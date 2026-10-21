@@ -1,0 +1,35 @@
+# Publishes the web app (the app/ folder) to GitHub Pages so it can be opened
+# and installed on a phone, and so the tracker's "Open in editor" links work.
+# Enable it once under Settings → Pages → Source: "GitHub Actions". Your files
+# are never part of the site; they live in your private data repository.
+name: Deploy web app to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths: ['app/**', '.github/workflows/pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: app
+      - id: deployment
+        uses: actions/deploy-pages@v5

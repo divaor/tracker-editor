@@ -1,0 +1,2 @@
+/* CodeMirror 6 (@codemirror/view 6.43.15, MIT) and its language packages - bundled by scripts/vendor.js */
+import{a,b,c,d,e,f,g,h,i,j,k,l}from"./chunk-3I4OKLUW.js";import"./chunk-HBHGX2AV.js";import"./chunk-2PZPTDJK.js";import"./chunk-RCQ6FVKW.js";export{k as autoCloseTags,d as completionPath,l as esLint,j as javascript,f as javascriptLanguage,h as jsxLanguage,c as localCompletionSource,e as scopeCompletionSource,a as snippets,i as tsxLanguage,g as typescriptLanguage,b as typescriptSnippets};
