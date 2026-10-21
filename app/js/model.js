@@ -161,6 +161,34 @@ export function fileLink(appUrl, id) {
   return `${appUrl.replace(/\/?$/, '/')}#/file/${encodeURIComponent(id)}`;
 }
 
+/**
+ * The tracker's attached files (proposals, artifacts, notes…), listed next to
+ * the editor's own files. Each carries its item's title, project and tags; the
+ * newest item wins when two items share a file.
+ */
+export function trackerDocs(items) {
+  const byPath = new Map();
+  for (const item of items ?? []) {
+    if (!item || item.deleted) continue;
+    for (const f of item.files ?? []) {
+      if (!f?.path) continue;
+      const doc = {
+        path: f.path,
+        name: f.name || f.path.split('/').pop(),
+        sha: f.sha ?? '',
+        size: f.size ?? 0,
+        project: item.project ?? '',
+        tags: item.tags ?? [],
+        modifiedAt: item.updatedAt ?? '',
+        item: { id: item.id, title: item.title ?? '' },
+      };
+      const seen = byPath.get(f.path);
+      if (!seen || doc.modifiedAt > seen.modifiedAt) byPath.set(f.path, doc);
+    }
+  }
+  return [...byPath.values()];
+}
+
 /** Parses "#/file/<id>" and "#/repo/<path>" (a file in the data repo, e.g. a tracker attachment). */
 export function parseRoute(hash) {
   const clean = text(hash).replace(/^#\/?/, '');

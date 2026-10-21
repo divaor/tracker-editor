@@ -49,9 +49,11 @@ test('quick open ranks fuzzy matches on names', () => {
     { name: 'meeting notes.md', project: 'Work' },
     { name: 'notes.md', project: '' },
     { name: 'server.py', project: 'Platform' },
+    { name: 'proposal.md', project: '', item: 'Caching proposal' },
   ];
   assert.deepEqual(quickOpen(list, 'notes').map((f) => f.name), ['notes.md', 'meeting notes.md']);
   assert.deepEqual(quickOpen(list, 'plat').map((f) => f.name), ['server.py'], 'matches on the project too');
+  assert.deepEqual(quickOpen(list, 'caching').map((f) => f.name), ['proposal.md'], 'and on a tracker document’s item');
 });
 
 test('chunks keep line ranges and stay near the size limit', () => {
@@ -96,4 +98,21 @@ test('model client: models, streamed chat, embeddings and clear errors', async (
     await llm.close();
   }
   await assert.rejects(createLlmClient({ baseUrl: 'http://127.0.0.1:9/v1' }).listModels(), /Could not reach the model server.*Is Ollama or LM Studio running\?/);
+});
+
+test('lists the tracker’s attached files with their item', async () => {
+  const { trackerDocs } = await import('../app/js/model.js');
+  const items = [
+    { id: 'a', title: 'Caching proposal', project: 'Platform', tags: ['GlobalAPI'], updatedAt: '2026-10-20T10:00:00.000Z', files: [{ path: 'files/p1/proposal.md', name: 'proposal.md', sha: 's1', size: 10 }, { path: 'files/p1/diagram.svg', name: 'diagram.svg', sha: 's2', size: 5 }] },
+    { id: 'b', title: 'Gone', deleted: true, files: [{ path: 'files/x/old.md', name: 'old.md', sha: 's3' }] },
+    { id: 'c', title: 'Plain task', files: [] },
+    { id: 'd', title: 'Caching proposal v2', project: 'Platform', tags: [], updatedAt: '2026-10-21T10:00:00.000Z', files: [{ path: 'files/p1/proposal.md', sha: 's4', size: 12 }] },
+  ];
+  const docs = trackerDocs(items);
+  assert.deepEqual(docs.map((d) => [d.path, d.name, d.sha, d.item.title]), [
+    ['files/p1/proposal.md', 'proposal.md', 's4', 'Caching proposal v2'],
+    ['files/p1/diagram.svg', 'diagram.svg', 's2', 'Caching proposal'],
+  ]);
+  assert.deepEqual(docs[1], { path: 'files/p1/diagram.svg', name: 'diagram.svg', sha: 's2', size: 5, project: 'Platform', tags: ['GlobalAPI'], modifiedAt: '2026-10-20T10:00:00.000Z', item: { id: 'a', title: 'Caching proposal' } });
+  assert.deepEqual(trackerDocs(undefined), []);
 });

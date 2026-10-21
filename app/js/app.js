@@ -46,7 +46,10 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar }) {
         if (isNarrow()) setSidebar(false);
         setTimeout(() => hostRef.current?.focus(), 30);
       },
-      openFile(id, { line, column, length } = {}) {
+      // Ids starting with "r:" are tracker documents (files elsewhere in the data repo).
+      openFile(id, position = {}) {
+        if (id.startsWith('r:')) return actions.openRepoFile(id.slice(2), position);
+        const { line, column, length } = position;
         if (!store.get(id)) {
           toast('That file is not on this device yet. Sync, then try again.', { kind: 'error' });
           return;
@@ -56,21 +59,34 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar }) {
         if (isNarrow()) setSidebar(false);
         if (line) setTimeout(() => hostRef.current?.reveal(line, column, length), 60);
       },
-      async openRepoFile(path) {
-        const settings = getSettings();
-        const token = await getToken();
-        if (!isSyncConfigured(settings) || !token) {
-          toast('Set up sync in Settings to open files from the tracker.', { kind: 'error' });
-          return;
-        }
-        try {
-          const file = await syncClient(settings, token).getFile(path, settings.branch || undefined);
-          if (!file) throw new Error(`${path} is not in ${settings.owner}/${settings.repo}.`);
+      async openRepoFile(path, { line, column, length } = {}) {
+        const doc = store.doc(path);
+        const tab = store.repoTab(path);
+        if (tab && (tab.dirty || (doc && tab.baseSha === doc.sha))) store.open(repoKey(path));
+        else {
+          // The downloaded copy when there is one (works offline), else from GitHub.
+          let file = doc && store.hasDocText(doc.sha) ? { text: store.cachedDocText(doc.sha), sha: doc.sha } : null;
+          if (!file) {
+            const settings = getSettings();
+            const token = await getToken();
+            if (!isSyncConfigured(settings) || !token) {
+              toast('Set up sync in Settings to open files from the tracker.', { kind: 'error' });
+              return;
+            }
+            try {
+              file = await syncClient(settings, token).getFile(path, settings.branch || undefined);
+              if (!file) throw new Error(`${path} is not in ${settings.owner}/${settings.repo}.`);
+            } catch (err) {
+              toast(err.message, { kind: 'error' });
+              return;
+            }
+          }
           store.openRepoFile({ path, text: file.text, sha: file.sha });
-          setView('editor');
-        } catch (err) {
-          toast(err.message, { kind: 'error' });
+          if (tab) hostRef.current?.replaceText(repoKey(path), file.text);
         }
+        setView('editor');
+        if (isNarrow()) setSidebar(false);
+        if (line) setTimeout(() => hostRef.current?.reveal(line, column, length), 60);
       },
       activate(key) {
         store.open(key);
@@ -195,6 +211,7 @@ export function App() {
         for (const id of detail.texts) hostRef.current?.replaceText(fileKey(id), store.text(id));
         for (const r of detail.repo) if (r.conflict) hostRef.current?.replaceText(repoKey(r.path), r.text);
       }
+      if (reason === 'docs') for (const r of detail.refreshed) hostRef.current?.replaceText(repoKey(r.path), r.text);
       rerender();
     });
   }, []);
@@ -395,6 +412,8 @@ export function App() {
   const projects = projectList(store.live(), store.projects());
   const projectsByKey = new Map(projects.map((p) => [p.key, p]));
   const scoped = store.live().filter((f) => matchesScope(f, settings.projectScope, projectsByKey));
+  const docs = store.docs();
+  const scopedDocs = docs.filter((d) => matchesScope(d, settings.projectScope, projectsByKey));
   const narrow = isNarrow();
 
   // The editor view stays mounted (CodeMirror lives in it) and is only hidden while Settings is open.
@@ -413,7 +432,7 @@ export function App() {
       <button type="button" class="icon-btn" aria-label="Settings" title="Settings" aria-pressed=${view === 'settings'} onClick=${() => setView(view === 'settings' ? 'editor' : 'settings')}><${Icon} name="settings" /></button>
     </header>
 
-    ${sidebar && html`<${Sidebar} files=${scoped} allFiles=${store.live()} projects=${projects} settings=${settings} activeKey=${activeKey} actions=${actions} />`}
+    ${sidebar && html`<${Sidebar} files=${scoped} docs=${scopedDocs} allFiles=${store.live()} projects=${projects} settings=${settings} activeKey=${activeKey} actions=${actions} />`}
     ${sidebar && narrow && html`<div class="scrim" onClick=${() => setSidebar(false)} />`}
 
     <main class="main">
@@ -430,16 +449,16 @@ export function App() {
               else store.setRepoText(activeRepo.path, next);
               hostRef.current?.replaceText(activeKey, next);
             }} />`}
-          ${!activeKey && html`<${Welcome} actions=${actions} hasFiles=${store.live().length > 0} configured=${isSyncConfigured(settings)} />`}
+          ${!activeKey && html`<${Welcome} actions=${actions} hasFiles=${store.live().length + docs.length > 0} configured=${isSyncConfigured(settings)} />`}
         </div>
         <${StatusBar} cursor=${activeKey ? cursor : null} language=${languageName} file=${activeFile} repo=${activeRepo} settings=${settings} sync=${sync} actions=${actions} />
       </div>
     </main>
 
-    ${panel === 'search' && html`<${SearchPanel} files=${scoped} allFiles=${store.live()} openKeys=${store.session.open} settings=${settings} actions=${actions} onClose=${() => setPanel(null)} />`}
-    ${panel === 'assistant' && html`<${AssistantPanel} files=${scoped} activeFile=${activeFile} activeRepo=${activeRepo} settings=${settings} actions=${actions} onClose=${() => setPanel(null)} />`}
+    ${panel === 'search' && html`<${SearchPanel} files=${scoped} docs=${scopedDocs} allFiles=${store.live()} allDocs=${docs} openKeys=${store.session.open} settings=${settings} actions=${actions} onClose=${() => setPanel(null)} />`}
+    ${panel === 'assistant' && html`<${AssistantPanel} files=${scoped} docs=${scopedDocs} activeFile=${activeFile} activeRepo=${activeRepo} settings=${settings} actions=${actions} onClose=${() => setPanel(null)} />`}
 
-    ${dialog?.type === 'quickOpen' && html`<${QuickOpen} files=${store.live()} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'quickOpen' && html`<${QuickOpen} files=${store.live()} docs=${docs} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'file' && store.get(dialog.id) && html`<${FileDialog} file=${store.get(dialog.id)} projects=${projects} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'send' && store.get(dialog.id) && html`<${SendDialog} file=${store.get(dialog.id)} projects=${projects} settings=${settings} actions=${actions} onClose=${() => setDialog(null)} />`}
     <${Toasts} />

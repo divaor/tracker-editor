@@ -3,7 +3,7 @@
 // IndexedDB as you type. Sync (syncManager.js) takes changes to GitHub.
 import { kvDelete, kvGet, kvSet } from './kv.js';
 import { getSettings } from './settings.js';
-import { applyFilePatch, createFile, nowIso, tombstone, untitledName } from './model.js';
+import { applyFilePatch, createFile, nowIso, tombstone, trackerDocs, untitledName } from './model.js';
 import { newId } from './tracker-model.js';
 
 const META_FIELDS = ['name', 'project', 'tags', 'language', 'deleted', 'updatedAt', 'updatedBy'];
@@ -14,6 +14,8 @@ let projects = []; // project records from tracker.json (last sync)
 let trackerItems = []; // tracker items (last sync), to show which items link a file
 let trackerOps = []; // pending changes to tracker.json: { id, op: 'project' | 'item', ... }
 let repoTabs = new Map(); // path → { path, name, text, baseSha, dirty }
+let docTexts = new Map(); // blob sha → text of a tracker document (for search and offline reading)
+let docs = { items: null, list: [] }; // trackerDocs(trackerItems), computed once per sync
 let session = { open: [], active: null, closed: [] }; // tab keys: "f:<id>" | "r:<path>"
 let meta = { lastSyncAt: null };
 let changeCounter = 0;
@@ -42,6 +44,7 @@ const persist = {
   session: () => later('session', () => kvSet('session', session)),
   repo: () => later('repoTabs', () => kvSet('repoTabs', [...repoTabs.values()])),
   rest: () => later('rest', () => Promise.all([kvSet('projects', projects), kvSet('trackerItems', trackerItems), kvSet('trackerOps', trackerOps), kvSet('meta', meta)])),
+  docs: () => later('docTexts', () => kvSet('docTexts', [...docTexts])),
 };
 
 /** Writes everything still waiting for its debounce (before closing the app). */
@@ -57,6 +60,7 @@ export async function flush() {
     kvSet('trackerItems', trackerItems),
     kvSet('trackerOps', trackerOps),
     kvSet('meta', meta),
+    kvSet('docTexts', [...docTexts]),
     ...pending.filter(([k]) => k.startsWith('text:')).map(([k]) => {
       const id = k.slice(5);
       return texts.has(id) ? kvSet(k, texts.get(id)) : kvDelete(k);
@@ -97,6 +101,7 @@ export const store = {
     projects = (await kvGet('projects')) ?? [];
     trackerItems = (await kvGet('trackerItems')) ?? [];
     trackerOps = (await kvGet('trackerOps')) ?? [];
+    docTexts = new Map((await kvGet('docTexts')) ?? []);
     meta = { ...meta, ...((await kvGet('meta')) ?? {}) };
     // Drop tabs whose file is gone.
     session.open = session.open.filter((k) => (k.startsWith('r:') ? repoTabs.has(k.slice(2)) : files.get(k.slice(2)) && !files.get(k.slice(2)).deleted));
@@ -132,6 +137,40 @@ export const store = {
   trackerOps: () => trackerOps,
   repoTab: (path) => repoTabs.get(path),
   repoTabs: () => [...repoTabs.values()],
+
+  // ---- The tracker's documents (attached files), from the last sync ----
+
+  docs() {
+    if (docs.items !== trackerItems) docs = { items: trackerItems, list: trackerDocs(trackerItems) };
+    return docs.list;
+  },
+  doc: (path) => store.docs().find((d) => d.path === path),
+  /** A document's text: the open tab's (it may have edits), else the cached copy; null if not downloaded yet. */
+  docText(path) {
+    const tab = repoTabs.get(path);
+    if (tab) return tab.text;
+    const sha = store.doc(path)?.sha;
+    return sha && docTexts.has(sha) ? docTexts.get(sha) : null;
+  },
+  hasDocText: (sha) => docTexts.has(sha),
+  cachedDocText: (sha) => docTexts.get(sha) ?? null,
+  /** Keeps downloaded document texts ([sha, text] pairs), dropping versions no document uses any more. */
+  cacheDocTexts(entries) {
+    for (const [sha, text] of entries) docTexts.set(sha, text);
+    const used = new Set(store.docs().map((d) => d.sha));
+    for (const sha of [...docTexts.keys()]) if (!used.has(sha)) docTexts.delete(sha);
+    // Open, unedited tabs of documents that changed elsewhere show the new version.
+    const refreshed = [];
+    for (const doc of store.docs()) {
+      const tab = repoTabs.get(doc.path);
+      if (!tab || tab.dirty || tab.baseSha === doc.sha || !docTexts.has(doc.sha)) continue;
+      repoTabs.set(doc.path, { ...tab, text: docTexts.get(doc.sha), baseSha: doc.sha });
+      refreshed.push({ path: doc.path, text: docTexts.get(doc.sha) });
+    }
+    if (refreshed.length) persist.repo();
+    persist.docs();
+    emit('docs', { refreshed });
+  },
   // Unsynced: edited text (dirty), changed name/project/tags or deleted (pending).
   pendingCount: () => [...files.values()].filter((f) => f.dirty || f.pending).length + [...repoTabs.values()].filter((t) => t.dirty).length + trackerOps.length,
 
@@ -332,6 +371,8 @@ export const store = {
     projects = [];
     trackerItems = [];
     trackerOps = [];
+    docTexts = new Map();
+    persist.docs();
     session = { open: [], active: null, closed: [] };
     meta = { lastSyncAt: null };
     persist.files();

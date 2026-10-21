@@ -23,6 +23,9 @@ A Notepad++-style editor whose files sync through the same private GitHub data r
   - A non-fast-forward branch update retries the round.
   - Deletions are tombstones, pruned after 180 days. Sync must never overwrite an index or `tracker.json` it cannot parse.
 - `store.js` keeps files, texts and the tab session in IndexedDB (`kv.js`) with debounced writes. `applySynced` must keep edits made while a sync was running.
+- Tracker documents: `store.docs()` lists the tracker's attached files from the last sync (`trackerDocs` in `model.js`).
+  - Their texts are cached by blob sha (`docTexts`). `syncManager.downloadDocs` fetches missing ones after each sync.
+  - Search, quick open and the model index address them as `r:<path>`; `actions.openFile` opens either kind.
 - `tabLock.js`: only one browser tab runs the app (Web Locks + BroadcastChannel). A new tab takes over, and the old one flushes, stops syncing and shows "Use it here".
 - `editor.js`: one CodeMirror `EditorView`, with an `EditorState` per tab. Languages load lazily from `@codemirror/language-data`.
 - Local model:

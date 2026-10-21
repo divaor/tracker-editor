@@ -40,7 +40,15 @@ export function llmClient(settings = getSettings()) {
   return createLlmClient({ baseUrl: settings.llm.baseUrl, apiKey: settings.llm.apiKey, fetchImpl: window.desktop?.llm ? desktopFetch : undefined });
 }
 
-let index = null; // file id → { id, hash, model, chunks: [{ from, to, text, vector }] }
+// What the model reads: { id, name, project, text }. Tracker documents have
+// the id "r:<path>" and are left out until they are downloaded.
+export const fileSources = (files) => files.map((f) => ({ id: f.id, name: f.name, project: f.project, text: store.text(f.id) }));
+export const docSources = (docs) =>
+  docs.map((d) => ({ id: `r:${d.path}`, name: d.name, project: d.project, text: store.docText(d.path) })).filter((d) => d.text !== null);
+/** The editor's files and the tracker's documents. */
+export const allSources = () => [...fileSources(store.live()), ...docSources(store.docs())];
+
+let index = null; // source id → { id, hash, model, chunks: [{ from, to, text, vector }] }
 async function load() {
   index ??= new Map(((await kvGet('vectors')) ?? []).map((e) => [e.id, e]));
   return index;
@@ -51,12 +59,13 @@ const save = () => kvSet('vectors', [...index.values()]);
 export async function indexStatus() {
   await load();
   const model = getSettings().llm.embedModel;
+  const sources = allSources();
   let stale = 0;
-  for (const f of store.live()) {
-    const entry = index.get(f.id);
-    if (!entry || entry.model !== model || entry.hash !== (await gitBlobSha(store.text(f.id)))) stale++;
+  for (const s of sources) {
+    const entry = index.get(s.id);
+    if (!entry || entry.model !== model || entry.hash !== (await gitBlobSha(s.text))) stale++;
   }
-  return { indexed: [...index.keys()].filter((id) => store.get(id)).length, stale, total: store.live().length };
+  return { indexed: sources.length - stale, stale, total: sources.length };
 }
 
 let running = null;
@@ -68,13 +77,14 @@ export function updateIndex({ onProgress, signal } = {}) {
     if (!model) throw new Error('Choose an embedding model in Settings → Local model.');
     await load();
     const client = llmClient();
-    for (const id of [...index.keys()]) if (!store.get(id)) index.delete(id);
+    const sources = allSources();
+    const ids = new Set(sources.map((s) => s.id));
+    for (const id of [...index.keys()]) if (!ids.has(id)) index.delete(id);
     const todo = [];
-    for (const f of store.live()) {
-      const text = store.text(f.id);
-      const hash = await gitBlobSha(text);
+    for (const f of sources) {
+      const hash = await gitBlobSha(f.text);
       const entry = index.get(f.id);
-      if (!entry || entry.hash !== hash || entry.model !== model) todo.push({ f, text, hash });
+      if (!entry || entry.hash !== hash || entry.model !== model) todo.push({ f, text: f.text, hash });
     }
     let done = 0;
     onProgress?.({ done, total: todo.length });
@@ -102,9 +112,10 @@ export async function semanticSearch(query, { k = 10, fileIds = null, signal } =
   await load();
   const model = getSettings().llm.embedModel;
   const [vector] = await llmClient().embed({ model, input: [query], signal });
+  const byId = new Map(allSources().map((s) => [s.id, s]));
   const entries = [];
   for (const e of index.values()) {
-    const file = store.get(e.id);
+    const file = byId.get(e.id);
     if (!file || (fileIds && !fileIds.has(e.id))) continue;
     for (const c of e.chunks) entries.push({ id: e.id, name: file.name, from: c.from, to: c.to, text: c.text, vector: c.vector });
   }
@@ -113,11 +124,12 @@ export async function semanticSearch(query, { k = 10, fileIds = null, signal } =
 
 const STOP = new Set('about above after again also because been before being between both could does doing down during each from further have having here into itself just more most other over same should some such than that their them then there these they this those through under until very what when where which while whom will with would your yours where what about'.split(' '));
 
-/** Without embeddings: passages around keyword matches, files with the most hits first. */
-export function keywordPassages(question, files, { k = 8, around = 8 } = {}) {
+/** Without embeddings: passages around keyword matches in `sources` ({ id, name, text }), files with the most hits first. */
+export function keywordPassages(question, sources, { k = 8, around = 8 } = {}) {
   const words = [...new Set((question.toLowerCase().match(/[\p{L}\p{N}_-]{4,}/gu) ?? []).filter((w) => !STOP.has(w)))];
   if (!words.length) return [];
-  const docs = files.map((f) => ({ id: f.id, name: f.name, text: store.text(f.id) }));
+  const docs = sources.map((s) => ({ id: s.id, name: s.name, text: s.text }));
+  const textOf = new Map(docs.map((d) => [d.id, d.text]));
   const scores = new Map();
   for (const word of words) {
     for (const hit of findInFiles(docs, word, { maxPerFile: 20 }).files) {
@@ -129,7 +141,7 @@ export function keywordPassages(question, files, { k = 8, around = 8 } = {}) {
   }
   const passages = [];
   for (const s of [...scores.values()].sort((a, b) => b.score - a.score).slice(0, k)) {
-    const lines = store.text(s.id).split('\n');
+    const lines = textOf.get(s.id).split('\n');
     const center = s.lines.sort((a, b) => a - b)[0];
     const from = Math.max(1, center - around);
     const to = Math.min(lines.length, center + around);

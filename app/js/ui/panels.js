@@ -1,7 +1,7 @@
 import { html, useEffect, useMemo, useRef, useState } from '../../vendor/preact-htm.js';
 import { findInFiles, quickOpen } from '../search.js';
 import { timeAgo } from '../format.js';
-import { fileKey, store } from '../store.js';
+import { fileKey, repoKey, store } from '../store.js';
 import { Icon } from './icons.js';
 import { Segmented } from './components.js';
 
@@ -11,12 +11,16 @@ const SCOPES = [
   { id: 'open', label: 'Open tabs' },
 ];
 
+// Tracker documents as search entries (id "r:<path>"); those not downloaded yet are left out.
+const docEntries = (docs) =>
+  docs.map((d) => ({ id: `r:${d.path}`, name: d.name, project: d.project, modifiedAt: d.modifiedAt, item: d.item.title, text: store.docText(d.path) })).filter((d) => d.text !== null);
+
 function Highlight({ text, at, length }) {
   return html`${text.slice(0, at)}<mark>${text.slice(at, at + length)}</mark>${text.slice(at + length)}`;
 }
 
 /** Find in all files: like Notepad++'s "Find in all opened documents", across every synced file. */
-export function SearchPanel({ files, allFiles, openKeys, actions, onClose }) {
+export function SearchPanel({ files, docs, allFiles, allDocs, openKeys, actions, onClose }) {
   const [query, setQuery] = useState('');
   const [options, setOptions] = useState({ caseSensitive: false, wholeWord: false, regex: false });
   const [scope, setScope] = useState('all');
@@ -29,12 +33,15 @@ export function SearchPanel({ files, allFiles, openKeys, actions, onClose }) {
     input.current?.select();
   }, []);
 
-  const pool = scope === 'open' ? allFiles.filter((f) => openKeys.includes(fileKey(f.id))) : scope === 'filtered' ? files : allFiles;
+  const pool =
+    scope === 'open' ? [...allFiles.filter((f) => openKeys.includes(fileKey(f.id))), ...docEntries(allDocs.filter((d) => openKeys.includes(repoKey(d.path))))]
+    : scope === 'filtered' ? [...files, ...docEntries(docs)]
+    : [...allFiles, ...docEntries(allDocs)];
   const ordered = [...pool].sort((a, b) => (b.modifiedAt > a.modifiedAt ? 1 : -1));
   let result = null;
   let error = '';
   try {
-    result = query ? findInFiles(ordered.map((f) => ({ id: f.id, name: f.name, text: store.text(f.id) })), query, options) : null;
+    result = query ? findInFiles(ordered.map((f) => ({ id: f.id, name: f.name, text: f.text ?? store.text(f.id) })), query, options) : null;
   } catch (err) {
     error = err.message;
   }
@@ -89,10 +96,13 @@ export function SearchPanel({ files, allFiles, openKeys, actions, onClose }) {
 }
 
 /** Ctrl+P: open a file by (fuzzy) name; also matches the project. */
-export function QuickOpen({ files, actions, onClose }) {
+export function QuickOpen({ files, docs, actions, onClose }) {
   const [query, setQuery] = useState('');
   const [index, setIndex] = useState(0);
-  const recent = useMemo(() => [...files].sort((a, b) => (b.modifiedAt > a.modifiedAt ? 1 : -1)), [files]);
+  const recent = useMemo(
+    () => [...files, ...docs.map((d) => ({ id: `r:${d.path}`, name: d.name, project: d.project, modifiedAt: d.modifiedAt, item: d.item.title }))].sort((a, b) => (b.modifiedAt > a.modifiedAt ? 1 : -1)),
+    [files, docs],
+  );
   const list = quickOpen(recent, query, 60);
   const choose = (file) => {
     onClose();
@@ -134,7 +144,8 @@ export function QuickOpen({ files, actions, onClose }) {
         ${list.map(
           (f, i) => html`<button type="button" key=${f.id} role="option" aria-selected=${i === index} class="quick-row ${i === index ? 'active' : ''}"
             onMouseEnter=${() => setIndex(i)} onClick=${() => choose(f)}>
-            <${Icon} name="file" size=${15} /><span class="quick-name">${f.name}</span>
+            <${Icon} name=${f.item ? 'doc' : 'file'} size=${15} /><span class="quick-name">${f.name}</span>
+            ${f.item && html`<span class="muted small quick-item">${f.item}</span>`}
             ${f.project && html`<span class="muted small">${f.project}</span>`}
             <span class="spacer" /><span class="muted small">${timeAgo(f.modifiedAt)}</span>
           </button>`,

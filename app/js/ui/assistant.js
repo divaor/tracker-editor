@@ -1,7 +1,7 @@
 import { html, useEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import { askMessages, summaryMessages } from '../ai.js';
 import { renderMarkdown } from '../markdown.js';
-import { indexStatus, keywordPassages, llmClient, semanticSearch, updateIndex } from '../semantic.js';
+import { allSources, docSources, fileSources, indexStatus, keywordPassages, llmClient, semanticSearch, updateIndex } from '../semantic.js';
 import { store } from '../store.js';
 import { Segmented } from './components.js';
 import { Icon } from './icons.js';
@@ -34,10 +34,14 @@ function Sources({ passages, actions }) {
 }
 
 /** The local model (Ollama, LM Studio, …): ask about your files, find by meaning, summarize. */
-export function AssistantPanel({ files, activeFile, activeRepo, settings, actions, onClose }) {
+export function AssistantPanel({ files, docs, activeFile, activeRepo, settings, actions, onClose }) {
   const { llm } = settings;
+  // The open tab: one of the editor's files or a tracker document.
+  const current = activeFile
+    ? { id: activeFile.id, name: activeFile.name, project: activeFile.project, text: store.text(activeFile.id) }
+    : activeRepo ? { id: `r:${activeRepo.path}`, name: activeRepo.name, project: '', text: activeRepo.text } : null;
   const [mode, setMode] = useState('ask');
-  const [scope, setScope] = useState(activeFile ? 'file' : 'all');
+  const [scope, setScope] = useState(current ? 'file' : 'all');
   const [question, setQuestion] = useState('');
   const [chat, setChat] = useState([]); // [{ q, a, passages }]
   const [busy, setBusy] = useState(false);
@@ -86,8 +90,8 @@ export function AssistantPanel({ files, activeFile, activeRepo, settings, action
   const summarize = (selectionOnly = false) =>
     run(async (signal) => {
       setMode('summary');
-      const name = activeFile?.name ?? activeRepo?.name;
-      const full = activeFile ? store.text(activeFile.id) : (activeRepo?.text ?? '');
+      const name = current?.name;
+      const full = current?.text ?? '';
       const selected = actions.selectionText();
       const text = selectionOnly && selected ? selected : full;
       if (!text.trim()) throw new Error('Open a file with some text first.');
@@ -103,7 +107,7 @@ export function AssistantPanel({ files, activeFile, activeRepo, settings, action
     return () => window.removeEventListener('assistant', on);
   }, [activeFile?.id, activeRepo?.path]);
 
-  const pool = () => (scope === 'file' && activeFile ? [activeFile] : scope === 'filtered' ? files : store.live());
+  const pool = () => (scope === 'file' && current ? [current] : scope === 'filtered' ? [...fileSources(files), ...docSources(docs)] : allSources());
 
   const ask = (e) => {
     e?.preventDefault();
@@ -114,9 +118,9 @@ export function AssistantPanel({ files, activeFile, activeRepo, settings, action
       const candidates = pool();
       const ids = new Set(candidates.map((f) => f.id));
       let passages;
-      if (scope === 'file' && activeFile && store.text(activeFile.id).length < 20000) {
-        const text = store.text(activeFile.id);
-        passages = [{ id: activeFile.id, name: activeFile.name, from: 1, to: text.split('\n').length, text }];
+      if (scope === 'file' && current && current.text.length < 20000) {
+        const { text } = current;
+        passages = [{ id: current.id, name: current.name, from: 1, to: text.split('\n').length, text }];
       } else if (llm.embedModel) {
         await updateIndex({ onProgress: setProgress, signal }).catch(() => {});
         setProgress(null);
@@ -171,7 +175,7 @@ export function AssistantPanel({ files, activeFile, activeRepo, settings, action
     </div>
     <div class="panel-body">
       <${Segmented} small options=${MODES} value=${mode} onChange=${setMode} label="Mode" />
-      ${mode !== 'summary' && html`<${Segmented} small options=${activeFile ? SCOPES : SCOPES.slice(1)} value=${scope} onChange=${setScope} label="Look in" />`}
+      ${mode !== 'summary' && html`<${Segmented} small options=${current ? SCOPES : SCOPES.slice(1)} value=${scope} onChange=${setScope} label="Look in" />`}
 
       ${mode === 'summary' &&
       html`<div class="assistant-actions">

@@ -7,6 +7,9 @@ import { getSettings, getToken, isSyncConfigured } from './settings.js';
 import { store } from './store.js';
 import { normalizeItem, nowIso, upsertProjectRecord } from './tracker-model.js';
 
+// Tracker documents larger than this are opened on demand instead of downloaded ahead.
+const MAX_DOC_BYTES = 2 * 1024 * 1024;
+
 // Typing produces many edits; wait for a pause so a sync carries a batch.
 const TEXT_DELAY = 15 * 1000;
 const EDIT_DELAY = 3000;
@@ -47,6 +50,17 @@ export function syncClient(settings, token) {
   return createGitHubClient({ token, owner: settings.owner, repo: settings.repo });
 }
 
+/** Downloads the tracker documents this device has no copy of yet, so they open offline and can be searched. */
+async function downloadDocs(client) {
+  const missing = store.docs().filter((d) => d.sha && !store.hasDocText(d.sha) && d.size <= MAX_DOC_BYTES);
+  const got = [];
+  for (let i = 0; i < missing.length && !stopped; i += 4) {
+    const batch = await Promise.all(missing.slice(i, i + 4).map((d) => client.getBlobText(d.sha).then((text) => [d.sha, text], () => null)));
+    got.push(...batch.filter(Boolean));
+  }
+  if (!stopped) store.cacheDocTexts(got);
+}
+
 async function run() {
   const settings = getSettings();
   const token = await getToken();
@@ -61,9 +75,10 @@ async function run() {
   set({ phase: 'syncing', error: null });
   const snap = store.snapshot();
   const device = settings.device || 'unknown device';
+  const client = syncClient(settings, token);
   try {
     const result = await syncOnce({
-      client: syncClient(settings, token),
+      client,
       branch: settings.branch,
       trackerPath: settings.trackerPath,
       files: store.all(),
@@ -73,6 +88,7 @@ async function run() {
       device,
     });
     store.applySynced(result, snap);
+    await downloadDocs(client).catch((err) => console.warn('Could not download tracker documents', err));
     set({ phase: 'idle', error: null, lastSyncAt: nowIso() });
     for (const fn of resultListeners) fn(result);
     return result;

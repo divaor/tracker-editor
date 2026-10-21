@@ -257,7 +257,10 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, setti
   }
 
   const view = new EditorView({ parent, state: EditorState.create({ doc: '' }) });
-  view.dom.hidden = true;
+  // CodeMirror's own style sets `display: flex !important`, which beats the
+  // hidden attribute, so hiding needs an inline !important rule.
+  const setVisible = (on) => (on ? view.dom.style.removeProperty('display') : view.dom.style.setProperty('display', 'none', 'important'));
+  setVisible(false);
 
   async function loadLanguage(key, name, chosen) {
     const desc = findLanguage(name, chosen);
@@ -284,7 +287,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, setti
         created = true;
       }
       active = key;
-      view.dom.hidden = false;
+      setVisible(true);
       view.setState(states.get(key));
       requestAnimationFrame(() => view.scrollDOM.scrollTo({ top: scroll.get(key) ?? 0 }));
       report(view.state);
@@ -298,7 +301,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, setti
         states.set(active, view.state);
       }
       active = null;
-      view.dom.hidden = true;
+      setVisible(false);
     },
 
     /** Replaces a tab's text with a version from elsewhere, touching only what differs. */
@@ -332,9 +335,10 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, setti
 
     drop(key) {
       flush(key);
+      // hide() keeps the active tab's state, so hide first, then forget it.
+      if (key === active) this.hide();
       states.delete(key);
       scroll.delete(key);
-      if (key === active) this.hide();
     },
 
     flushAll() {

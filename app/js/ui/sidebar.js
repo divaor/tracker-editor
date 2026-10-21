@@ -1,7 +1,7 @@
 import { html, useState } from '../../vendor/preact-htm.js';
 import { timeAgo } from '../format.js';
 import { saveSettings } from '../settings.js';
-import { fileKey } from '../store.js';
+import { fileKey, repoKey, store } from '../store.js';
 import { projectKey } from '../tracker-model.js';
 import { Icon } from './icons.js';
 import { ScopeBar, Segmented } from './components.js';
@@ -12,27 +12,32 @@ const SORTS = [
   { id: 'project', label: 'Project' },
 ];
 
-function tagCounts(files) {
+function tagCounts(rows) {
   const counts = new Map();
-  for (const f of files) for (const t of f.tags) counts.set(t, (counts.get(t) ?? 0) + 1);
+  for (const r of rows) for (const t of r.tags) counts.set(t, (counts.get(t) ?? 0) + 1);
   return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 }
 
-export function Sidebar({ files, projects, settings, activeKey, actions }) {
+// One list for the editor's files and the tracker's documents.
+const fileRow = (f) => ({ key: fileKey(f.id), name: f.name, project: f.project, tags: f.tags, modifiedAt: f.modifiedAt, updatedAt: f.updatedAt, unsynced: f.dirty || f.pending, id: f.id });
+const docRow = (d) => ({ key: repoKey(d.path), name: d.name, project: d.project, tags: d.tags, modifiedAt: d.modifiedAt, updatedAt: d.modifiedAt, unsynced: store.repoTab(d.path)?.dirty, id: `r:${d.path}`, item: d.item.title });
+
+export function Sidebar({ files, docs, projects, settings, activeKey, actions }) {
   const [filter, setFilter] = useState('');
   const [tag, setTag] = useState(null);
   const [sort, setSort] = useState('recent');
   const byKey = new Map(projects.map((p) => [p.key, p]));
   const q = filter.trim().toLowerCase();
-  const shown = files
-    .filter((f) => !tag || f.tags.some((t) => t.toLowerCase() === tag.toLowerCase()))
-    .filter((f) => !q || f.name.toLowerCase().includes(q) || f.project.toLowerCase().includes(q) || f.tags.some((t) => t.toLowerCase().includes(q)))
+  const rows = [...files.map(fileRow), ...docs.map(docRow)];
+  const shown = rows
+    .filter((r) => !tag || r.tags.some((t) => t.toLowerCase() === tag.toLowerCase()))
+    .filter((r) => !q || [r.name, r.project, r.item ?? '', ...r.tags].some((s) => s.toLowerCase().includes(q)))
     .sort((a, b) => {
       if (sort === 'name') return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
       if (sort === 'project') return (a.project || '￿').localeCompare(b.project || '￿') || a.name.localeCompare(b.name, undefined, { numeric: true });
       return (b.modifiedAt > a.modifiedAt ? 1 : b.modifiedAt < a.modifiedAt ? -1 : 0) || (b.updatedAt > a.updatedAt ? 1 : -1);
     });
-  const tags = tagCounts(files);
+  const tags = tagCounts(rows);
   let lastProject = null;
 
   return html`<aside class="sidebar" aria-label="Files">
@@ -40,7 +45,7 @@ export function Sidebar({ files, projects, settings, activeKey, actions }) {
       <${ScopeBar} scope=${settings.projectScope} projects=${projects} onChange=${(scope) => saveSettings({ projectScope: scope })} />
       <div class="sidebar-filter">
         <${Icon} name="search" size=${15} />
-        <input value=${filter} onInput=${(e) => setFilter(e.currentTarget.value)} placeholder=${`Filter ${files.length} file${files.length === 1 ? '' : 's'}`} aria-label="Filter files" />
+        <input value=${filter} onInput=${(e) => setFilter(e.currentTarget.value)} placeholder=${`Filter ${rows.length} file${rows.length === 1 ? '' : 's'}`} aria-label="Filter files" />
       </div>
       ${tags.length > 0 &&
       html`<div class="sidebar-tags">
@@ -57,11 +62,13 @@ export function Sidebar({ files, projects, settings, activeKey, actions }) {
         lastProject = f.project;
         return html`
           ${header && html`<div class="file-group" key=${`g-${f.project}`}>${f.project ? html`<span class="project-dot" style=${{ '--pc': project?.color }} />${f.project}` : 'No project'}</div>`}
-          <button type="button" key=${f.id} class="file-row ${activeKey === fileKey(f.id) ? 'active' : ''}" onClick=${() => actions.openFile(f.id)} title=${f.name}>
+          <button type="button" key=${f.key} class="file-row ${activeKey === f.key ? 'active' : ''}" onClick=${() => actions.openFile(f.id)}
+            title=${f.item ? `${f.name} · from the tracker: ${f.item}` : f.name}>
             <span class="file-row-main">
               <span class="file-name">${f.name}</span>
-              ${(f.dirty || f.pending) && html`<span class="tab-dot" title="Not synced yet" />`}
+              ${f.unsynced && html`<span class="tab-dot" title="Not synced yet" />`}
             </span>
+            ${f.item && html`<span class="file-item"><${Icon} name="doc" size=${13} /><span>${f.item}</span></span>`}
             <span class="file-meta">
               ${f.project && sort !== 'project' && html`<span class="mini-project"><span class="project-dot" style=${{ '--pc': project?.color }} />${f.project}</span>`}
               ${f.tags.slice(0, 3).map((t) => html`<span class="mini-tag" key=${t}>#${t}</span>`)}
@@ -72,7 +79,7 @@ export function Sidebar({ files, projects, settings, activeKey, actions }) {
         `;
       })}
       ${!shown.length &&
-      html`<p class="muted small empty-list">${files.length ? 'No files match.' : 'No files here yet.'}${
+      html`<p class="muted small empty-list">${rows.length ? 'No files match.' : 'No files here yet.'}${
         settings.projectScope.length ? html` <button type="button" class="btn link" onClick=${() => saveSettings({ projectScope: [] })}>Show all projects</button>` : ''
       }</p>`}
     </div>

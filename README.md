@@ -13,7 +13,8 @@ It is the companion of [Tracker](https://github.com/divaor/tracking_app) and sha
 - **Projects and tags**: the tracker's projects and tags, the same Work / Personal filter, and new projects you create here appear in the tracker.
 - **Tracker integration**:
   - **Send to tracker** turns a file into a task, idea or doc linked to it.
-  - The tracker shows **Open in editor** on those items and **Edit in editor** on attached files (proposals, artifacts); your edits are saved back to the tracker.
+  - The tracker's documents (proposals, artifacts and other attached files) are listed with your files, under the name of their item. They are downloaded on each sync, so you can read them offline and find them with `Ctrl+P`, Find in files and the local model.
+  - The tracker shows **Open in editor** on those items and **Edit in editor** on attached files; your edits are saved back to the tracker.
 - **Search that knows where things are**:
   - `Ctrl+P` opens a file by (fuzzy) name or project.
   - `Ctrl+Shift+F` finds text in all files, the filtered ones or the open tabs, with case, whole-word and regex options.

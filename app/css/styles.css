@@ -1676,6 +1676,26 @@ button.project-chip:hover {
   white-space: nowrap;
 }
 
+.file-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.file-item svg {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.file-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .file-meta {
   display: flex;
   align-items: center;
@@ -2193,6 +2213,13 @@ mark {
   white-space: nowrap;
 }
 
+.quick-item {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .quick-empty {
   padding: 10px;
 }
@@ -2483,6 +2510,10 @@ mark {
   }
 
   .topbar > .spacer {
+    display: none;
+  }
+
+  .welcome .shortcuts {
     display: none;
   }
 

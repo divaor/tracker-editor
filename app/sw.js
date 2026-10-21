@@ -1,7 +1,7 @@
 // Offline support: precache the app shell and every CodeMirror language
 // chunk (listed in vendor/cm/files.json), then serve network-first so updates
 // show up immediately when online. GitHub and model requests are never intercepted.
-const CACHE = 'editor-v0.1.0';
+const CACHE = 'editor-v0.1.1';
 const ASSETS = [
   './',
   'css/styles.css',

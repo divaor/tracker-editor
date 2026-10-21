@@ -116,7 +116,11 @@ export function fuzzyScore(target, query) {
 export function quickOpen(files, query, limit = 60) {
   if (!query.trim()) return files.slice(0, limit);
   return files
-    .map((file, i) => ({ file, i, score: Math.max(fuzzyScore(file.name, query), fuzzyScore(`${file.project} ${file.name}`, query) - 5) }))
+    .map((file, i) => ({
+      file,
+      i,
+      score: Math.max(fuzzyScore(file.name, query), fuzzyScore(`${file.project} ${file.name}`, query) - 5, file.item ? fuzzyScore(`${file.item} ${file.name}`, query) - 5 : -1),
+    }))
     .filter((r) => r.score >= 0)
     .sort((a, b) => b.score - a.score || a.i - b.i)
     .slice(0, limit)
