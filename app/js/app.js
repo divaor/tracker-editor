@@ -85,9 +85,11 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
           toast('That file is not on this device yet. Sync, then try again.', { kind: 'error' });
           return;
         }
+        if (isNarrow()) setSidebar(false);
+        // Already in the side view: go there.
+        if (fileKey(id) === store.session.side && !isNarrow() && !line && hostRef.current?.focusSide()) return setView('editor');
         store.open(fileKey(id));
         setView('editor');
-        if (isNarrow()) setSidebar(false);
         if (line) setTimeout(() => hostRef.current?.reveal(line, column, length), 60);
       },
       async openRepoFile(path, { line, column, length } = {}) {
@@ -119,9 +121,20 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         if (isNarrow()) setSidebar(false);
         if (line) setTimeout(() => hostRef.current?.reveal(line, column, length), 60);
       },
+      /** A click on a tab: the side view's tab is focused there, any other shows in the main pane. */
       activate(key) {
+        setView('editor');
+        if (key === store.session.side && !isNarrow() && hostRef.current?.focusSide()) return;
+        store.open(key);
+      },
+      /** Shows a tab in the main pane (from the side view too). */
+      showInMain(key) {
         store.open(key);
         setView('editor');
+      },
+      closeSide: () => store.setSide(null),
+      closeMany(keys) {
+        for (const key of keys) actions.close(key);
       },
       close(key) {
         const k = parseKey(key);
@@ -134,7 +147,8 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       },
       reopenClosed: () => store.reopenClosed() || toast('No closed tabs to reopen'),
       cycleTab(step) {
-        const { open, active } = store.session;
+        const { active, side } = store.session;
+        const open = store.session.open.filter((k) => k !== side);
         if (open.length < 2) return;
         store.open(open[(open.indexOf(active) + step + open.length) % open.length]);
       },
@@ -463,12 +477,46 @@ export function App() {
   actions.toggleWrap = () => saveSettings({ wordWrap: !getSettings().wordWrap });
   actions.togglePreview = () => {
     hostRef.current?.flushAll();
+    // The preview takes the side view's place.
+    if (!preview.has(activeKey)) store.setSide(null);
     setPreview((p) => {
       const next = new Set(p);
       next.has(activeKey) ? next.delete(activeKey) : next.add(activeKey);
       return next;
     });
   };
+  /** Splits the editor: `key` in a second pane next to the main one (Ctrl+\ toggles it). */
+  actions.openSide = (key) => {
+    hostRef.current?.flushAll();
+    const { open, active } = store.session;
+    // Ctrl+\: the tab next to the active one.
+    const target = key ?? open[open.indexOf(active) + 1] ?? open[open.indexOf(active) - 1];
+    if (!target || !store.setSide(target)) return toast('Open another file to see two side by side.');
+    setPreview((p) => {
+      const next = new Set(p);
+      next.delete(store.session.active);
+      return next;
+    });
+  };
+  actions.toggleSplit = () => (store.session.side ? actions.closeSide() : actions.openSide());
+
+  // The split view's second pane, after the main one so a tab moving between them hands over its state.
+  const sideEl = useRef(null);
+  const sideKey = store.session.side;
+  const sideParsed = parseKey(sideKey);
+  const sideFile = sideParsed?.kind === 'file' ? store.get(sideParsed.id) : null;
+  const sideRepo = sideParsed?.kind === 'repo' ? store.repoTab(sideParsed.path) : null;
+  const showSide = Boolean((sideFile || sideRepo) && view === 'editor' && !compare && !showPreview && !isNarrow());
+  useLayoutEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    if (!showSide) return host.closeSide();
+    host.openSide(sideKey, sideEl.current, {
+      text: sideFile ? store.text(sideFile.id) : sideRepo.text,
+      name: sideFile?.name ?? sideRepo.name,
+      language: sideFile?.language ?? '',
+    });
+  }, [sideKey, showSide, activeKey]);
 
   // Another tab is taking over: hand it the text still waiting in the editor.
   useEffect(() => {
@@ -575,6 +623,9 @@ export function App() {
       } else if (e.altKey && !mod && k === 'w') {
         e.preventDefault();
         if (store.session.active) actions.close(store.session.active);
+      } else if (mod && e.key === '\\') {
+        e.preventDefault();
+        actions.toggleSplit();
       } else if (mod && k === 's') {
         e.preventDefault();
         // What was just typed goes too.
@@ -600,6 +651,7 @@ export function App() {
         'prev-tab': () => actions.cycleTab(-1),
         'quick-open': () => setDialog({ type: 'quickOpen' }),
         trash: () => setDialog({ type: 'trash' }),
+        split: () => actions.toggleSplit(),
         find: () => actions.run('find'),
         replace: () => actions.run('replace'),
         'goto-line': () => actions.run('gotoLine'),
@@ -673,11 +725,23 @@ export function App() {
     <main class="main">
       ${view === 'settings' && html`<${SettingsView} settings=${settings} sync=${sync} actions=${actions} />`}
       <div class="editor-view" hidden=${view === 'settings'}>
-        <${TabBar} session=${store.session} actions=${actions} />
+        <${TabBar} session=${store.session} projects=${projects} settings=${settings} actions=${actions} />
         ${activeKey && html`<${FileBar} file=${activeFile} repo=${activeRepo} projects=${projects} language=${languageName}
           canPreview=${Boolean(previewType)} preview=${showPreview} settings=${settings} actions=${actions} />`}
-        <div class="editor-area ${showPreview ? 'split' : ''} ${compare ? 'comparing' : ''}">
+        <div class="editor-area ${showPreview ? 'split' : ''} ${showSide ? 'side-split' : ''} ${compare ? 'comparing' : ''}">
           <div class="editor-host" ref=${editorEl} />
+          ${showSide &&
+          html`<div class="side-pane" aria-label=${`Side view: ${sideFile?.name ?? sideRepo.name}`}>
+            <div class="side-head">
+              <${Icon} name=${sideRepo ? 'paperclip' : 'file'} size=${14} />
+              <span class="side-name">${sideFile?.name ?? sideRepo.name}</span>
+              ${(sideFile?.dirty || sideFile?.pending || sideRepo?.dirty) && html`<span class="tab-dot" title="Not synced yet" />`}
+              <span class="spacer" />
+              <button type="button" class="icon-btn sm" aria-label="Swap the panes" title="Swap the panes" onClick=${() => store.swapSides()}><${Icon} name="rotate" size=${15} /></button>
+              <button type="button" class="icon-btn sm" aria-label="Close the side view" title="Close the side view (Ctrl+\\)" onClick=${actions.closeSide}><${Icon} name="x" size=${15} /></button>
+            </div>
+            <div class="side-host" ref=${sideEl} />
+          </div>`}
           ${compare && html`<${CompareView} key=${compare.sha ?? compare.left.label} compare=${compare} settings=${settings} onClose=${() => setCompare(null)} />`}
           ${showPreview && html`<${Preview} key=${activeKey} kind=${previewType} name=${activeName} text=${activeFile ? store.text(activeFile.id) : activeRepo?.text}
             onToggle=${(next) => {

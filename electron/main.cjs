@@ -324,6 +324,7 @@ function buildMenu() {
         item('Files', 'CmdOrCtrl+B', 'toggle-sidebar'),
         item('Word Wrap', 'Alt+Z', 'toggle-wrap'),
         item('Read Aloud', 'Alt+R', 'read-aloud'),
+        shown('Split View', 'CmdOrCtrl+\\', 'split'),
         item('Local Model', 'CmdOrCtrl+Shift+A', 'assistant'),
         { type: 'separator' },
         item('Next Tab', 'Ctrl+Tab', 'next-tab'),

@@ -35,6 +35,8 @@ export const DEFAULT_SETTINGS = {
   wordWrap: typeof matchMedia === 'function' && matchMedia('(max-width: 860px)').matches,
   showWhitespace: false,
   lineNumbers: true,
+  // Tabs gathered by project in the tab bar, each group foldable.
+  groupTabs: false,
   // Project filter for the file list (see matchesScope in tracker-model.js).
   projectScope: [],
   // Where links to files point (the tracker opens these).

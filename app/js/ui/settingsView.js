@@ -116,6 +116,8 @@ function EditorCard({ settings }) {
       <${Check} checked=${settings.wordWrap} label="Word wrap" hint="Alt+Z" onChange=${(v) => saveSettings({ wordWrap: v })} />
       <${Check} checked=${settings.lineNumbers} label="Line numbers and folding" onChange=${(v) => saveSettings({ lineNumbers: v })} />
       <${Check} checked=${settings.showWhitespace} label="Show spaces and trailing whitespace" onChange=${(v) => saveSettings({ showWhitespace: v })} />
+      <${Check} checked=${settings.groupTabs} label="Group tabs by project" hint="Each project's tabs together, with a header that folds them"
+        onChange=${(v) => saveSettings({ groupTabs: v })} />
       <${Check} checked=${settings.autoName} label="Name new files from what is in them" hint="By the local model when it is on, otherwise from a heading on the first line"
         onChange=${(v) => saveSettings({ autoName: v })} />
     </div>

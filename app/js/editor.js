@@ -248,6 +248,8 @@ export function createCompareView(parent, { left, right, name = '', language = '
 /**
  * Creates the editor in `parent`. `onChange(key, text, { urgent })` gets the text of the
  * tab after you type (debounced); `onCursor(info)` the cursor position.
+ * `openSide(key, el, …)` shows a second tab next to it (the split view); a tab's
+ * state, with its undo history, moves between the panes.
  */
 export function createEditorHost(parent, { onChange, onCursor, onShortcut, settings }) {
   const states = new Map(); // key → EditorState
@@ -261,6 +263,11 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, setti
   const gutter = new Compartment();
   let options = settings;
   let active = null;
+  let side = null; // { key, view } of the split view's second pane
+  let focused = 'main'; // the pane typed in last: commands and reading aloud use it
+  // The view showing a tab, if one does.
+  const viewOf = (key) => (key && key === active ? view : key && key === side?.key ? side.view : null);
+  const current = () => (focused === 'side' && side ? side : { key: active, view });
 
   const configFor = (o) => ({
     theme: [baseTheme(o.dark), syntaxHighlighting(o.dark ? DARK_STYLE : LIGHT_STYLE, { fallback: true })],
@@ -274,7 +281,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, setti
     if (!pending.has(key)) return;
     clearTimeout(pending.get(key));
     pending.delete(key);
-    const state = key === active ? view.state : states.get(key);
+    const state = viewOf(key)?.state ?? states.get(key);
     if (state) onChange(key, state.doc.toString(), { urgent });
   };
 
@@ -344,6 +351,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, setti
   }
 
   const view = new EditorView({ parent, state: EditorState.create({ doc: '' }) });
+  view.dom.addEventListener('focusin', () => (focused = 'main'));
   // CodeMirror's own style sets `display: flex !important`, which beats the
   // hidden attribute, so hiding needs an inline !important rule.
   const setVisible = (on) => (on ? view.dom.style.removeProperty('display') : view.dom.style.setProperty('display', 'none', 'important'));
@@ -353,7 +361,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, setti
     const desc = findLanguage(name, chosen);
     const support = desc ? (desc.support ?? (await desc.load().catch(() => null))) : null;
     const effects = lang.reconfigure(support ?? []);
-    if (key === active) view.dispatch({ effects });
+    if (viewOf(key)) viewOf(key).dispatch({ effects });
     else if (states.has(key)) states.set(key, states.get(key).update({ effects }).state);
     return desc?.name ?? PLAIN_TEXT;
   }
@@ -363,6 +371,9 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, setti
 
     /** Shows a tab (creating its editor state the first time). */
     show(key, { text, name, language }) {
+      // From the second pane to the main one.
+      if (side?.key === key) this.closeSide();
+      focused = 'main';
       if (active && active !== key) {
         flush(active);
         states.set(active, view.state);
@@ -393,20 +404,59 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, setti
 
     /** Replaces a tab's text with a version from elsewhere, touching only what differs. */
     replaceText(key, text) {
-      const state = key === active ? view.state : states.get(key);
+      const v = viewOf(key);
+      const state = v ? v.state : states.get(key);
       const changes = state && minimalChange(state.doc.toString(), text);
       if (!changes) return;
       const tr = state.update({ changes, annotations: remote.of(true) });
-      if (key === active) view.dispatch(tr);
+      if (v) v.dispatch(tr);
       else states.set(key, tr.state);
     },
 
-    /** Replaces the active tab's text as an edit of yours: saved at once, and Ctrl+Z takes it back. */
+    /** Replaces a shown tab's text as an edit of yours: saved at once, and Ctrl+Z takes it back. */
     setTextAsEdit(key, text) {
-      if (key !== active) return false;
-      const changes = minimalChange(view.state.doc.toString(), text);
-      if (changes) view.dispatch({ changes, userEvent: 'input.paste' });
+      const v = viewOf(key);
+      if (!v) return false;
+      const changes = minimalChange(v.state.doc.toString(), text);
+      if (changes) v.dispatch({ changes, userEvent: 'input.paste' });
       return true;
+    },
+
+    /** Shows `key` in the second pane, inside `el` (never the main pane's tab). */
+    openSide(key, el, { text, name, language }) {
+      if (key === active) return Promise.resolve(null);
+      if (side?.key === key && el.contains(side.view.dom)) return Promise.resolve(null);
+      this.closeSide();
+      let created = false;
+      if (!states.has(key)) {
+        states.set(key, EditorState.create({ doc: text, extensions: extensions(key, text) }));
+        created = true;
+      }
+      const sideView = new EditorView({ parent: el, state: states.get(key) });
+      sideView.dom.addEventListener('focusin', () => (focused = 'side'));
+      side = { key, view: sideView };
+      const top = scroll.get(key);
+      if (top) requestAnimationFrame(() => sideView.scrollDOM.scrollTo({ top }));
+      return created ? loadLanguage(key, name, language) : Promise.resolve(null);
+    },
+
+    closeSide() {
+      if (!side) return;
+      const { key, view: sideView } = side;
+      flush(key);
+      states.set(key, sideView.state);
+      scroll.set(key, sideView.scrollDOM.scrollTop);
+      side = null;
+      focused = 'main';
+      sideView.destroy();
+    },
+
+    focusSide() {
+      side?.view.focus();
+      return Boolean(side);
+    },
+    get side() {
+      return side?.key ?? null;
     },
 
     setLanguage: loadLanguage,
@@ -415,36 +465,40 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, setti
       options = next;
       const config = configFor(next);
       const effects = [theme.reconfigure(config.theme), wrap.reconfigure(config.wrap), whitespace.reconfigure(config.whitespace), tabs.reconfigure(config.tabs), gutter.reconfigure(config.gutter)];
-      for (const [key, state] of states) if (key !== active) states.set(key, state.update({ effects }).state);
+      for (const [key, state] of states) if (!viewOf(key)) states.set(key, state.update({ effects }).state);
       if (active) view.dispatch({ effects });
+      side?.view.dispatch({ effects });
     },
 
     drop(key) {
       flush(key);
       // hide() keeps the active tab's state, so hide first, then forget it.
       if (key === active) this.hide();
+      if (key === side?.key) this.closeSide();
       states.delete(key);
       scroll.delete(key);
     },
 
     /** Marks the passage being read aloud in a tab ({ from, to }, or null to clear) and scrolls to it. */
     highlightReading(key, range) {
-      const isActive = key === active;
-      const state = isActive ? view.state : states.get(key);
+      const shown = viewOf(key);
+      const isActive = Boolean(shown);
+      const state = shown ? shown.state : states.get(key);
       if (!state) return;
       const len = state.doc.length;
       const r = range && { from: Math.min(range.from, len), to: Math.min(range.to, len) };
       const effects = [setReading.of(r && r.to > r.from ? r : null)];
       if (isActive && r && r.to > r.from) effects.push(EditorView.scrollIntoView(r.from, { y: 'center' }));
-      if (isActive) view.dispatch({ effects });
+      if (isActive) shown.dispatch({ effects });
       else states.set(key, state.update({ effects }).state);
     },
 
-    /** The text and selection of the active tab: { key, text, from, to } (for reading aloud). */
+    /** The text and selection of the pane typed in last: { key, text, from, to } (for reading aloud). */
     snapshot() {
-      if (!active) return null;
-      const { main } = view.state.selection;
-      return { key: active, text: view.state.doc.toString(), from: main.from, to: main.to };
+      const { key, view: v } = current();
+      if (!key) return null;
+      const { main } = v.state.selection;
+      return { key, text: v.state.doc.toString(), from: main.from, to: main.to };
     },
 
     flushAll() {
@@ -453,9 +507,10 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, setti
 
     run(name) {
       const command = COMMANDS[name];
-      if (!command || !active) return false;
-      view.focus();
-      return command(view);
+      const { key, view: v } = current();
+      if (!command || !key) return false;
+      v.focus();
+      return command(v);
     },
 
     /** Moves the cursor to a line (1-based) and column, centering it. */
@@ -468,7 +523,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, setti
     },
 
     selectionText() {
-      const { state } = view;
+      const { state } = current().view;
       return state.selection.ranges.map((r) => state.sliceDoc(r.from, r.to)).join('\n');
     },
 

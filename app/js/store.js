@@ -16,7 +16,10 @@ let trackerOps = []; // pending changes to tracker.json: { id, op: 'project' | '
 let repoTabs = new Map(); // path → { path, name, text, baseSha, dirty }
 let docTexts = new Map(); // blob sha → text of a tracker document (for search and offline reading)
 let docs = { items: null, list: [] }; // trackerDocs(trackerItems), computed once per sync
-let session = { open: [], active: null, closed: [] }; // tab keys: "f:<id>" | "r:<path>"
+// Tab keys are "f:<id>" | "r:<path>". Pinned tabs come first in `open`; `side` is
+// the tab in the split view's second pane (never the active one); `collapsed`
+// lists project keys whose tab group is folded.
+let session = { open: [], active: null, closed: [], pinned: [], side: null, collapsed: [] };
 let meta = { lastSyncAt: null };
 let trashed = new Set(); // deleted files whose text this device kept (kv "trash:<id>")
 let changeCounter = 0;
@@ -72,6 +75,17 @@ function forgetTrash(ids) {
   if (any) kvSet('trashIds', [...trashed]);
 }
 
+// Keeps the session's rules: pinned tabs are open and first, the side tab is open and not the active one.
+function tidySession() {
+  session.pinned = session.pinned.filter((k) => session.open.includes(k));
+  session.open = [...session.pinned, ...session.open.filter((k) => !session.pinned.includes(k))];
+  if (session.side && (!session.open.includes(session.side) || session.side === session.active)) session.side = null;
+  if (!session.active && session.side) {
+    session.active = session.side;
+    session.side = null;
+  }
+}
+
 /** Writes everything still waiting for its debounce (before closing the app). */
 export async function flush() {
   if (closed) return;
@@ -122,7 +136,7 @@ export const store = {
     files = new Map(saved.map((f) => [f.id, f]));
     const loaded = await Promise.all([...files.values()].filter((f) => !f.deleted).map(async (f) => [f.id, (await kvGet(`text:${f.id}`)) ?? '']));
     texts = new Map(loaded);
-    session = { open: [], active: null, closed: [], ...((await kvGet('session')) ?? {}) };
+    session = { open: [], active: null, closed: [], pinned: [], side: null, collapsed: [], ...((await kvGet('session')) ?? {}) };
     repoTabs = new Map(((await kvGet('repoTabs')) ?? []).map((t) => [t.path, t]));
     projects = (await kvGet('projects')) ?? [];
     trackerItems = (await kvGet('trackerItems')) ?? [];
@@ -133,6 +147,7 @@ export const store = {
     // Drop tabs whose file is gone.
     session.open = session.open.filter((k) => (k.startsWith('r:') ? repoTabs.has(k.slice(2)) : files.get(k.slice(2)) && !files.get(k.slice(2)).deleted));
     if (!session.open.includes(session.active)) session.active = session.open[0] ?? null;
+    tidySession();
     emit('load');
   },
 
@@ -274,9 +289,12 @@ export const store = {
 
   open(key, { silent = false } = {}) {
     if (!session.open.includes(key)) {
-      const at = session.open.indexOf(session.active);
+      // Next to the active tab, after the pinned ones.
+      const at = Math.max(session.open.indexOf(session.active), session.pinned.length - 1);
       session.open = at === -1 ? [...session.open, key] : [...session.open.slice(0, at + 1), key, ...session.open.slice(at + 1)];
     }
+    // The side pane's tab opened in the main one: the split ends.
+    if (session.side === key) session.side = null;
     session.active = key;
     persist.session();
     if (!silent) emit('session');
@@ -286,8 +304,14 @@ export const store = {
     const at = session.open.indexOf(key);
     if (at === -1) return;
     session.open = session.open.filter((k) => k !== key);
+    session.pinned = session.pinned.filter((k) => k !== key);
     session.closed = [key, ...session.closed.filter((k) => k !== key)].slice(0, 20);
-    if (session.active === key) session.active = session.open[Math.min(at, session.open.length - 1)] ?? null;
+    if (session.side === key) session.side = null;
+    if (session.active === key) {
+      const rest = session.open.filter((k) => k !== session.side);
+      session.active = rest[Math.min(at, rest.length - 1)] ?? null;
+    }
+    tidySession();
     if (key.startsWith('r:') && !repoTabs.get(key.slice(2))?.dirty) {
       repoTabs.delete(key.slice(2));
       persist.repo();
@@ -305,10 +329,55 @@ export const store = {
     return key;
   },
 
+  /** Moves a tab to `toIndex` in the tab bar, staying among the pinned tabs or the others. */
   move(key, toIndex) {
     const list = session.open.filter((k) => k !== key);
-    list.splice(Math.max(0, Math.min(toIndex, list.length)), 0, key);
+    const pinned = session.pinned.includes(key);
+    const n = session.pinned.filter((k) => k !== key).length;
+    list.splice(pinned ? Math.max(0, Math.min(toIndex, n)) : Math.max(n, Math.min(toIndex, list.length)), 0, key);
     session.open = list;
+    persist.session();
+    emit('session');
+  },
+
+  /** Pins a tab (first in the bar, kept by "Close others") or unpins it. */
+  pin(key, on = true) {
+    if (!session.open.includes(key) || session.pinned.includes(key) === on) return;
+    session.pinned = on ? [...session.pinned, key] : session.pinned.filter((k) => k !== key);
+    tidySession();
+    persist.session();
+    emit('session');
+  },
+
+  /**
+   * Shows a tab in the split view's second pane (null closes it). The active tab
+   * moves aside for it: the main pane shows a neighbor. False when no other tab is open.
+   */
+  setSide(key) {
+    if (key && !session.open.includes(key)) return false;
+    if (key && key === session.active) {
+      const others = session.open.filter((k) => k !== key);
+      if (!others.length) return false;
+      const at = session.open.indexOf(key);
+      session.active = [...session.open.slice(0, at)].reverse().find((k) => k !== key) ?? others[0];
+    }
+    session.side = key;
+    persist.session();
+    emit('session');
+    return true;
+  },
+
+  /** Swaps the tabs of the two panes. */
+  swapSides() {
+    if (!session.side) return;
+    [session.active, session.side] = [session.side, session.active];
+    persist.session();
+    emit('session');
+  },
+
+  /** Folds or unfolds a project's tab group. */
+  toggleGroup(group) {
+    session.collapsed = session.collapsed.includes(group) ? session.collapsed.filter((g) => g !== group) : [...session.collapsed, group];
     persist.session();
     emit('session');
   },
@@ -420,7 +489,7 @@ export const store = {
     trackerOps = [];
     docTexts = new Map();
     persist.docs();
-    session = { open: [], active: null, closed: [] };
+    session = { open: [], active: null, closed: [], pinned: [], side: null, collapsed: [] };
     meta = { lastSyncAt: null };
     persist.files();
     persist.repo();

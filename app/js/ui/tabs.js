@@ -7,61 +7,135 @@ import { syncNow } from '../syncManager.js';
 import { projectKey } from '../tracker-model.js';
 import { ProjectChip } from './components.js';
 import { Icon } from './icons.js';
-import { MenuButton } from './menu.js';
+import { Menu, MenuButton } from './menu.js';
 
 function tabInfo(key) {
   const k = parseKey(key);
   if (k?.kind === 'file') {
     const f = store.get(k.id);
-    return f && { name: f.name, unsynced: f.dirty || f.pending, title: [f.project, f.name].filter(Boolean).join(' / ') };
+    return f && { name: f.name, project: f.project, unsynced: f.dirty || f.pending, title: [f.project, f.name].filter(Boolean).join(' / ') };
   }
   const t = k && store.repoTab(k.path);
-  return t && { name: t.name, unsynced: t.dirty, repo: true, title: `From the tracker: ${t.path}` };
+  return t && { name: t.name, project: store.doc(k.path)?.project ?? '', unsynced: t.dirty, repo: true, title: `From the tracker: ${t.path}` };
 }
 
-export function TabBar({ session, actions }) {
+// Unpinned tabs by project, in the order each project first appears; tabs
+// without one last.
+function groupTabs(keys) {
+  const groups = new Map();
+  for (const key of keys) {
+    const project = tabInfo(key)?.project ?? '';
+    const id = project ? projectKey(project) : '';
+    if (!groups.has(id)) groups.set(id, { id, name: project, keys: [] });
+    groups.get(id).keys.push(key);
+  }
+  const list = [...groups.values()];
+  return [...list.filter((g) => g.id), ...list.filter((g) => !g.id)];
+}
+
+const narrowScreen = () => matchMedia('(max-width: 860px)').matches;
+
+export function TabBar({ session, projects, settings, actions }) {
   const strip = useRef(null);
   const [dragging, setDragging] = useState(null);
+  const [menu, setMenu] = useState(null); // { key, at }
   useEffect(() => {
     strip.current?.querySelector('.tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [session.active, session.open.length]);
+  const pinned = session.pinned ?? [];
+  const unpinned = session.open.filter((k) => !pinned.includes(k));
+  const groups = settings.groupTabs ? groupTabs(unpinned) : [{ id: null, keys: unpinned }];
+  const showHeaders = settings.groupTabs && groups.some((g) => g.id);
+  const byKey = new Map(projects.map((p) => [p.key, p]));
+
+  const menuItems = (key) => {
+    const isPinned = pinned.includes(key);
+    const at = session.open.indexOf(key);
+    const group = settings.groupTabs ? groups.find((g) => g.keys.includes(key)) : null;
+    const closable = (keys) => keys.filter((k) => !pinned.includes(k));
+    const others = closable(session.open.filter((k) => k !== key));
+    const right = closable(session.open.slice(at + 1));
+    return [
+      { label: isPinned ? 'Unpin' : 'Pin', icon: 'pin', run: () => store.pin(key, !isPinned) },
+      !narrowScreen() &&
+        (key === session.side
+          ? { label: 'Close the side view', icon: 'columns', run: actions.closeSide }
+          : { label: 'Open to the side', icon: 'columns', disabled: session.open.length < 2, run: () => actions.openSide(key) }),
+      { label: 'History', icon: 'history', run: () => (actions.showInMain(key), actions.showHistory()) },
+      { label: 'Compare with…', icon: 'columns', run: () => (actions.showInMain(key), actions.compareWith()) },
+      { separator: true },
+      { label: 'Close', icon: 'x', run: () => actions.close(key) },
+      { label: 'Close others', disabled: !others.length, run: () => actions.closeMany(others) },
+      { label: 'Close tabs to the right', disabled: !right.length, run: () => actions.closeMany(right) },
+      group?.id && { label: `Close the ${group.name} tabs`, run: () => actions.closeMany(closable(group.keys)) },
+      { label: 'Close all', disabled: !closable(session.open).length, run: () => actions.closeMany(closable(session.open)) },
+      { separator: true },
+      { label: 'Group tabs by project', checked: settings.groupTabs, run: () => saveSettings({ groupTabs: !getSettings().groupTabs }) },
+    ];
+  };
+
+  const tab = (key) => {
+    const info = tabInfo(key);
+    if (!info) return null;
+    const isActive = key === session.active;
+    const isSide = key === session.side;
+    const isPinned = pinned.includes(key);
+    return html`<div key=${key} role="tab" aria-selected=${isActive} tabindex=${isActive ? 0 : -1}
+        class="tab ${isActive ? 'active' : ''} ${isSide ? 'side' : ''} ${isPinned ? 'pinned' : ''} ${info.unsynced ? 'unsynced' : ''} ${dragging === key ? 'dragging' : ''}"
+        title=${isSide ? `${info.title} · in the side view` : info.title}
+        draggable="true"
+        onDragStart=${(e) => {
+          setDragging(key);
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/x-tab', key);
+        }}
+        onDragEnd=${() => setDragging(null)}
+        onDragOver=${(e) => dragging && e.preventDefault()}
+        onDrop=${(e) => {
+          const from = e.dataTransfer.getData('text/x-tab');
+          if (from) {
+            e.preventDefault();
+            store.move(from, session.open.indexOf(key));
+          }
+        }}
+        onClick=${() => actions.activate(key)}
+        onAuxClick=${(e) => e.button === 1 && actions.close(key)}
+        onContextMenu=${(e) => {
+          e.preventDefault();
+          setMenu({ key, at: { x: e.clientX, y: e.clientY } });
+        }}
+        onKeyDown=${(e) => (e.key === 'Enter' || e.key === ' ') && actions.activate(key)}>
+      ${isPinned && html`<${Icon} name="pin" size=${12} class="tab-pin" />`}
+      ${isSide && html`<${Icon} name="columns" size=${13} class="tab-side" />`}
+      ${info.repo && html`<${Icon} name="paperclip" size=${13} />`}
+      <span class="tab-name">${info.name}</span>
+      <span class="tab-dot" title="Not synced yet" />
+      <button type="button" class="tab-close" aria-label=${`Close ${info.name}`} tabindex="-1"
+        onClick=${(e) => {
+          e.stopPropagation();
+          actions.close(key);
+        }}><${Icon} name="x" size=${13} /></button>
+    </div>`;
+  };
+
   return html`<div class="tabbar" role="tablist" aria-label="Open files" ref=${strip}
       onDblClick=${(e) => e.target === e.currentTarget && actions.newFile()}>
-    ${session.open.map((key, index) => {
-      const info = tabInfo(key);
-      if (!info) return null;
-      const isActive = key === session.active;
-      return html`<div key=${key} role="tab" aria-selected=${isActive} tabindex=${isActive ? 0 : -1}
-          class="tab ${isActive ? 'active' : ''} ${info.unsynced ? 'unsynced' : ''} ${dragging === key ? 'dragging' : ''}" title=${info.title}
-          draggable="true"
-          onDragStart=${(e) => {
-            setDragging(key);
-            e.dataTransfer.effectAllowed = 'move';
-            e.dataTransfer.setData('text/x-tab', key);
-          }}
-          onDragEnd=${() => setDragging(null)}
-          onDragOver=${(e) => dragging && e.preventDefault()}
-          onDrop=${(e) => {
-            const from = e.dataTransfer.getData('text/x-tab');
-            if (from) {
-              e.preventDefault();
-              store.move(from, index);
-            }
-          }}
-          onClick=${() => actions.activate(key)}
-          onAuxClick=${(e) => e.button === 1 && actions.close(key)}
-          onKeyDown=${(e) => (e.key === 'Enter' || e.key === ' ') && actions.activate(key)}>
-        ${info.repo && html`<${Icon} name="paperclip" size=${13} />`}
-        <span class="tab-name">${info.name}</span>
-        <span class="tab-dot" title="Not synced yet" />
-        <button type="button" class="tab-close" aria-label=${`Close ${info.name}`} tabindex="-1"
-          onClick=${(e) => {
-            e.stopPropagation();
-            actions.close(key);
-          }}><${Icon} name="x" size=${13} /></button>
-      </div>`;
+    ${pinned.map(tab)}
+    ${groups.map((g) => {
+      const collapsed = showHeaders && session.collapsed?.includes(g.id || 'none');
+      const shown = collapsed ? g.keys.filter((k) => k === session.active || k === session.side) : g.keys;
+      const color = g.id ? byKey.get(g.id)?.color : null;
+      return html`
+        ${showHeaders &&
+        html`<button type="button" key=${`group:${g.id}`} class="tab-group ${collapsed ? 'collapsed' : ''}" style=${color ? { '--pc': color } : undefined}
+          aria-expanded=${!collapsed} title=${collapsed ? `Show the ${g.name || 'other'} tabs` : `Fold the ${g.name || 'other'} tabs`}
+          onClick=${() => store.toggleGroup(g.id || 'none')}>
+          ${g.id ? html`<span class="project-dot" />` : ''}<span>${g.name || 'Other'}</span>${collapsed && html`<span class="count">${g.keys.length}</span>`}
+        </button>`}
+        ${shown.map(tab)}`;
     })}
     <button type="button" class="tab-new" aria-label="New file" title="New file (Alt+N)" onClick=${() => actions.newFile()}><${Icon} name="plus" size=${16} /></button>
+    ${menu && session.open.includes(menu.key) && html`<${Menu} items=${menuItems(menu.key)} at=${menu.at} label="Tab" onClose=${() => setMenu(null)} />`}
   </div>`;
 }
 
