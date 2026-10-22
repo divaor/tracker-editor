@@ -87,7 +87,7 @@ The editor uses the tracker's repo, token and projects. Its own files go to `edi
 
 ## 3. Tabs, pinning, groups and the split view
 
-**Right-click a tab** (long-press on a phone) for its menu:
+**Right-click a tab** for its menu (on a phone: the **⋯** on the open tab, or a long press on any tab):
 
 | Item | What it does |
 | --- | --- |
@@ -99,7 +99,8 @@ The editor uses the tracker's repo, token and projects. Its own files go to `edi
 | Close, Close others, Close tabs to the right, Close the *Project* tabs, Close all | Pinned tabs are kept, except by Close. |
 | Group tabs by project | One header per project in the tab bar; click a header to fold its tabs. |
 
-- `Ctrl+W` closes a tab (desktop), `Ctrl+Shift+T` reopens the last closed one, `Ctrl+Tab` goes to the next one. Drag tabs to reorder them.
+- `Ctrl+W` closes a tab (desktop), and so does a **middle-click** on it; `Ctrl+Shift+T` reopens the last closed one, `Ctrl+Tab` goes to the next one. **Double-click a tab to pin it** (again to unpin). Drag tabs to reorder them.
+- **Many tabs open**: scroll the tab bar with the mouse wheel (or swipe sideways on a touchpad or a phone). At its ends, an arrow with a number says how many tabs are past it; click it to scroll that way.
 - **Drag a tab out of the window** (desktop) to give it to another app as a file. The app decides what to do with it:
   - **Desktop or a folder**: a copy (a synced file is copied under its tab name). The original is never moved.
   - **A terminal with Claude Code**: its path is typed in (for a synced file, the path of a copy), so Claude reads it.
@@ -272,7 +273,7 @@ The sidebar has two views on the desktop: **My files** (synced) and **Folders** 
 | To | Do |
 | --- | --- |
 | Select | Click; `Ctrl`+click to add; `Shift`+click for a range; `Ctrl+A` for all; arrow keys (`Shift` to extend); or type the start of a name. The bottom line counts what is selected. |
-| Open | Double-click or `Enter`. A folder opens in the view (`Backspace` or ↑ goes back; click the path at the top to jump). A text file opens **in place** like `Ctrl+O` (not synced, `Ctrl+S` saves, Follow works). PDFs, pictures, Office files and other formats open **with their own program**. |
+| Open | Double-click or `Enter`. A folder opens in the view (`Backspace` or ↑ goes back; click the path at the top to jump). A text file opens **in place** like `Ctrl+O` (not synced, `Ctrl+S` saves, Follow works). **Pictures and PDFs show large here** (as with `Space`; `Enter` there opens them with their program); to open them with their program straight away, choose that in **Settings → Desktop → Folders**. Office files and other formats open **with their own program**. |
 | Make | **New file**, **New folder** (`Ctrl+Shift+N`): type the name in the list, `Enter`. |
 | Rename | `F2`, type, `Enter` (`Escape` cancels). |
 | Copy, move | `Ctrl+C` / `Ctrl+X`, then `Ctrl+V` in another folder (or **Paste into this folder** on a folder). **Duplicate** makes "name - Copy". Or drag onto a folder or onto part of the path at the top: moves, with `Ctrl` copies. |
@@ -411,6 +412,8 @@ Turn them on in **Settings → Desktop**.
 | `Ctrl+Shift+A` | The model |
 | `Ctrl+S` | Sync now (with what you just typed), or save a file opened from disk or a server |
 | `Ctrl+W` / `Ctrl+Shift+T` | Close tab / reopen it (desktop) |
+| Middle-click / double-click a tab | Close it / pin or unpin it |
+| Mouse wheel over the tabs | Scroll through them |
 | `Ctrl+Tab` | Next tab |
 
 ---

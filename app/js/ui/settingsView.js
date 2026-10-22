@@ -203,7 +203,7 @@ function ShortcutField({ value, problem, label, onChange, onTry }) {
 }
 
 /** Desktop: keep running in the tray, quick capture, text from a screenshot, clipboard history (the main process keeps these). */
-function DesktopCard({ actions }) {
+function DesktopCard({ settings, actions }) {
   const [prefs, setPrefs] = useState(null);
   useEffect(() => {
     window.desktop.prefs.get().then(setPrefs);
@@ -221,6 +221,15 @@ function DesktopCard({ actions }) {
         hint="In Open with for text and code files (without becoming their default program), Edit with Tracker Editor when you right-click a file (Windows 11: under Show more options), and Open in Tracker Editor on folders."
         onChange=${(v) => set({ shell: { enabled: v } })} />
       ${prefs.shell.error && html`<p class="notice small" role="alert">Windows did not take it: ${prefs.shell.error}</p>`}`}
+    </div>
+    <h3 class="settings-sub">Folders</h3>
+    <div class="field-grid">
+      <${Field} label="Double-clicking a picture or a PDF" hint="Enter does the same. Space always shows it large, and right-click has the other way.">
+        <select value=${settings.folderMediaOpens} onChange=${(e) => saveSettings({ folderMediaOpens: e.currentTarget.value })}>
+          <option value="viewer">Shows it large here</option>
+          <option value="program">Opens it with its program</option>
+        </select>
+      </${Field}>
     </div>
     <h3 class="settings-sub">Quick capture</h3>
     <p class="muted small">A shortcut that works in any app opens a small window to jot something down. Ctrl+Enter keeps it as a new note, or adds it to Inbox.md under the time.</p>
@@ -562,7 +571,7 @@ export function SettingsView({ settings, sync, actions }) {
     <${ModelCard} settings=${settings} actions=${actions} />
     <${ReadAloudCard} settings=${settings} actions=${actions} />
     ${window.desktop?.typing && html`<${TypingCard} settings=${settings} />`}
-    ${window.desktop?.prefs && html`<${DesktopCard} actions=${actions} />`}
+    ${window.desktop?.prefs && html`<${DesktopCard} settings=${settings} actions=${actions} />`}
     ${dictationSupported() && html`<${DictationCard} settings=${settings} />`}
     <${EncryptionCard} actions=${actions} />
     <${DataCard} actions=${actions} />

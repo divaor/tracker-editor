@@ -58,6 +58,9 @@ export const DEFAULT_SETTINGS = {
   // The preview under the list of files (on or off) and its height in pixels.
   folderPreview: false,
   folderPreviewHeight: 260,
+  // Opening a picture or a PDF in the folders view (double-click, Enter): 'viewer' shows it
+  // large here (as Space does), 'program' opens it with its own program.
+  folderMediaOpens: 'viewer',
   // Servers: permissions (rwxr-xr-x) next to each file in the folders view.
   showPermissions: false,
   // The terminal panel's height (desktop), in pixels.

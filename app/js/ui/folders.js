@@ -1,6 +1,6 @@
 import { html, useEffect, useLayoutEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import { canDragOut, draggedPaths, draggedTab, dropped, isOwnDrop, onDragOutEnd, startDragOut } from '../dragOut.js';
-import { baseName, breadcrumbs, FOLDER_SORTS, isImageName, modeString, opensInEditor, parentOf, pushRecent, quotePath, rangeOf, renameRange, rootOf, selectionSummary, sortsUp, toggleFavorite, topmost, treeRows } from '../folders.js';
+import { baseName, breadcrumbs, FOLDER_SORTS, isImageName, modeString, opensInEditor, parentOf, peekKind, pushRecent, quotePath, rangeOf, renameRange, rootOf, selectionSummary, sortsUp, toggleFavorite, topmost, treeRows } from '../folders.js';
 import { formatBytes, timeAgo } from '../format.js';
 import { saveSettings } from '../settings.js';
 import { diskKey } from '../store.js';
@@ -331,8 +331,12 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   // ---- Opening ----
 
   const openOutside = (e) => bridge.openExternal(e.path).catch(fail);
-  const openEntry = async (e, { many = false } = {}) => {
+  // Pictures and PDFs show large here unless the setting says their program.
+  const inViewer = (e) => !e.dir && settings.folderMediaOpens !== 'program' && ['image', 'pdf'].includes(peekKind(e.name));
+  /** Opens a file or folder; `outside` opens a picture or PDF with its program even when they show here. */
+  const openEntry = async (e, { many = false, outside = false } = {}) => {
     if (e.dir) return go(e.path);
+    if (!outside && inViewer(e)) return setViewing(e.path);
     if (!opensInEditor(e.name)) return openOutside(e);
     const problem = await actions.openDiskPath(e.path, { report: false });
     // Not text after all: its own program.
@@ -343,7 +347,11 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   const openSelected = () => {
     const items = targets();
     if (items.length === 1) return openEntry(items[0]);
-    for (const e of items.filter((x) => !x.dir).slice(0, 20)) openEntry(e, { many: true });
+    const files = items.filter((x) => !x.dir).slice(0, 20);
+    // Several pictures or PDFs: the first shows large (the arrows go through the rest); the others open.
+    const shown = files.find(inViewer);
+    for (const e of files.filter((x) => !inViewer(x))) openEntry(e, { many: true });
+    if (shown) setViewing(shown.path);
   };
 
   // ---- Changing things (each with Undo where it can be undone) ----
@@ -948,7 +956,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     ${viewing &&
     html`<${FileViewer} entries=${entries.filter((e) => !e.dir)} path=${viewing}
       onPath=${(p) => (setViewing(p), select([p]))}
-      onOpen=${(e) => (setViewing(null), openEntry(e))}
+      onOpen=${(e) => (setViewing(null), openEntry(e, { outside: true }))}
       onOpenOutside=${openOutside}
       onClose=${() => (setViewing(null), list.current?.focus())} />`}
     <div class="sidebar-foot folders-foot">

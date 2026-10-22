@@ -9,7 +9,8 @@ It is the companion of [Tracker](https://github.com/divaor/tracking_app) and sha
 ## Features
 
 - **Many files open at once**: tabs you can reorder, reopen closed tabs (`Ctrl+Shift+T`), untitled `new 1`, `new 2`… files like Notepad++. Your tabs and their text come back exactly as you left them, including untitled ones.
-  - Right-click (or long-press) a tab to **pin** it, open it **to the side**, see its history, compare it, or close others, those to the right, a project's tabs or all.
+  - Right-click a tab (on a phone: its ⋯, or a long press) to **pin** it, open it **to the side**, see its history, compare it, or close others, those to the right, a project's tabs or all. Double-click a tab to pin it, middle-click to close it.
+  - Many tabs: the mouse wheel scrolls the tab bar (no scrollbar), and an arrow with a count at each end says how many tabs are past it.
   - **Group tabs by project**, each group with a header that folds it.
   - **Split view** (`Ctrl+\`) on wide screens: two files side by side, both editable.
 - **Where each file lives, at a glance**: every tab, the file bar, the status bar and a frame around the editor are colored by where the file is: **my files** (synced, green), a **tracker** document (blue), **this computer** (amber) or a **server** (pink). The file bar says how it stands: synced or not yet, saved or not, changed elsewhere, not connected.

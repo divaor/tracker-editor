@@ -1,4 +1,4 @@
-import { html, useEffect, useRef, useState } from '../../vendor/preact-htm.js';
+import { html, useEffect, useLayoutEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import { languageNames, PLAIN_TEXT } from '../editor.js';
 import { formatBytes, timeAgo } from '../format.js';
 import { getSettings, isSyncConfigured, saveSettings } from '../settings.js';
@@ -69,15 +69,87 @@ function groupTabs(keys) {
 }
 
 const narrowScreen = () => matchMedia('(max-width: 860px)').matches;
+// A finger rather than a mouse: tabs get a ⋯ button and a long press for their menu.
+const touchScreen = () => matchMedia('(pointer: coarse)').matches;
+const LONG_PRESS_MS = 500;
+
+/**
+ * How many tabs are cut off at each edge of the scrolled strip, and whether to hint at
+ * that edge ({ left, right, moreLeft, moreRight }): for a hidden tab, or more than the
+ * width of the + button out of sight.
+ */
+function hiddenTabs(view, tabs) {
+  const out = { left: 0, right: 0 };
+  for (const t of tabs) {
+    if (t.left < view.left - 1) out.left++;
+    else if (t.right > view.right + 1) out.right++;
+  }
+  out.moreLeft = out.left > 0 || view.scrollLeft > 40;
+  out.moreRight = out.right > 0 || view.scrollWidth - view.scrollLeft - view.width > 40;
+  return out;
+}
+
+/** The tabs past the strip's edges, from the page: see hiddenTabs. */
+function measureTabs(el) {
+  const box = el.getBoundingClientRect();
+  const tabs = [...el.querySelectorAll('.tab')].map((t) => t.getBoundingClientRect());
+  return hiddenTabs({ left: box.left, right: box.right, width: el.clientWidth, scrollLeft: el.scrollLeft, scrollWidth: el.scrollWidth }, tabs);
+}
 
 export function TabBar({ session, projects, settings, actions }) {
   const strip = useRef(null);
   const [dragging, setDragging] = useState(null);
   const [menu, setMenu] = useState(null); // { key, at }
+  const [edges, setEdges] = useState({ left: 0, right: 0, moreLeft: false, moreRight: false });
+  const press = useRef(null); // a finger held on a tab: { timer, x, y, fired }
+  const touch = touchScreen();
   useEffect(() => {
-    strip.current?.querySelector('.tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  }, [session.active, session.open.length]);
+    const el = strip.current;
+    const tab = el?.querySelector('.tab.active');
+    if (!tab) return;
+    // The last tab: all the way, so the + after it shows too.
+    if (tab === [...el.querySelectorAll('.tab')].at(-1)) el.scrollLeft = el.scrollWidth;
+    else tab.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [session.active, session.open.length, session.pinned?.length]);
   useEffect(() => onDragOutEnd(() => setDragging(null)), []);
+  // The hints at the edges follow scrolling, resizing and tabs coming and going.
+  const measure = () => {
+    const el = strip.current;
+    if (!el) return;
+    const next = measureTabs(el);
+    setEdges((prev) => (Object.keys(next).every((k) => prev[k] === next[k]) ? prev : next));
+  };
+  useLayoutEffect(measure);
+  useEffect(() => {
+    const el = strip.current;
+    let frame = 0;
+    const later = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measure);
+    };
+    // A mouse wheel scrolls the tabs sideways (a touchpad's sideways swipe already does).
+    const onWheel = (e) => {
+      if (e.ctrlKey || Math.abs(e.deltaX) >= Math.abs(e.deltaY) || el.scrollWidth <= el.clientWidth) return;
+      e.preventDefault();
+      el.scrollLeft += e.deltaMode === 1 ? e.deltaY * 32 : e.deltaY;
+    };
+    const resize = new ResizeObserver(later);
+    resize.observe(el);
+    el.addEventListener('scroll', later, { passive: true });
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => {
+      cancelAnimationFrame(frame);
+      resize.disconnect();
+      el.removeEventListener('scroll', later);
+      el.removeEventListener('wheel', onWheel);
+    };
+  }, []);
+  const scrollBy = (dir) => strip.current?.scrollBy({ left: dir * Math.max(120, strip.current.clientWidth * 0.7), behavior: 'smooth' });
+  const openMenu = (key, at) => setMenu({ key, at });
+  const endPress = () => {
+    clearTimeout(press.current?.timer);
+    if (press.current && !press.current.fired) press.current = null;
+  };
   const pinned = session.pinned ?? [];
   const unpinned = session.open.filter((k) => !pinned.includes(k));
   const groups = settings.groupTabs ? groupTabs(unpinned) : [{ id: null, keys: unpinned }];
@@ -123,8 +195,8 @@ export function TabBar({ session, projects, settings, actions }) {
     const isPinned = pinned.includes(key);
     return html`<div key=${key} role="tab" aria-selected=${isActive} tabindex=${isActive ? 0 : -1}
         class="tab kind-${info.kind} ${isActive ? 'active' : ''} ${isSide ? 'side' : ''} ${isPinned ? 'pinned' : ''} ${info.unsynced ? 'unsynced' : ''} ${info.offline ? 'offline' : ''} ${dragging === key ? 'dragging' : ''}"
-        title=${isSide ? `${info.title} · in the side view` : info.title}
-        draggable="true"
+        title=${`${isSide ? `${info.title} · in the side view` : info.title}${touch ? '' : `\n${isPinned ? 'Double-click to unpin' : 'Double-click to pin'} · middle-click to close`}`}
+        draggable=${!touch}
         onDragStart=${(e) => {
           setDragging(key);
           // Desktop: a real file drag, so the tab can go to other apps too (dragOut.js).
@@ -152,11 +224,40 @@ export function TabBar({ session, projects, settings, actions }) {
             setDragging(null);
           }
         }}
-        onClick=${() => actions.activate(key)}
-        onAuxClick=${(e) => e.button === 1 && actions.close(key)}
+        onClick=${() => {
+          // The click that ends a long press only opened the menu.
+          if (press.current?.fired) return void (press.current = null);
+          actions.activate(key);
+        }}
+        onDblClick=${(e) => {
+          if (e.target.closest('button')) return;
+          e.stopPropagation();
+          store.pin(key, !isPinned);
+          actions.toast(isPinned ? `Unpinned “${info.name}”` : `Pinned “${info.name}”: it stays first and is kept when you close others. Double-click it again to unpin.`, { timeout: isPinned ? 2500 : 5000 });
+        }}
+        onMouseDown=${(e) => e.button === 1 && e.preventDefault()}
+        onAuxClick=${(e) => e.button === 1 && (e.preventDefault(), actions.close(key))}
+        onPointerDown=${(e) => {
+          clearTimeout(press.current?.timer);
+          press.current = null;
+          if (e.pointerType !== 'touch') return;
+          const at = { x: e.clientX, y: e.clientY };
+          press.current = {
+            ...at,
+            fired: false,
+            timer: setTimeout(() => {
+              press.current.fired = true;
+              navigator.vibrate?.(12);
+              openMenu(key, at);
+            }, LONG_PRESS_MS),
+          };
+        }}
+        onPointerMove=${(e) => press.current && !press.current.fired && Math.hypot(e.clientX - press.current.x, e.clientY - press.current.y) > 10 && endPress()}
+        onPointerUp=${endPress}
+        onPointerCancel=${endPress}
         onContextMenu=${(e) => {
           e.preventDefault();
-          setMenu({ key, at: { x: e.clientX, y: e.clientY } });
+          openMenu(key, { x: e.clientX, y: e.clientY });
         }}
         onKeyDown=${(e) => (e.key === 'Enter' || e.key === ' ') && actions.activate(key)}>
       ${isPinned && html`<${Icon} name="pin" size=${12} class="tab-pin" />`}
@@ -166,6 +267,14 @@ export function TabBar({ session, projects, settings, actions }) {
       ${info.snippet && html`<${Icon} name="snippet" size=${12} class="tab-lock" />`}
       <span class="tab-name">${info.name}</span>
       <span class="tab-dot" title=${info.dotTitle} />
+      ${touch &&
+      isActive &&
+      html`<button type="button" class="tab-close tab-menu" aria-label=${`More for ${info.name}`} aria-haspopup="menu" tabindex="-1"
+        onClick=${(e) => {
+          e.stopPropagation();
+          const r = e.currentTarget.getBoundingClientRect();
+          openMenu(key, { x: r.right, y: r.bottom + 4, right: true });
+        }}><${Icon} name="more" size=${15} /></button>`}
       <button type="button" class="tab-close" aria-label=${`Close ${info.name}`} tabindex="-1"
         onClick=${(e) => {
           e.stopPropagation();
@@ -174,7 +283,18 @@ export function TabBar({ session, projects, settings, actions }) {
     </div>`;
   };
 
-  return html`<div class="tabbar" role="tablist" aria-label="Open files" ref=${strip}
+  const hint = (side) => {
+    const count = edges[side];
+    const more = side === 'left' ? edges.moreLeft : edges.moreRight;
+    if (!more) return null;
+    const label = count ? `${count} more ${count === 1 ? 'tab' : 'tabs'} to the ${side}` : `More to the ${side}`;
+    return html`<button type="button" class="tab-hint ${side}" aria-label=${label} title=${`${label} (or scroll with the mouse wheel)`} tabindex="-1"
+      onClick=${() => scrollBy(side === 'left' ? -1 : 1)}>
+      ${side === 'left' && html`<${Icon} name="chevronRight" size=${14} class="flip" />`}${count > 0 && html`<span class="tab-hint-count">${count}</span>`}${side === 'right' && html`<${Icon} name="chevronRight" size=${14} />`}
+    </button>`;
+  };
+
+  return html`<div class="tabbar-wrap">${hint('left')}<div class="tabbar" role="tablist" aria-label="Open files" ref=${strip}
       onDblClick=${(e) => e.target === e.currentTarget && actions.newFile()}>
     ${pinned.map(tab)}
     ${groups.map((g) => {
@@ -192,7 +312,7 @@ export function TabBar({ session, projects, settings, actions }) {
     })}
     <button type="button" class="tab-new" aria-label="New file" title="New file (Alt+N)" onClick=${() => actions.newFile()}><${Icon} name="plus" size=${16} /></button>
     ${menu && session.open.includes(menu.key) && html`<${Menu} items=${menuItems(menu.key)} at=${menu.at} label="Tab" onClose=${() => setMenu(null)} />`}
-  </div>`;
+  </div>${hint('right')}</div>`;
 }
 
 /** Project, tags and actions for the file in the active tab. */
