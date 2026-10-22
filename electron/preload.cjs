@@ -55,6 +55,27 @@ contextBridge.exposeInMainWorld('desktop', {
       return () => ipcRenderer.removeListener('type:progress', listener);
     },
   },
+  // Tray, quick capture and clipboard history settings (kept by the main process).
+  prefs: {
+    get: () => ipcRenderer.invoke('prefs:get'),
+    set: (patch) => ipcRenderer.invoke('prefs:set', patch),
+  },
+  capture: {
+    open: () => ipcRenderer.invoke('capture:open'),
+    take: () => ipcRenderer.invoke('capture:take'),
+  },
+  clipboardHistory: {
+    list: () => ipcRenderer.invoke('clip:list'),
+    copy: (id) => ipcRenderer.invoke('clip:copy', id),
+    remove: (id) => ipcRenderer.invoke('clip:remove', id),
+    pin: (id, on) => ipcRenderer.invoke('clip:pin', id, on),
+    clear: () => ipcRenderer.invoke('clip:clear'),
+    onChanged(callback) {
+      const listener = () => callback();
+      ipcRenderer.on('clip:changed', listener);
+      return () => ipcRenderer.removeListener('clip:changed', listener);
+    },
+  },
   closeReady: () => ipcRenderer.send('app:close-ready'),
   onCommand(callback) {
     const listener = (_event, command) => callback(command);

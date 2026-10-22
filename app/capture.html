@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-src 'none'" />
+    <title>Quick capture</title>
+    <link rel="stylesheet" href="css/styles.css" />
+    <script src="js/theme-boot.js"></script>
+    <script type="module" src="js/capturePage.js"></script>
+  </head>
+  <body class="capture-page">
+    <form class="capture" id="capture">
+      <header class="capture-head">
+        <span class="capture-title">Quick capture</span>
+        <span class="muted small">Ctrl+Enter saves · Esc closes (the draft stays)</span>
+      </header>
+      <textarea id="text" aria-label="Note" placeholder="A thought, a task, something to keep…" spellcheck="true"></textarea>
+      <footer class="capture-foot">
+        <div class="segmented small" role="group" aria-label="Where it goes">
+          <button type="button" data-mode="new">New note</button>
+          <button type="button" data-mode="inbox" title="Added at the end of Inbox.md, under the time">Add to Inbox</button>
+        </div>
+        <button type="button" class="btn ghost sm" id="paste" title="Add what is on the clipboard">Paste clipboard</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn ghost sm" id="cancel">Close</button>
+        <button type="submit" class="btn primary sm" id="save">Save</button>
+      </footer>
+    </form>
+  </body>
+</html>

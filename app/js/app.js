@@ -30,6 +30,8 @@ import { OutlinePanel } from './ui/outline.js';
 import { FilterBar } from './ui/filterBar.js';
 import { MacroDialog } from './ui/macro.js';
 import { CloseDiskDialog, ReloadDiskDialog } from './ui/diskDialogs.js';
+import { ClipboardHistory } from './ui/clipboardHistory.js';
+import { appendToInbox, findInbox, INBOX_NAME } from './capture.js';
 import { snippetNameFrom } from './snippets.js';
 import { linkName, resolveLink } from './outline.js';
 import { prepareTyping, typingDelay } from './typing.js';
@@ -409,6 +411,39 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       copyToFiles(path) {
         const tab = store.diskTab(path);
         if (tab) actions.newFile({ name: tab.name, text: tab.text });
+      },
+
+      // ---- Quick capture and the clipboard history (desktop) ----
+
+      openClipboardHistory() {
+        if (!window.desktop?.clipboardHistory) return toast('The clipboard history works in the desktop app.', { kind: 'error' });
+        setDialog({ type: 'clipboard' });
+      },
+      /** Notes from the quick capture window, waiting in the main process. */
+      async takeCaptures() {
+        const taken = (await window.desktop?.capture?.take().catch(() => [])) ?? [];
+        for (const capture of taken) actions.saveCapture(capture);
+      },
+      /** A captured note: a new file (not opened, so what you are doing is not interrupted), or added to the Inbox. */
+      saveCapture({ text, mode, at }) {
+        const when = new Date(at || Date.now());
+        if (mode === 'inbox') {
+          hostRef.current?.flushAll();
+          const inbox = findInbox(store.live());
+          if (inbox && !store.isSealed(inbox.id)) {
+            const next = appendToInbox(store.text(inbox.id), text, when);
+            store.setText(inbox.id, next, { urgent: true });
+            hostRef.current?.replaceText(fileKey(inbox.id), next);
+            return toast(`Added to ${inbox.name}`, { action: { label: 'Open', run: () => actions.openFile(inbox.id) } });
+          }
+          if (!inbox) {
+            const id = store.create({ name: INBOX_NAME, text: appendToInbox('', text, when), open: false });
+            return toast(`Added to a new ${INBOX_NAME}`, { action: { label: 'Open', run: () => actions.openFile(id) } });
+          }
+          // An Inbox locked on this device: kept as a note of its own instead.
+        }
+        const id = store.create({ text: `${text.replace(/\s+$/, '')}\n`, open: false });
+        toast('Captured as a new note', { action: { label: 'Open', run: () => actions.openFile(id) } });
       },
 
       // ---- [[Links]] and the outline ----
@@ -931,6 +966,11 @@ export function App() {
     if (sideParsed.kind === 'disk') host.setReadOnly(sideKey, Boolean(sideRepo.follow || sideRepo.truncated));
   }, [sideKey, showSide, activeKey]);
 
+  // Notes captured while the window was closed or loading.
+  useEffect(() => {
+    actions.takeCaptures();
+  }, []);
+
   // Files on disk: changes made elsewhere come in; followed files grow.
   useEffect(
     () =>
@@ -1083,6 +1123,9 @@ export function App() {
       } else if (e.altKey && !mod && !e.shiftKey && k === 't' && window.desktop?.typing) {
         e.preventDefault();
         actions.typeOut();
+      } else if (mod && e.shiftKey && k === 'v' && window.desktop?.clipboardHistory) {
+        e.preventDefault();
+        actions.openClipboardHistory();
       } else if (mod && e.key === '\\') {
         e.preventDefault();
         actions.toggleSplit();
@@ -1113,6 +1156,8 @@ export function App() {
         split: () => actions.toggleSplit(),
         'type-out': () => actions.typeOut(),
         'disk-open': () => actions.openDiskFiles(),
+        'clipboard-history': () => actions.openClipboardHistory(),
+        captures: () => actions.takeCaptures(),
         snippets: () => actions.openSnippets(),
         'ask-selection': () => actions.askSelection(),
         outline: () => actions.toggleOutline(),
@@ -1247,6 +1292,7 @@ export function App() {
       ? html`<${QuickOpen} files=${store.live()} docs=${docs} actions=${actions} title=${`Compare ${activeName} with…`} exclude=${activeFile ? activeFile.id : activeRepo ? `r:${activeRepo.path}` : ''}
           onPick=${(entry) => actions.compareWithEntry(entry)} onClose=${() => setDialog(null)} />`
       : html`<${QuickOpen} files=${store.live()} docs=${docs} actions=${actions} onClose=${() => setDialog(null)} />`)}
+    ${dialog?.type === 'clipboard' && html`<${ClipboardHistory} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'macro' && html`<${MacroDialog} steps=${dialog.steps} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'trash' && html`<${TrashDialog} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'checklist' && store.get(dialog.id) && html`<${ChecklistDialog} file=${store.get(dialog.id)} text=${dialog.text} firstLine=${dialog.firstLine} projects=${projects} actions=${actions} onClose=${() => setDialog(null)} />`}

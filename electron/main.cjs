@@ -3,7 +3,7 @@
 // with the OS keychain, opens and saves files on disk, forwards requests to a
 // local model server (no CORS setup needed), opens tracker-editor:// links
 // from the tracker, and lets the app save and sync before the window closes.
-const { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, safeStorage, screen, shell } = require('electron');
+const { app, BrowserWindow, Menu, Notification, Tray, clipboard, dialog, globalShortcut, ipcMain, nativeImage, net, protocol, safeStorage, screen, shell } = require('electron');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const http = require('node:http');
@@ -11,6 +11,7 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { startTyping } = require('./typer.cjs');
 const disk = require('./diskFiles.cjs');
+const clips = require('./clipHistory.cjs');
 
 const APP_DIR = path.join(__dirname, '..', 'app');
 const APP_ORIGIN = 'app://editor';
@@ -33,6 +34,7 @@ else app.setAsDefaultProtocolClient(LINK_SCHEME);
 let mainWindow = null;
 let pendingRoute = null;
 let closing = false;
+let quitting = false;
 
 // ---- Small JSON files in the user data folder ------------------------------
 
@@ -326,12 +328,290 @@ ipcMain.handle('webhook:close', guard(() => {
   return true;
 }));
 
+// ---- Desktop preferences: tray, quick capture, clipboard history ------------
+// Kept by the main process (prefs.json), which needs them before the page loads.
+
+const DEFAULT_CAPTURE = 'CommandOrControl+Alt+N';
+let prefs = null;
+function loadPrefs() {
+  const saved = readJson('prefs.json', {});
+  prefs = {
+    background: Boolean(saved.background),
+    capture: { enabled: false, shortcut: DEFAULT_CAPTURE, ...saved.capture },
+    clipboard: { enabled: false, max: clips.DEFAULT_MAX, ...saved.clipboard },
+    toldAboutTray: Boolean(saved.toldAboutTray),
+  };
+}
+const prefsState = () => ({
+  background: prefs.background,
+  capture: { ...prefs.capture, status: captureStatus },
+  clipboard: { ...prefs.clipboard, encrypted: safeStorage.isEncryptionAvailable() },
+  tray: Boolean(tray),
+});
+
+ipcMain.handle('prefs:get', guard(() => prefsState()));
+ipcMain.handle('prefs:set', guard((_e, patch = {}) => {
+  if ('background' in patch) prefs.background = Boolean(patch.background);
+  if (patch.capture) {
+    const { enabled, shortcut } = patch.capture;
+    if (enabled !== undefined) prefs.capture.enabled = Boolean(enabled);
+    if (typeof shortcut === 'string' && shortcut.trim()) prefs.capture.shortcut = shortcut.trim().slice(0, 60);
+  }
+  if (patch.clipboard) {
+    const { enabled, max } = patch.clipboard;
+    if (enabled !== undefined) {
+      prefs.clipboard.enabled = Boolean(enabled);
+      // Turning it off forgets the history.
+      if (!prefs.clipboard.enabled) setClips([]);
+    }
+    if (max !== undefined) prefs.clipboard.max = Math.min(500, Math.max(5, Math.round(Number(max)) || clips.DEFAULT_MAX));
+  }
+  writeJson('prefs.json', prefs);
+  applyPrefs();
+  return prefsState();
+}));
+
+function applyPrefs() {
+  registerCapture();
+  watchClipboard();
+  updateTray();
+}
+
+// ---- Background mode (system tray) --------------------------------------------
+
+let tray = null;
+function updateTray() {
+  if (!prefs.background) {
+    tray?.destroy();
+    tray = null;
+    return;
+  }
+  try {
+    if (!tray) {
+      tray = new Tray(nativeImage.createFromPath(path.join(APP_DIR, 'icons', 'icon-192.png')).resize({ width: 18, height: 18 }));
+      tray.setToolTip('Tracker Editor');
+      tray.on('click', showWindow);
+    }
+  } catch (err) {
+    console.warn('System tray is not available', err);
+    tray = null;
+    return;
+  }
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: 'Open Tracker Editor', click: showWindow },
+      { label: 'Quick Capture', accelerator: prefs.capture.enabled ? prefs.capture.shortcut : undefined, registerAccelerator: false, click: openCapture },
+      { label: 'Clipboard History', enabled: prefs.clipboard.enabled, click: () => send('clipboard-history') },
+      { type: 'separator' },
+      { label: 'Quit Tracker Editor', click: () => app.quit() },
+    ]),
+  );
+}
+
+// ---- Quick capture: a small window from a global shortcut ----------------------
+// What is written there goes to the main window (a new note, or the Inbox note),
+// through captures.json so nothing is lost if that window is not up yet.
+
+let captureWindow = null;
+let captureStatus = 'off'; // 'ok' | 'taken' | 'invalid' | 'off'
+let captureShortcut = null;
+let captureDraft = '';
+const pendingCaptures = [];
+
+function registerCapture() {
+  if (captureShortcut) globalShortcut.unregister(captureShortcut);
+  captureShortcut = null;
+  captureStatus = 'off';
+  if (!prefs.capture.enabled) return;
+  try {
+    if (globalShortcut.register(prefs.capture.shortcut, openCapture)) {
+      captureShortcut = prefs.capture.shortcut;
+      captureStatus = 'ok';
+    } else captureStatus = 'taken';
+  } catch {
+    captureStatus = 'invalid';
+  }
+}
+
+function openCapture() {
+  if (captureWindow) {
+    captureWindow.show();
+    captureWindow.focus();
+    return;
+  }
+  const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+  const width = Math.min(560, area.width - 40);
+  const height = 300;
+  captureWindow = new BrowserWindow({
+    width,
+    height,
+    x: Math.round(area.x + (area.width - width) / 2),
+    y: Math.round(area.y + area.height * 0.2),
+    frame: false,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    show: false,
+    title: 'Quick capture',
+    backgroundColor: '#f6f5f1',
+    webPreferences: {
+      preload: path.join(__dirname, 'capturePreload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      spellcheck: true,
+    },
+  });
+  captureWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  captureWindow.webContents.on('will-navigate', (event) => event.preventDefault());
+  captureWindow.once('ready-to-show', () => {
+    captureWindow.show();
+    captureWindow.focus();
+  });
+  captureWindow.on('closed', () => {
+    captureWindow = null;
+  });
+  captureWindow.loadURL(`${APP_ORIGIN}/capture.html`);
+}
+
+const fromCapture = (event) => captureWindow && event.sender === captureWindow.webContents;
+ipcMain.handle('capture:open', guard(() => openCapture()));
+ipcMain.handle('capture:draft', guard(() => captureDraft));
+ipcMain.handle('capture:keep-draft', guard((_e, text) => {
+  captureDraft = String(text ?? '').slice(0, clips.MAX_TEXT);
+  return true;
+}));
+ipcMain.handle('capture:close', guard((event) => fromCapture(event) && captureWindow.close()));
+ipcMain.handle('capture:submit', guard((event, entry) => {
+  const text = String(entry?.text ?? '');
+  if (!fromCapture(event) || !text.trim()) return false;
+  pendingCaptures.push({ text: text.slice(0, 1_000_000), mode: entry.mode === 'inbox' ? 'inbox' : 'new', at: Date.now() });
+  writeJson('captures.json', pendingCaptures);
+  captureDraft = '';
+  captureWindow.close();
+  // A window that is still loading takes them when it starts.
+  if (!mainWindow) createWindow();
+  else if (!mainWindow.webContents.isLoading()) mainWindow.webContents.send('command', 'captures');
+  return true;
+}));
+// The main window takes what was captured.
+ipcMain.handle('capture:take', guard((event) => {
+  if (event.sender !== mainWindow?.webContents) return [];
+  const taken = pendingCaptures.splice(0);
+  writeJson('captures.json', []);
+  return taken;
+}));
+
+// ---- Clipboard history (opt-in) -----------------------------------------------
+// Texts copied anywhere, polled once a second. Kept on this computer only,
+// encrypted with the system keychain (in memory only when there is none).
+// Copies that password managers mark as concealed are skipped.
+
+let clipList = [];
+let clipTimer = null; // { timer } of the running watch
+let clipSaveTimer = null;
+let lastClip = null;
+const CLIP_FILE = 'clipboard-history.bin';
+
+function loadClips() {
+  try {
+    if (!safeStorage.isEncryptionAvailable()) return [];
+    return JSON.parse(safeStorage.decryptString(fs.readFileSync(dataFile(CLIP_FILE))));
+  } catch {
+    return [];
+  }
+}
+
+function saveClips() {
+  clearTimeout(clipSaveTimer);
+  clipSaveTimer = null;
+  try {
+    if (!clipList.length) return fs.rmSync(dataFile(CLIP_FILE), { force: true });
+    if (!safeStorage.isEncryptionAvailable()) return;
+    fs.writeFileSync(dataFile(CLIP_FILE), safeStorage.encryptString(JSON.stringify(clipList)));
+  } catch (err) {
+    console.error('Could not save the clipboard history', err);
+  }
+}
+
+function setClips(list) {
+  if (list === clipList) return;
+  clipList = list;
+  if (!clipSaveTimer) clipSaveTimer = setTimeout(saveClips, 1000);
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('clip:changed');
+}
+
+async function concealedNow() {
+  try {
+    const items = await clipboard.read();
+    if (clips.isConcealed(items.flatMap((i) => i.types))) return true;
+    // Windows: CanIncludeInClipboardHistory set to 0 means "keep out of histories".
+    const allowed = items.flatMap((i) => i.types.filter((t) => clips.formatName(t) === 'CanIncludeInClipboardHistory').map((t) => i.getType(t)));
+    for (const blob of await Promise.all(allowed)) {
+      const bytes = Buffer.from(await blob.arrayBuffer());
+      if (bytes.length >= 4 && bytes.readUInt32LE(0) === 0) return true;
+    }
+  } catch {
+    // formats that cannot be read: not concealed
+  }
+  return false;
+}
+
+async function checkClipboard() {
+  let text;
+  try {
+    text = await clipboard.readText();
+  } catch {
+    return;
+  }
+  if (text === lastClip || !prefs.clipboard.enabled) return;
+  lastClip = text;
+  if (!(await concealedNow())) setClips(clips.addClip(clipList, text, { max: prefs.clipboard.max }));
+}
+
+function watchClipboard() {
+  clearTimeout(clipTimer?.timer);
+  clipTimer = null;
+  if (!prefs.clipboard.enabled) return;
+  const watching = {};
+  clipTimer = watching;
+  const step = async () => {
+    await checkClipboard();
+    if (clipTimer === watching) watching.timer = setTimeout(step, 1000);
+  };
+  // What is on the clipboard already is not a new copy.
+  clipboard.readText().then(
+    (text) => {
+      lastClip = text;
+      if (clipTimer === watching) watching.timer = setTimeout(step, 1000);
+    },
+    () => {},
+  );
+}
+
+ipcMain.handle('clip:list', guard(() => (prefs.clipboard.enabled ? clipList : [])));
+ipcMain.handle('clip:copy', guard(async (_e, id) => {
+  const entry = clipList.find((c) => c.id === id);
+  if (!entry) return false;
+  lastClip = entry.text;
+  await clipboard.writeText(entry.text);
+  setClips(clips.addClip(clipList, entry.text, { max: prefs.clipboard.max }));
+  return true;
+}));
+ipcMain.handle('clip:remove', guard((_e, id) => setClips(clips.removeClip(clipList, id))));
+ipcMain.handle('clip:pin', guard((_e, id, on) => setClips(clips.pinClip(clipList, id, on))));
+ipcMain.handle('clip:clear', guard(() => setClips(clips.clearClips(clipList))));
+
 // ---- Closing: let the app save and sync first --------------------------------
 
 ipcMain.on('app:close-ready', (event) => {
   if (!fromApp(event) || !mainWindow) return;
   closing = true;
   mainWindow.close();
+  if (quitting) app.quit();
 });
 
 // ---- Window -------------------------------------------------------------
@@ -429,6 +709,17 @@ function createWindow() {
   mainWindow.on('close', (event) => {
     writeJson('window-state.json', { bounds: mainWindow.getNormalBounds(), maximized: mainWindow.isMaximized() });
     if (closing) return;
+    // In the tray: hide, so quick capture and the clipboard history keep working.
+    if (!quitting && prefs.background && tray) {
+      event.preventDefault();
+      mainWindow.hide();
+      if (!prefs.toldAboutTray && Notification.isSupported()) {
+        new Notification({ title: 'Tracker Editor is still running', body: 'Quick capture and the clipboard history keep working. Quit it from the tray icon.' }).show();
+        prefs.toldAboutTray = true;
+        writeJson('prefs.json', prefs);
+      }
+      return;
+    }
     // Let the app write what was just typed and sync; it answers with close-ready.
     event.preventDefault();
     mainWindow.webContents.send('command', 'flush');
@@ -496,6 +787,9 @@ function buildMenu() {
         shown('Type into Another Window', 'Alt+T', 'type-out'),
         shown('Insert Snippet…', 'Alt+I', 'snippets'),
         shown('Ask the Model About the Selection…', 'CmdOrCtrl+K', 'ask-selection'),
+        { type: 'separator' },
+        shown('Clipboard History…', 'CmdOrCtrl+Shift+V', 'clipboard-history'),
+        { label: 'Quick Capture', click: () => openCapture() },
       ],
     },
     {
@@ -546,10 +840,24 @@ app.whenReady().then(() => {
     return net.fetch(pathToFileURL(filePath).toString());
   });
   buildMenu();
+  loadPrefs();
+  clipList = prefs.clipboard.enabled ? loadClips() : [];
+  pendingCaptures.push(...readJson('captures.json', []));
+  applyPrefs();
   const link = process.argv.find((a) => a.startsWith(`${LINK_SCHEME}://`));
   if (link) pendingRoute = routeFromLink(link);
   createWindow();
   app.on('activate', showWindow);
+});
+
+app.on('before-quit', () => {
+  quitting = true;
+  captureWindow?.destroy();
+});
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
+  if (clipSaveTimer) saveClips();
 });
 
 app.on('window-all-closed', () => {

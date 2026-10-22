@@ -154,6 +154,75 @@ function TypingCard({ settings }) {
   </${Card}>`;
 }
 
+// "CommandOrControl+Alt+N" → "Ctrl+Alt+N" (or ⌘ on a Mac).
+const shortcutLabel = (accelerator) => accelerator.replace(/CommandOrControl|CmdOrCtrl/g, window.desktop?.platform === 'darwin' ? '⌘' : 'Ctrl');
+
+/** Turns a key press into an Electron accelerator, e.g. Ctrl+Alt+N → "CommandOrControl+Alt+N" ('' while only modifiers are held). */
+function acceleratorFrom(e) {
+  if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return '';
+  const key = e.code.startsWith('Key') ? e.code.slice(3) : e.code.startsWith('Digit') ? e.code.slice(5) : /^F\d+$/.test(e.key) ? e.key : e.code === 'Space' ? 'Space' : '';
+  if (!key) return '';
+  const mods = [(e.ctrlKey || e.metaKey) && 'CommandOrControl', e.altKey && 'Alt', e.shiftKey && 'Shift'].filter(Boolean);
+  return mods.length ? [...mods, key].join('+') : '';
+}
+
+const CAPTURE_STATUS = {
+  ok: '',
+  taken: 'Another app already uses this shortcut. Pick another one.',
+  invalid: 'That is not a shortcut this computer can use. Pick another one.',
+};
+
+/** Desktop: keep running in the tray, quick capture, clipboard history (the main process keeps these). */
+function DesktopCard({ actions }) {
+  const [prefs, setPrefs] = useState(null);
+  const [recording, setRecording] = useState(false);
+  useEffect(() => {
+    window.desktop.prefs.get().then(setPrefs);
+  }, []);
+  if (!prefs) return null;
+  const set = async (patch) => setPrefs(await window.desktop.prefs.set(patch));
+  const problem = prefs.capture.enabled && CAPTURE_STATUS[prefs.capture.status];
+  return html`<${Card} title="Desktop" icon="settings">
+    <div class="field-grid">
+      <${Check} checked=${prefs.background} label="Keep running in the tray when the window is closed" hint="So quick capture and the clipboard history work with the window closed. Quit from the tray icon." onChange=${(v) => set({ background: v })} />
+      ${prefs.background && !prefs.tray && html`<p class="notice small">This desktop has no system tray, so closing the window still quits.</p>`}
+    </div>
+    <h3 class="settings-sub">Quick capture</h3>
+    <p class="muted small">A shortcut that works in any app opens a small window to jot something down. Ctrl+Enter keeps it as a new note, or adds it to Inbox.md under the time.</p>
+    <div class="field-grid">
+      <${Check} checked=${prefs.capture.enabled} label="Quick capture" onChange=${(v) => set({ capture: { enabled: v } })} />
+      <${Field} label="Shortcut">
+        <span class="shortcut-field">
+          <input readonly value=${recording ? 'Press the keys…' : shortcutLabel(prefs.capture.shortcut)} aria-label="Quick capture shortcut" class=${problem ? 'invalid' : ''}
+            onFocus=${() => setRecording(true)} onBlur=${() => setRecording(false)}
+            onKeyDown=${(e) => {
+              if (e.key === 'Tab') return;
+              e.preventDefault();
+              if (e.key === 'Escape') return e.currentTarget.blur();
+              const accelerator = acceleratorFrom(e);
+              if (!accelerator) return;
+              e.currentTarget.blur();
+              set({ capture: { shortcut: accelerator } });
+            }} />
+          <button type="button" class="btn sm" onClick=${() => window.desktop.capture.open()}>Try it</button>
+        </span>
+      </${Field}>
+      ${problem && html`<p class="notice small" role="alert">${problem}</p>`}
+    </div>
+    <h3 class="settings-sub">Clipboard history</h3>
+    <p class="muted small">Keeps the texts you copy in any app, to find and paste them again (Ctrl+Shift+V). They stay on this computer${prefs.clipboard.encrypted ? ', encrypted with its keychain' : ' (in memory only: there is no keychain to encrypt them)'}, and copies that password managers mark as secret are skipped. Turning it off forgets the history.</p>
+    <div class="field-grid">
+      <${Check} checked=${prefs.clipboard.enabled} label="Clipboard history" onChange=${(v) => set({ clipboard: { enabled: v } })} />
+      <${Field} label="Keep">
+        <select value=${String(prefs.clipboard.max)} disabled=${!prefs.clipboard.enabled} onChange=${(e) => set({ clipboard: { max: Number(e.currentTarget.value) } })}>
+          ${[20, 50, 100, 200].map((n) => html`<option key=${n} value=${n}>The last ${n}</option>`)}
+        </select>
+      </${Field}>
+      ${prefs.clipboard.enabled && html`<span><button type="button" class="btn sm" onClick=${actions.openClipboardHistory}>Open the history</button></span>`}
+    </div>
+  </${Card}>`;
+}
+
 const PRESETS = [
   { id: 'ollama', label: 'Ollama', url: DEFAULT_LLM_URL },
   { id: 'lmstudio', label: 'LM Studio', url: 'http://localhost:1234/v1' },
@@ -446,6 +515,7 @@ export function SettingsView({ settings, sync, actions }) {
     <${ModelCard} settings=${settings} actions=${actions} />
     <${ReadAloudCard} settings=${settings} actions=${actions} />
     ${window.desktop?.typing && html`<${TypingCard} settings=${settings} />`}
+    ${window.desktop?.prefs && html`<${DesktopCard} actions=${actions} />`}
     <${EncryptionCard} actions=${actions} />
     <${DataCard} actions=${actions} />
     <p class="muted small about">Tracker Editor ${APP_VERSION} · ${window.desktop ? `Desktop app (Electron ${window.desktop.versions?.electron ?? ''})` : 'Web app'} · <a href="https://github.com/divaor/tracker-editor" target="_blank" rel="noopener">Source</a></p>
