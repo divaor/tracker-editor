@@ -31,6 +31,8 @@ const PATHS = {
   check: () => html`<path d="M5 12l5 5 9-10" />`,
   checklist: () => html`<path d="m4 7 2 2 4-4M4 17l2 2 4-4M13 7h7M13 17h7" />`,
   arrowRight: () => html`<path d="M5 12h14M13 6l6 6-6 6" />`,
+  arrowUp: () => html`<path d="M12 19V5M6 11l6-6 6 6" />`,
+  folderOpen: () => html`<path d="M3 7a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v1M3 7v10a2 2 0 0 0 2 2h12l4-8H8l-3 8" />`,
   eye: () => html`<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" />`,
   copy: () => html`<rect x="8" y="8" width="13" height="13" rx="2" /><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" />`,
   paperclip: () => html`<path d="m20 11-8.5 8.5a5 5 0 0 1-7-7L13 4a3.3 3.3 0 0 1 4.7 4.7l-8.4 8.4a1.7 1.7 0 0 1-2.4-2.4L14.5 7" />`,

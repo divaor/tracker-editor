@@ -36,6 +36,8 @@ It is the companion of [Tracker](https://github.com/divaor/tracking_app) and sha
   - Or a **model service that answers later** (submit a request, get the answer from a status call or a webhook), described by a connection profile; see [4. Model](#4-model-optional).
 - **Type into another window** (desktop): for remote desktops and consoles that do not take pasted text. `Alt+T` types the selection, or the whole file, as key presses into the window you click into before a short countdown ends.
 - **Files on disk** (desktop): **File → Open File (Edit in Place)** (`Ctrl+O`) edits a file where it is, keeping its line endings and encoding. It reloads when the file changes elsewhere, warns before saving over someone else's change, and **Follow** shows new lines as they are written, like `tail -f`. Huge logs open by their last part.
+- **Folders** (desktop): the sidebar's **Folders** view (`Ctrl+Shift+E`) browses folders on your computer like a file explorer. Their files open as files on disk: edited in place and not synced, unless you **Copy into my files**.
+- **Drag a tab out** (desktop): to the desktop or a folder for a copy, to a terminal running Claude Code for its path, or to the Claude app to attach it. **Copy for Claude** in the tab menu copies the path of a file on disk, or the name and text of the others.
 - **Quick capture** (desktop): a shortcut that works in any app opens a small window to jot something down, kept as a new note or added to `Inbox.md`.
 - **Clipboard history** (desktop, off until you turn it on): what you copy in any app, to search and paste again (`Ctrl+Shift+V`). Kept on the computer, encrypted, and passwords from password managers are skipped.
 - **Text from images and screenshots**: paste, drop or pick an image (on a phone, take a photo), or on the desktop drag around part of the screen, and its text is read on the device (English and Spanish) to insert, keep or copy.
@@ -192,7 +194,32 @@ It stops when another window takes the focus, when you hold `Escape` (Windows), 
 - When a file changes on disk and you have no unsaved edits, it reloads by itself. When you do, a notice offers **Compare**, **Reload** or **Keep mine and save over it**; saving never silently overwrites someone else's change.
 - **Follow** shows the lines added to a log as they are written (read-only meanwhile), and starts over when the log is rotated.
 - Files over 20 MB open by their last 5 MB, read-only. **Filter lines** (`Alt+L`) and the lighter editor for big files help with long logs.
-- **Copy into my files** in the ⋯ menu makes a synced copy. The app only reads and writes files you picked in its open dialog.
+- **Copy into my files** in the ⋯ menu makes a synced copy. The app only reads and writes files you picked in its open dialog, and files inside folders you picked.
+
+### Folders
+
+The sidebar has two views on the desktop: **My files** (synced) and **Folders** (on this computer). **View → Folders** (`Ctrl+Shift+E`) shows it; **File → Open Folder…** adds a folder.
+
+- Pick a folder in the system dialog (or start the dialog in Documents, Desktop or Downloads). Then move through its folders like in a file explorer: click a folder to go in, the path at the top or ↑ to go back, the filter to find a file by name. The app can reach files inside the folders you picked and nowhere above them; links that lead outside are refused.
+- Click a file to open it as a file on disk (as with `Ctrl+O`): saving, reloading and **Follow** work the same, and it is never synced. **Copy into my files** (right-click) makes a synced copy; the file on disk stays as it is.
+- Right-click also has **Copy path**, **Copy for Claude** and **Show in the file explorer**. ⋯ next to the folder's name switches folders, shows hidden files, makes a new file and forgets a folder.
+- The folders and the one you were in are remembered, along with the files you had open.
+
+### Dragging tabs to other apps
+
+Drag a tab out of the window and drop it on another app. The app gets a file, and decides what to do with it:
+
+| Dropped on | File on disk | Synced file or tracker document |
+| --- | --- | --- |
+| The desktop or a folder | A copy of the file | A copy, named after the tab |
+| A terminal (Claude Code) | Its path is typed in | The path of a copy is typed in |
+| The Claude app (desktop or browser) | Attached | Attached |
+| Another editor (VS Code, Notepad++) | Usually opened | Usually opened (the copy) |
+
+- The app you drop on decides what happens; the editor offers the file to copy, never to move, so the original stays where it is. A drop cannot make Explorer open the folder where a file lives; use **Show in folder** in the tab menu for that.
+- The copies of synced files are written to a temporary folder (`Tracker Editor drag`) and removed after a week. Encrypted files are never written out: their tabs only move within the tab bar.
+- Dropped back on the tab bar, the tab moves there, as before. On the web app, a dragged tab carries its text, so dropping it into a chat box or another app's text field pastes it.
+- **Copy for Claude** (tab menu, or ⋯): for a file on disk, its path (quoted when it has spaces), which Claude Code reads where it is; for the others, the name and the text in a code block, ready to paste into a chat.
 
 ## 9. Quick capture, clipboard history and screenshots (desktop)
 
@@ -216,6 +243,7 @@ All three are in **Settings → Desktop**, off until you turn them on.
 | `Ctrl+P` | Open a file by name |
 | `Ctrl+Shift+F` | Find in files |
 | `Ctrl+O` | Open a file from disk to edit in place (desktop) |
+| `Ctrl+Shift+E` | Folders on this computer (desktop) |
 | `Ctrl+F` / `Ctrl+H` | Find / replace in this file |
 | `Ctrl+G` | Go to line |
 | `Ctrl+D` | Select the next occurrence |
@@ -298,6 +326,7 @@ app/                  the web app (also loaded by Electron)
   js/selectionAsk.js  what the model panel can do with the selection or a file
   js/snippets.js, outline.js, logtools.js, checklist.js   snippets, outline and [[links]], line filters, checklists
   js/diskTabs.js      files on disk edited in place, reloads and follow mode
+  js/folders.js, dragOut.js       the folders view (paths, breadcrumbs, Copy for Claude), dragging tabs out
   js/capture.js, ocr.js, ocrEngine.js, dictation.js       quick capture, text from images, voice notes
   js/ui/              tabs, sidebar, panels, dialogs, model panel, settings, compare, history, trash
   capture.html, snip.html   the quick capture window and the screenshot overlay (desktop)
@@ -306,6 +335,7 @@ electron/             main process + preload (app:// protocol, keychain, model p
                       tray, global shortcuts, clipboard history, screen capture)
   typer.cjs           key presses into another window (Windows, macOS, Linux)
   diskFiles.cjs       reading and writing files on disk (encodings, line endings, the end of huge files)
+  folders.cjs         which paths the page may reach in picked folders, folder listings, copies for dragged tabs
   clipHistory.cjs     the clipboard history list
 scripts/              vendor bundling, icon rendering, local web server
 test/                 unit tests
@@ -319,7 +349,8 @@ test/                 unit tests
 - **Desktop app**: the window is sandboxed with context isolation; the model proxy only accepts `http(s)` requests, and outside links open in your default browser.
 - **Encrypted files**: AES-GCM with a 256-bit key derived from your passphrase (PBKDF2-SHA256, 600,000 rounds). The key is kept on unlocked devices as a non-extractable key; the passphrase is never stored.
 - **Model service secrets**: the API key and webhook secret are kept in the keychain (desktop) and never written to the settings or the data repo. The webhook receiver refuses events whose signature does not match when a secret is set.
-- **Files on disk**: the page can read and write only files you picked in the desktop app's open dialog.
+- **Files on disk**: the page can read and write only files you picked in the desktop app's open dialog, and files inside folders you picked there (symbolic links resolved, so they cannot lead outside). A forgotten folder is out of reach again.
+- **Dragged tabs**: synced files dragged out are written as plain copies to a temporary folder, deleted after a week; encrypted files are never written out.
 - **Clipboard history** is off by default, kept only on the computer (encrypted with the keychain; in memory only when there is none), skips copies marked as secret by password managers, and is deleted when turned off.
 - **Text from images** runs in the page: images are never uploaded. **Voice notes** use the browser's speech service, which sends the audio to its provider.
 - **One tab at a time**: in a browser, the editor runs in one tab; opening it again (for example from a tracker link) moves it to the new tab, so two tabs never save over each other.

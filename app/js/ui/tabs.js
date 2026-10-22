@@ -8,6 +8,7 @@ import { projectKey } from '../tracker-model.js';
 import { ProjectChip } from './components.js';
 import { Icon } from './icons.js';
 import { dictationSupported } from './dictation.js';
+import { canDragOut, draggedTab, dropped, isOwnDrop, onDragOutEnd, startDragOut } from '../dragOut.js';
 import { Menu, MenuButton } from './menu.js';
 
 function tabInfo(key) {
@@ -47,6 +48,7 @@ export function TabBar({ session, projects, settings, actions }) {
   useEffect(() => {
     strip.current?.querySelector('.tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [session.active, session.open.length]);
+  useEffect(() => onDragOutEnd(() => setDragging(null)), []);
   const pinned = session.pinned ?? [];
   const unpinned = session.open.filter((k) => !pinned.includes(k));
   const groups = settings.groupTabs ? groupTabs(unpinned) : [{ id: null, keys: unpinned }];
@@ -70,6 +72,10 @@ export function TabBar({ session, projects, settings, actions }) {
       { label: 'Compare with…', icon: 'columns', run: () => (actions.showInMain(key), actions.compareWith()) },
       { label: 'Compare with clipboard', icon: 'copy', run: () => (actions.showInMain(key), actions.compareWithClipboard()) },
       { separator: true },
+      { label: 'Copy for Claude', icon: 'claude', run: () => actions.copyForClaude(key) },
+      parseKey(key)?.kind === 'disk' && { label: 'Copy path', icon: 'copy', run: () => actions.copyPath(parseKey(key).path) },
+      parseKey(key)?.kind === 'disk' && { label: 'Show in folder', icon: 'folder', run: () => actions.showOnDisk(parseKey(key).path) },
+      { separator: true },
       { label: 'Close', icon: 'x', run: () => actions.close(key) },
       { label: 'Close others', disabled: !others.length, run: () => actions.closeMany(others) },
       { label: 'Close tabs to the right', disabled: !right.length, run: () => actions.closeMany(right) },
@@ -92,16 +98,29 @@ export function TabBar({ session, projects, settings, actions }) {
         draggable="true"
         onDragStart=${(e) => {
           setDragging(key);
-          e.dataTransfer.effectAllowed = 'move';
+          // Desktop: a real file drag, so the tab can go to other apps too (dragOut.js).
+          const item = canDragOut() && actions.dragOutItem(key);
+          if (item) {
+            e.preventDefault();
+            startDragOut(key, item);
+            return;
+          }
+          e.dataTransfer.effectAllowed = 'copyMove';
           e.dataTransfer.setData('text/x-tab', key);
+          // Dropped in another app (a chat box, another window), it is the text.
+          const text = actions.tabText(key);
+          if (text && text.length <= 1024 * 1024) e.dataTransfer.setData('text/plain', text);
         }}
         onDragEnd=${() => setDragging(null)}
         onDragOver=${(e) => dragging && e.preventDefault()}
         onDrop=${(e) => {
-          const from = e.dataTransfer.getData('text/x-tab');
+          const from = e.dataTransfer.getData('text/x-tab') || (isOwnDrop(e.dataTransfer) && draggedTab());
           if (from) {
             e.preventDefault();
+            e.stopPropagation();
             store.move(from, session.open.indexOf(key));
+            dropped();
+            setDragging(null);
           }
         }}
         onClick=${() => actions.activate(key)}
@@ -201,6 +220,7 @@ export function FileBar({ file, repo, disk, sealed, projects, canPreview, previe
   const shareButton = html`<button type="button" class="btn ghost sm" title="Share: WhatsApp, Teams, email, copy…" onClick=${actions.share}><${Icon} name="share" size=${15} /><span class="label">Share</span></button>`;
   const moreItems = (id) => [
     disk && { label: 'Show in folder', icon: 'folder', run: () => actions.showOnDisk(disk.path) },
+    disk && { label: 'Copy path', icon: 'copy', run: () => actions.copyPath(disk.path) },
     disk && { label: 'Copy into my files (synced)', icon: 'filePlus', run: () => actions.copyToFiles(disk.path) },
     disk && { separator: true },
     id && { label: 'Details…', icon: 'tag', run: () => actions.openDialog({ type: 'file', id }) },
@@ -216,6 +236,7 @@ export function FileBar({ file, repo, disk, sealed, projects, canPreview, previe
     window.desktop?.ocr && { label: 'Text from a screenshot…', icon: 'scan', run: actions.screenshotToText },
     id && { label: 'Send checklist to tracker…', icon: 'checklist', run: actions.sendChecklist },
     window.desktop?.typing && { label: 'Type into another window', icon: 'keyboard', run: () => actions.typeOut() },
+    { label: disk ? 'Copy for Claude (the path)' : 'Copy for Claude (name and text)', icon: 'claude', run: () => actions.copyForClaude(store.session.active) },
     settings.llm.enabled && { label: 'Ask the model… (Ctrl+K)', icon: 'sparkle', run: actions.askSelection },
     { label: 'Insert snippet…', icon: 'snippet', run: actions.openSnippets },
     id && { label: 'Save as snippet', icon: 'snippet', run: actions.saveSnippet },

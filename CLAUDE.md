@@ -58,6 +58,13 @@ A Notepad++-style editor whose files sync through the same private GitHub data r
   - `store.diskTabs` (never synced; only unsaved text is persisted, the rest is read again, `stale`). Changes emit `'disk'`, not `'local'`, so they do not start a sync.
   - `diskTabs.js` saves (refusing when the mtime moved, unless forced), reloads, and follows appends (`readAppended`, a shorter file reloads). Read-only while following or for the tail of a huge file (`editor.setReadOnly`).
   - `electron/diskFiles.cjs` decodes (BOM, CRLF, UTF-8 or latin1) and encodes back. `main.cjs` keeps an allowlist of picked paths (`disk-files.json`) and polls watched files (`fs.watchFile`, `disk:changed`).
+- Folders (desktop): the sidebar's `sidebarMode` 'folders' shows `ui/folders.js` (`FoldersView`). Settings `folder` (where you are) and `showHidden`.
+  - Folders picked in the dialog (`folder:pick`) are kept in `disk-folders.json`. `checkFile` allows a path in `disk-files.json` or inside a picked folder (`electron/folders.cjs` `allowedBy`: real paths, so links and `..` cannot lead out). The page cannot add a folder or a path any other way; keep it so (a drop must not grant access).
+  - `app/js/folders.js` (pure): breadcrumbs and the folder above (never above the picked one), filtering, `claudeText` (Copy for Claude: a quoted path, or the name and the text in a fence).
+  - Files open as disk tabs (`actions.openDiskPath`); "Copy into my files" is the only way one gets synced.
+- Dragging a tab out (desktop): the tab's `dragstart` is cancelled and `drag:start` makes the main process call `webContents.startDrag` with the file on disk, or a copy written to `os.tmpdir()/Tracker Editor drag/<random>/` (`DRAG_DIR_NAME` in `folders.js`, removed after 7 days). Encrypted files are never written out.
+  - `dragOut.js` remembers the drag, so a drop back into the window is recognized (`isOwnDrop`: the path, or the temporary folder): on a tab it moves the tab, elsewhere it is ignored (the window and the editor's drop handlers check it). Windows and Linux report `drag:end` after the drop; macOS at once, so the page also waits for the next pointer event.
+  - In the browser, the drag is an HTML5 one (`text/x-tab`, plus the text as `text/plain`).
 - Desktop extras in `main.cjs`, set in Settings → Desktop through `prefs:get`/`prefs:set` (kept in `prefs.json`, applied by `applyPrefs`):
   - Tray: hiding instead of quitting when `background` is on. `quitting` lets Quit pass through the flush on close.
   - Global shortcuts (`registerShortcuts`): quick capture and text from a screenshot, each with a status (`ok`, `taken`, `invalid`, `off`).

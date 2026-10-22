@@ -68,6 +68,7 @@ import {
 } from '../vendor/cm/codemirror.js';
 import { compileFilter, hiddenRuns, isBigText } from './logtools.js';
 import { parseLinks } from './outline.js';
+import { isOwnDrop } from './dragOut.js';
 
 export { languages };
 
@@ -482,8 +483,14 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
           return true;
         },
         drop(e, v) {
+          // A tab dropped on the text (dragged out and back, or within the page) is not inserted.
+          if (isOwnDrop(e.dataTransfer)) {
+            e.preventDefault();
+            return true;
+          }
           const image = imageIn(e.dataTransfer);
-          if (!image || !onImage) return false;
+          // Other files are added as files (the window's drop handler), not inserted into this one.
+          if (!image || !onImage) return Boolean(e.dataTransfer?.files?.length);
           e.preventDefault();
           e.stopPropagation();
           const pos = v.posAtCoords({ x: e.clientX, y: e.clientY });

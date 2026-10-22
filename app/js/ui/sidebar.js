@@ -5,6 +5,7 @@ import { fileKey, repoKey, store } from '../store.js';
 import { projectKey } from '../tracker-model.js';
 import { Icon } from './icons.js';
 import { ScopeBar, Segmented } from './components.js';
+import { FoldersView } from './folders.js';
 
 const SORTS = [
   { id: 'recent', label: 'Recent' },
@@ -22,7 +23,26 @@ function tagCounts(rows) {
 const fileRow = (f) => ({ key: fileKey(f.id), name: f.name, project: f.project, tags: f.tags, modifiedAt: f.modifiedAt, updatedAt: f.updatedAt, unsynced: f.dirty || f.pending, id: f.id, encrypted: f.encrypted, snippet: f.snippet });
 const docRow = (d) => ({ key: repoKey(d.path), name: d.name, project: d.project, tags: d.tags, modifiedAt: d.modifiedAt, updatedAt: d.modifiedAt, unsynced: store.repoTab(d.path)?.dirty, id: `r:${d.path}`, item: d.item.title });
 
-export function Sidebar({ files, docs, projects, settings, activeKey, actions }) {
+const MODES = [
+  { id: 'files', label: 'My files', icon: 'cloud' },
+  { id: 'folders', label: 'Folders', icon: 'folder' },
+];
+
+/** Desktop: your files (synced) or folders on this computer (not synced). */
+const ModeSwitch = ({ mode }) =>
+  window.desktop?.folders && html`<${Segmented} small options=${MODES} value=${mode} onChange=${(id) => saveSettings({ sidebarMode: id })} label="Show" />`;
+
+export function Sidebar({ files, docs, projects, settings, activeKey, openKeys = [], actions }) {
+  if (window.desktop?.folders && settings.sidebarMode === 'folders') {
+    return html`<aside class="sidebar folders" aria-label="Folders">
+      <div class="sidebar-top"><${ModeSwitch} mode="folders" /></div>
+      <${FoldersView} settings=${settings} activeKey=${activeKey} openKeys=${openKeys} actions=${actions} />
+    </aside>`;
+  }
+  return html`<${FileSidebar} files=${files} docs=${docs} projects=${projects} settings=${settings} activeKey=${activeKey} actions=${actions} />`;
+}
+
+function FileSidebar({ files, docs, projects, settings, activeKey, actions }) {
   const [filter, setFilter] = useState('');
   const [tag, setTag] = useState(null);
   const [sort, setSort] = useState('recent');
@@ -43,6 +63,7 @@ export function Sidebar({ files, docs, projects, settings, activeKey, actions })
 
   return html`<aside class="sidebar" aria-label="Files">
     <div class="sidebar-top">
+      <${ModeSwitch} mode="files" />
       <${ScopeBar} scope=${settings.projectScope} projects=${projects} onChange=${(scope) => saveSettings({ projectScope: scope })} />
       <div class="sidebar-filter">
         <${Icon} name="search" size=${15} />

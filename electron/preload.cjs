@@ -1,6 +1,6 @@
 // Exposes a small, explicit API to the web app. Runs sandboxed with context
 // isolation, so the page never gets direct access to Node or Electron.
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('desktop', {
   platform: process.platform,
@@ -29,10 +29,36 @@ contextBridge.exposeInMainWorld('desktop', {
     stat: (path) => ipcRenderer.invoke('disk:stat', path),
     watch: (path, on = true) => ipcRenderer.invoke('disk:watch', path, on),
     show: (path) => ipcRenderer.invoke('disk:show', path),
+    // The path of a file dropped on the page ('' for one that is not on disk).
+    pathOf: (file) => {
+      try {
+        return webUtils.getPathForFile(file);
+      } catch {
+        return '';
+      }
+    },
     onChanged(callback) {
       const listener = (_event, change) => callback(change);
       ipcRenderer.on('disk:changed', listener);
       return () => ipcRenderer.removeListener('disk:changed', listener);
+    },
+  },
+  // Folders picked in the open dialog: their files can be listed and opened.
+  folders: {
+    pick: (defaultPath) => ipcRenderer.invoke('folder:pick', defaultPath),
+    roots: () => ipcRenderer.invoke('folder:roots'),
+    forget: (folder) => ipcRenderer.invoke('folder:forget', folder),
+    list: (dir) => ipcRenderer.invoke('folder:list', dir),
+    places: () => ipcRenderer.invoke('folder:places'),
+    newFile: (dir, name) => ipcRenderer.invoke('folder:new-file', dir, name),
+  },
+  // Dragging a tab (or a file) out to other apps: { path } of a file on disk, or { name, text } for a copy.
+  drag: {
+    start: (item) => ipcRenderer.send('drag:start', item),
+    onEnd(callback) {
+      const listener = (_event, info) => callback(info);
+      ipcRenderer.on('drag:end', listener);
+      return () => ipcRenderer.removeListener('drag:end', listener);
     },
   },
   // Receives a model service's answers by webhook (port and path from Settings).

@@ -1742,6 +1742,170 @@ button.project-chip:hover {
   font-size: 12px;
 }
 
+/* ---- Folders (desktop): folders on this computer, not synced ------------------- */
+.sidebar-top > .segmented {
+  align-self: stretch;
+}
+
+.sidebar-top > .segmented button {
+  flex: 1;
+  justify-content: center;
+}
+
+.folders-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 14px 12px;
+}
+
+.folders-empty p {
+  margin: 0;
+}
+
+.folder-places {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.folders-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.folders-root {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.folders-root-name {
+  min-width: 0;
+  font-weight: 650;
+}
+
+.folders-root-name span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow-x: auto;
+  font-size: 12px;
+  white-space: nowrap;
+  scrollbar-width: thin;
+}
+
+.crumb {
+  flex-shrink: 0;
+  max-width: 160px;
+  padding: 2px 5px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  text-overflow: ellipsis;
+}
+
+.crumb:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.crumb.current {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.crumb-sep {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+
+.folders-new {
+  display: flex;
+  gap: 6px;
+}
+
+.folders-new input {
+  flex: 1;
+  min-width: 0;
+}
+
+.folder-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+}
+
+.folder-row:hover {
+  background: var(--surface-2);
+}
+
+.folder-row.active {
+  background: var(--accent-soft);
+}
+
+.folder-row > .icon {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+
+.folder-row.is-dir > .icon {
+  color: var(--accent);
+}
+
+.folder-row.hidden-entry {
+  opacity: 0.65;
+}
+
+.folder-name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-row.is-dir .folder-name {
+  font-weight: 550;
+}
+
+.folder-meta {
+  flex-shrink: 0;
+  font-size: 11.5px;
+}
+
+.folder-row .open-dot {
+  display: inline-block;
+  background: var(--accent);
+}
+
+.folders-foot {
+  justify-content: center;
+}
+
 /* ---- Tabs ------------------------------------------------------------------- */
 .tabbar {
   display: flex;

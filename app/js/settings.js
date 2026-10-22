@@ -41,6 +41,11 @@ export const DEFAULT_SETTINGS = {
   groupTabs: false,
   // Project filter for the file list (see matchesScope in tracker-model.js).
   projectScope: [],
+  // The sidebar (desktop): your files ('files'), or folders on this computer ('folders', not synced):
+  // the folder shown and whether dot files are listed.
+  sidebarMode: 'files',
+  folder: '',
+  showHidden: false,
   // Where links to files point (the tracker opens these).
   appUrl: PUBLIC_APP_URL,
   trackerUrl: TRACKER_APP_URL,

@@ -11,6 +11,8 @@ import { getReaderState, onReaderState, setReaderHighlighter, startReading, stop
 import { getSettings, getToken, isSyncConfigured, onSettings, resolvedTheme, saveSettings } from './settings.js';
 import { diskKey, fileKey, flush, parseKey, repoKey, store } from './store.js';
 import { diskAvailable, openDiskFiles, reloadDiskTab, saveDiskTab, unwatchDisk, watchDiskTabs } from './diskTabs.js';
+import { claudeText } from './folders.js';
+import { draggedPath, draggedTab, dropped, isOwnDrop } from './dragOut.js';
 import { getSyncState, onSyncResult, onSyncState, syncClient, syncNow } from './syncManager.js';
 import { matchesScope, projectList } from './tracker-model.js';
 import { AssistantPanel } from './ui/assistant.js';
@@ -68,6 +70,8 @@ async function askFiling(text, { ext = '', name = true } = {}) {
 // "Platform · #sql #reports"
 const filedAs = ({ project, tags }) => [project, tags.map((t) => `#${t}`).join(' ')].filter(Boolean).join(' · ');
 const looksBinary = (text) => text.slice(0, 8000).includes('\u0000');
+// "Error invoking remote method 'disk:read': Error: This is not a text file." → "This is not a text file."
+const ipcMessage = (err) => String(err?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
 
 function download(name, text) {
   const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
@@ -447,10 +451,95 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         });
       },
       showOnDisk: (path) => window.desktop?.disk?.show(path),
-      /** A copy of a disk file as one of the editor's files (synced). */
-      copyToFiles(path) {
+      /** A copy of a disk file as one of the editor's files (synced); the file on disk stays as it is. */
+      async copyToFiles(path) {
         const tab = store.diskTab(path);
-        if (tab) actions.newFile({ name: tab.name, text: tab.text });
+        try {
+          const { name, text } = tab ?? (await window.desktop.disk.read(path));
+          actions.newFile({ name, text });
+          toast(`${name} is now also in your files, and syncs. The file on disk is not changed.`);
+        } catch (err) {
+          toast(ipcMessage(err), { kind: 'error' });
+        }
+      },
+      /** A file in a folder of the folders view, opened as a tab on disk (the tab is activated when it is open already). */
+      async openDiskPath(path) {
+        hostRef.current?.flushAll();
+        try {
+          if (!store.diskTab(path)) {
+            store.openDiskFile(await window.desktop.disk.read(path));
+            await window.desktop.disk.watch(path);
+          } else store.open(diskKey(path));
+          setView('editor');
+          if (isNarrow()) setSidebar(false);
+        } catch (err) {
+          toast(`${path.split(/[\\/]/).pop()}: ${ipcMessage(err)}`, { kind: 'error' });
+        }
+      },
+      /** Picks a folder in the system dialog (starting at `defaultPath`) and shows it in the folders view. */
+      async openFolder(defaultPath) {
+        if (!window.desktop?.folders) return toast('Folders work in the desktop app.', { kind: 'error' });
+        const picked = await window.desktop.folders.pick(defaultPath);
+        if (!picked) return null;
+        saveSettings({ sidebarMode: 'folders', folder: picked });
+        setSidebar(true);
+        return picked;
+      },
+      /** Ctrl+Shift+E: the folders view (a folder is picked first when there is none yet). */
+      async showFolders() {
+        if (!window.desktop?.folders) return;
+        if (!(await window.desktop.folders.roots()).length) return actions.openFolder();
+        saveSettings({ sidebarMode: 'folders' });
+        setSidebar(true);
+      },
+
+      // ---- Tabs to other apps (and Claude) ----
+
+      /** A tab's name and text ({ name, text, path } with `path` for a file on disk), or null. */
+      tabContent(key) {
+        hostRef.current?.flushAll();
+        const k = parseKey(key);
+        if (k?.kind === 'file') {
+          const f = store.get(k.id);
+          return f && !store.isSealed(k.id) ? { name: f.name, text: store.text(k.id), encrypted: f.encrypted } : null;
+        }
+        if (k?.kind === 'disk') {
+          const d = store.diskTab(k.path);
+          return d && { name: d.name, text: d.text, path: d.missing ? '' : d.path, dirty: d.dirty };
+        }
+        const t = k && store.repoTab(k.path);
+        return t && { name: t.name, text: t.text };
+      },
+      tabText: (key) => actions.tabContent(key)?.text ?? '',
+      /**
+       * What a tab dragged out of the window carries: a file on disk as itself
+       * ({ path }), the others as a copy ({ name, text }). Encrypted files are
+       * not written out (null: the tab only moves within the bar).
+       */
+      dragOutItem(key) {
+        const c = actions.tabContent(key);
+        if (!c || c.encrypted) return null;
+        if (c.path) {
+          if (c.dirty) toast('Not saved: the file on disk does not have your latest edits.', { timeout: 6000 });
+          return { path: c.path };
+        }
+        return { name: c.name, text: c.text };
+      },
+      /** The path of a file on disk for Claude Code, or the name and text of the others. */
+      async copyForClaude(key) {
+        const c = actions.tabContent(key);
+        if (!c) return;
+        try {
+          await navigator.clipboard.writeText(claudeText(c));
+          toast(c.path ? 'The path is on the clipboard: paste it into Claude' : `${c.name} is on the clipboard, name and text: paste it into Claude`);
+        } catch (err) {
+          toast(err.message, { kind: 'error' });
+        }
+      },
+      /** A path on the clipboard; `claude`: quoted when needed, as a terminal takes it. */
+      async copyPath(path, { claude = false } = {}) {
+        await navigator.clipboard.writeText(claude ? claudeText({ path }) : path).catch(() => {});
+        toast(claude ? 'The path is on the clipboard: paste it into Claude' : 'Path copied');
       },
 
       // ---- Text from images (OCR) ----
@@ -1266,6 +1355,8 @@ export function App() {
         split: () => actions.toggleSplit(),
         'type-out': () => actions.typeOut(),
         'disk-open': () => actions.openDiskFiles(),
+        'folder-open': () => actions.openFolder(),
+        folders: () => actions.showFolders(),
         'clipboard-history': () => actions.openClipboardHistory(),
         captures: () => actions.takeCaptures(),
         'screenshot-ocr': () => actions.screenshotToText(),
@@ -1311,6 +1402,13 @@ export function App() {
     const drop = (e) => {
       if (!e.dataTransfer?.files?.length) return;
       e.preventDefault();
+      // A tab dragged out and dropped back here is not added again; a file from the folders view opens.
+      if (isOwnDrop(e.dataTransfer)) {
+        const path = !draggedTab() && draggedPath();
+        dropped();
+        if (path) actions.openDiskPath(path);
+        return;
+      }
       actions.importFiles([...e.dataTransfer.files]);
     };
     window.addEventListener('dragover', over);
@@ -1346,7 +1444,7 @@ export function App() {
       <button type="button" class="icon-btn" aria-label="Settings" title="Settings" aria-pressed=${view === 'settings'} onClick=${() => setView(view === 'settings' ? 'editor' : 'settings')}><${Icon} name="settings" /></button>
     </header>
 
-    ${sidebar && html`<${Sidebar} files=${scoped} docs=${scopedDocs} allFiles=${store.live()} projects=${projects} settings=${settings} activeKey=${activeKey} actions=${actions} />`}
+    ${sidebar && html`<${Sidebar} files=${scoped} docs=${scopedDocs} allFiles=${store.live()} projects=${projects} settings=${settings} activeKey=${activeKey} openKeys=${store.session.open} actions=${actions} />`}
     ${sidebar && narrow && html`<div class="scrim" onClick=${() => setSidebar(false)} />`}
 
     <main class="main">
@@ -1443,6 +1541,7 @@ function Welcome({ actions, hasFiles, configured, desktop }) {
         ${hasFiles && html`<button type="button" class="btn" onClick=${() => actions.openDialog({ type: 'quickOpen' })}><${Icon} name="search" size=${16} />Open a file</button>`}
         <button type="button" class="btn" onClick=${() => actions.openFromDisk()}><${Icon} name="upload" size=${16} />Import files</button>
         ${desktop && html`<button type="button" class="btn" title="Edit a file where it is (a log, a config file); it is not synced" onClick=${() => actions.openDiskFiles()}><${Icon} name="disk" size=${16} />Open from disk</button>`}
+        ${window.desktop?.folders && html`<button type="button" class="btn" title="Browse a folder and open its files where they are; they are not synced (Ctrl+Shift+E)" onClick=${() => actions.showFolders()}><${Icon} name="folderOpen" size=${16} />Open a folder</button>`}
       </div>
       ${!configured && html`<p class="notice"><${Icon} name="cloudOff" size=${16} />Not syncing yet. <button type="button" class="btn link" onClick=${actions.showSettings}>Set up sync</button> with the same repo and token as the tracker (or paste its setup code).</p>`}
       <dl class="shortcuts">

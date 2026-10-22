@@ -11,6 +11,8 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { startTyping } = require('./typer.cjs');
 const disk = require('./diskFiles.cjs');
+const folders = require('./folders.cjs');
+const os = require('node:os');
 const clips = require('./clipHistory.cjs');
 
 const APP_DIR = path.join(__dirname, '..', 'app');
@@ -127,16 +129,19 @@ ipcMain.handle('files:save', guard(async (_e, name, text) => {
 }));
 
 // ---- Files on disk, edited in place -------------------------------------------
-// The page may read and write only files the user picked in the open dialog
-// (remembered across restarts), and is told when a watched one changes.
+// The page may read and write only files the user picked in the open dialog,
+// or files inside a folder picked there (both remembered across restarts),
+// and is told when a watched one changes.
 
 const allowedFiles = new Set(readJson('disk-files.json', []));
 const allowFile = (file) => {
   allowedFiles.add(file);
   writeJson('disk-files.json', [...allowedFiles].slice(-500));
 };
+const allowedFolders = readJson('disk-folders.json', []).filter((f) => typeof f === 'string');
+const saveFolders = () => writeJson('disk-folders.json', allowedFolders);
 const checkFile = (file) => {
-  if (typeof file !== 'string' || !allowedFiles.has(file)) throw new Error('That file was not opened here.');
+  if (typeof file !== 'string' || !(allowedFiles.has(file) || folders.allowedBy(allowedFolders, file))) throw new Error('That file was not opened here.');
   return file;
 };
 const watched = new Map(); // path → listener
@@ -189,6 +194,66 @@ ipcMain.handle('disk:watch', guard((event, file, on = true) => {
   return true;
 }));
 ipcMain.handle('disk:show', guard((_e, file) => shell.showItemInFolder(checkFile(file))));
+
+// ---- Folders: browse and open files inside folders picked in the dialog ------
+
+ipcMain.handle('folder:pick', guard(async (_e, defaultPath) => {
+  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+    title: 'Open a folder',
+    defaultPath: typeof defaultPath === 'string' && defaultPath ? defaultPath : undefined,
+    properties: ['openDirectory', 'createDirectory'],
+  });
+  if (canceled || !filePaths[0]) return null;
+  const picked = filePaths[0];
+  if (!allowedFolders.includes(picked)) {
+    allowedFolders.push(picked);
+    saveFolders();
+  }
+  return picked;
+}));
+ipcMain.handle('folder:roots', guard(() => allowedFolders.filter((f) => fs.existsSync(f))));
+ipcMain.handle('folder:forget', guard((_e, folder) => {
+  const at = allowedFolders.indexOf(folder);
+  if (at !== -1) allowedFolders.splice(at, 1);
+  saveFolders();
+  return allowedFolders;
+}));
+ipcMain.handle('folder:list', guard((_e, dir) => folders.listFolder(checkFile(dir))));
+// Where the open dialog starts: the usual folders.
+ipcMain.handle('folder:places', guard(() => Object.fromEntries(['home', 'desktop', 'documents', 'downloads'].map((name) => [name, app.getPath(name)]))));
+ipcMain.handle('folder:new-file', guard((_e, dir, name) => {
+  const clean = String(name ?? '').trim();
+  if (!clean || /[\\/]/.test(clean) || clean === '.' || clean === '..') throw new Error('Use a file name without slashes.');
+  const file = path.join(checkFile(dir), clean);
+  checkFile(file);
+  if (fs.existsSync(file)) throw new Error(`${clean} already exists here.`);
+  fs.writeFileSync(file, '');
+  return file;
+}));
+
+// ---- Dragging a tab out to other apps ------------------------------------------
+// A real file drag: a file on disk is dragged as itself, an editor file as a
+// copy written to a temporary folder. The other app decides what a drop does:
+// the desktop or a folder keeps a copy, a terminal (Claude Code) pastes the
+// path, the Claude app attaches the file.
+
+const DRAG_DIR = path.join(os.tmpdir(), 'Tracker Editor drag');
+let dragIcon = null;
+const iconForDrag = () => (dragIcon ??= nativeImage.createFromPath(path.join(APP_DIR, 'icons', 'icon-192.png')).resize({ width: 32, height: 32 }));
+
+ipcMain.on('drag:start', (event, item = {}) => {
+  if (!fromApp(event)) return;
+  let file;
+  try {
+    file = item.path ? checkFile(item.path) : folders.writeExport(DRAG_DIR, item.name, String(item.text ?? ''));
+  } catch (err) {
+    event.sender.send('drag:end', { error: err.message });
+    return;
+  }
+  event.sender.startDrag({ file, icon: iconForDrag() });
+  // Windows and Linux return when the drop is done; the page also clears it on its own.
+  if (!event.sender.isDestroyed()) event.sender.send('drag:end', { file });
+});
 
 // ---- Typing into another window ----------------------------------------------
 // For remote desktops that block pasting: key presses into whichever window has
@@ -865,6 +930,7 @@ function buildMenu() {
         item('New File', 'CmdOrCtrl+N', 'new'),
         item('Open a File…', 'CmdOrCtrl+P', 'quick-open'),
         item('Open File (Edit in Place)…', 'CmdOrCtrl+O', 'disk-open'),
+        item('Open Folder…', undefined, 'folder-open'),
         item('Import Files…', undefined, 'open-disk'),
         item('Save a Copy to Disk…', 'CmdOrCtrl+Shift+S', 'save-copy'),
         item('Trash…', undefined, 'trash'),
@@ -913,6 +979,7 @@ function buildMenu() {
       label: 'View',
       submenu: [
         item('Files', 'CmdOrCtrl+B', 'toggle-sidebar'),
+        item('Folders', 'CmdOrCtrl+Shift+E', 'folders'),
         item('Word Wrap', 'Alt+Z', 'toggle-wrap'),
         item('Read Aloud', 'Alt+R', 'read-aloud'),
         shown('Split View', 'CmdOrCtrl+\\', 'split'),
@@ -961,6 +1028,7 @@ app.whenReady().then(() => {
   clipList = prefs.clipboard.enabled ? loadClips() : [];
   pendingCaptures.push(...readJson('captures.json', []));
   applyPrefs();
+  folders.cleanExports(DRAG_DIR);
   const link = process.argv.find((a) => a.startsWith(`${LINK_SCHEME}://`));
   if (link) pendingRoute = routeFromLink(link);
   createWindow();
