@@ -10,6 +10,7 @@ const http = require('node:http');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { startTyping } = require('./typer.cjs');
+const disk = require('./diskFiles.cjs');
 
 const APP_DIR = path.join(__dirname, '..', 'app');
 const APP_ORIGIN = 'app://editor';
@@ -122,6 +123,70 @@ ipcMain.handle('files:save', guard(async (_e, name, text) => {
   fs.writeFileSync(filePath, text, 'utf8');
   return filePath;
 }));
+
+// ---- Files on disk, edited in place -------------------------------------------
+// The page may read and write only files the user picked in the open dialog
+// (remembered across restarts), and is told when a watched one changes.
+
+const allowedFiles = new Set(readJson('disk-files.json', []));
+const allowFile = (file) => {
+  allowedFiles.add(file);
+  writeJson('disk-files.json', [...allowedFiles].slice(-500));
+};
+const checkFile = (file) => {
+  if (typeof file !== 'string' || !allowedFiles.has(file)) throw new Error('That file was not opened here.');
+  return file;
+};
+const watched = new Map(); // path → listener
+
+ipcMain.handle('disk:open', guard(async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, { title: 'Open a file to edit in place', properties: ['openFile', 'multiSelections'] });
+  if (canceled) return [];
+  const out = [];
+  for (const file of filePaths) {
+    try {
+      out.push(disk.readTextFile(file));
+      allowFile(file);
+    } catch (err) {
+      out.push({ path: file, name: path.basename(file), error: err.message });
+    }
+  }
+  return out;
+}));
+
+ipcMain.handle('disk:read', guard((_e, file) => disk.readTextFile(checkFile(file))));
+ipcMain.handle('disk:read-appended', guard((_e, file, offset, opts) => disk.readAppended(checkFile(file), Number(offset) || 0, opts)));
+ipcMain.handle('disk:write', guard((_e, file, text, opts) => {
+  if (typeof text !== 'string') throw new Error('Nothing to save');
+  return disk.writeTextFile(checkFile(file), text, opts ?? {});
+}));
+ipcMain.handle('disk:stat', guard((_e, file) => {
+  try {
+    const stat = fs.statSync(checkFile(file));
+    return { mtimeMs: stat.mtimeMs, size: stat.size };
+  } catch {
+    return null;
+  }
+}));
+ipcMain.handle('disk:watch', guard((event, file, on = true) => {
+  checkFile(file);
+  if (!on) {
+    if (watched.has(file)) fs.unwatchFile(file, watched.get(file));
+    watched.delete(file);
+    return true;
+  }
+  if (watched.has(file)) return true;
+  const sender = event.sender;
+  // Polling works for network shares too, where change events do not arrive.
+  const listener = (curr, prev) => {
+    if (curr.mtimeMs === prev.mtimeMs && curr.size === prev.size) return;
+    if (!sender.isDestroyed()) sender.send('disk:changed', { path: file, mtimeMs: curr.mtimeMs, size: curr.size, exists: curr.mtimeMs > 0 });
+  };
+  fs.watchFile(file, { interval: 1000 }, listener);
+  watched.set(file, listener);
+  return true;
+}));
+ipcMain.handle('disk:show', guard((_e, file) => shell.showItemInFolder(checkFile(file))));
 
 // ---- Typing into another window ----------------------------------------------
 // For remote desktops that block pasting: key presses into whichever window has
@@ -393,7 +458,8 @@ function buildMenu() {
       submenu: [
         item('New File', 'CmdOrCtrl+N', 'new'),
         item('Open a File…', 'CmdOrCtrl+P', 'quick-open'),
-        item('Add Files from Disk…', 'CmdOrCtrl+O', 'open-disk'),
+        item('Open File (Edit in Place)…', 'CmdOrCtrl+O', 'disk-open'),
+        item('Import Files…', undefined, 'open-disk'),
         item('Save a Copy to Disk…', 'CmdOrCtrl+Shift+S', 'save-copy'),
         item('Trash…', undefined, 'trash'),
         { type: 'separator' },

@@ -67,6 +67,9 @@ const PATHS = {
   pause: () => html`<path d="M8 5v14M16 5v14" />`,
   skipBack: () => html`<path d="M18 5v14L9 12zM6 5v14" />`,
   skipForward: () => html`<path d="M6 5v14l9-7zM18 5v14" />`,
+  disk: () => html`<rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 14h18M7 17h.01M11 17h.01" />`,
+  follow: () => html`<path d="M12 4v12M6.5 10.5 12 16l5.5-5.5M5 20h14" />`,
+  save: () => html`<path d="M5 3h11l3 3v15H5z" /><path d="M8 3v5h7V3M8 21v-7h8v7" />`,
 };
 
 export function Icon({ name, size = 18, class: cls = '' }) {

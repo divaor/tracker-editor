@@ -20,6 +20,21 @@ contextBridge.exposeInMainWorld('desktop', {
       return () => ipcRenderer.removeListener('llm:chunk', listener);
     },
   },
+  // Files on disk, edited in place: only ones picked in the open dialog.
+  disk: {
+    open: () => ipcRenderer.invoke('disk:open'),
+    read: (path) => ipcRenderer.invoke('disk:read', path),
+    readAppended: (path, offset, opts) => ipcRenderer.invoke('disk:read-appended', path, offset, opts),
+    write: (path, text, opts) => ipcRenderer.invoke('disk:write', path, text, opts),
+    stat: (path) => ipcRenderer.invoke('disk:stat', path),
+    watch: (path, on = true) => ipcRenderer.invoke('disk:watch', path, on),
+    show: (path) => ipcRenderer.invoke('disk:show', path),
+    onChanged(callback) {
+      const listener = (_event, change) => callback(change);
+      ipcRenderer.on('disk:changed', listener);
+      return () => ipcRenderer.removeListener('disk:changed', listener);
+    },
+  },
   // Receives a model service's answers by webhook (port and path from Settings).
   webhook: {
     listen: (opts) => ipcRenderer.invoke('webhook:listen', opts),

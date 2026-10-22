@@ -1883,6 +1883,47 @@ button.project-chip:hover {
   text-overflow: ellipsis;
 }
 
+/* A file on disk: its path after the name, and notices under the bar. */
+.filebar-path {
+  overflow: hidden;
+  max-width: 40ch;
+  text-overflow: ellipsis;
+}
+
+.filebar-stack {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.filebar-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--accent-soft);
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.filebar-notice.warn {
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+  color: var(--text);
+}
+
+.filebar-notice > svg {
+  flex-shrink: 0;
+  color: var(--warn);
+}
+
+@media (max-width: 860px) {
+  .filebar-path {
+    display: none;
+  }
+}
+
 .filebar .project-chip {
   flex-shrink: 0;
 }

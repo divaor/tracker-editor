@@ -59,6 +59,7 @@ import {
   syntaxHighlighting,
   tags,
   toggleComment,
+  Transaction,
   undo,
   unifiedMergeView,
   runScopeHandlers,
@@ -328,6 +329,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
   const whitespace = new Compartment();
   const tabs = new Compartment();
   const gutter = new Compartment();
+  const readOnly = new Compartment();
   let options = settings;
   let active = null;
   let side = null; // { key, view } of the split view's second pane
@@ -417,6 +419,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
     const big = isBigText(text);
     if (big) bigKeys.add(key);
     return [
+      readOnly.of([]),
       recorder,
       lineFilterField,
       gutter.of(config.gutter),
@@ -645,6 +648,27 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       }
       v.focus();
       return runs;
+    },
+
+    /** Makes a tab read-only (a followed log, the tail of a huge file) or editable again. */
+    setReadOnly(key, on) {
+      const v = viewOf(key);
+      const effects = readOnly.reconfigure(on ? [EditorState.readOnly.of(true), EditorView.editable.of(true)] : []);
+      if (v) v.dispatch({ effects });
+      else if (states.has(key)) states.set(key, states.get(key).update({ effects }).state);
+    },
+
+    /** Adds text at the end of a tab (new lines of a followed file); `follow` keeps the end in view (with '' it only goes there). */
+    appendText(key, text, { follow = true } = {}) {
+      const v = viewOf(key);
+      const state = v ? v.state : states.get(key);
+      if (!state || (!text && !follow)) return;
+      const end = state.doc.length;
+      // Not in the undo history: a followed log would fill it.
+      const spec = text ? { changes: { from: end, insert: text }, annotations: [remote.of(true), Transaction.addToHistory.of(false)] } : {};
+      if (follow) Object.assign(spec, { selection: { anchor: end + text.length }, scrollIntoView: true });
+      if (v) v.dispatch(spec);
+      else states.set(key, state.update(spec).state);
     },
 
     /** Whether a tab is in the lighter editor for very large files. */

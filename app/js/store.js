@@ -16,6 +16,10 @@ let projects = []; // project records from tracker.json (last sync)
 let trackerItems = []; // tracker items (last sync), to show which items link a file
 let trackerOps = []; // pending changes to tracker.json: { id, op: 'project' | 'item', ... }
 let repoTabs = new Map(); // path → { path, name, text, baseSha, dirty }
+// Files on disk edited in place (desktop), never synced: path → { path, name, text,
+// eol, bom, encoding, mtimeMs, size, truncated, dirty, follow, conflict, missing,
+// stale (text not read yet after a restart) }.
+let diskTabs = new Map();
 let docTexts = new Map(); // blob sha → text of a tracker document (for search and offline reading)
 let docs = { items: null, list: [] }; // trackerDocs(trackerItems), computed once per sync
 // Tab keys are "f:<id>" | "r:<path>". Pinned tabs come first in `open`; `side` is
@@ -30,7 +34,12 @@ const author = () => getSettings().device || '';
 
 export const fileKey = (id) => `f:${id}`;
 export const repoKey = (path) => `r:${path}`;
-export const parseKey = (key) => (key?.startsWith('r:') ? { kind: 'repo', path: key.slice(2) } : key?.startsWith('f:') ? { kind: 'file', id: key.slice(2) } : null);
+export const diskKey = (path) => `d:${path}`;
+export const parseKey = (key) =>
+  key?.startsWith('r:') ? { kind: 'repo', path: key.slice(2) }
+  : key?.startsWith('f:') ? { kind: 'file', id: key.slice(2) }
+  : key?.startsWith('d:') ? { kind: 'disk', path: key.slice(2) }
+  : null;
 
 // ---- Persistence (debounced) -------------------------------------------------
 
@@ -50,11 +59,15 @@ function later(key, fn, ms = 250) {
     fn();
   }, ms));
 }
+// A disk tab's text is kept only while it has unsaved edits; otherwise it is read from disk again.
+const savedDiskTabs = () => [...diskTabs.values()].map((t) => (t.dirty ? t : { ...t, text: '', stale: true }));
+
 const persist = {
   files: (ms) => later('files', () => kvSet('files', [...files.values()]), ms),
   text: (id, ms) => later(`text:${id}`, () => (texts.has(id) ? kvSet(`text:${id}`, texts.get(id)) : sealed.has(id) ? kvSet(`text:${id}`, sealed.get(id)) : kvDelete(`text:${id}`)), ms),
   session: (ms) => later('session', () => kvSet('session', session), ms),
   repo: (ms) => later('repoTabs', () => kvSet('repoTabs', [...repoTabs.values()]), ms),
+  disk: (ms) => later('diskTabs', () => kvSet('diskTabs', savedDiskTabs()), ms),
   rest: () => later('rest', () => Promise.all([kvSet('projects', projects), kvSet('trackerItems', trackerItems), kvSet('trackerOps', trackerOps), kvSet('meta', meta)])),
   docs: () => later('docTexts', () => kvSet('docTexts', [...docTexts])),
 };
@@ -110,6 +123,7 @@ export async function flush() {
     kvSet('files', [...files.values()]),
     kvSet('session', session),
     kvSet('repoTabs', [...repoTabs.values()]),
+    kvSet('diskTabs', savedDiskTabs()),
     kvSet('projects', projects),
     kvSet('trackerItems', trackerItems),
     kvSet('trackerOps', trackerOps),
@@ -153,6 +167,7 @@ export const store = {
     sealed = new Map(loaded.filter(([id, t]) => files.get(id).encrypted && isSealed(t)));
     session = { open: [], active: null, closed: [], pinned: [], side: null, collapsed: [], ...((await kvGet('session')) ?? {}) };
     repoTabs = new Map(((await kvGet('repoTabs')) ?? []).map((t) => [t.path, t]));
+    diskTabs = new Map(((await kvGet('diskTabs')) ?? []).map((t) => [t.path, t]));
     projects = (await kvGet('projects')) ?? [];
     trackerItems = (await kvGet('trackerItems')) ?? [];
     trackerOps = (await kvGet('trackerOps')) ?? [];
@@ -160,7 +175,9 @@ export const store = {
     meta = { ...meta, ...((await kvGet('meta')) ?? {}) };
     trashed = new Set(((await kvGet('trashIds')) ?? []).filter((id) => files.get(id)?.deleted));
     // Drop tabs whose file is gone.
-    session.open = session.open.filter((k) => (k.startsWith('r:') ? repoTabs.has(k.slice(2)) : files.get(k.slice(2)) && !files.get(k.slice(2)).deleted));
+    session.open = session.open.filter((k) =>
+      k.startsWith('r:') ? repoTabs.has(k.slice(2)) : k.startsWith('d:') ? diskTabs.has(k.slice(2)) : files.get(k.slice(2)) && !files.get(k.slice(2)).deleted,
+    );
     if (!session.open.includes(session.active)) session.active = session.open[0] ?? null;
     tidySession();
     emit('load');
@@ -362,6 +379,10 @@ export const store = {
       repoTabs.delete(key.slice(2));
       persist.repo();
     }
+    if (key.startsWith('d:')) {
+      diskTabs.delete(key.slice(2));
+      persist.disk(0);
+    }
     persist.session();
     if (!silent) emit('session');
   },
@@ -443,6 +464,67 @@ export const store = {
     repoTabs.set(path, { ...tab, text, dirty: true });
     persist.repo(urgent ? 0 : undefined);
     changed('text', { path, urgent });
+  },
+
+  // ---- Files on disk (desktop), edited in place ----
+
+  diskTab: (path) => diskTabs.get(path),
+  diskTabs: () => [...diskTabs.values()],
+
+  /** A file read from disk (diskFiles.cjs readTextFile) as a tab; one with unsaved edits keeps them. */
+  openDiskFile(info) {
+    const existing = diskTabs.get(info.path);
+    if (!existing?.dirty) {
+      const { path, name, text, eol, bom, encoding, mtimeMs, size, truncated } = info;
+      diskTabs.set(path, { path, name, text, eol, bom, encoding, mtimeMs, size, truncated, dirty: false, follow: existing?.follow ?? false, conflict: false, missing: false });
+    }
+    persist.disk(0);
+    store.open(diskKey(info.path));
+  },
+
+  setDiskText(path, text, { urgent = false } = {}) {
+    const tab = diskTabs.get(path);
+    if (!tab || tab.text === text) return;
+    diskTabs.set(path, { ...tab, text, dirty: true });
+    persist.disk(urgent ? 0 : undefined);
+    emit('disk', { path, text: true });
+  },
+
+  /** Saved to disk: `text` is what was written. Edits made since stay unsaved. */
+  diskSaved(path, { text, mtimeMs, size }) {
+    const tab = diskTabs.get(path);
+    if (!tab) return;
+    diskTabs.set(path, { ...tab, mtimeMs, size, dirty: tab.text !== text, conflict: false, missing: false });
+    persist.disk(0);
+    emit('disk', { path });
+  },
+
+  /** The file as it is on disk now, replacing the tab's text. */
+  diskReloaded(path, info) {
+    const tab = diskTabs.get(path);
+    if (!tab) return;
+    const { text, eol, bom, encoding, mtimeMs, size, truncated } = info;
+    diskTabs.set(path, { ...tab, text, eol, bom, encoding, mtimeMs, size, truncated, dirty: false, conflict: false, missing: false, stale: false });
+    persist.disk();
+    emit('disk', { path });
+  },
+
+  /** Lines added at the end of a followed file. */
+  diskAppended(path, text, { mtimeMs, size }) {
+    const tab = diskTabs.get(path);
+    if (!tab) return;
+    diskTabs.set(path, { ...tab, text: tab.text + text, mtimeMs, size });
+    persist.disk();
+    emit('disk', { path });
+  },
+
+  /** Flags of a disk tab: follow, conflict (changed on disk while edited here), missing. */
+  diskPatch(path, patch) {
+    const tab = diskTabs.get(path);
+    if (!tab) return;
+    diskTabs.set(path, { ...tab, ...patch });
+    persist.disk();
+    emit('disk', { path });
   },
 
   // ---- tracker.json ----
@@ -532,6 +614,8 @@ export const store = {
     files = new Map();
     texts = new Map();
     repoTabs = new Map();
+    diskTabs = new Map();
+    persist.disk(0);
     projects = [];
     trackerItems = [];
     trackerOps = [];

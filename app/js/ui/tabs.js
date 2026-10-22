@@ -15,6 +15,10 @@ function tabInfo(key) {
     const f = store.get(k.id);
     return f && { name: f.name, project: f.project, encrypted: f.encrypted, snippet: f.snippet, unsynced: f.dirty || f.pending, title: [f.project, f.name].filter(Boolean).join(' / ') + (f.encrypted ? ' · encrypted' : '') };
   }
+  if (k?.kind === 'disk') {
+    const d = store.diskTab(k.path);
+    return d && { name: d.name, project: '', unsynced: d.dirty, disk: true, follow: d.follow, title: `On disk: ${d.path}${d.dirty ? ' · not saved' : ''}` };
+  }
   const t = k && store.repoTab(k.path);
   return t && { name: t.name, project: store.doc(k.path)?.project ?? '', unsynced: t.dirty, repo: true, title: `From the tracker: ${t.path}` };
 }
@@ -109,10 +113,11 @@ export function TabBar({ session, projects, settings, actions }) {
       ${isPinned && html`<${Icon} name="pin" size=${12} class="tab-pin" />`}
       ${isSide && html`<${Icon} name="columns" size=${13} class="tab-side" />`}
       ${info.repo && html`<${Icon} name="paperclip" size=${13} />`}
+      ${info.disk && html`<${Icon} name=${info.follow ? 'follow' : 'disk'} size=${13} />`}
       ${info.encrypted && html`<${Icon} name="lock" size=${12} class="tab-lock" />`}
       ${info.snippet && html`<${Icon} name="snippet" size=${12} class="tab-lock" />`}
       <span class="tab-name">${info.name}</span>
-      <span class="tab-dot" title="Not synced yet" />
+      <span class="tab-dot" title=${info.disk ? 'Not saved' : 'Not synced yet'} />
       <button type="button" class="tab-close" aria-label=${`Close ${info.name}`} tabindex="-1"
         onClick=${(e) => {
           e.stopPropagation();
@@ -143,19 +148,66 @@ export function TabBar({ session, projects, settings, actions }) {
 }
 
 /** Project, tags and actions for the file in the active tab. */
-export function FileBar({ file, repo, sealed, projects, canPreview, preview, settings, actions }) {
+// "1.2 MB"
+const formatSize = (bytes) => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
+
+/** The bar of a file on disk edited in place: saving, reloading, following it as it grows. */
+function DiskBar({ disk, buttons, moreItems, actions }) {
+  const { path, dirty, follow, conflict, missing, truncated } = disk;
+  const readOnly = follow || truncated;
+  const status = missing ? 'Not on disk' : conflict ? 'Changed on disk' : dirty ? 'Not saved' : follow ? 'Following' : 'Saved';
+  return html`<div class="filebar-stack">
+    <div class="filebar">
+      <span class="filebar-note" title=${path}><${Icon} name="disk" size=${14} /><span class="filebar-title">${disk.name}</span><span class="muted small filebar-path">${path.slice(0, path.length - disk.name.length - 1) || path}</span></span>
+      <span class="spacer" />
+      ${buttons}
+      <button type="button" class="btn ghost sm ${follow ? 'on' : ''}" aria-pressed=${follow} disabled=${missing}
+        title=${follow ? 'Stop following (the file becomes editable)' : 'Follow the file as it grows, like tail -f (read-only meanwhile)'} onClick=${() => actions.followDisk(path, !follow)}>
+        <${Icon} name="follow" size=${15} /><span class="label">Follow</span>
+      </button>
+      <button type="button" class="btn ghost sm" disabled=${missing} title="Read the file from disk again" onClick=${() => (dirty ? actions.openDialog({ type: 'reloadDisk', path }) : actions.reloadDisk(path))}>
+        <${Icon} name="rotate" size=${15} /><span class="label">Reload</span>
+      </button>
+      ${!readOnly &&
+      html`<button type="button" class="btn ${dirty || missing ? 'primary' : 'ghost'} sm" title="Save to disk (Ctrl+S)" onClick=${() => actions.saveDisk(path)}>
+        <${Icon} name="save" size=${15} /><span class="label">Save</span>
+      </button>`}
+      <span class="filebar-status ${dirty || conflict || missing ? 'pending' : ''}" title=${`${disk.eol === 'crlf' ? 'Windows (CRLF)' : 'Unix (LF)'} line endings · ${disk.encoding === 'latin1' ? 'Windows-1252' : 'UTF-8'}${disk.bom ? ' with BOM' : ''}, kept when saving`}>
+        <span class="label">${status}</span>
+      </span>
+      <${MenuButton} label="More" items=${moreItems} />
+    </div>
+    ${conflict &&
+    html`<div class="filebar-notice warn" role="alert">
+      <${Icon} name="alert" size=${15} /><span>The file changed on disk while you were editing it here.</span>
+      <span class="spacer" />
+      <button type="button" class="btn ghost sm" onClick=${() => actions.compareDisk(path)}>Compare</button>
+      <button type="button" class="btn ghost sm" onClick=${() => actions.reloadDisk(path)}>Reload (lose my edits)</button>
+      <button type="button" class="btn sm" onClick=${() => actions.saveDisk(path, { force: true })}>Keep mine and save over it</button>
+    </div>`}
+    ${missing &&
+    html`<div class="filebar-notice warn" role="status"><${Icon} name="alert" size=${15} /><span>The file is not on disk any more (moved, renamed or deleted). Save puts it back.</span></div>`}
+    ${truncated &&
+    html`<div class="filebar-notice" role="status"><${Icon} name="disk" size=${15} /><span>A ${formatSize(disk.size)} file: showing its last part, read-only. Follow shows new lines as they are written.</span></div>`}
+  </div>`;
+}
+
+export function FileBar({ file, repo, disk, sealed, projects, canPreview, preview, settings, actions }) {
   const previewButton =
     canPreview &&
     html`<button type="button" class="btn ghost sm ${preview ? 'on' : ''}" aria-pressed=${preview} title="Show a reading view next to the text" onClick=${actions.togglePreview}><${Icon} name="eye" size=${15} /><span class="label">Preview</span></button>`;
   const listenButton = html`<button type="button" class="btn ghost sm" title="Read aloud from the cursor, or the selection (Alt+R)" onClick=${actions.readAloud}><${Icon} name="volume" size=${15} /><span class="label">Listen</span></button>`;
   const shareButton = html`<button type="button" class="btn ghost sm" title="Share: WhatsApp, Teams, email, copy…" onClick=${actions.share}><${Icon} name="share" size=${15} /><span class="label">Share</span></button>`;
   const moreItems = (id) => [
+    disk && { label: 'Show in folder', icon: 'folder', run: () => actions.showOnDisk(disk.path) },
+    disk && { label: 'Copy into my files (synced)', icon: 'filePlus', run: () => actions.copyToFiles(disk.path) },
+    disk && { separator: true },
     id && { label: 'Details…', icon: 'tag', run: () => actions.openDialog({ type: 'file', id }) },
     { label: 'Outline and links (Ctrl+Shift+O)', icon: 'list', run: actions.toggleOutline },
     { label: 'Filter lines (Alt+L)', icon: 'search', run: actions.toggleFilter },
     { label: 'Record or stop a macro (Ctrl+Shift+R)', icon: 'play', run: actions.toggleRecording },
     { label: 'Run the macro…', icon: 'skipForward', run: actions.runMacro },
-    { label: 'History', icon: 'history', run: actions.showHistory },
+    !disk && { label: 'History', icon: 'history', run: actions.showHistory },
     { label: 'Compare with…', icon: 'columns', run: actions.compareWith },
     { label: 'Compare with clipboard', icon: 'copy', run: actions.compareWithClipboard },
     id && { label: 'Send checklist to tracker…', icon: 'checklist', run: actions.sendChecklist },
@@ -169,6 +221,7 @@ export function FileBar({ file, repo, sealed, projects, canPreview, preview, set
     id && { separator: true },
     id && { label: 'Move to trash', icon: 'trash', danger: true, run: () => actions.remove(id) },
   ];
+  if (disk) return html`<${DiskBar} disk=${disk} buttons=${[previewButton, listenButton, shareButton]} moreItems=${() => moreItems()} actions=${actions} />`;
   if (repo) {
     // A tracker document: its item's title and project; the path is in the tooltip.
     const doc = store.doc(repo.path);
@@ -253,11 +306,12 @@ export function SyncBadge({ sync, compact = false }) {
   </button>`;
 }
 
-export function StatusBar({ recording, big, cursor, language, file, repo, settings, actions }) {
+export function StatusBar({ recording, big, cursor, language, file, repo, disk, settings, actions }) {
   const setLanguage = (value) => file && actions.patch(file.id, { language: value === 'auto' ? '' : value });
   let state = '';
   if (file) state = file.dirty ? 'Saved on this device · not synced yet' : file.sha ? `Synced · edited ${timeAgo(file.modifiedAt)}${file.modifiedBy ? ` on ${file.modifiedBy}` : ''}` : 'Saved on this device';
   if (repo) state = repo.dirty ? 'Edited · goes to the tracker on the next sync' : 'Tracker file';
+  if (disk) state = disk.dirty ? 'Not saved to disk · Ctrl+S saves' : disk.follow ? 'Following the file as it grows' : 'File on disk · not synced';
   return html`<footer class="statusbar">
     <span class="status-item status-state" title=${file ? `${formatBytes(store.text(file.id).length)}` : ''}>${state}</span>
     ${recording && html`<button type="button" class="status-item status-btn-text status-recording" title="Recording a macro: Ctrl+Shift+R stops" onClick=${actions.toggleRecording}>● Recording macro</button>`}
@@ -272,11 +326,13 @@ export function StatusBar({ recording, big, cursor, language, file, repo, settin
         ${languageNames().map((name) => html`<option key=${name} value=${name}>${name}</option>`)}
       </select>
     </label>`}
-    ${repo && html`<span class="status-item">${language || PLAIN_TEXT}</span>`}
+    ${(repo || disk) && html`<span class="status-item">${language || PLAIN_TEXT}</span>`}
     <button type="button" class="status-item status-btn-text hide-narrow" title="Tab size" onClick=${() => saveSettings({ tabSize: settings.tabSize === 4 ? 2 : 4 })}>Spaces: ${settings.tabSize}</button>
     <button type="button" class="status-item status-btn-text ${settings.wordWrap ? 'on' : ''}" title="Word wrap (Alt+Z)" aria-pressed=${settings.wordWrap} onClick=${() => saveSettings({ wordWrap: !getSettings().wordWrap })}>
       <${Icon} name="wrap" size=${14} /><span class="hide-narrow">Wrap</span>
     </button>
-    <span class="status-item hide-narrow">UTF-8 · LF</span>
+    ${disk
+      ? html`<span class="status-item hide-narrow" title="The file's encoding and line endings, kept when saving">${disk.encoding === 'latin1' ? 'Windows-1252' : 'UTF-8'}${disk.bom ? ' BOM' : ''} · ${disk.eol === 'crlf' ? 'CRLF' : 'LF'}</span>`
+      : html`<span class="status-item hide-narrow">UTF-8 · LF</span>`}
   </footer>`;
 }

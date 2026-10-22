@@ -9,7 +9,8 @@ import { formatDateTime } from './format.js';
 import { previewKind } from './previews.js';
 import { getReaderState, onReaderState, setReaderHighlighter, startReading, stopReading, toggleReading } from './reader.js';
 import { getSettings, getToken, isSyncConfigured, onSettings, resolvedTheme, saveSettings } from './settings.js';
-import { fileKey, flush, parseKey, repoKey, store } from './store.js';
+import { diskKey, fileKey, flush, parseKey, repoKey, store } from './store.js';
+import { diskAvailable, openDiskFiles, reloadDiskTab, saveDiskTab, unwatchDisk, watchDiskTabs } from './diskTabs.js';
 import { getSyncState, onSyncResult, onSyncState, syncClient, syncNow } from './syncManager.js';
 import { matchesScope, projectList } from './tracker-model.js';
 import { AssistantPanel } from './ui/assistant.js';
@@ -28,6 +29,7 @@ import { AskSelectionDialog } from './ui/askSelection.js';
 import { OutlinePanel } from './ui/outline.js';
 import { FilterBar } from './ui/filterBar.js';
 import { MacroDialog } from './ui/macro.js';
+import { CloseDiskDialog, ReloadDiskDialog } from './ui/diskDialogs.js';
 import { snippetNameFrom } from './snippets.js';
 import { linkName, resolveLink } from './outline.js';
 import { prepareTyping, typingDelay } from './typing.js';
@@ -88,6 +90,10 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       if (k.kind === 'file') {
         const f = store.get(k.id);
         return f && { key, kind: 'file', id: f.id, name: f.name, language: f.language, project: f.project, tags: f.tags, dirty: f.dirty, text: store.text(f.id) };
+      }
+      if (k.kind === 'disk') {
+        const d = store.diskTab(k.path);
+        return d && { key, kind: 'disk', path: k.path, name: d.name, language: '', project: '', tags: [], dirty: d.dirty, text: d.text };
       }
       const tab = store.repoTab(k.path);
       return tab && { key, kind: 'repo', path: k.path, name: tab.name, language: '', project: store.doc(k.path)?.project ?? '', tags: store.doc(k.path)?.tags ?? [], dirty: tab.dirty, text: tab.text };
@@ -167,9 +173,15 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       closeMany(keys) {
         for (const key of keys) actions.close(key);
       },
-      close(key) {
+      close(key, { discard = false } = {}) {
         const k = parseKey(key);
         const file = k?.kind === 'file' ? store.get(k.id) : null;
+        if (k?.kind === 'disk') {
+          hostRef.current?.flushAll();
+          // Unsaved changes to a file on disk: ask first.
+          if (store.diskTab(k.path)?.dirty && !discard) return setDialog({ type: 'closeDisk', key });
+          unwatchDisk(k.path);
+        }
         hostRef.current?.drop(key);
         if (getReaderState().key === key) stopReading();
         store.close(key);
@@ -324,6 +336,79 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         const quote = context.text.length > 600 ? `${context.text.slice(0, 600)}…` : context.text;
         const name = uniqueName(safeName(`${label} - ${context.name.replace(/\.[^.]+$/, '')}.md`), store.live().map((f) => f.name));
         actions.newFile({ name, text: `# ${label}: ${context.name}\n\n\`\`\`\n${quote}\n\`\`\`\n\n${answer}\n` });
+      },
+
+      // ---- Files on disk (desktop) ----
+
+      async openDiskFiles() {
+        if (!diskAvailable()) return toast('Editing files on disk works in the desktop app.', { kind: 'error' });
+        const problems = await openDiskFiles();
+        setView('editor');
+        for (const p of problems) toast(p, { kind: 'error' });
+      },
+      /** Ctrl+S: saves a file on disk, or syncs. */
+      async saveOrSync() {
+        hostRef.current?.flushAll();
+        const k = parseKey(store.session.active);
+        if (k?.kind !== 'disk') return syncNow();
+        await actions.saveDisk(k.path);
+      },
+      async saveDisk(path, { force = false } = {}) {
+        hostRef.current?.flushAll();
+        try {
+          const result = await saveDiskTab(path, { force });
+          if (result === 'conflict') toast('The file changed on disk since you opened it, so it was not saved. Reload it, or keep yours and save over it.', { kind: 'error', timeout: 10000 });
+          return result;
+        } catch (err) {
+          toast(err.message, { kind: 'error' });
+          return 'error';
+        }
+      },
+      async reloadDisk(path) {
+        try {
+          hostRef.current?.replaceText(diskKey(path), await reloadDiskTab(path));
+        } catch (err) {
+          toast(err.message, { kind: 'error' });
+        }
+      },
+      /** Follow mode (tail -f): new lines appear as they are written; the tab is read-only meanwhile. */
+      followDisk(path, on) {
+        const tab = store.diskTab(path);
+        if (!tab) return;
+        if (on && tab.dirty) return toast('Save or reload the file first: following shows the file as it is on disk.');
+        store.diskPatch(path, { follow: on });
+        hostRef.current?.setReadOnly(diskKey(path), on || tab.truncated);
+        if (on) actions.reloadDisk(path).then(() => hostRef.current?.appendText(diskKey(path), '', { follow: true }));
+      },
+      /** A file that changed on disk while edited here: what is on disk (left) against your edits. */
+      async compareDisk(path) {
+        hostRef.current?.flushAll();
+        const tab = store.diskTab(path);
+        if (!tab) return;
+        let onDisk;
+        try {
+          onDisk = (await window.desktop.disk.read(path)).text;
+        } catch (err) {
+          return toast(err.message, { kind: 'error' });
+        }
+        if (store.session.active !== diskKey(path)) store.open(diskKey(path));
+        setCompare({
+          key: diskKey(path),
+          name: tab.name,
+          language: '',
+          left: { label: 'On disk now', text: onDisk },
+          right: { label: 'Your edits', text: tab.text },
+          actions: [
+            { label: 'Use the disk version', icon: 'rotate', run: () => (setCompare(null), actions.reloadDisk(path)) },
+            { label: 'Keep mine and save', icon: 'save', primary: true, run: () => (setCompare(null), actions.saveDisk(path, { force: true })) },
+          ],
+        });
+      },
+      showOnDisk: (path) => window.desktop?.disk?.show(path),
+      /** A copy of a disk file as one of the editor's files (synced). */
+      copyToFiles(path) {
+        const tab = store.diskTab(path);
+        if (tab) actions.newFile({ name: tab.name, text: tab.text });
       },
 
       // ---- [[Links]] and the outline ----
@@ -603,7 +688,7 @@ export function App() {
   useEffect(() => {
     let timer = null;
     return store.subscribe((reason, detail) => {
-      if (reason === 'text') {
+      if (reason === 'text' || (reason === 'disk' && detail?.text)) {
         if (!timer) timer = setTimeout(() => ((timer = null), rerender()), 400);
         return;
       }
@@ -647,6 +732,7 @@ export function App() {
       onChange(key, text, { urgent } = {}) {
         const k = parseKey(key);
         if (k?.kind === 'repo') return store.setRepoText(k.path, text, { urgent });
+        if (k?.kind === 'disk') return store.setDiskText(k.path, text, { urgent });
         const file = store.get(k.id);
         if (!file) return;
         const before = store.text(k.id);
@@ -659,7 +745,7 @@ export function App() {
       },
       onCursor: setCursor,
       onShortcut(name) {
-        if (name === 'sync') syncNow();
+        // Ctrl+S is handled by the window's key handler (saveOrSync), which sees it too.
         if (name === 'toggleWrap') actions.toggleWrap?.();
         return true;
       },
@@ -677,7 +763,10 @@ export function App() {
   const active = parseKey(activeKey);
   const activeFile = active?.kind === 'file' ? store.get(active.id) : null;
   const activeRepo = active?.kind === 'repo' ? store.repoTab(active.path) : null;
-  const activeName = activeFile?.name ?? activeRepo?.name ?? '';
+  const activeDisk = active?.kind === 'disk' ? store.diskTab(active.path) : null;
+  const activeName = activeFile?.name ?? activeRepo?.name ?? activeDisk?.name ?? '';
+  // The text of the open tab, whatever its kind.
+  const activeText = () => (activeFile ? store.text(activeFile.id) : (activeRepo ?? activeDisk)?.text ?? '');
   const languageName = activeKey ? (findLanguage(activeName, activeFile?.language)?.name ?? PLAIN_TEXT) : '';
   const previewType = activeKey ? previewKind(activeName, languageName) : '';
   // An encrypted file this device cannot read yet shows a lock instead of the editor.
@@ -691,18 +780,20 @@ export function App() {
   useLayoutEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    if (!activeKey || view !== 'editor' || (!activeFile && !activeRepo) || activeSealed) {
+    if (!activeKey || view !== 'editor' || (!activeFile && !activeRepo && !activeDisk) || activeSealed) {
       host.hide();
       return;
     }
     host.show(activeKey, {
-      text: activeFile ? store.text(activeFile.id) : activeRepo.text,
+      text: activeText(),
       name: activeName,
       language: activeFile?.language ?? '',
     });
+    // A followed file, or the tail of a huge one, is read-only.
+    if (activeDisk) host.setReadOnly(activeKey, Boolean(activeDisk.follow || activeDisk.truncated));
     setBig(host.isBig(activeKey));
     if (!isNarrow()) host.focus();
-  }, [activeKey, view, Boolean(activeFile || activeRepo), activeSealed]);
+  }, [activeKey, view, Boolean(activeFile || activeRepo || activeDisk), activeSealed]);
 
   actions.toggleWrap = () => saveSettings({ wordWrap: !getSettings().wordWrap });
   actions.togglePreview = () => {
@@ -826,7 +917,7 @@ export function App() {
   const sideKey = store.session.side;
   const sideParsed = parseKey(sideKey);
   const sideFile = sideParsed?.kind === 'file' ? store.get(sideParsed.id) : null;
-  const sideRepo = sideParsed?.kind === 'repo' ? store.repoTab(sideParsed.path) : null;
+  const sideRepo = sideParsed?.kind === 'repo' ? store.repoTab(sideParsed.path) : sideParsed?.kind === 'disk' ? store.diskTab(sideParsed.path) : null;
   const showSide = Boolean((sideFile || sideRepo) && !(sideFile && store.isSealed(sideFile.id)) && view === 'editor' && !compare && !showPreview && !isNarrow());
   useLayoutEffect(() => {
     const host = hostRef.current;
@@ -837,7 +928,18 @@ export function App() {
       name: sideFile?.name ?? sideRepo.name,
       language: sideFile?.language ?? '',
     });
+    if (sideParsed.kind === 'disk') host.setReadOnly(sideKey, Boolean(sideRepo.follow || sideRepo.truncated));
   }, [sideKey, showSide, activeKey]);
+
+  // Files on disk: changes made elsewhere come in; followed files grow.
+  useEffect(
+    () =>
+      watchDiskTabs({
+        onReplace: (key, text) => hostRef.current?.replaceText(key, text),
+        onAppend: (key, text) => hostRef.current?.appendText(key, text, { follow: true }),
+      }),
+    [],
+  );
 
   // Another tab is taking over: hand it the text still waiting in the editor.
   useEffect(() => {
@@ -986,9 +1088,8 @@ export function App() {
         actions.toggleSplit();
       } else if (mod && k === 's') {
         e.preventDefault();
-        // What was just typed goes too.
-        hostRef.current?.flushAll();
-        syncNow();
+        // A file on disk is saved; otherwise what was just typed is synced.
+        actions.saveOrSync();
       }
     };
     window.addEventListener('keydown', onKey);
@@ -1011,6 +1112,7 @@ export function App() {
         trash: () => setDialog({ type: 'trash' }),
         split: () => actions.toggleSplit(),
         'type-out': () => actions.typeOut(),
+        'disk-open': () => actions.openDiskFiles(),
         snippets: () => actions.openSnippets(),
         'ask-selection': () => actions.askSelection(),
         outline: () => actions.toggleOutline(),
@@ -1092,7 +1194,7 @@ export function App() {
       ${view === 'settings' && html`<${SettingsView} settings=${settings} sync=${sync} actions=${actions} />`}
       <div class="editor-view" hidden=${view === 'settings'}>
         <${TabBar} session=${store.session} projects=${projects} settings=${settings} actions=${actions} />
-        ${activeKey && html`<${FileBar} file=${activeFile} repo=${activeRepo} sealed=${activeSealed} projects=${projects} language=${languageName}
+        ${activeKey && html`<${FileBar} file=${activeFile} repo=${activeRepo} disk=${activeDisk} sealed=${activeSealed} projects=${projects} language=${languageName}
           canPreview=${Boolean(previewType)} preview=${showPreview} settings=${settings} actions=${actions} />`}
         ${activeKey && filterKeys.has(activeKey) && !compare && !activeSealed &&
         html`<${FilterBar} key=${activeKey} tabKey=${activeKey} actions=${actions} onClose=${actions.toggleFilter} />`}
@@ -1112,9 +1214,10 @@ export function App() {
             <div class="side-host" ref=${sideEl} />
           </div>`}
           ${compare && html`<${CompareView} key=${compare.sha ?? compare.left.label} compare=${compare} settings=${settings} onClose=${() => setCompare(null)} />`}
-          ${showPreview && html`<${Preview} key=${activeKey} kind=${previewType} name=${activeName} text=${activeFile ? store.text(activeFile.id) : activeRepo?.text}
+          ${showPreview && html`<${Preview} key=${activeKey} kind=${previewType} name=${activeName} text=${activeText()}
             onToggle=${(next) => {
               if (activeFile) store.setText(activeFile.id, next);
+              else if (activeDisk) store.setDiskText(activeDisk.path, next, { urgent: true });
               else store.setRepoText(activeRepo.path, next);
               hostRef.current?.replaceText(activeKey, next);
             }}
@@ -1123,10 +1226,10 @@ export function App() {
               setTimeout(() => hostRef.current?.reveal(line, column, 1), 60);
             }} />`}
           ${activeSealed && html`<${LockedFile} file=${activeFile} actions=${actions} />`}
-          ${!activeKey && html`<${Welcome} actions=${actions} hasFiles=${store.live().length + docs.length > 0} configured=${isSyncConfigured(settings)} />`}
+          ${!activeKey && html`<${Welcome} actions=${actions} desktop=${diskAvailable()} hasFiles=${store.live().length + docs.length > 0} configured=${isSyncConfigured(settings)} />`}
         </div>
         <${ReadAloudBar} />
-        <${StatusBar} recording=${recording} big=${big && Boolean(activeKey)} cursor=${activeKey ? cursor : null} language=${languageName} file=${activeFile} repo=${activeRepo} settings=${settings} sync=${sync} actions=${actions} />
+        <${StatusBar} recording=${recording} big=${big && Boolean(activeKey)} cursor=${activeKey ? cursor : null} language=${languageName} file=${activeFile} repo=${activeRepo} disk=${activeDisk} settings=${settings} sync=${sync} actions=${actions} />
       </div>
     </main>
 
@@ -1134,8 +1237,8 @@ export function App() {
     ${panel === 'history' && activeKey && (activeFile || activeRepo) && html`<${HistoryPanel} key=${activeKey} selected=${compare?.sha}
       target=${{ key: activeKey, kind: activeFile ? 'file' : 'repo', id: activeFile?.id, path: activeRepo?.path, name: activeName, dirty: activeFile?.dirty || activeRepo?.dirty }}
       actions=${actions} onClose=${() => setPanel(null)} />`}
-    ${panel === 'outline' && activeKey && (activeFile || activeRepo) && !activeSealed &&
-    html`<${OutlinePanel} name=${activeName} text=${activeFile ? store.text(activeFile.id) : activeRepo.text} language=${languageName} fileId=${activeFile?.id}
+    ${panel === 'outline' && activeKey && (activeFile || activeRepo || activeDisk) && !activeSealed &&
+    html`<${OutlinePanel} name=${activeName} text=${activeText()} language=${languageName} fileId=${activeFile?.id}
       cursorLine=${cursor?.line} actions=${actions} onClose=${() => setPanel(null)} />`}
     ${panel === 'assistant' && html`<${AssistantPanel} files=${scoped} docs=${scopedDocs} activeFile=${activeFile} activeRepo=${activeRepo} settings=${settings} actions=${actions} onClose=${() => setPanel(null)} />`}
 
@@ -1150,15 +1253,24 @@ export function App() {
     ${dialog?.type === 'ask' && html`<${AskSelectionDialog} context=${dialog.context} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'snippets' && html`<${SnippetPicker} selection=${dialog.selection} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'file' && store.get(dialog.id) && html`<${FileDialog} file=${store.get(dialog.id)} projects=${projects} actions=${actions} onClose=${() => setDialog(null)} />`}
-    ${dialog?.type === 'share' && activeKey && html`<${ShareDialog} name=${activeName} text=${activeFile ? store.text(activeFile.id) : (activeRepo?.text ?? '')}
-      link=${activeFile ? fileLink(settings.appUrl, activeFile.id) : `${settings.appUrl.replace(/\/?$/, '/')}#/repo/${activeRepo.path.split('/').map(encodeURIComponent).join('/')}`}
+    ${dialog?.type === 'share' && activeKey && html`<${ShareDialog} name=${activeName} text=${activeText()}
+      link=${activeFile ? fileLink(settings.appUrl, activeFile.id) : activeRepo ? `${settings.appUrl.replace(/\/?$/, '/')}#/repo/${activeRepo.path.split('/').map(encodeURIComponent).join('/')}` : ''}
       actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'send' && store.get(dialog.id) && html`<${SendDialog} file=${store.get(dialog.id)} projects=${projects} settings=${settings} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'closeDisk' && store.diskTab(parseKey(dialog.key).path) &&
+    html`<${CloseDiskDialog} tab=${store.diskTab(parseKey(dialog.key).path)} onClose=${() => setDialog(null)}
+      onDiscard=${() => (setDialog(null), actions.close(dialog.key, { discard: true }))}
+      onSave=${async () => {
+        setDialog(null);
+        if ((await actions.saveDisk(parseKey(dialog.key).path)) === 'saved') actions.close(dialog.key, { discard: true });
+      }} />`}
+    ${dialog?.type === 'reloadDisk' && store.diskTab(dialog.path) &&
+    html`<${ReloadDiskDialog} tab=${store.diskTab(dialog.path)} onClose=${() => setDialog(null)} onReload=${() => (setDialog(null), actions.reloadDisk(dialog.path))} />`}
     <${Toasts} />
   </div>`;
 }
 
-function Welcome({ actions, hasFiles, configured }) {
+function Welcome({ actions, hasFiles, configured, desktop }) {
   return html`<div class="welcome">
     <div class="welcome-card">
       <h1>No file open</h1>
@@ -1167,6 +1279,7 @@ function Welcome({ actions, hasFiles, configured }) {
         <button type="button" class="btn primary" onClick=${() => actions.newFile()}><${Icon} name="plus" size=${16} />New file</button>
         ${hasFiles && html`<button type="button" class="btn" onClick=${() => actions.openDialog({ type: 'quickOpen' })}><${Icon} name="search" size=${16} />Open a file</button>`}
         <button type="button" class="btn" onClick=${() => actions.openFromDisk()}><${Icon} name="upload" size=${16} />Import files</button>
+        ${desktop && html`<button type="button" class="btn" title="Edit a file where it is (a log, a config file); it is not synced" onClick=${() => actions.openDiskFiles()}><${Icon} name="disk" size=${16} />Open from disk</button>`}
       </div>
       ${!configured && html`<p class="notice"><${Icon} name="cloudOff" size=${16} />Not syncing yet. <button type="button" class="btn link" onClick=${actions.showSettings}>Set up sync</button> with the same repo and token as the tracker (or paste its setup code).</p>`}
       <dl class="shortcuts">
@@ -1174,7 +1287,7 @@ function Welcome({ actions, hasFiles, configured }) {
         <div><dt><kbd>Ctrl</kbd> <kbd>P</kbd></dt><dd>Open a file by name</dd></div>
         <div><dt><kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>F</kbd></dt><dd>Find in all files</dd></div>
         <div><dt><kbd>Ctrl</kbd> <kbd>F</kbd> / <kbd>H</kbd></dt><dd>Find / replace in this file</dd></div>
-        <div><dt><kbd>Ctrl</kbd> <kbd>S</kbd></dt><dd>Sync now</dd></div>
+        <div><dt><kbd>Ctrl</kbd> <kbd>S</kbd></dt><dd>Sync now (saves a file opened from disk)</dd></div>
       </dl>
     </div>
   </div>`;
