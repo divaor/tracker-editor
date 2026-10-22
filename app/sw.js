@@ -2,7 +2,7 @@
 // chunk (listed in vendor/cm/files.json), then serve network-first so updates
 // show up immediately when online. GitHub and model requests are never intercepted.
 // Text recognition (vendor/ocr/, about 9 MB) is cached the first time it is used.
-const CACHE = 'editor-v0.8.0';
+const CACHE = 'editor-v0.9.0';
 const INBOX = 'editor-inbox'; // shared files waiting for the app (see js/inbox.js)
 const ASSETS = [
   './',
@@ -71,6 +71,9 @@ const ASSETS = [
   'js/ocrEngine.js',
   'js/dictation.js',
   'js/dragOut.js',
+  'js/where.js',
+  'js/servers.js',
+  'js/ui/servers.js',
   'js/folders.js',
   'js/ui/folders.js',
   'js/ui/ocr.js',

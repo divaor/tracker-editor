@@ -146,6 +146,85 @@ const checkFile = (file) => {
 };
 const watched = new Map(); // path → listener
 
+// ---- Files on servers (SFTP, FTP, FTPS) -----------------------------------------
+// remote.cjs; files there are remote://<id>/<path>, and the disk:* and folder:*
+// handlers below send those to it. Passwords stay here (secrets.json, through the
+// keychain); an unknown or changed SSH host key is asked about in the window.
+
+const remoteFiles = require('./remote.cjs');
+const isRemote = remoteFiles.isRemote;
+const hostKeyQuestions = new Map(); // question id → answer(ok)
+const remote = remoteFiles.createRemote({
+  store: { read: () => readJson('remote.json', {}), write: (data) => writeJson('remote.json', data) },
+  secrets: { get: (id, kind) => getSecret(`remote:${id}:${kind}`), set: (id, kind, value) => setSecret(`remote:${id}:${kind}`, value) },
+  askHostKey: (info) =>
+    new Promise((resolve) => {
+      if (!mainWindow || mainWindow.isDestroyed()) return resolve(false);
+      const question = crypto.randomBytes(6).toString('hex');
+      const timer = setTimeout(() => answer(false), 180000);
+      const answer = (ok) => {
+        clearTimeout(timer);
+        hostKeyQuestions.delete(question);
+        resolve(Boolean(ok));
+      };
+      hostKeyQuestions.set(question, answer);
+      mainWindow.webContents.send('remote:host-key', { ...info, question });
+    }),
+  onStatus: (status) => mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.send('remote:status', status),
+});
+
+ipcMain.handle('remote:connections', guard(() => remote.connections()));
+ipcMain.handle('remote:save', guard((_e, conn, secrets) => remote.saveConnection(conn ?? {}, secrets ?? {})));
+ipcMain.handle('remote:delete', guard((_e, id) => remote.deleteConnection(id)));
+ipcMain.handle('remote:test', guard((_e, conn, secrets) => remote.test(conn ?? {}, secrets ?? {})));
+ipcMain.handle('remote:connect', guard((_e, id) => remote.connect(id)));
+ipcMain.handle('remote:disconnect', guard((_e, id) => remote.disconnect(id)));
+ipcMain.handle('remote:forget-host-key', guard((_e, id) => remote.forgetHostKey(id)));
+ipcMain.handle('remote:host-key-answer', guard((_e, question, ok) => {
+  hostKeyQuestions.get(question)?.(ok);
+  return true;
+}));
+// A private key file for SSH, picked in the dialog (only picked files can be used).
+ipcMain.handle('remote:pick-key', guard(async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, { title: 'Choose your private key', defaultPath: path.join(os.homedir(), '.ssh'), properties: ['openFile', 'showHiddenFiles'] });
+  if (canceled || !filePaths[0]) return null;
+  remote.allowKey(filePaths[0]);
+  return filePaths[0];
+}));
+
+// A file on a server is checked now and then while the server is connected (never
+// connecting by itself), and 'disk:changed' says when it changed there.
+const remoteWatches = new Map(); // remote:// path → { timer, last, busy }
+function watchRemote(sender, uri, on) {
+  const existing = remoteWatches.get(uri);
+  if (!on) {
+    if (existing) clearInterval(existing.timer);
+    remoteWatches.delete(uri);
+    return true;
+  }
+  if (existing) return true;
+  const { id } = remoteFiles.parseUri(uri);
+  const entry = { last: null, busy: false };
+  entry.timer = setInterval(async () => {
+    if (entry.busy || sender.isDestroyed() || !remote.isConnected(id)) return;
+    entry.busy = true;
+    try {
+      const st = await remote.stat(uri);
+      const now = st ? `${st.mtimeMs}:${st.size}` : 'gone';
+      // The first look is reported too: the page compares it with what it read (a change may have come in between).
+      if (now !== entry.last) sender.send('disk:changed', { path: uri, mtimeMs: st?.mtimeMs ?? 0, size: st?.size ?? 0, exists: Boolean(st) });
+      entry.last = now;
+    } catch {
+      // unreachable for now: tried again on the next round
+    } finally {
+      entry.busy = false;
+    }
+  }, 3000);
+  remoteWatches.set(uri, entry);
+  sender.once('destroyed', () => clearInterval(entry.timer));
+  return true;
+}
+
 ipcMain.handle('disk:open', guard(async () => {
   const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, { title: 'Open a file to edit in place', properties: ['openFile', 'multiSelections'] });
   if (canceled) return [];
@@ -161,13 +240,17 @@ ipcMain.handle('disk:open', guard(async () => {
   return out;
 }));
 
-ipcMain.handle('disk:read', guard((_e, file) => disk.readTextFile(checkFile(file))));
-ipcMain.handle('disk:read-appended', guard((_e, file, offset, opts) => disk.readAppended(checkFile(file), Number(offset) || 0, opts)));
+ipcMain.handle('disk:read', guard((_e, file) => (isRemote(file) ? remote.read(file) : disk.readTextFile(checkFile(file)))));
+ipcMain.handle('disk:read-appended', guard((_e, file, offset, opts) =>
+  isRemote(file) ? remote.readAppended(file, Number(offset) || 0, opts) : disk.readAppended(checkFile(file), Number(offset) || 0, opts),
+));
 ipcMain.handle('disk:write', guard((_e, file, text, opts) => {
   if (typeof text !== 'string') throw new Error('Nothing to save');
-  return disk.writeTextFile(checkFile(file), text, opts ?? {});
+  return isRemote(file) ? remote.write(file, text, opts ?? {}) : disk.writeTextFile(checkFile(file), text, opts ?? {});
 }));
 ipcMain.handle('disk:stat', guard((_e, file) => {
+  // A server that cannot be reached throws, so the page can tell it from a missing file.
+  if (isRemote(file)) return remote.stat(file);
   try {
     const stat = fs.statSync(checkFile(file));
     return { mtimeMs: stat.mtimeMs, size: stat.size };
@@ -176,6 +259,7 @@ ipcMain.handle('disk:stat', guard((_e, file) => {
   }
 }));
 ipcMain.handle('disk:watch', guard((event, file, on = true) => {
+  if (isRemote(file)) return watchRemote(event.sender, file, on);
   checkFile(file);
   if (!on) {
     if (watched.has(file)) fs.unwatchFile(file, watched.get(file));
@@ -193,7 +277,10 @@ ipcMain.handle('disk:watch', guard((event, file, on = true) => {
   watched.set(file, listener);
   return true;
 }));
-ipcMain.handle('disk:show', guard((_e, file) => shell.showItemInFolder(checkFile(file))));
+ipcMain.handle('disk:show', guard((_e, file) => {
+  if (isRemote(file)) throw new Error('That file is on a server.');
+  shell.showItemInFolder(checkFile(file));
+}));
 
 // ---- Folders: browse and open files inside folders picked in the dialog ------
 
@@ -218,7 +305,7 @@ ipcMain.handle('folder:forget', guard((_e, folder) => {
   saveFolders();
   return allowedFolders;
 }));
-ipcMain.handle('folder:list', guard((_e, dir) => folders.listFolder(checkFile(dir))));
+ipcMain.handle('folder:list', guard((_e, dir) => (isRemote(dir) ? remote.list(dir) : folders.listFolder(checkFile(dir)))));
 // Where the open dialog starts: the usual folders.
 ipcMain.handle('folder:places', guard(() => Object.fromEntries(['home', 'desktop', 'documents', 'downloads'].map((name) => [name, app.getPath(name)]))));
 // New files and folders, renaming, moving, copying and deleting, like a file
@@ -242,6 +329,7 @@ const checkList = (paths) => {
 };
 // `text` fills the new file; `unique` picks a free name ("name (2).txt") instead of refusing one that exists.
 ipcMain.handle('folder:new-file', guard((_e, dir, name, { text = '', unique = false } = {}) => {
+  if (isRemote(dir)) return remote.newFile(dir, name, { text: typeof text === 'string' ? text : '', unique });
   const clean = folders.checkName(name);
   checkDir(dir);
   const file = unique ? folders.freePath(dir, clean) : path.join(dir, clean);
@@ -251,6 +339,7 @@ ipcMain.handle('folder:new-file', guard((_e, dir, name, { text = '', unique = fa
   return file;
 }));
 ipcMain.handle('folder:new-folder', guard((_e, dir, name) => {
+  if (isRemote(dir)) return remote.newFolder(dir, name);
   const clean = folders.checkName(name);
   const folder = path.join(checkDir(dir), clean);
   checkFile(folder);
@@ -259,24 +348,49 @@ ipcMain.handle('folder:new-folder', guard((_e, dir, name) => {
   return folder;
 }));
 ipcMain.handle('folder:rename', guard((_e, from, name) => {
+  if (isRemote(from)) return remote.rename(from, name);
   const to = folders.renameEntry(checkEntry(from), name);
   checkFile(to);
   return to;
 }));
-ipcMain.handle('folder:move', guard((_e, paths, dir) => folders.moveInto(checkList(paths).map(checkEntry), checkDir(dir))));
-ipcMain.handle('folder:copy', guard((_e, paths, dir) => folders.copyInto(checkList(paths).map((p) => (checkFile(p), p)), checkDir(dir))));
+// Copies between this computer and servers (or two servers): uploads and downloads.
+async function copyAcross(paths, dir) {
+  if (isRemote(dir)) return remote.copyInto(paths.map((p) => (isRemote(p) ? p : checkFile(p))), dir);
+  checkDir(dir);
+  const local = paths.filter((p) => !isRemote(p)).map(checkFile);
+  return [...(local.length ? folders.copyInto(local, dir) : []), ...(await remote.downloadInto(paths.filter(isRemote), dir, folders.freePath))];
+}
+const sameServer = (paths, dir) => isRemote(dir) && paths.every((p) => isRemote(p) && remoteFiles.parseUri(p).id === remoteFiles.parseUri(dir).id);
+ipcMain.handle('folder:move', guard(async (_e, paths, dir) => {
+  checkList(paths);
+  if (!isRemote(dir) && !paths.some(isRemote)) return folders.moveInto(paths.map(checkEntry), checkDir(dir));
+  if (sameServer(paths, dir)) return remote.moveWithin(paths, dir);
+  // Between this computer and a server: copied, then the originals removed (from here, to the Recycle Bin).
+  for (const p of paths) if (!isRemote(p)) checkEntry(p);
+  const copies = await copyAcross(paths, dir);
+  for (const c of copies) await (isRemote(c.from) ? remote.remove([c.from]) : shell.trashItem(c.from));
+  return copies;
+}));
+ipcMain.handle('folder:copy', guard((_e, paths, dir) => {
+  checkList(paths);
+  if (!isRemote(dir) && !paths.some(isRemote)) return folders.copyInto(paths.map((p) => (checkFile(p), p)), checkDir(dir));
+  return copyAcross(paths, dir);
+}));
 // Files pasted or dropped from another app: the preload takes their paths from the
 // File objects (webUtils), so the page cannot name other files. They are copied in;
 // they do not become reachable themselves.
 ipcMain.handle('folder:copy-in', guard((_e, paths, dir) => {
   const sources = (Array.isArray(paths) ? paths : []).filter((p) => typeof p === 'string' && path.isAbsolute(p) && fs.existsSync(p));
   if (!sources.length) throw new Error('Those files are not on disk.');
+  if (isRemote(dir)) return remote.copyInto(checkList(sources), dir);
   return folders.copyInto(checkList(sources), checkDir(dir));
 }));
 // To the Recycle Bin (macOS: the Trash), from where they can be restored.
+// Files on a server are deleted for good (servers have no Recycle Bin; the page asks first and says so).
 ipcMain.handle('folder:trash', guard(async (_e, paths) => {
-  const done = [];
-  for (const p of checkList(paths).map(checkEntry)) {
+  checkList(paths);
+  const done = paths.some(isRemote) ? await remote.remove(paths.filter(isRemote)) : [];
+  for (const p of paths.filter((x) => !isRemote(x)).map(checkEntry)) {
     await shell.trashItem(p);
     done.push(p);
   }
@@ -285,6 +399,16 @@ ipcMain.handle('folder:trash', guard(async (_e, paths) => {
 // A file the editor cannot show, with its default program; a folder in the file explorer.
 // Programs, scripts and shortcuts are never started (folders.canOpenExternally).
 ipcMain.handle('folder:open-external', guard(async (_e, file) => {
+  if (isRemote(file)) {
+    // A copy, downloaded to open with its program (changes there are not sent back).
+    const name = path.posix.basename(remoteFiles.parseUri(file).path);
+    if (!folders.canOpenExternally(name)) throw new Error(`${name} is a program or a script; the editor does not start those.`);
+    const copy = remoteFiles.tempCopyPath(file);
+    fs.writeFileSync(copy, await remote.readBytes(file, 200 * 1024 * 1024));
+    const failed = await shell.openPath(copy);
+    if (failed) throw new Error(failed);
+    return true;
+  }
   checkFile(file);
   const isDir = fs.statSync(file).isDirectory();
   if (!isDir && !folders.canOpenExternally(path.basename(file))) throw new Error(`${path.basename(file)} is a program or a script; the editor does not start those. Use Show in the file explorer.`);
@@ -294,6 +418,10 @@ ipcMain.handle('folder:open-external', guard(async (_e, file) => {
 }));
 // An image's bytes, for reading its text.
 ipcMain.handle('folder:read-image', guard((_e, file) => {
+  if (isRemote(file)) {
+    if (!folders.isImage(path.posix.basename(file))) throw new Error('That is not an image.');
+    return remote.readBytes(file, 40 * 1024 * 1024);
+  }
   checkFile(file);
   if (!folders.isImage(path.basename(file))) throw new Error(`${path.basename(file)} is not an image.`);
   if (fs.statSync(file).size > 40 * 1024 * 1024) throw new Error(`${path.basename(file)} is larger than 40 MB.`);
@@ -306,6 +434,28 @@ ipcMain.handle('folder:watch', guard((event, dir) => {
   folderWatches.get(sender.id)?.close();
   folderWatches.delete(sender.id);
   if (!dir) return false;
+  if (isRemote(dir)) {
+    // A folder on a server: listed again now and then while connected.
+    const { id } = remoteFiles.parseUri(dir);
+    let last = null;
+    let busy = false;
+    const poll = setInterval(async () => {
+      if (busy || sender.isDestroyed() || !remote.isConnected(id)) return;
+      busy = true;
+      try {
+        const now = JSON.stringify((await remote.list(dir)).entries.map((e) => [e.name, e.size, e.mtimeMs]));
+        if (last !== null && now !== last) sender.send('folder:changed', { dir });
+        last = now;
+      } catch {
+        // tried again on the next round
+      } finally {
+        busy = false;
+      }
+    }, 4000);
+    folderWatches.set(sender.id, { close: () => clearInterval(poll) });
+    sender.once('destroyed', () => clearInterval(poll));
+    return true;
+  }
   checkDir(dir);
   let timer = null;
   try {
@@ -1026,6 +1176,7 @@ function buildMenu() {
         item('Open a File…', 'CmdOrCtrl+P', 'quick-open'),
         item('Open File (Edit in Place)…', 'CmdOrCtrl+O', 'disk-open'),
         item('Open Folder…', undefined, 'folder-open'),
+        item('Connect to a Server…', undefined, 'server-add'),
         item('Import Files…', undefined, 'open-disk'),
         item('Save a Copy to Disk…', 'CmdOrCtrl+Shift+S', 'save-copy'),
         item('Trash…', undefined, 'trash'),
@@ -1138,6 +1289,7 @@ app.on('before-quit', () => {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
+  remote.disconnectAll();
   if (clipSaveTimer) saveClips();
 });
 

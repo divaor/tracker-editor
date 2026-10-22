@@ -25,6 +25,11 @@
   --done: #23845f;
   --danger: #c23b3b;
   --warn: #b7791f;
+  /* Where a file lives (where.js): my files, a tracker document, this computer, a server. */
+  --kind-synced: #1c8f55;
+  --kind-doc: #2f6fd6;
+  --kind-disk: #c47a0a;
+  --kind-remote: #b5309a;
   --shadow-sm: 0 1px 2px rgba(25, 23, 18, 0.06);
   --shadow: 0 1px 2px rgba(25, 23, 18, 0.05), 0 4px 14px rgba(25, 23, 18, 0.06);
   --shadow-lg: 0 10px 40px rgba(25, 23, 18, 0.18);
@@ -61,6 +66,10 @@
     --done: #4fbf91;
     --danger: #ef6b6b;
     --warn: #e0a94a;
+    --kind-synced: #4fc58a;
+    --kind-doc: #6ea2f2;
+    --kind-disk: #eba94a;
+    --kind-remote: #e27ad0;
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 14px rgba(0, 0, 0, 0.25);
     --shadow-lg: 0 10px 40px rgba(0, 0, 0, 0.5);
@@ -91,6 +100,10 @@
   --done: #4fbf91;
   --danger: #ef6b6b;
   --warn: #e0a94a;
+  --kind-synced: #4fc58a;
+  --kind-doc: #6ea2f2;
+  --kind-disk: #eba94a;
+  --kind-remote: #e27ad0;
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 14px rgba(0, 0, 0, 0.25);
   --shadow-lg: 0 10px 40px rgba(0, 0, 0, 0.5);
@@ -1908,6 +1921,59 @@ button.project-chip:hover {
   gap: 8px;
 }
 
+.folders-servers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.folders-where {
+  display: inline-flex;
+  color: var(--kc);
+}
+
+.folders-where svg {
+  color: var(--kc) !important;
+}
+
+.folders-root-name.kind-remote > .icon {
+  color: var(--kc);
+}
+
+.folders-root-name .conn-dot {
+  color: var(--kc);
+}
+
+.folders-error p {
+  margin: 0 0 8px;
+}
+
+.server-dialog .row-input {
+  display: flex;
+  gap: 6px;
+}
+
+.server-dialog .row-input input {
+  flex: 1;
+  min-width: 0;
+}
+
+.warn-text {
+  color: var(--warn);
+}
+
+.hostkey-dialog .fingerprint code {
+  display: block;
+  padding: 8px 10px;
+  overflow-wrap: anywhere;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  font-size: 13px;
+}
+
 .folders-foot svg {
   flex-shrink: 0;
   color: var(--text-3);
@@ -2003,6 +2069,182 @@ button.project-chip:hover {
   background: color-mix(in srgb, var(--danger) 85%, #000);
 }
 
+/* ---- Where a file lives: colors on tabs, the file bar, the status bar, the editor ---- */
+.kind-synced {
+  --kc: var(--kind-synced);
+}
+
+.kind-doc {
+  --kc: var(--kind-doc);
+}
+
+.kind-disk {
+  --kc: var(--kind-disk);
+}
+
+.kind-remote {
+  --kc: var(--kind-remote);
+}
+
+.where-chip {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  max-width: 340px;
+  padding: 2px 9px 2px 7px;
+  border: 1px solid color-mix(in srgb, var(--kc) 45%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--kc) 11%, var(--surface));
+  color: var(--text);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+button.where-chip:hover {
+  background: color-mix(in srgb, var(--kc) 18%, var(--surface));
+}
+
+.where-chip > .icon {
+  flex-shrink: 0;
+  color: var(--kc);
+}
+
+.where-label {
+  overflow: hidden;
+  font-weight: 650;
+  text-overflow: ellipsis;
+}
+
+.where-state {
+  overflow: hidden;
+  color: var(--text-2);
+  text-overflow: ellipsis;
+}
+
+.where-state::before {
+  content: '·';
+  margin-right: 5px;
+  color: var(--text-3);
+}
+
+.where-chip.tone-pending .where-state,
+.where-chip.tone-busy .where-state {
+  color: var(--progress);
+  font-weight: 600;
+}
+
+.where-chip.tone-warn .where-state {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.where-chip.tone-error {
+  border-color: var(--danger);
+}
+
+.where-chip.tone-error .where-state {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+/* Phones: the chip shrinks first, to the state (the color and icon say where). */
+@media (max-width: 860px) {
+  .filebar .where-chip {
+    flex-shrink: 1;
+    min-width: 34px;
+  }
+
+  .filebar .where-chip .where-label {
+    display: none;
+  }
+
+  .filebar .where-chip .where-state::before {
+    display: none;
+  }
+}
+
+.where-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.status-where {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 5px;
+  height: 100%;
+  margin: 0 6px 0 -6px;
+  padding: 0 9px;
+  background: var(--kc);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+:root[data-theme='dark'] .status-where {
+  color: #15141f;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .status-where {
+    color: #15141f;
+  }
+}
+
+.conn-dot {
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+}
+
+.conn-dot.state-connected {
+  background: currentColor;
+}
+
+.conn-dot.state-connecting {
+  animation: fade 1s ease-in-out infinite alternate;
+}
+
+.conn-dot.state-error {
+  border-style: dashed;
+}
+
+/* The frame around the editor (Settings → Editor; whereFrame). */
+.editor-area.framed[data-kind]::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  border: 2px solid color-mix(in srgb, var(--kc) 75%, transparent);
+  pointer-events: none;
+}
+
+.editor-area.framed[data-kind='synced']::after {
+  border-color: color-mix(in srgb, var(--kc) 45%, transparent);
+}
+
+.editor-area[data-kind='synced'] {
+  --kc: var(--kind-synced);
+}
+
+.editor-area[data-kind='doc'] {
+  --kc: var(--kind-doc);
+}
+
+.editor-area[data-kind='disk'] {
+  --kc: var(--kind-disk);
+}
+
+.editor-area[data-kind='remote'] {
+  --kc: var(--kind-remote);
+}
+
 /* ---- Tabs ------------------------------------------------------------------- */
 .tabbar {
   display: flex;
@@ -2039,6 +2281,24 @@ button.project-chip:hover {
   background: var(--surface);
   color: var(--text);
   box-shadow: inset 0 2px 0 var(--accent);
+}
+
+/* Each tab's top line is the color of where its file lives; the open one's is stronger. */
+.tab[class*='kind-'] {
+  box-shadow: inset 0 2px 0 color-mix(in srgb, var(--kc) 55%, transparent);
+}
+
+.tab.active[class*='kind-'] {
+  box-shadow: inset 0 3px 0 var(--kc);
+}
+
+.tab .tab-kind {
+  flex-shrink: 0;
+  color: var(--kc, var(--text-3));
+}
+
+.tab.offline .tab-name {
+  opacity: 0.6;
 }
 
 .tab.dragging {
@@ -4211,6 +4471,14 @@ svg.up {
 
 .ocr-lang {
   max-width: 260px;
+}
+
+.ocr-engine .segmented {
+  align-self: flex-start;
+}
+
+.ocr-result.streaming {
+  color: var(--text-2);
 }
 
 .ocr-result {

@@ -39,6 +39,8 @@ export const DEFAULT_SETTINGS = {
   lineNumbers: true,
   // Tabs gathered by project in the tab bar, each group foldable.
   groupTabs: false,
+  // A frame around the editor in the color of where the file lives (my files, tracker, this computer, a server).
+  whereFrame: true,
   // Project filter for the file list (see matchesScope in tracker-model.js).
   projectScope: [],
   // The sidebar (desktop): your files ('files'), or folders on this computer ('folders', not synced):
@@ -60,6 +62,8 @@ export const DEFAULT_SETTINGS = {
     baseUrl: DEFAULT_LLM_URL,
     chatModel: '',
     embedModel: '',
+    // For text from images (a model that reads pictures); '' = the chat model.
+    visionModel: '',
     apiKey: '',
     profile: '',
     webhook: { enabled: false, port: 8765, path: '/llm-webhook', publicUrl: '' },
@@ -79,8 +83,10 @@ export const DEFAULT_SETTINGS = {
   typing: { countdown: 5, speed: 'normal', autoIndent: false, minimize: false, unicode: false },
   // The round model button at the bottom right of the editor (when a model is connected).
   assistBubble: true,
-  // Text from images: the languages to read (ocr.js OCR_LANGUAGES).
+  // Text from images: the languages to read (ocr.js OCR_LANGUAGES), and who reads them:
+  // 'device' (on this device) or 'model' (the connected model, when it reads images).
   ocrLang: 'eng+spa',
+  ocrEngine: 'device',
   // Dictation (voice notes): a BCP 47 language, '' = the device's.
   dictationLang: '',
   // Settings migrations already applied on this device.

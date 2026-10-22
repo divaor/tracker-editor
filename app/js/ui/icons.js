@@ -32,6 +32,7 @@ const PATHS = {
   checklist: () => html`<path d="m4 7 2 2 4-4M4 17l2 2 4-4M13 7h7M13 17h7" />`,
   arrowRight: () => html`<path d="M5 12h14M13 6l6 6-6 6" />`,
   arrowUp: () => html`<path d="M12 19V5M6 11l6-6 6 6" />`,
+  server: () => html`<rect x="3" y="4" width="18" height="7" rx="2" /><rect x="3" y="13" width="18" height="7" rx="2" /><path d="M7 7.5h.01M7 16.5h.01" />`,
   folderPlus: () => html`<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M12 10v6M9 13h6" />`,
   scissors: () => html`<circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M8.1 8.1 20 20M8.1 15.9 20 4" />`,
   clipboard: () => html`<rect x="8" y="2" width="8" height="4" rx="1" /><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />`,

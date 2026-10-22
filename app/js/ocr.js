@@ -30,3 +30,45 @@ export function ocrScale(width, height) {
 
 /** How sure the reading is, from tesseract's 0–100 confidence. */
 export const confidenceLabel = (confidence) => (confidence >= 85 ? 'Read clearly' : confidence >= 60 ? 'Mostly clear: check the text' : 'Hard to read: check the text carefully');
+
+// ---- Text from images with the connected model ----------------------------------
+
+/** Models whose names say they read images (to suggest one in Settings). */
+export const looksLikeVisionModel = (name) => /vision|[-_.]vl\b|vl[:\d]|llava|minicpm-v|moondream|gemma3|pixtral|qwen2\.5vl|qwen3-vl|granite.*vision|llama4/i.test(name ?? '');
+
+/**
+ * The chat messages that ask a model to read the text in images (data URLs, as
+ * OpenAI-compatible servers take them), keeping the layout.
+ */
+export function visionMessages(dataUrls, { langs = 'eng+spa' } = {}) {
+  const languages = langs
+    .split('+')
+    .map((l) => ({ eng: 'English', spa: 'Spanish' })[l] ?? l)
+    .join(' and ');
+  return [
+    {
+      role: 'system',
+      content: `You transcribe the text in images exactly as written (most likely in ${languages}). Keep the line breaks and the reading order; write tables as Markdown tables and lists as lists. Do not translate, correct, summarize or describe the image. Reply with only the text; if there is no text, reply with nothing.`,
+    },
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: dataUrls.length > 1 ? `Transcribe the text in these ${dataUrls.length} images, in order, with a line "## Image N" before each.` : 'Transcribe the text in this image.' },
+        ...dataUrls.map((url) => ({ type: 'image_url', image_url: { url } })),
+      ],
+    },
+  ];
+}
+
+/** The model's reply as text: without a code fence around all of it, or a lead-in like "Here is the text:". */
+export function cleanVisionReply(reply) {
+  let text = String(reply ?? '').trim();
+  text = text.replace(/^(here (is|are) the (transcribed |extracted )?text[^\n:]*:|the text (in|from) the image (is|reads)[^\n:]*:|aquí está el texto[^\n:]*:)\s*/i, '');
+  const fenced = /^```[\w-]*\n([\s\S]*?)\n```$/.exec(text);
+  if (fenced) text = fenced[1];
+  return text.trim();
+}
+
+/** The longest side images are scaled down to before they go to a model (smaller requests, the text still sharp). */
+export const VISION_MAX_SIDE = 2000;
+export const visionScale = (width, height) => Math.min(1, VISION_MAX_SIDE / Math.max(width, height, 1));

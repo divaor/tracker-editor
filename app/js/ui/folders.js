@@ -4,6 +4,8 @@ import { baseName, breadcrumbs, filterEntries, FOLDER_SORTS, isImageName, opensI
 import { formatBytes, timeAgo } from '../format.js';
 import { saveSettings } from '../settings.js';
 import { diskKey } from '../store.js';
+import { server, servers, serverStatus } from '../servers.js';
+import { isRemotePath, protocolName, remoteParts, remoteRoot } from '../where.js';
 import { Modal, toast } from './components.js';
 import { Icon } from './icons.js';
 import { Menu, MenuButton } from './menu.js';
@@ -28,12 +30,15 @@ let clip = null;
 /** Moving files to the Recycle Bin: asked first, since the editor cannot bring them back. */
 function DeleteDialog({ entries, onConfirm, onClose }) {
   const names = entries.slice(0, 6).map((e) => e.name);
+  const what = entries.length === 1 ? html`<strong>${entries[0].name}</strong>` : count(entries.length, 'item');
+  // Servers have no Recycle Bin: deleting there is for good.
+  const onServer = isRemotePath(entries[0]?.path) && server(remoteParts(entries[0].path).id);
   return html`<${Modal} title="Delete" onClose=${onClose}
     footer=${html`<span class="spacer" /><button type="button" class="btn" onClick=${onClose}>Cancel</button>
-      <button type="button" class="btn primary danger" onClick=${onConfirm}><${Icon} name="trash" size=${15} />Move to ${binName().replace('the ', '')}</button>`}>
-    <p>Move ${entries.length === 1 ? html`<strong>${entries[0].name}</strong>` : count(entries.length, 'item')} to ${binName()}?</p>
+      <button type="button" class="btn primary danger" onClick=${onConfirm}><${Icon} name="trash" size=${15} />${onServer ? 'Delete for good' : `Move to ${binName().replace('the ', '')}`}</button>`}>
+    <p>${onServer ? html`Delete ${what} from <strong>${onServer.name}</strong>?` : html`Move ${what} to ${binName()}?`}</p>
     ${entries.length > 1 && html`<ul class="delete-list">${names.map((n) => html`<li key=${n}>${n}</li>`)}${entries.length > names.length && html`<li class="muted">and ${entries.length - names.length} more</li>`}</ul>`}
-    <p class="muted small">You can restore ${entries.length === 1 ? 'it' : 'them'} from there.</p>
+    <p class="muted small">${onServer ? 'Files deleted on a server cannot be brought back from here.' : `You can restore ${entries.length === 1 ? 'it' : 'them'} from there.`}</p>
   </${Modal}>`;
 }
 
@@ -87,7 +92,14 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   const typed = useRef({ text: '', at: 0 });
   const pendingSelect = useRef(null); // a path to select once the folder is read (the one you came up from)
   const dir = settings.folder;
-  const root = roots && rootOf(dir, roots);
+  // Your folders, and the servers set up here (each from its top folder).
+  const serverRoots = servers().map((c) => remoteRoot(c.id));
+  const root = roots && rootOf(dir, [...roots, ...serverRoots]);
+  const remote = isRemotePath(root);
+  const conn = remote ? server(remoteParts(root).id) : null;
+  const connState = conn ? serverStatus(conn.id) : null;
+  const rootName = (r) => (isRemotePath(r) ? (server(remoteParts(r).id)?.name ?? 'Server') : baseName(r));
+  const internalDrag = useRef(null); // paths dragged within a folder on a server
 
   const refreshRoots = () => bridge.roots().then(setRoots);
   useEffect(() => {
@@ -97,7 +109,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   // The folder shown: the last one (picked from the menu, the list may be behind), or the first
   // picked when it is gone or was forgotten.
   useEffect(() => {
-    if (!roots || root || (!roots.length && !dir)) return;
+    if (!roots || root || (!roots.length && !dir) || isRemotePath(dir)) return;
     let stale = false;
     bridge.roots().then((fresh) => {
       if (stale) return;
@@ -139,6 +151,10 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     };
   }, [dir, root]);
   useEffect(() => onDragOutEnd(() => setDropTarget(null)), []);
+  // A server that connects again: its folder is read again.
+  useEffect(() => {
+    if (remote && connState?.state === 'connected' && listing?.error) load(dir);
+  }, [connState?.state]);
 
   const entries = sortEntries(filterEntries(listing?.dir === dir ? listing.entries : [], { query: filter, hidden: settings.showHidden }), settings.folderSort);
   const order = entries.map((e) => e.path);
@@ -348,26 +364,37 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
 
   const dragPaths = (e) => (selected.has(e.path) ? order.filter((p) => selected.has(p)) : [e.path]);
   const onDragStart = (ev, e) => {
-    ev.preventDefault();
-    if (!canDragOut()) return;
     const paths = dragPaths(e);
     if (!selected.has(e.path)) select([e.path]);
+    // On a server: moved onto folders here (other apps cannot take them from there).
+    if (remote) {
+      internalDrag.current = paths;
+      ev.dataTransfer.effectAllowed = 'copyMove';
+      ev.dataTransfer.setData('text/x-folder-paths', JSON.stringify(paths));
+      return;
+    }
+    ev.preventDefault();
+    if (!canDragOut()) return;
     // To the desktop, a folder, a terminal or the Claude app as the files themselves; onto a folder here, moved.
     startDragOut(null, { paths });
   };
   const acceptDrag = (ev, target) => {
     const types = ev.dataTransfer?.types ?? [];
-    if (!types.includes('Files') && !draggedPaths().length) return;
-    if (draggedPaths().includes(target)) return;
+    const inside = internalDrag.current;
+    if (!types.includes('Files') && !draggedPaths().length && !inside) return;
+    if (draggedPaths().includes(target) || inside?.includes(target)) return;
     ev.preventDefault();
     ev.stopPropagation();
-    ev.dataTransfer.dropEffect = ev.ctrlKey || !draggedPaths().length || draggedTab() ? 'copy' : 'move';
+    ev.dataTransfer.dropEffect = ev.ctrlKey || (!draggedPaths().length && !inside) || draggedTab() ? 'copy' : 'move';
     setDropTarget(target);
   };
   const onDrop = (ev, target) => {
     ev.preventDefault();
     ev.stopPropagation();
     setDropTarget(null);
+    const inside = internalDrag.current;
+    internalDrag.current = null;
+    if (inside) return inside.includes(target) ? null : ev.ctrlKey ? copyTo(inside, target) : moveTo(inside, target);
     const files = [...(ev.dataTransfer?.files ?? [])];
     if (isOwnDrop(ev.dataTransfer)) {
       const tab = draggedTab();
@@ -460,7 +487,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     { label: settings.showHidden ? 'Hide hidden files' : 'Show hidden files', icon: 'eye', run: () => saveSettings({ showHidden: !settings.showHidden }) },
     { label: 'Refresh (F5)', icon: 'rotate', run: () => load(dir) },
     { label: 'Copy path', icon: 'copy', run: () => actions.copyPath(dir) },
-    { label: 'Open in the file explorer', icon: 'external', run: () => bridge.openExternal(dir).catch(fail) },
+    !remote && { label: 'Open in the file explorer', icon: 'external', run: () => bridge.openExternal(dir).catch(fail) },
   ];
   const entryItems = () => {
     const items = targets();
@@ -480,30 +507,41 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       { label: 'Delete (Del)', icon: 'trash', danger: true, run: () => setConfirm(items) },
       { separator: true },
       { label: one ? 'Copy path' : 'Copy paths', icon: 'copy', run: () => (one ? actions.copyPath(one.path) : navigator.clipboard.writeText(items.map((e) => e.path).join('\n')).then(() => toast('Paths copied'))) },
-      { label: one ? 'Copy for Claude (the path)' : 'Copy for Claude (the paths)', icon: 'claude', run: () => navigator.clipboard.writeText(items.map((e) => quotePath(e.path)).join(' ')).then(() => toast('On the clipboard: paste it into Claude')) },
+      !remote && { label: one ? 'Copy for Claude (the path)' : 'Copy for Claude (the paths)', icon: 'claude', run: () => navigator.clipboard.writeText(items.map((e) => quotePath(e.path)).join(' ')).then(() => toast('On the clipboard: paste it into Claude')) },
       files.length && files.length === items.length && files.every((e) => opensInEditor(e.name)) && { label: 'Copy into my files (synced)', icon: 'filePlus', run: () => files.forEach((e) => actions.copyToFiles(e.path)) },
-      one && { label: 'Show in the file explorer', icon: 'external', run: () => actions.showOnDisk(one.path) },
+      one && !remote && { label: 'Show in the file explorer', icon: 'external', run: () => actions.showOnDisk(one.path) },
     ];
   };
   const rootItems = () => [
     ...roots.map((r) => ({ label: r, icon: 'folder', checked: r === root, run: () => go(r) })),
+    ...servers().map((c) => ({ label: `${c.name} (${protocolName(c.protocol)} · ${c.host})`, icon: 'server', checked: remoteRoot(c.id) === root, run: () => actions.openServer(c.id) })),
     { separator: true },
-    { label: 'Open another folder…', icon: 'folderOpen', run: () => pick(parentOf(dir, root) ?? root) },
-    ...PLACES.filter((p) => places[p.id] && !roots.includes(places[p.id])).map((p) => ({ label: `Pick in ${p.label}…`, run: () => pick(places[p.id]) })),
+    { label: 'Open another folder…', icon: 'folderOpen', run: () => pick(remote ? undefined : (parentOf(dir, root) ?? root)) },
+    { label: 'Connect to a server…', icon: 'server', run: () => actions.editServer() },
+    ...(remote ? [] : PLACES.filter((p) => places[p.id] && !roots.includes(places[p.id])).map((p) => ({ label: `Pick in ${p.label}…`, run: () => pick(places[p.id]) }))),
     { separator: true },
     ...sortItems,
     { separator: true },
     { label: settings.showHidden ? 'Hide hidden files' : `Show hidden files${hiddenCount ? ` (${hiddenCount} here)` : ''}`, icon: 'eye', run: () => saveSettings({ showHidden: !settings.showHidden }) },
-    { label: 'Show this folder in the file explorer', icon: 'external', run: () => actions.showOnDisk(dir) },
-    { label: `Forget ${baseName(root)}`, icon: 'x', run: () => forget(root) },
+    ...(remote
+      ? [
+          { label: `Edit ${conn?.name ?? 'this server'}…`, icon: 'edit', run: () => actions.editServer(conn) },
+          connState?.state === 'connected'
+            ? { label: 'Disconnect', icon: 'x', run: () => window.desktop.remote.disconnect(conn.id) }
+            : { label: 'Connect', icon: 'server', run: () => actions.openServer(conn.id) },
+        ]
+      : [
+          { label: 'Show this folder in the file explorer', icon: 'external', run: () => actions.showOnDisk(dir) },
+          { label: `Forget ${baseName(root)}`, icon: 'x', run: () => forget(root) },
+        ]),
   ];
 
   // ---- The view ----
 
   if (!roots) return html`<div class="file-list" />`;
-  if (!roots.length) {
+  if (!root) {
     return html`<div class="folders-empty">
-      <p>Browse a folder on this computer and open its files here, like in a file explorer.</p>
+      <p>Browse a folder on this computer, or one on a server, and open its files here, like in a file explorer.</p>
       <p class="muted small">They are edited in place and are not synced. "Copy into my files" makes a copy that syncs.</p>
       <button type="button" class="btn primary" onClick=${() => pick()}><${Icon} name="folderOpen" size=${16} />Open a folder…</button>
       <div class="folder-places">
@@ -512,9 +550,13 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
           (p) => html`<button type="button" key=${p.id} class="btn ghost sm" title=${`Pick a folder, starting in ${places[p.id]}`} onClick=${() => pick(places[p.id])}>${p.label}</button>`,
         )}
       </div>
+      <div class="folders-servers">
+        ${roots.map((r) => html`<button type="button" key=${r} class="btn ghost sm" title=${r} onClick=${() => go(r)}><${Icon} name="folder" size=${15} />${baseName(r)}</button>`)}
+        ${servers().map((c) => html`<button type="button" key=${c.id} class="btn ghost sm" title=${`${protocolName(c.protocol)} · ${c.user ? `${c.user}@` : ''}${c.host}`} onClick=${() => actions.openServer(c.id)}><${Icon} name="server" size=${15} />${c.name}</button>`)}
+        <button type="button" class="btn sm" onClick=${() => actions.editServer()}><${Icon} name="server" size=${15} />Connect to a server…</button>
+      </div>
     </div>`;
   }
-  if (!root) return html`<div class="file-list" />`;
 
   const crumbs = breadcrumbs(dir, root);
   const up = parentOf(dir, root);
@@ -532,8 +574,9 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     const isSelected = selected.has(e.path);
     return html`<div key=${e.path} data-path=${e.path} role="option" aria-selected=${isSelected} id=${`row-${order.indexOf(e.path)}`}
       class="folder-row ${e.dir ? 'is-dir' : ''} ${isSelected ? 'selected' : ''} ${cursor === e.path ? 'cursor' : ''} ${activeKey === key ? 'active' : ''} ${e.hidden ? 'hidden-entry' : ''} ${clip?.op === 'cut' && clip.paths.includes(e.path) ? 'is-cut' : ''} ${dropTarget === e.path ? 'drop-target' : ''}"
-      title=${e.path} draggable=${renaming !== e.path}
+      title=${remote ? remoteParts(e.path).path : e.path} draggable=${renaming !== e.path}
       onDragStart=${(ev) => onDragStart(ev, e)}
+      onDragEnd=${() => (internalDrag.current = null)}
       ...${e.dir ? dropProps(e.path) : {}}
       onClick=${(ev) => {
         ev.stopPropagation();
@@ -570,7 +613,10 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   return html`
     <div class="folders-head">
       <div class="folders-root">
-        <button type="button" class="btn ghost sm folders-root-name ${dropTarget === root ? 'drop-target' : ''}" title=${root} onClick=${() => go(root)} ...${dropProps(root)}><${Icon} name="folder" size=${15} /><span>${baseName(root)}</span></button>
+        <button type="button" class="btn ghost sm folders-root-name ${remote ? 'kind-remote' : ''} ${dropTarget === root ? 'drop-target' : ''}"
+          title=${remote ? `${protocolName(conn?.protocol)} · ${conn?.user ? `${conn.user}@` : ''}${conn?.host} · ${connState?.state === 'connected' ? 'connected' : 'not connected'}` : root} onClick=${() => go(root)} ...${dropProps(root)}>
+          <${Icon} name=${remote ? 'server' : 'folder'} size=${15} /><span>${rootName(root)}</span>${remote && html`<span class="conn-dot state-${connState?.state}" />`}
+        </button>
         <span class="spacer" />
         ${tool('Up one folder (Backspace)', 'arrowUp', () => go(up), !up)}
         ${tool('Refresh (F5)', 'rotate', () => load(dir))}
@@ -591,17 +637,17 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       html`<nav class="crumbs" aria-label="Folder path">
         ${crumbs.map(
           (c, i) => html`${i > 0 && html`<span class="crumb-sep" key=${`s${i}`}>›</span>`}<button type="button" key=${c.path} class="crumb ${i === crumbs.length - 1 ? 'current' : ''} ${dropTarget === c.path ? 'drop-target' : ''}"
-            aria-current=${i === crumbs.length - 1 ? 'location' : undefined} title=${c.path} onClick=${() => go(c.path)} ...${i < crumbs.length - 1 ? dropProps(c.path) : {}}>${c.name}</button>`,
+            aria-current=${i === crumbs.length - 1 ? 'location' : undefined} title=${remote ? remoteParts(c.path).path : c.path} onClick=${() => go(c.path)} ...${i < crumbs.length - 1 ? dropProps(c.path) : {}}>${i === 0 ? rootName(root) : c.name}</button>`,
         )}
       </nav>`}
       <div class="sidebar-filter">
         <${Icon} name="search" size=${15} />
-        <input value=${filter} onInput=${(e) => setFilter(e.currentTarget.value)} placeholder=${`Filter ${baseName(dir)}`} aria-label="Filter this folder"
+        <input value=${filter} onInput=${(e) => setFilter(e.currentTarget.value)} placeholder=${`Filter ${dir === root ? rootName(root) : baseName(dir)}`} aria-label="Filter this folder"
           onKeyDown=${(e) => e.key === 'ArrowDown' && (e.preventDefault(), list.current?.focus(), order[0] && select([order[0]]))} />
       </div>
     </div>
     <div class="file-list folder-list ${dropTarget === dir ? 'drop-target' : ''}" role="listbox" aria-multiselectable="true" tabindex="0" ref=${list}
-      aria-label=${`Files in ${baseName(dir)}`} aria-activedescendant=${cursor && order.includes(cursor) ? `row-${order.indexOf(cursor)}` : undefined}
+      aria-label=${`Files in ${dir === root ? rootName(root) : baseName(dir)}`} aria-activedescendant=${cursor && order.includes(cursor) ? `row-${order.indexOf(cursor)}` : undefined}
       onKeyDown=${onKeyDown}
       onFocus=${claimSelection}
       onClick=${() => setSelected(new Set())}
@@ -617,7 +663,11 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
         <${NameField} key=${`${creating.kind}:${creating.name}`} initial=${creating.name} dir=${creating.kind === 'folder'} label=${creating.kind === 'folder' ? 'New folder name' : 'New file name'}
           onDone=${(name) => create({ ...creating, name })} onCancel=${() => (setCreating(null), list.current?.focus())} />
       </div>`}
-      ${listing?.error && html`<p class="error-text small empty-list">${listing.error}</p>`}
+      ${listing?.error &&
+      html`<div class="empty-list folders-error">
+        <p class="error-text small">${listing.error}</p>
+        ${remote && html`<p><button type="button" class="btn sm" onClick=${(e) => (e.stopPropagation(), load(dir))}>Try again</button> <button type="button" class="btn ghost sm" onClick=${(e) => (e.stopPropagation(), actions.editServer(conn))}>Edit the server…</button></p>`}
+      </div>`}
       ${entries.map(row)}
       ${listing?.dir === dir && !listing.error && !entries.length && !creating &&
       html`<p class="muted small empty-list">${filter ? 'Nothing here matches.' : hiddenCount && !settings.showHidden ? `Only hidden files here (${hiddenCount}).` : 'This folder is empty. Drop or paste files here.'}</p>`}
@@ -625,9 +675,11 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     </div>
     <div class="sidebar-foot folders-foot">
       <span class="muted small folders-status" aria-live="polite">${selectionSummary(entries, selected, formatBytes)}</span>
-      <span title="Files on this computer: edited in place, not synced. Copy into my files makes a synced copy."><${Icon} name="cloudOff" size=${15} /></span>
+      <span class="folders-where ${remote ? 'kind-remote' : 'kind-disk'}" title=${remote ? `On ${conn?.name}: files are saved back to the server, not synced. Copy into my files makes a synced copy.` : 'Files on this computer: edited in place, not synced. Copy into my files makes a synced copy.'}>
+        <${Icon} name=${remote ? 'server' : 'disk'} size=${14} />
+      </span>
     </div>
-    ${menu && html`<${Menu} items=${menu.entry ? entryItems() : backgroundItems()} at=${menu.at} label=${menu.entry?.name ?? baseName(dir)} onClose=${() => setMenu(null)} />`}
+    ${menu && html`<${Menu} items=${menu.entry ? entryItems() : backgroundItems()} at=${menu.at} label=${menu.entry?.name ?? (dir === root ? rootName(root) : baseName(dir))} onClose=${() => setMenu(null)} />`}
     ${confirm && html`<${DeleteDialog} entries=${confirm} onConfirm=${() => remove(confirm)} onClose=${() => (setConfirm(null), list.current?.focus())} />`}
   `;
 }

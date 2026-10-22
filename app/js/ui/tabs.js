@@ -10,20 +10,47 @@ import { Icon } from './icons.js';
 import { dictationSupported } from './dictation.js';
 import { canDragOut, draggedTab, dropped, isOwnDrop, onDragOutEnd, startDragOut } from '../dragOut.js';
 import { Menu, MenuButton } from './menu.js';
+import { isRemotePath, KINDS, kindOfKey, protocolName, remoteAddress, remoteParts, whereState } from '../where.js';
+import { server, serverStatus } from '../servers.js';
+
+/** The server of a file on one ({ conn, status }), or null. */
+const serverOf = (path) => {
+  const { id } = remoteParts(path);
+  return { conn: server(id), status: serverStatus(id) };
+};
 
 function tabInfo(key) {
   const k = parseKey(key);
+  const kind = kindOfKey(key);
   if (k?.kind === 'file') {
     const f = store.get(k.id);
-    return f && { name: f.name, project: f.project, encrypted: f.encrypted, snippet: f.snippet, unsynced: f.dirty || f.pending, title: [f.project, f.name].filter(Boolean).join(' / ') + (f.encrypted ? ' · encrypted' : '') };
+    return f && { kind, name: f.name, project: f.project, encrypted: f.encrypted, snippet: f.snippet, unsynced: f.dirty || f.pending, dotTitle: 'Not synced yet', title: `My files (synced): ${[f.project, f.name].filter(Boolean).join(' / ')}${f.encrypted ? ' · encrypted' : ''}` };
   }
   if (k?.kind === 'disk') {
     const d = store.diskTab(k.path);
-    return d && { name: d.name, project: '', unsynced: d.dirty, disk: true, follow: d.follow, title: `On disk: ${d.path}${d.dirty ? ' · not saved' : ''}` };
+    if (!d) return null;
+    if (kind === 'remote') {
+      const { conn } = serverOf(d.path);
+      return { kind, name: d.name, project: '', unsynced: d.dirty, follow: d.follow, offline: d.offline, dotTitle: 'Not saved to the server', title: `On ${conn?.name ?? 'a server'}: ${remoteAddress(d.path, conn)}${d.dirty ? ' · not saved to the server' : ''}` };
+    }
+    return { kind, name: d.name, project: '', unsynced: d.dirty, follow: d.follow, dotTitle: 'Not saved', title: `On this computer: ${d.path}${d.dirty ? ' · not saved' : ''}` };
   }
   const t = k && store.repoTab(k.path);
-  return t && { name: t.name, project: store.doc(k.path)?.project ?? '', unsynced: t.dirty, repo: true, title: `From the tracker: ${t.path}` };
+  return t && { kind, name: t.name, project: store.doc(k.path)?.project ?? '', unsynced: t.dirty, dotTitle: 'Not synced yet', title: `Tracker document: ${t.path}` };
 }
+
+/**
+ * Where the open file lives and how it stands, colored by kind: "My files ·
+ * Synced", "This computer · Not saved", "db1 · Saved on the server"…
+ */
+export function WhereChip({ kind, label, state, title, onClick }) {
+  const tip = [title ?? KINDS[kind].hint, state.detail].filter(Boolean).join('\n');
+  return html`<button type="button" class="where-chip kind-${kind} tone-${state.tone}" title=${tip} onClick=${onClick} aria-label=${`${label}: ${state.text}`}>
+    <${Icon} name=${KINDS[kind].icon} size=${14} /><span class="where-label">${label}</span><span class="where-state">${state.text}</span>
+  </button>`;
+}
+
+const syncInfo = (sync) => ({ configured: isSyncConfigured(), phase: sync?.phase });
 
 // Unpinned tabs by project, in the order each project first appears; tabs
 // without one last.
@@ -93,7 +120,7 @@ export function TabBar({ session, projects, settings, actions }) {
     const isSide = key === session.side;
     const isPinned = pinned.includes(key);
     return html`<div key=${key} role="tab" aria-selected=${isActive} tabindex=${isActive ? 0 : -1}
-        class="tab ${isActive ? 'active' : ''} ${isSide ? 'side' : ''} ${isPinned ? 'pinned' : ''} ${info.unsynced ? 'unsynced' : ''} ${dragging === key ? 'dragging' : ''}"
+        class="tab kind-${info.kind} ${isActive ? 'active' : ''} ${isSide ? 'side' : ''} ${isPinned ? 'pinned' : ''} ${info.unsynced ? 'unsynced' : ''} ${info.offline ? 'offline' : ''} ${dragging === key ? 'dragging' : ''}"
         title=${isSide ? `${info.title} · in the side view` : info.title}
         draggable="true"
         onDragStart=${(e) => {
@@ -132,12 +159,11 @@ export function TabBar({ session, projects, settings, actions }) {
         onKeyDown=${(e) => (e.key === 'Enter' || e.key === ' ') && actions.activate(key)}>
       ${isPinned && html`<${Icon} name="pin" size=${12} class="tab-pin" />`}
       ${isSide && html`<${Icon} name="columns" size=${13} class="tab-side" />`}
-      ${info.repo && html`<${Icon} name="paperclip" size=${13} />`}
-      ${info.disk && html`<${Icon} name=${info.follow ? 'follow' : 'disk'} size=${13} />`}
+      <${Icon} name=${info.follow ? 'follow' : KINDS[info.kind].icon} size=${13} class="tab-kind" />
       ${info.encrypted && html`<${Icon} name="lock" size=${12} class="tab-lock" />`}
       ${info.snippet && html`<${Icon} name="snippet" size=${12} class="tab-lock" />`}
       <span class="tab-name">${info.name}</span>
-      <span class="tab-dot" title=${info.disk ? 'Not saved' : 'Not synced yet'} />
+      <span class="tab-dot" title=${info.dotTitle} />
       <button type="button" class="tab-close" aria-label=${`Close ${info.name}`} tabindex="-1"
         onClick=${(e) => {
           e.stopPropagation();
@@ -171,48 +197,59 @@ export function TabBar({ session, projects, settings, actions }) {
 // "1.2 MB"
 const formatSize = (bytes) => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
 
-/** The bar of a file on disk edited in place: saving, reloading, following it as it grows. */
+/** The bar of a file on disk (or on a server) edited in place: saving, reloading, following it as it grows. */
 function DiskBar({ disk, buttons, moreItems, actions }) {
-  const { path, dirty, follow, conflict, missing, truncated } = disk;
+  const { path, dirty, follow, conflict, missing, truncated, offline } = disk;
+  const remote = isRemotePath(path);
+  const srv = remote ? serverOf(path) : null;
   const readOnly = follow || truncated;
-  const status = missing ? 'Not on disk' : conflict ? 'Changed on disk' : dirty ? 'Not saved' : follow ? 'Following' : 'Saved';
+  const state = whereState({ kind: remote ? 'remote' : 'disk', disk, server: srv?.status });
+  const location = remote ? remoteParts(path).path : path;
+  const folder = location.slice(0, location.length - disk.name.length - 1) || location;
+  const where = remote ? `${KINDS.remote.hint}\n${protocolName(srv.conn?.protocol)} · ${remoteAddress(path, srv.conn)}` : `${KINDS.disk.hint}\n${path}`;
+  const encoding = `${disk.eol === 'crlf' ? 'Windows (CRLF)' : 'Unix (LF)'} line endings · ${disk.encoding === 'latin1' ? 'Windows-1252' : 'UTF-8'}${disk.bom ? ' with BOM' : ''}, kept when saving`;
+  const elsewhere = remote ? 'on the server' : 'on disk';
   return html`<div class="filebar-stack">
     <div class="filebar">
-      <span class="filebar-note" title=${path}><${Icon} name="disk" size=${14} /><span class="filebar-title">${disk.name}</span><span class="muted small filebar-path">${path.slice(0, path.length - disk.name.length - 1) || path}</span></span>
+      <${WhereChip} kind=${remote ? 'remote' : 'disk'} label=${remote ? (srv.conn?.name ?? 'Server') : 'This computer'} state=${state} title=${where} onClick=${() => actions.showOnDisk(path)} />
+      <span class="filebar-note" title=${`${remote ? remoteAddress(path, srv.conn) : path}\n${encoding}`}><span class="filebar-title">${disk.name}</span><span class="muted small filebar-path">${folder}</span></span>
       <span class="spacer" />
       ${buttons}
       <button type="button" class="btn ghost sm ${follow ? 'on' : ''}" aria-pressed=${follow} disabled=${missing}
         title=${follow ? 'Stop following (the file becomes editable)' : 'Follow the file as it grows, like tail -f (read-only meanwhile)'} onClick=${() => actions.followDisk(path, !follow)}>
         <${Icon} name="follow" size=${15} /><span class="label">Follow</span>
       </button>
-      <button type="button" class="btn ghost sm" disabled=${missing} title="Read the file from disk again" onClick=${() => (dirty ? actions.openDialog({ type: 'reloadDisk', path }) : actions.reloadDisk(path))}>
+      <button type="button" class="btn ghost sm" disabled=${missing} title=${`Read the file ${elsewhere} again`} onClick=${() => (dirty ? actions.openDialog({ type: 'reloadDisk', path }) : actions.reloadDisk(path))}>
         <${Icon} name="rotate" size=${15} /><span class="label">Reload</span>
       </button>
       ${!readOnly &&
-      html`<button type="button" class="btn ${dirty || missing ? 'primary' : 'ghost'} sm" title="Save to disk (Ctrl+S)" onClick=${() => actions.saveDisk(path)}>
+      html`<button type="button" class="btn ${dirty || missing ? 'primary' : 'ghost'} sm" title=${remote ? 'Save to the server (Ctrl+S)' : 'Save to disk (Ctrl+S)'} disabled=${disk.saving} onClick=${() => actions.saveDisk(path)}>
         <${Icon} name="save" size=${15} /><span class="label">Save</span>
       </button>`}
-      <span class="filebar-status ${dirty || conflict || missing ? 'pending' : ''}" title=${`${disk.eol === 'crlf' ? 'Windows (CRLF)' : 'Unix (LF)'} line endings · ${disk.encoding === 'latin1' ? 'Windows-1252' : 'UTF-8'}${disk.bom ? ' with BOM' : ''}, kept when saving`}>
-        <span class="label">${status}</span>
-      </span>
       <${MenuButton} label="More" items=${moreItems} />
     </div>
+    ${remote && offline &&
+    html`<div class="filebar-notice warn" role="alert">
+      <${Icon} name="cloudOff" size=${15} /><span>${srv.conn?.name ?? 'The server'} cannot be reached${srv.status.error ? `: ${srv.status.error.replace(/\.+$/, '')}` : ''}.${dirty ? ' Your edits are kept on this device; Save sends them when it is back.' : ''}</span>
+      <span class="spacer" />
+      <button type="button" class="btn sm" onClick=${() => actions.reconnectServer(remoteParts(path).id)}>Reconnect</button>
+    </div>`}
     ${conflict &&
     html`<div class="filebar-notice warn" role="alert">
-      <${Icon} name="alert" size=${15} /><span>The file changed on disk while you were editing it here.</span>
+      <${Icon} name="alert" size=${15} /><span>The file changed ${elsewhere} while you were editing it here.</span>
       <span class="spacer" />
       <button type="button" class="btn ghost sm" onClick=${() => actions.compareDisk(path)}>Compare</button>
       <button type="button" class="btn ghost sm" onClick=${() => actions.reloadDisk(path)}>Reload (lose my edits)</button>
       <button type="button" class="btn sm" onClick=${() => actions.saveDisk(path, { force: true })}>Keep mine and save over it</button>
     </div>`}
     ${missing &&
-    html`<div class="filebar-notice warn" role="status"><${Icon} name="alert" size=${15} /><span>The file is not on disk any more (moved, renamed or deleted). Save puts it back.</span></div>`}
+    html`<div class="filebar-notice warn" role="status"><${Icon} name="alert" size=${15} /><span>The file is not ${elsewhere} any more (moved, renamed or deleted). Save puts it back.</span></div>`}
     ${truncated &&
     html`<div class="filebar-notice" role="status"><${Icon} name="disk" size=${15} /><span>A ${formatSize(disk.size)} file: showing its last part, read-only. Follow shows new lines as they are written.</span></div>`}
   </div>`;
 }
 
-export function FileBar({ file, repo, disk, sealed, projects, canPreview, preview, settings, actions }) {
+export function FileBar({ file, repo, disk, sealed, projects, canPreview, preview, settings, sync, actions }) {
   const previewButton =
     canPreview &&
     html`<button type="button" class="btn ghost sm ${preview ? 'on' : ''}" aria-pressed=${preview} title="Show a reading view next to the text" onClick=${actions.togglePreview}><${Icon} name="eye" size=${15} /><span class="label">Preview</span></button>`;
@@ -236,7 +273,7 @@ export function FileBar({ file, repo, disk, sealed, projects, canPreview, previe
     window.desktop?.ocr && { label: 'Text from a screenshot…', icon: 'scan', run: actions.screenshotToText },
     id && { label: 'Send checklist to tracker…', icon: 'checklist', run: actions.sendChecklist },
     window.desktop?.typing && { label: 'Type into another window', icon: 'keyboard', run: () => actions.typeOut() },
-    { label: disk ? 'Copy for Claude (the path)' : 'Copy for Claude (name and text)', icon: 'claude', run: () => actions.copyForClaude(store.session.active) },
+    { label: disk && !isRemotePath(disk.path) ? 'Copy for Claude (the path)' : 'Copy for Claude (name and text)', icon: 'claude', run: () => actions.copyForClaude(store.session.active) },
     settings.llm.enabled && { label: 'Ask the model… (Ctrl+K)', icon: 'sparkle', run: actions.askSelection },
     { label: 'Insert snippet…', icon: 'snippet', run: actions.openSnippets },
     id && { label: 'Save as snippet', icon: 'snippet', run: actions.saveSnippet },
@@ -252,22 +289,23 @@ export function FileBar({ file, repo, disk, sealed, projects, canPreview, previe
     const doc = store.doc(repo.path);
     const project = doc?.project && projects.find((p) => p.key === projectKey(doc.project));
     return html`<div class="filebar">
-      <span class="filebar-note" title=${`From the tracker: ${repo.path}`}><${Icon} name="doc" size=${14} /><span class="filebar-title">${doc?.item.title || repo.name}</span></span>
+      <${WhereChip} kind="doc" label="Tracker" state=${whereState({ kind: 'doc', repo })} title=${`${KINDS.doc.hint}\n${repo.path}`} />
+      <span class="filebar-note" title=${`From the tracker: ${repo.path}`}><span class="filebar-title">${doc?.item.title || repo.name}</span></span>
       ${doc?.project && html`<${ProjectChip} project=${project} name=${doc.project} />`}
       <span class="spacer" />
       ${previewButton}
       ${listenButton}
       ${shareButton}
-      <span class="filebar-status ${repo.dirty ? 'pending' : ''}" title=${repo.dirty ? 'Saved on this device; goes to the tracker on the next sync' : 'The same as on the tracker'}>
-        <${Icon} name=${repo.dirty ? 'sync' : 'cloud'} size=${14} /><span class="label">${repo.dirty ? 'Not synced yet' : 'Synced'}</span>
-      </span>
       <${MenuButton} label="More" items=${() => moreItems()} />
     </div>`;
   }
   if (!file) return null;
   const project = projects.find((p) => p.key === projectKey(file.project));
+  const synced = html`<${WhereChip} kind="synced" label="My files" state=${whereState({ kind: 'synced', file, sync: syncInfo(sync) })}
+    onClick=${() => (isSyncConfigured() ? syncNow() : (location.hash = '#/settings'))} />`;
   if (sealed) {
     return html`<div class="filebar">
+      ${synced}
       ${file.project && html`<${ProjectChip} project=${project} name=${file.project} />`}
       <span class="filebar-note"><${Icon} name="lock" size=${14} />Encrypted · locked on this device</span>
       <span class="spacer" />
@@ -276,6 +314,7 @@ export function FileBar({ file, repo, disk, sealed, projects, canPreview, previe
   }
   const linked = store.trackerItems().filter((i) => !i.deleted && i.url?.includes(`#/file/${encodeURIComponent(file.id)}`));
   return html`<div class="filebar">
+    ${synced}
     ${file.project
       ? html`<${ProjectChip} project=${project} name=${file.project} onClick=${() => actions.openDialog({ type: 'file', id: file.id })} />`
       : html`<button type="button" class="btn ghost sm add-project" onClick=${() => actions.openDialog({ type: 'file', id: file.id })}><${Icon} name="folder" size=${14} />Add project</button>`}
@@ -334,10 +373,19 @@ export function SyncBadge({ sync, compact = false }) {
 export function StatusBar({ recording, big, cursor, language, file, repo, disk, settings, actions }) {
   const setLanguage = (value) => file && actions.patch(file.id, { language: value === 'auto' ? '' : value });
   let state = '';
+  const kind = file ? 'synced' : repo ? 'doc' : disk ? (isRemotePath(disk.path) ? 'remote' : 'disk') : null;
+  const srv = kind === 'remote' ? serverOf(disk.path) : null;
   if (file) state = file.dirty ? 'Saved on this device · not synced yet' : file.sha ? `Synced · edited ${timeAgo(file.modifiedAt)}${file.modifiedBy ? ` on ${file.modifiedBy}` : ''}` : 'Saved on this device';
   if (repo) state = repo.dirty ? 'Edited · goes to the tracker on the next sync' : 'Tracker file';
-  if (disk) state = disk.dirty ? 'Not saved to disk · Ctrl+S saves' : disk.follow ? 'Following the file as it grows' : 'File on disk · not synced';
+  if (kind === 'disk') state = disk.dirty ? 'Not saved to disk · Ctrl+S saves' : disk.follow ? 'Following the file as it grows' : 'File on this computer · not synced';
+  if (kind === 'remote') state = `${protocolName(srv.conn?.protocol)} · ${remoteAddress(disk.path, srv.conn)}${disk.dirty ? ' · not saved to the server' : ''}`;
+  const label = { synced: 'My files', doc: 'Tracker', disk: 'This computer', remote: srv?.conn?.name ?? 'Server' }[kind];
+  const connection = srv && { connected: 'Connected', connecting: 'Connecting…', error: `Not connected: ${srv.status.error}`, disconnected: 'Not connected' }[srv.status.state];
   return html`<footer class="statusbar">
+    ${kind &&
+    html`<span class="status-where kind-${kind}" title=${connection ? `${KINDS[kind].hint}\n${connection}` : KINDS[kind].hint}>
+      <${Icon} name=${KINDS[kind].icon} size=${13} /><span>${label}</span>${srv && html`<span class="conn-dot state-${srv.status.state}" aria-label=${connection} />`}
+    </span>`}
     <span class="status-item status-state" title=${file ? `${formatBytes(store.text(file.id).length)}` : ''}>${state}</span>
     ${recording && html`<button type="button" class="status-item status-btn-text status-recording" title="Recording a macro: Ctrl+Shift+R stops" onClick=${actions.toggleRecording}>● Recording macro</button>`}
     ${big && html`<span class="status-item status-big" title="A very large file: highlighting, wrapping and completion are off to keep it fast">Large file</span>`}

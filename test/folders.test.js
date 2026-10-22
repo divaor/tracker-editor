@@ -227,3 +227,107 @@ test('the status line counts the selection', () => {
   assert.equal(page.selectionSummary(e, new Set(['/a', '/b', '/c'])), '3 of 3 items selected · 1024 B');
   assert.equal(page.selectionSummary(e, new Set(['/a'])), '1 of 3 items selected');
 });
+
+// ---- Where a file lives (app/js/where.js) ----
+const where = await import('../app/js/where.js');
+
+test('the kind of a tab: my files, tracker, this computer, a server', () => {
+  assert.equal(where.kindOfKey('f:abc'), 'synced');
+  assert.equal(where.kindOfKey('r:files/x/plan.md'), 'doc');
+  assert.equal(where.kindOfKey('d:C:\\logs\\app.log'), 'disk');
+  assert.equal(where.kindOfKey('d:remote://a1b2c3d4e5/var/log/app.log'), 'remote');
+  assert.equal(where.kindOfKey(null), null);
+  assert.deepEqual(where.remoteParts('remote://a1b2c3d4e5/var/log/app.log'), { id: 'a1b2c3d4e5', path: '/var/log/app.log' });
+  assert.deepEqual(where.remoteParts('remote://a1b2c3d4e5'), { id: 'a1b2c3d4e5', path: '/' });
+});
+
+test('a file on a server is shown as ssh writes it, or as a URL for another port', () => {
+  const uri = 'remote://a1b2c3d4e5/etc/nginx/nginx.conf';
+  assert.equal(where.remoteAddress(uri, { protocol: 'sftp', host: 'web1', port: 22, user: 'ana' }), 'ana@web1:/etc/nginx/nginx.conf');
+  assert.equal(where.remoteAddress(uri, { protocol: 'sftp', host: 'web1', port: 2222, user: 'ana' }), 'sftp://ana@web1:2222/etc/nginx/nginx.conf');
+  assert.equal(where.remoteAddress(uri, { protocol: 'ftp', host: 'files', port: 21, user: '' }), 'files:/etc/nginx/nginx.conf');
+  assert.equal(where.remoteAddress(uri, null), '/etc/nginx/nginx.conf');
+});
+
+test('the state shown with where a file lives', () => {
+  const text = (o) => where.whereState(o).text;
+  assert.equal(text({ kind: 'synced', file: {}, sync: { configured: true } }), 'Synced');
+  assert.equal(text({ kind: 'synced', file: { dirty: true }, sync: { configured: true, phase: 'idle' } }), 'Not synced yet');
+  assert.equal(text({ kind: 'synced', file: { dirty: true }, sync: { configured: true, phase: 'offline' } }), 'Not synced · offline');
+  assert.equal(text({ kind: 'synced', file: {}, sync: { configured: false } }), 'On this device only');
+  assert.equal(text({ kind: 'doc', repo: { dirty: true } }), 'Not synced yet');
+  assert.equal(text({ kind: 'disk', disk: { dirty: true } }), 'Not saved');
+  assert.equal(text({ kind: 'disk', disk: { conflict: true, dirty: true } }), 'Changed on disk');
+  assert.equal(text({ kind: 'disk', disk: { follow: true } }), 'Following');
+  assert.equal(text({ kind: 'remote', disk: {} }), 'Saved on the server');
+  assert.equal(text({ kind: 'remote', disk: { dirty: true } }), 'Not saved to the server');
+  assert.equal(text({ kind: 'remote', disk: { saving: true, dirty: true } }), 'Saving…');
+  assert.equal(text({ kind: 'remote', disk: { dirty: true, offline: true }, server: { state: 'error' } }), 'Not connected · not saved');
+  assert.equal(text({ kind: 'remote', disk: { offline: true }, server: { state: 'connecting' } }), 'Connecting…');
+  assert.equal(text({ kind: 'remote', disk: { missing: true } }), 'Not on the server');
+  assert.equal(where.whereState({ kind: 'remote', disk: { conflict: true } }).tone, 'error');
+});
+
+// ---- Files on servers (electron/remote.cjs), without a server ----
+const remoteMod = require('../electron/remote.cjs');
+
+test('server paths stay on their server and names stay clean', () => {
+  assert.deepEqual(remoteMod.parseUri('remote://a1b2c3d4e5/a/../../etc/passwd'), { id: 'a1b2c3d4e5', path: '/etc/passwd' });
+  assert.deepEqual(remoteMod.parseUri('remote://a1b2c3d4e5'), { id: 'a1b2c3d4e5', path: '/' });
+  assert.throws(() => remoteMod.parseUri('remote://../x'));
+  assert.throws(() => remoteMod.parseUri('/etc/passwd'));
+  assert.equal(remoteMod.toUri('a1b2c3d4e5', '/srv/x'), 'remote://a1b2c3d4e5/srv/x');
+  assert.match(remoteMod.fingerprintOf(Buffer.from('key')), /^SHA256:[A-Za-z0-9+/]+$/);
+  assert.match(remoteMod.friendlyError(Object.assign(new Error('x'), { code: 'ECONNREFUSED' }), { host: 'h', port: 22 }).message, /Nothing answers at h:22/);
+  assert.match(remoteMod.friendlyError(new Error('All configured authentication methods failed'), null).message, /did not accept/);
+});
+
+test('connections are checked and kept without their secrets', () => {
+  let stored = {};
+  const secrets = new Map();
+  const remote = remoteMod.createRemote({
+    store: { read: () => stored, write: (d) => (stored = JSON.parse(JSON.stringify(d))) },
+    secrets: { get: (id, kind) => secrets.get(`${id}:${kind}`) ?? '', set: (id, kind, v) => (v ? secrets.set(`${id}:${kind}`, v) : secrets.delete(`${id}:${kind}`)) },
+    askHostKey: async () => false,
+  });
+  assert.throws(() => remote.saveConnection({ host: '' }), /server name/);
+  assert.throws(() => remote.saveConnection({ host: 'a/b' }), /without spaces/);
+  assert.throws(() => remote.saveConnection({ host: 'h', port: 70000 }), /port/);
+  assert.throws(() => remote.saveConnection({ host: 'h', auth: 'key', keyPath: '/home/x/.ssh/id_ed25519' }), /Choose the key file/);
+  const c = remote.saveConnection({ host: 'h', user: 'u', protocol: 'ftp', auth: 'key', path: 'srv/www' }, { password: 'pw' });
+  assert.equal(c.port, 21);
+  assert.equal(c.auth, 'password', 'FTP signs in with a password');
+  assert.equal(c.path, '/srv/www');
+  assert.equal(c.hasPassword, true);
+  assert.equal(JSON.stringify(stored).includes('pw'), false);
+  remote.allowKey('/home/x/.ssh/id_ed25519');
+  const k = remote.saveConnection({ host: 'h', auth: 'key', keyPath: '/home/x/.ssh/id_ed25519' });
+  assert.equal(k.keyPath, '/home/x/.ssh/id_ed25519');
+  remote.deleteConnection(c.id);
+  assert.equal(secrets.has(`${c.id}:password`), false);
+});
+
+// ---- Text from images with the model (app/js/ocr.js) ----
+const ocr = await import('../app/js/ocr.js');
+
+test('a model is asked to transcribe images as they are', () => {
+  const [system, user] = ocr.visionMessages(['data:image/png;base64,AAA', 'data:image/png;base64,BBB'], { langs: 'spa' });
+  assert.match(system.content, /exactly as written \(most likely in Spanish\)/);
+  assert.match(system.content, /Do not translate/);
+  assert.equal(user.content[0].type, 'text');
+  assert.match(user.content[0].text, /these 2 images.*## Image N/);
+  assert.deepEqual(user.content.slice(1).map((p) => p.image_url.url), ['data:image/png;base64,AAA', 'data:image/png;base64,BBB']);
+});
+
+test('the reply is kept as the text, without fences or lead-ins', () => {
+  assert.equal(ocr.cleanVisionReply('Here is the text from the image:\nInvoice 4471\nTotal 12'), 'Invoice 4471\nTotal 12');
+  assert.equal(ocr.cleanVisionReply('```text\nline 1\nline 2\n```'), 'line 1\nline 2');
+  assert.equal(ocr.cleanVisionReply('| a | b |\n|---|---|\n| 1 | 2 |'), '| a | b |\n|---|---|\n| 1 | 2 |');
+  assert.equal(ocr.cleanVisionReply(''), '');
+  assert.equal(ocr.visionScale(4000, 1000), 0.5);
+  assert.equal(ocr.visionScale(800, 600), 1);
+  assert.equal(ocr.looksLikeVisionModel('llama3.2-vision:11b'), true);
+  assert.equal(ocr.looksLikeVisionModel('qwen2.5vl:7b'), true);
+  assert.equal(ocr.looksLikeVisionModel('llama3.2'), false);
+  assert.equal(ocr.looksLikeVisionModel('nomic-embed-text'), false);
+});

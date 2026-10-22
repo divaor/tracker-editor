@@ -10,7 +10,10 @@ import { previewKind } from './previews.js';
 import { getReaderState, onReaderState, setReaderHighlighter, startReading, stopReading, toggleReading } from './reader.js';
 import { getSettings, getToken, isSyncConfigured, onSettings, resolvedTheme, saveSettings } from './settings.js';
 import { diskKey, fileKey, flush, parseKey, repoKey, store } from './store.js';
-import { diskAvailable, openDiskFiles, reloadDiskTab, saveDiskTab, unwatchDisk, watchDiskTabs } from './diskTabs.js';
+import { diskAvailable, openDiskFiles, recheckServerTabs, reloadDiskTab, saveDiskTab, unwatchDisk, watchDiskTabs } from './diskTabs.js';
+import { isRemotePath, kindOfKey, remoteAddress, remoteParts, remoteRoot } from './where.js';
+import { onServers, server, watchServers } from './servers.js';
+import { HostKeyDialog, ServerDialog } from './ui/servers.js';
 import { claudeText, opensInEditor, remapPath } from './folders.js';
 import { draggedPaths, draggedTab, dropped, isOwnDrop } from './dragOut.js';
 import { getSyncState, onSyncResult, onSyncState, syncClient, syncNow } from './syncManager.js';
@@ -403,10 +406,11 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         hostRef.current?.flushAll();
         try {
           const result = await saveDiskTab(path, { force });
-          if (result === 'conflict') toast('The file changed on disk since you opened it, so it was not saved. Reload it, or keep yours and save over it.', { kind: 'error', timeout: 10000 });
+          if (result === 'conflict') toast(`The file changed ${isRemotePath(path) ? 'on the server' : 'on disk'} since you opened it, so it was not saved. Reload it, or keep yours and save over it.`, { kind: 'error', timeout: 10000 });
           return result;
         } catch (err) {
-          toast(err.message, { kind: 'error' });
+          // A server that cannot be reached: the file bar says so, with Reconnect.
+          if (!store.diskTab(path)?.offline) toast(ipcMessage(err), { kind: 'error', timeout: 8000 });
           return 'error';
         }
       },
@@ -442,7 +446,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
           key: diskKey(path),
           name: tab.name,
           language: '',
-          left: { label: 'On disk now', text: onDisk },
+          left: { label: isRemotePath(path) ? 'On the server now' : 'On disk now', text: onDisk },
           right: { label: 'Your edits', text: tab.text },
           actions: [
             { label: 'Use the disk version', icon: 'rotate', run: () => (setCompare(null), actions.reloadDisk(path)) },
@@ -450,7 +454,32 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
           ],
         });
       },
-      showOnDisk: (path) => window.desktop?.disk?.show(path),
+      /** Shows a file in the file explorer; one on a server, in the folders view at its folder. */
+      showOnDisk(path) {
+        if (!isRemotePath(path)) return window.desktop?.disk?.show(path);
+        saveSettings({ sidebarMode: 'folders', folder: path.slice(0, path.lastIndexOf('/')) || remoteRoot(remoteParts(path).id) });
+        setSidebar(true);
+      },
+      /** Connects to a server again (its tabs are looked at again when it is back). */
+      async reconnectServer(id) {
+        try {
+          await window.desktop.remote.connect(id);
+        } catch (err) {
+          toast(ipcMessage(err), { kind: 'error', timeout: 8000 });
+        }
+      },
+      /** Adds a server ({}), or edits one. */
+      editServer: (conn = {}) => setDialog({ type: 'server', conn }),
+      /** Opens a server in the folders view. */
+      async openServer(id) {
+        try {
+          const { root } = await window.desktop.remote.connect(id);
+          saveSettings({ sidebarMode: 'folders', folder: root });
+          setSidebar(true);
+        } catch (err) {
+          toast(ipcMessage(err), { kind: 'error', timeout: 8000 });
+        }
+      },
       /** A copy of a disk file as one of the editor's files (synced); the file on disk stays as it is. */
       async copyToFiles(path) {
         const tab = store.diskTab(path);
@@ -549,7 +578,8 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         }
         if (k?.kind === 'disk') {
           const d = store.diskTab(k.path);
-          return d && { name: d.name, text: d.text, path: d.missing ? '' : d.path, dirty: d.dirty };
+          // A file on a server goes as a copy (other apps cannot reach it there).
+          return d && { name: d.name, text: d.text, path: d.missing || isRemotePath(d.path) ? '' : d.path, dirty: d.dirty };
         }
         const t = k && store.repoTab(k.path);
         return t && { name: t.name, text: t.text };
@@ -580,8 +610,9 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
           toast(err.message, { kind: 'error' });
         }
       },
-      /** A path on the clipboard; `claude`: quoted when needed, as a terminal takes it. */
+      /** A path on the clipboard; `claude`: quoted when needed, as a terminal takes it. A file on a server: user@host:/path. */
       async copyPath(path, { claude = false } = {}) {
+        if (isRemotePath(path)) path = remoteAddress(path, server(remoteParts(path).id));
         await navigator.clipboard.writeText(claude ? claudeText({ path }) : path).catch(() => {});
         toast(claude ? 'The path is on the clipboard: paste it into Claude' : 'Path copied');
       },
@@ -944,6 +975,33 @@ export function App() {
     return onReaderState((s) => s.status === 'idle' && s.error && toast(s.error, { kind: 'error' }));
   }, []);
   useEffect(() => onSyncState(setSync), []);
+  // Servers (desktop): their status shows on tabs; when one connects again, its tabs are looked at again.
+  useEffect(() => {
+    const offStatus = watchServers({ onConnected: recheckServerTabs });
+    const offList = onServers(rerender);
+    return () => (offStatus(), offList());
+  }, []);
+  const [hostKey, setHostKey] = useState(null);
+  useEffect(() => window.desktop?.remote?.onHostKey(setHostKey), []);
+  // Files on servers set to save automatically: a moment after the last edit.
+  useEffect(() => {
+    const timers = new Map();
+    return store.subscribe((reason, detail) => {
+      if (reason !== 'disk' || !detail?.text || !isRemotePath(detail.path) || !server(remoteParts(detail.path).id)?.autoSave) return;
+      clearTimeout(timers.get(detail.path));
+      timers.set(
+        detail.path,
+        setTimeout(async () => {
+          const tab = store.diskTab(detail.path);
+          if (!tab?.dirty || tab.conflict || tab.saving || tab.follow) return;
+          hostRef.current?.flushAll();
+          // Not reached: the tab says so, and the edits wait on this device.
+          const result = await saveDiskTab(detail.path).catch(() => null);
+          if (result === 'conflict') toast(`${tab.name} changed on the server, so it was not saved. Compare, reload, or keep yours.`, { kind: 'error', timeout: 10000 });
+        }, 1500),
+      );
+    });
+  }, []);
   useEffect(
     () =>
       onSyncResult((result) => {
@@ -1400,6 +1458,7 @@ export function App() {
         'type-out': () => actions.typeOut(),
         'disk-open': () => actions.openDiskFiles(),
         'folder-open': () => actions.openFolder(),
+        'server-add': () => actions.editServer(),
         folders: () => actions.showFolders(),
         'clipboard-history': () => actions.openClipboardHistory(),
         captures: () => actions.takeCaptures(),
@@ -1495,13 +1554,13 @@ export function App() {
       ${view === 'settings' && html`<${SettingsView} settings=${settings} sync=${sync} actions=${actions} />`}
       <div class="editor-view" hidden=${view === 'settings'}>
         <${TabBar} session=${store.session} projects=${projects} settings=${settings} actions=${actions} />
-        ${activeKey && html`<${FileBar} file=${activeFile} repo=${activeRepo} disk=${activeDisk} sealed=${activeSealed} projects=${projects} language=${languageName}
+        ${activeKey && html`<${FileBar} file=${activeFile} repo=${activeRepo} disk=${activeDisk} sealed=${activeSealed} projects=${projects} language=${languageName} sync=${sync}
           canPreview=${Boolean(previewType)} preview=${showPreview} settings=${settings} actions=${actions} />`}
         ${activeKey && filterKeys.has(activeKey) && !compare && !activeSealed &&
         html`<${FilterBar} key=${activeKey} tabKey=${activeKey} actions=${actions} onClose=${actions.toggleFilter} />`}
         ${dictating && dictating === activeKey && html`<${DictationBar} lang=${settings.dictationLang} onPhrase=${actions.dictate} onStop=${actions.stopDictation} />`}
         ${typingJob && html`<${TypeOutPanel} job=${typingJob} onStop=${() => window.desktop?.typing?.stop()} />`}
-        <div class="editor-area ${showPreview ? 'split' : ''} ${showSide ? 'side-split' : ''} ${compare ? 'comparing' : ''}">
+        <div class="editor-area ${showPreview ? 'split' : ''} ${showSide ? 'side-split' : ''} ${compare ? 'comparing' : ''} ${settings.whereFrame && activeKey ? 'framed' : ''}" data-kind=${kindOfKey(activeKey) ?? undefined}>
           <div class="editor-host" ref=${editorEl} />
           ${assist && activeKey && view === 'editor' && !compare && !activeSealed && html`<${AssistPanel} key=${activeKey} scope=${assistScope} actions=${actions} onClose=${() => (setAssist(false), hostRef.current?.focus())} />`}
           ${!assist && modelReady && settings.assistBubble && activeKey && !compare && !activeSealed && !typingJob && html`<${AssistBubble} onOpen=${() => setAssist(true)} />`}
@@ -1552,6 +1611,8 @@ export function App() {
           onPick=${(entry) => actions.compareWithEntry(entry)} onClose=${() => setDialog(null)} />`
       : html`<${QuickOpen} files=${store.live()} docs=${docs} actions=${actions} onClose=${() => setDialog(null)} />`)}
     ${dialog?.type === 'ocr' && html`<${OcrDialog} images=${dialog.images} saveTo=${dialog.saveTo} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'server' && html`<${ServerDialog} conn=${dialog.conn} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${hostKey && html`<${HostKeyDialog} info=${hostKey} onAnswer=${(ok) => (window.desktop.remote.answerHostKey(hostKey.question, ok), setHostKey(null))} />`}
     ${dialog?.type === 'clipboard' && html`<${ClipboardHistory} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'macro' && html`<${MacroDialog} steps=${dialog.steps} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'trash' && html`<${TrashDialog} actions=${actions} onClose=${() => setDialog(null)} />`}

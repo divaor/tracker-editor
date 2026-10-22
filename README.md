@@ -12,6 +12,7 @@ It is the companion of [Tracker](https://github.com/divaor/tracking_app) and sha
   - Right-click (or long-press) a tab to **pin** it, open it **to the side**, see its history, compare it, or close others, those to the right, a project's tabs or all.
   - **Group tabs by project**, each group with a header that folds it.
   - **Split view** (`Ctrl+\`) on wide screens: two files side by side, both editable.
+- **Where each file lives, at a glance**: every tab, the file bar, the status bar and a frame around the editor are colored by where the file is: **my files** (synced, green), a **tracker** document (blue), **this computer** (amber) or a **server** (pink). The file bar says how it stands: synced or not yet, saved or not, changed elsewhere, not connected.
 - **Nothing is lost**: pasted text and new tabs are saved to disk immediately, and typing a moment after the last key. Every write waits until it is on disk, so a crash or a power cut keeps your work. The data repo then holds a copy too, synced a few seconds later.
 - **Named and filed from their content**: an untitled tab you paste or write into gets a name that says what it is, from the local model when one is connected (for example `Deploy runbook.md`), otherwise from a heading on its first line. The model also files a new note under one of your projects, with a few tags. Undo puts back what it had.
 - **History**: every synced version of a file or tracker document, with who changed it and when. Compare any version with the text now, side by side (one text with the changes marked on phones), then restore it, copy it or open it as a new file. **Compare with…** compares two files.
@@ -40,7 +41,8 @@ It is the companion of [Tracker](https://github.com/divaor/tracking_app) and sha
 - **Drag a tab out** (desktop): to the desktop or a folder for a copy, to a terminal running Claude Code for its path, or to the Claude app to attach it. **Copy for Claude** in the tab menu copies the path of a file on disk, or the name and text of the others.
 - **Quick capture** (desktop): a shortcut that works in any app opens a small window to jot something down, kept as a new note or added to `Inbox.md`.
 - **Clipboard history** (desktop, off until you turn it on): what you copy in any app, to search and paste again (`Ctrl+Shift+V`). Kept on the computer, encrypted, and passwords from password managers are skipped.
-- **Text from images and screenshots**: paste, drop or pick an image (on a phone, take a photo), or on the desktop drag around part of the screen, and its text is read on the device (English and Spanish) to insert, keep or copy.
+- **Files on servers** (desktop): connect to servers over **SFTP**, **FTPS** or **FTP** and work on their files as on your own: browse them in Folders, open, edit and save back, follow logs, rename, move, copy, upload and delete. The editor shows when a file is not saved to the server yet, changed there meanwhile, or the server cannot be reached.
+- **Text from images and screenshots**: paste, drop or pick an image (on a phone, take a photo), or on the desktop drag around part of the screen, and its text is read on the device (English and Spanish), or by your model when it reads images, to insert, keep or copy.
 - **Voice notes** (phone and browsers with a speech service): the microphone button dictates into the open file or a new note, with spoken line breaks ("new line", "nuevo párrafo").
 - **Syntax highlighting** for 140+ languages, detected from the file name or the content of pasted text, or picked in the status bar.
 - **Editing tools**: find and replace (with regex), go to line, multiple cursors, select next occurrence, comment lines, duplicate/delete/sort lines, remove duplicates, trim trailing spaces, upper/lower case, format JSON, word wrap, visible whitespace, bracket matching, code folding.
@@ -227,7 +229,18 @@ Drag a tab out of the window and drop it on another app. The app gets a file, an
 - Dropped back on the tab bar, the tab moves there, as before. On the web app, a dragged tab carries its text, so dropping it into a chat box or another app's text field pastes it.
 - **Copy for Claude** (tab menu, or ⋯): for a file on disk, its path (quoted when it has spaces), which Claude Code reads where it is; for the others, the name and the text in a code block, ready to paste into a chat.
 
-## 9. Quick capture, clipboard history and screenshots (desktop)
+## 9. Files on servers (desktop)
+
+**File → Connect to a Server…**, or **Connect to a server…** in Folders, adds one: **SFTP** (over SSH), **FTPS** (FTP over TLS) or **FTP** (not encrypted: only where nothing else is available).
+
+- Sign in with a **password**, a **key file** (with its passphrase, if it has one) or, for SFTP, your **SSH agent**. Passwords and passphrases are kept in this computer's keychain, never in the editor's settings or your data repo, and are not shown again. **Test** tries the settings before you save them.
+- The first SFTP connection shows the **server's key fingerprint** to check (as `ssh-keygen -lf` prints it); it is remembered. If it ever changes, the editor asks before connecting, since that can mean someone is in between.
+- The server opens in **Folders**, starting in your home folder (or the folder you set). Everything in the folders view works there: open, new file or folder, rename, cut, copy and paste, duplicate, drag onto folders, delete (for good: servers have no Recycle Bin, so it asks first), and files pasted or dropped from your computer are uploaded. Copying between your computer and a server goes both ways. Pictures and other files open with their program from a downloaded copy.
+- A file from a server opens in a **pink** tab, with the server's name in the file bar and the status bar (`SFTP · user@host:/path`, and a dot for the connection). It is not synced: **Ctrl+S** saves it to the server, and until then the tab says **Not saved to the server**. Turn on **Save to the server automatically** in the server's settings to save a moment after you stop typing.
+- Changes made on the server show up in tabs you have not edited; with your edits, the file bar offers **Compare**, **Reload** or **Keep mine and save over it**, so nothing is overwritten by surprise. **Follow** shows lines added to a log on the server.
+- If the server cannot be reached, your edits stay on this device (also across restarts), the tab says **Not connected · not saved**, and **Reconnect** brings it back.
+
+## 10. Quick capture, clipboard history and screenshots (desktop)
 
 All three are in **Settings → Desktop**, off until you turn them on.
 
@@ -236,9 +249,10 @@ All three are in **Settings → Desktop**, off until you turn them on.
 - **Clipboard history** (`Ctrl+Shift+V`): texts you copy in any app, newest first. Search them, insert one at the cursor, copy it again, open it as a file or type it into another window; pin the ones to keep. They stay on this computer, encrypted with its keychain; copies password managers mark as secret are skipped, and turning it off forgets the history.
 - **Keep running in the tray when the window is closed**, so the shortcuts and the history keep working.
 
-## 10. Text from images and voice notes
+## 11. Text from images and voice notes
 
 - **Images**: paste an image into a file, drop one on the window, pick one with **⋯ → Text from an image…** (on a phone you can take a photo), or share one to the editor from another app. The text is read on the device by [Tesseract](https://github.com/naptha/tesseract.js) in English and Spanish (pick one language for better results), shown to correct, then inserted, kept as a new file or copied. The first time loads about 9 MB; after that it works offline.
+  - **With your model**: when the connected model reads images (a vision model such as `llama3.2-vision`, `qwen2.5vl` or `gemma3`, set as **Model for images** in Settings → Model), **Read by** in the dialog switches to it. It often does better with photos, handwriting and tables (kept as Markdown tables). The image goes to your model server; a local one keeps it on your computer. The choice is remembered.
 - **Voice notes**: the microphone button at the top dictates into the open file, or a new note when none is open; **Voice note** on the installed app's icon (long-press it on Android) starts one. Say "new line" or "new paragraph" ("nueva línea", "nuevo párrafo", "punto y aparte") for line breaks. It uses the browser's speech service (on Android, Google's), so it needs a connection; pick the language in **Settings → Voice notes**. The desktop app has no speech service, so dictation is not there.
 
 ## Keyboard shortcuts
@@ -249,7 +263,7 @@ All three are in **Settings → Desktop**, off until you turn them on.
 | `Ctrl+P` | Open a file by name |
 | `Ctrl+Shift+F` | Find in files |
 | `Ctrl+O` | Open a file from disk to edit in place (desktop) |
-| `Ctrl+Shift+E` | Folders on this computer (desktop) |
+| `Ctrl+Shift+E` | Folders on this computer and on servers (desktop) |
 | In the folders view | `Enter` open, `Backspace` up, `F2` rename, `Del` delete, `Ctrl+C` / `Ctrl+X` / `Ctrl+V`, `Ctrl+A`, `Ctrl+Shift+N` new folder, `F5` refresh |
 | `Ctrl+F` / `Ctrl+H` | Find / replace in this file |
 | `Ctrl+G` | Go to line |
@@ -315,6 +329,8 @@ npm run vendor    # re-bundle CodeMirror and copy Preact/htm, marked, DOMPurify 
 
 The web app is plain ES modules with no build step. CodeMirror 6 and its languages are bundled once by `npm run vendor` (esbuild, one chunk per language) into `app/vendor/cm/`; text recognition (tesseract.js, its WebAssembly core and the English and Spanish models) is copied into `app/vendor/ocr/`.
 
+The desktop app's only runtime dependencies are [ssh2](https://github.com/mscdex/ssh2) (SFTP) and [basic-ftp](https://github.com/patrickjuchli/basic-ftp) (FTP, FTPS), both plain JavaScript. ssh2's optional native speed-ups are left out of the installers (`build.files` in package.json), so builds need no compiler; it uses its JavaScript and WebAssembly code instead.
+
 ```
 app/                  the web app (also loaded by Electron)
   js/model.js         file records, merge rules, paths in the data repo
@@ -334,6 +350,7 @@ app/                  the web app (also loaded by Electron)
   js/snippets.js, outline.js, logtools.js, checklist.js   snippets, outline and [[links]], line filters, checklists
   js/diskTabs.js      files on disk edited in place, reloads and follow mode
   js/folders.js, dragOut.js       the folders view (paths, order, selection, Copy for Claude), dragging tabs and files out
+  js/where.js, servers.js         where a file lives (kinds, colors, states), the servers and their connections
   js/capture.js, ocr.js, ocrEngine.js, dictation.js       quick capture, text from images, voice notes
   js/ui/              tabs, sidebar, panels, dialogs, model panel, settings, compare, history, trash
   capture.html, snip.html   the quick capture window and the screenshot overlay (desktop)
@@ -343,6 +360,7 @@ electron/             main process + preload (app:// protocol, keychain, model p
   typer.cjs           key presses into another window (Windows, macOS, Linux)
   diskFiles.cjs       reading and writing files on disk (encodings, line endings, the end of huge files)
   folders.cjs         which paths the page may reach in picked folders, listings, rename/move/copy, what may open outside
+  remote.cjs          servers: SFTP (ssh2) and FTP/FTPS (basic-ftp), connections, host keys, files and folders there
   clipHistory.cjs     the clipboard history list
 scripts/              vendor bundling, icon rendering, local web server
 test/                 unit tests
@@ -358,6 +376,7 @@ test/                 unit tests
 - **Model service secrets**: the API key and webhook secret are kept in the keychain (desktop) and never written to the settings or the data repo. The webhook receiver refuses events whose signature does not match when a secret is set.
 - **Files on disk**: the page can read and write only files you picked in the desktop app's open dialog, and files inside folders you picked there (symbolic links resolved, so they cannot lead outside). A forgotten folder is out of reach again. Renaming, moving, copying and deleting stay inside the picked folders, deleting goes to the Recycle Bin, and files pasted or dropped from other apps are copied in without becoming reachable themselves.
 - **Other programs**: files open with their default program only when they are not programs, scripts or shortcuts, so a page can never start one.
+- **Servers**: passwords and key passphrases are kept by the main process in the keychain store and never sent to the page; key files can only be ones picked in the file dialog. SSH host keys are checked against the fingerprint you trusted, and a changed key stops the connection unless you accept it. FTPS checks the server's certificate unless you allow a self-signed one; FTP is marked as unencrypted.
 - **Dragged tabs**: synced files dragged out are written as plain copies to a temporary folder, deleted after a week; encrypted files are never written out.
 - **Clipboard history** is off by default, kept only on the computer (encrypted with the keychain; in memory only when there is none), skips copies marked as secret by password managers, and is deleted when turned off.
 - **Text from images** runs in the page: images are never uploaded. **Voice notes** use the browser's speech service, which sends the audio to its provider.

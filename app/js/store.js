@@ -60,7 +60,8 @@ function later(key, fn, ms = 250) {
   }, ms));
 }
 // A disk tab's text is kept only while it has unsaved edits; otherwise it is read from disk again.
-const savedDiskTabs = () => [...diskTabs.values()].map((t) => (t.dirty ? t : { ...t, text: '', stale: true }));
+// `saving` and `offline` are for now only (a server that was not reached may be reachable after a restart).
+const savedDiskTabs = () => [...diskTabs.values()].map(({ saving, offline, ...t }) => (t.dirty ? t : { ...t, text: '', stale: true }));
 
 const persist = {
   files: (ms) => later('files', () => kvSet('files', [...files.values()]), ms),

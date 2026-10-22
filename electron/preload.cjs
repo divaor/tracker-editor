@@ -78,6 +78,29 @@ contextBridge.exposeInMainWorld('desktop', {
     // Ctrl+V in the page: a paste event with the files copied in other apps.
     paste: () => ipcRenderer.invoke('edit:paste'),
   },
+  // Servers (SFTP, FTP, FTPS): files there are remote://<id>/<path> and go through disk and folders above.
+  remote: {
+    connections: () => ipcRenderer.invoke('remote:connections'),
+    // `secrets`: { password, passphrase } to keep (sent once; never read back).
+    save: (conn, secrets) => ipcRenderer.invoke('remote:save', conn, secrets),
+    delete: (id) => ipcRenderer.invoke('remote:delete', id),
+    test: (conn, secrets) => ipcRenderer.invoke('remote:test', conn, secrets),
+    connect: (id) => ipcRenderer.invoke('remote:connect', id),
+    disconnect: (id) => ipcRenderer.invoke('remote:disconnect', id),
+    forgetHostKey: (id) => ipcRenderer.invoke('remote:forget-host-key', id),
+    pickKey: () => ipcRenderer.invoke('remote:pick-key'),
+    answerHostKey: (question, ok) => ipcRenderer.invoke('remote:host-key-answer', question, ok),
+    onStatus(callback) {
+      const listener = (_event, status) => callback(status);
+      ipcRenderer.on('remote:status', listener);
+      return () => ipcRenderer.removeListener('remote:status', listener);
+    },
+    onHostKey(callback) {
+      const listener = (_event, info) => callback(info);
+      ipcRenderer.on('remote:host-key', listener);
+      return () => ipcRenderer.removeListener('remote:host-key', listener);
+    },
+  },
   // Dragging tabs or files out to other apps: { path } or { paths } on disk, or { name, text } for a copy.
   drag: {
     start: (item) => ipcRenderer.send('drag:start', item),

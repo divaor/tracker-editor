@@ -18,6 +18,8 @@ import { TYPING_SPEEDS } from '../typing.js';
 import { DICTATION_LANGUAGES } from '../dictation.js';
 import { dictationSupported } from './dictation.js';
 import { Icon } from './icons.js';
+import { KINDS } from '../where.js';
+import { looksLikeVisionModel } from '../ocr.js';
 
 const SYNC_FIELDS = ['owner', 'repo', 'branch', 'trackerPath', 'device'];
 const pick = (obj, keys) => Object.fromEntries(keys.map((k) => [k, obj[k] ?? '']));
@@ -124,6 +126,11 @@ function EditorCard({ settings }) {
       <${Check} checked=${settings.showWhitespace} label="Show spaces and trailing whitespace" onChange=${(v) => saveSettings({ showWhitespace: v })} />
       <${Check} checked=${settings.groupTabs} label="Group tabs by project" hint="Each project's tabs together, with a header that folds them"
         onChange=${(v) => saveSettings({ groupTabs: v })} />
+      <${Check} checked=${settings.whereFrame} label="Frame the editor in the color of where the file lives" hint="Tabs, the file bar and the status bar always show it"
+        onChange=${(v) => saveSettings({ whereFrame: v })} />
+      <div class="where-legend span-2" aria-label="Where files live">
+        ${Object.entries(KINDS).map(([kind, k]) => html`<span key=${kind} class="where-chip kind-${kind} tone-ok" title=${k.hint}><${Icon} name=${k.icon} size=${14} /><span class="where-label">${k.label}</span><span class="where-state">${{ synced: 'synced', doc: 'synced with the tracker', disk: 'not synced', remote: 'not synced' }[kind]}</span></span>`)}
+      </div>
       <${Check} checked=${settings.autoName} label="Name new files from what is in them" hint="By the local model when it is on, otherwise from a heading on the first line"
         onChange=${(v) => saveSettings({ autoName: v })} />
       <${Check} checked=${settings.autoFile} label="File new notes under a project, with tags" hint="By the local model, from your projects and the tags you use. Undo is in the message."
@@ -369,7 +376,7 @@ function OpenAiModelForm({ settings, actions }) {
       setModels(list);
       const guessEmbed = list.find((m) => /embed|bge|e5|minilm|nomic/i.test(m)) ?? '';
       const guessChat = list.find((m) => !/embed|bge|e5|minilm|nomic/i.test(m)) ?? '';
-      setForm((f) => ({ ...f, chatModel: f.chatModel || guessChat, embedModel: f.embedModel || guessEmbed }));
+      setForm((f) => ({ ...f, chatModel: f.chatModel || guessChat, embedModel: f.embedModel || guessEmbed, visionModel: f.visionModel || (list.find(looksLikeVisionModel) ?? '') }));
       setCheck({ state: 'ok', text: list.length ? `Connected. ${list.length} model${list.length === 1 ? '' : 's'} available.` : 'Connected, but no models are downloaded yet (for Ollama: ollama pull llama3.2).' });
     } catch (err) {
       setCheck({ state: 'error', text: err.message });
@@ -397,6 +404,10 @@ function OpenAiModelForm({ settings, actions }) {
       <${Field} label="Embedding model" hint="For finding by meaning, e.g. nomic-embed-text. Optional.">
         ${models ? html`<select value=${form.embedModel} onChange=${(e) => set({ embedModel: e.currentTarget.value })}><option value="">None (keyword search)</option>${options(form.embedModel).map((m) => html`<option key=${m} value=${m}>${m}</option>`)}</select>`
         : html`<input value=${form.embedModel} onInput=${(e) => set({ embedModel: e.currentTarget.value })} placeholder="nomic-embed-text" spellcheck=${false} />`}
+      </${Field}>
+      <${Field} label="Model for images" hint="Reads text from images when you choose it in Text from an image, e.g. llama3.2-vision, qwen2.5vl, gemma3. Blank: the chat model.">
+        ${models ? html`<select value=${form.visionModel ?? ''} onChange=${(e) => set({ visionModel: e.currentTarget.value })}><option value="">The chat model</option>${options(form.visionModel).map((m) => html`<option key=${m} value=${m}>${m}</option>`)}</select>`
+        : html`<input value=${form.visionModel ?? ''} onInput=${(e) => set({ visionModel: e.currentTarget.value })} placeholder="llama3.2-vision" spellcheck=${false} />`}
       </${Field}>
       <${Field} label="API key" hint="Only if your server needs one"><input type="password" value=${form.apiKey} onInput=${(e) => set({ apiKey: e.currentTarget.value })} autocomplete="off" /></${Field}>
       <div class="form-actions span-2">
