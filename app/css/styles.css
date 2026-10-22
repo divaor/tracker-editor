@@ -3511,6 +3511,64 @@ svg.up {
   white-space: nowrap;
 }
 
+/* ---- Filter lines, large files ------------------------------------------------------- */
+.filter-bar {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.filter-bar > svg {
+  color: var(--text-3);
+}
+
+.filter-bar input {
+  flex: 1 1 200px;
+  min-width: 0;
+  min-height: 30px;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.filter-bar input.invalid {
+  border-color: var(--danger);
+}
+
+.filter-bar .toggle {
+  width: 30px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.filter-bar .toggle.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.filter-count {
+  white-space: nowrap;
+}
+
+.cm-hidden-lines {
+  padding: 1px 12px;
+  border-top: 1px dashed var(--border);
+  border-bottom: 1px dashed var(--border);
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-family: var(--font);
+  font-size: 11px;
+}
+
+.status-big {
+  color: var(--warn);
+}
+
 /* ---- Phone / narrow window --------------------------------------------------------- */
 .scrim {
   display: none;

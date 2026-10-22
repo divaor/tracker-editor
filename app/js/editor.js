@@ -62,7 +62,9 @@ import {
   undo,
   unifiedMergeView,
   ViewPlugin,
+  WidgetType,
 } from '../vendor/cm/codemirror.js';
+import { compileFilter, hiddenRuns, isBigText } from './logtools.js';
 import { parseLinks } from './outline.js';
 
 export { languages };
@@ -248,6 +250,46 @@ export function createCompareView(parent, { left, right, name = '', language = '
   };
 }
 
+// Showing only the lines that match a filter (or hiding them), per tab. Hidden
+// runs collapse into a small marker; line numbers stay those of the file.
+const setLineFilter = StateEffect.define();
+class HiddenLines extends WidgetType {
+  constructor(count) {
+    super();
+    this.count = count;
+  }
+  eq(other) {
+    return other.count === this.count;
+  }
+  toDOM() {
+    const el = document.createElement('div');
+    el.className = 'cm-hidden-lines';
+    el.textContent = `⋯ ${this.count.toLocaleString()} line${this.count === 1 ? '' : 's'} hidden`;
+    return el;
+  }
+}
+const NO_FILTER = { filter: null, test: null, deco: Decoration.none, shown: 0, total: 0 };
+function applyFilter(doc, filter, test) {
+  const { runs, shown } = hiddenRuns(doc.lines, (n) => doc.line(n).text, test, filter.mode);
+  const deco = Decoration.set(runs.map(([a, b]) => Decoration.replace({ block: true, widget: new HiddenLines(b - a + 1) }).range(doc.line(a).from, doc.line(b).to)));
+  return { filter, test, deco, shown, total: doc.lines };
+}
+const lineFilterField = StateField.define({
+  create: () => NO_FILTER,
+  update(value, tr) {
+    let { filter, test } = value;
+    for (const e of tr.effects) {
+      if (!e.is(setLineFilter)) continue;
+      filter = e.value;
+      test = filter ? compileFilter(filter) : null;
+    }
+    if (!filter) return NO_FILTER;
+    if (filter === value.filter && !tr.docChanged) return value;
+    return applyFilter(tr.state.doc, filter, test);
+  },
+  provide: (f) => EditorView.decorations.from(f, (v) => v.deco),
+});
+
 // [[Links]] between notes: underlined; Ctrl/Cmd+click opens them (host option onOpenLink).
 const wikiLinkMatcher = new MatchDecorator({ regexp: /\[\[[^[\]\n]+?\]\]/g, decoration: Decoration.mark({ class: 'cm-wikilink', attributes: { title: 'Ctrl+click to open' } }) });
 const wikiLinks = ViewPlugin.fromClass(
@@ -288,6 +330,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
   let options = settings;
   let active = null;
   let side = null; // { key, view } of the split view's second pane
+  const bigKeys = new Set(); // tabs in the lighter editor for very large files
   let focused = 'main'; // the pane typed in last: commands and reading aloud use it
   // The view showing a tab, if one does.
   const viewOf = (key) => (key && key === active ? view : key && key === side?.key ? side.view : null);
@@ -335,7 +378,11 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
 
   function extensions(key, text) {
     const config = configFor(options);
+    // A very large file gets a lighter editor: no wrapping, matching, completion or highlighting.
+    const big = isBigText(text);
+    if (big) bigKeys.add(key);
     return [
+      lineFilterField,
       gutter.of(config.gutter),
       highlightActiveLineGutter(),
       highlightSpecialChars(),
@@ -344,14 +391,12 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       dropCursor(),
       EditorState.allowMultipleSelections.of(true),
       indentOnInput(),
-      bracketMatching(),
-      closeBrackets(),
-      autocompletion({ activateOnTyping: true }),
+      big ? [] : [bracketMatching(), closeBrackets(), autocompletion({ activateOnTyping: true })],
       EditorState.languageData.of(() => [{ autocomplete: completeAnyWord }, { autocomplete: linkCompletion }]),
       rectangularSelection(),
       crosshairCursor(),
       highlightActiveLine(),
-      highlightSelectionMatches(),
+      big ? [] : highlightSelectionMatches(),
       readingField,
       search({ top: true }),
       placeholder('Type or paste here. Everything is saved on this device as you type and synced to GitHub.'),
@@ -371,7 +416,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       ]),
       lang.of([]),
       theme.of(config.theme),
-      wrap.of(config.wrap),
+      wrap.of(big ? [] : config.wrap),
       whitespace.of(config.whitespace),
       tabs.of(config.tabs),
       EditorView.updateListener.of((update) => {
@@ -412,6 +457,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
   setVisible(false);
 
   async function loadLanguage(key, name, chosen) {
+    if (bigKeys.has(key)) return PLAIN_TEXT;
     const desc = findLanguage(name, chosen);
     const support = desc ? (desc.support ?? (await desc.load().catch(() => null))) : null;
     const effects = lang.reconfigure(support ?? []);
@@ -493,6 +539,41 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       return true;
     },
 
+    /**
+     * Shows only the lines of a tab that match `filter` ({ pattern, regex,
+     * caseSensitive, mode: 'show' | 'hide' }), or all of them (null).
+     * Returns { shown, total }; throws when the pattern is invalid.
+     */
+    setLineFilter(key, filter) {
+      if (filter) compileFilter(filter);
+      const v = viewOf(key);
+      const effects = setLineFilter.of(filter);
+      if (v) v.dispatch({ effects });
+      else if (states.has(key)) states.set(key, states.get(key).update({ effects }).state);
+      return this.lineFilter(key);
+    },
+    /** The tab's filter and counts: { filter, shown, total }. */
+    lineFilter(key) {
+      const state = viewOf(key)?.state ?? states.get(key);
+      const f = state?.field(lineFilterField, false);
+      return f?.filter ? { filter: f.filter, shown: f.shown, total: f.total } : { filter: null, shown: state?.doc.lines ?? 0, total: state?.doc.lines ?? 0 };
+    },
+    /** The lines the filter shows, as text. */
+    shownLines(key) {
+      const state = viewOf(key)?.state ?? states.get(key);
+      const f = state?.field(lineFilterField, false);
+      if (!state) return '';
+      if (!f?.filter) return state.doc.toString();
+      const out = [];
+      for (let n = 1; n <= state.doc.lines; n++) {
+        const text = state.doc.line(n).text;
+        if (f.test.test(text) === (f.filter.mode === 'show')) out.push(text);
+      }
+      return out.join('\n');
+    },
+    /** Whether a tab is in the lighter editor for very large files. */
+    isBig: (key) => bigKeys.has(key),
+
     /** Inserts text in place of the selection of the pane typed in last, the cursor `cursorOffset` into it. */
     insertAtCursor(text, cursorOffset = text.length) {
       const { key, view: v } = current();
@@ -546,13 +627,16 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       options = next;
       const config = configFor(next);
       const effects = [theme.reconfigure(config.theme), wrap.reconfigure(config.wrap), whitespace.reconfigure(config.whitespace), tabs.reconfigure(config.tabs), gutter.reconfigure(config.gutter)];
-      for (const [key, state] of states) if (!viewOf(key)) states.set(key, state.update({ effects }).state);
-      if (active) view.dispatch({ effects });
-      side?.view.dispatch({ effects });
+      // Large files keep wrapping off.
+      const effectsFor = (key) => (bigKeys.has(key) ? effects.map((e, i) => (i === 1 ? wrap.reconfigure([]) : e)) : effects);
+      for (const [key, state] of states) if (!viewOf(key)) states.set(key, state.update({ effects: effectsFor(key) }).state);
+      if (active) view.dispatch({ effects: effectsFor(active) });
+      if (side) side.view.dispatch({ effects: effectsFor(side.key) });
     },
 
     drop(key) {
       flush(key);
+      bigKeys.delete(key);
       // hide() keeps the active tab's state, so hide first, then forget it.
       if (key === active) this.hide();
       if (key === side?.key) this.closeSide();

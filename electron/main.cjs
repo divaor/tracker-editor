@@ -421,6 +421,7 @@ function buildMenu() {
         shown('Replace', 'CmdOrCtrl+H', 'replace'),
         shown('Go to Line', 'CmdOrCtrl+G', 'goto-line'),
         item('Find in Files', 'CmdOrCtrl+Shift+F', 'find-in-files'),
+        shown('Filter Lines', 'Alt+L', 'filter-lines'),
         { type: 'separator' },
         shown('Type into Another Window', 'Alt+T', 'type-out'),
         shown('Insert Snippet…', 'Alt+I', 'snippets'),

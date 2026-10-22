@@ -26,6 +26,7 @@ import { TypeOutPanel } from './ui/typeOut.js';
 import { SnippetPicker } from './ui/snippets.js';
 import { AskSelectionDialog } from './ui/askSelection.js';
 import { OutlinePanel } from './ui/outline.js';
+import { FilterBar } from './ui/filterBar.js';
 import { snippetNameFrom } from './snippets.js';
 import { linkName, resolveLink } from './outline.js';
 import { prepareTyping, typingDelay } from './typing.js';
@@ -588,6 +589,8 @@ export function App() {
   const [dialog, setDialog] = useState(null);
   const [sidebar, setSidebar] = useState(() => !isNarrow());
   const [cursor, setCursor] = useState(null);
+  // The open tab is in the lighter editor for very large files.
+  const [big, setBig] = useState(false);
   const [preview, setPreview] = useState(() => new Set());
   const [compare, setCompare] = useState(null);
   const hostRef = useRef(null);
@@ -696,6 +699,7 @@ export function App() {
       name: activeName,
       language: activeFile?.language ?? '',
     });
+    setBig(host.isBig(activeKey));
     if (!isNarrow()) host.focus();
   }, [activeKey, view, Boolean(activeFile || activeRepo), activeSealed]);
 
@@ -724,6 +728,22 @@ export function App() {
     });
   };
   actions.toggleSplit = () => (store.session.side ? actions.closeSide() : actions.openSide());
+
+  // Filtering lines (Alt+L): the tabs whose filter bar is open.
+  const [filterKeys, setFilterKeys] = useState(() => new Set());
+  actions.toggleFilter = () => {
+    if (!activeKey) return;
+    const open = filterKeys.has(activeKey);
+    if (open) hostRef.current?.setLineFilter(activeKey, null);
+    setFilterKeys((keys) => {
+      const next = new Set(keys);
+      open ? next.delete(activeKey) : next.add(activeKey);
+      return next;
+    });
+  };
+  actions.setLineFilter = (key, filter) => hostRef.current?.setLineFilter(key, filter) ?? { shown: 0, total: 0 };
+  actions.lineFilter = (key) => hostRef.current?.lineFilter(key) ?? { filter: null, shown: 0, total: 0 };
+  actions.shownLines = (key) => hostRef.current?.shownLines(key) ?? '';
 
   // Typing into another window (desktop app): the selection, or the whole file.
   const [typingJob, setTypingJob] = useState(null);
@@ -904,6 +924,9 @@ export function App() {
       } else if (mod && !e.shiftKey && !e.altKey && k === 'k') {
         e.preventDefault();
         actions.askSelection();
+      } else if (e.altKey && !mod && !e.shiftKey && k === 'l') {
+        e.preventDefault();
+        actions.toggleFilter();
       } else if (e.altKey && !mod && !e.shiftKey && k === 'i') {
         e.preventDefault();
         actions.openSnippets();
@@ -943,6 +966,7 @@ export function App() {
         snippets: () => actions.openSnippets(),
         'ask-selection': () => actions.askSelection(),
         outline: () => actions.toggleOutline(),
+        'filter-lines': () => actions.toggleFilter(),
         find: () => actions.run('find'),
         replace: () => actions.run('replace'),
         'goto-line': () => actions.run('gotoLine'),
@@ -1019,6 +1043,8 @@ export function App() {
         <${TabBar} session=${store.session} projects=${projects} settings=${settings} actions=${actions} />
         ${activeKey && html`<${FileBar} file=${activeFile} repo=${activeRepo} sealed=${activeSealed} projects=${projects} language=${languageName}
           canPreview=${Boolean(previewType)} preview=${showPreview} settings=${settings} actions=${actions} />`}
+        ${activeKey && filterKeys.has(activeKey) && !compare && !activeSealed &&
+        html`<${FilterBar} key=${activeKey} tabKey=${activeKey} actions=${actions} onClose=${actions.toggleFilter} />`}
         ${typingJob && html`<${TypeOutPanel} job=${typingJob} onStop=${() => window.desktop?.typing?.stop()} />`}
         <div class="editor-area ${showPreview ? 'split' : ''} ${showSide ? 'side-split' : ''} ${compare ? 'comparing' : ''}">
           <div class="editor-host" ref=${editorEl} />
@@ -1049,7 +1075,7 @@ export function App() {
           ${!activeKey && html`<${Welcome} actions=${actions} hasFiles=${store.live().length + docs.length > 0} configured=${isSyncConfigured(settings)} />`}
         </div>
         <${ReadAloudBar} />
-        <${StatusBar} cursor=${activeKey ? cursor : null} language=${languageName} file=${activeFile} repo=${activeRepo} settings=${settings} sync=${sync} actions=${actions} />
+        <${StatusBar} big=${big && Boolean(activeKey)} cursor=${activeKey ? cursor : null} language=${languageName} file=${activeFile} repo=${activeRepo} settings=${settings} sync=${sync} actions=${actions} />
       </div>
     </main>
 
