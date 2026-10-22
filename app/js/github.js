@@ -112,6 +112,24 @@ export function createGitHubClient({
     },
 
     /** { sha, text } of a file at a ref (branch or commit), or null when it does not exist. */
+    /** Commits that touched `path` (a file or a folder), newest first: [{ sha, message, date }]. */
+    async listCommits({ path: filePath, branch, perPage = 50 }) {
+      const list = await request('GET', `${repoPath}/commits`, { query: { path: filePath, sha: branch || undefined, per_page: perPage } });
+      return (list ?? []).map((c) => ({ sha: c.sha, message: c.commit?.message ?? '', date: c.commit?.committer?.date ?? c.commit?.author?.date ?? '' }));
+    },
+
+    /** The entries of a folder at `ref`: [{ name, path, sha, type }], or null when it does not exist there. */
+    async listDir(dirPath, ref) {
+      let data;
+      try {
+        data = await request('GET', `${repoPath}/contents/${encodePath(dirPath)}`, { query: { ref } });
+      } catch (err) {
+        if (err.status === 404) return null;
+        throw err;
+      }
+      return Array.isArray(data) ? data.map((e) => ({ name: e.name, path: e.path, sha: e.sha, type: e.type })) : null;
+    },
+
     async getFile(filePath, ref) {
       let data;
       try {

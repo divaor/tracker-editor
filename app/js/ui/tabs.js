@@ -7,6 +7,7 @@ import { syncNow } from '../syncManager.js';
 import { projectKey } from '../tracker-model.js';
 import { ProjectChip } from './components.js';
 import { Icon } from './icons.js';
+import { MenuButton } from './menu.js';
 
 function tabInfo(key) {
   const k = parseKey(key);
@@ -71,6 +72,11 @@ export function FileBar({ file, repo, projects, canPreview, preview, settings, a
     html`<button type="button" class="btn ghost sm ${preview ? 'on' : ''}" aria-pressed=${preview} title="Show a reading view next to the text" onClick=${actions.togglePreview}><${Icon} name="eye" size=${15} /><span class="label">Preview</span></button>`;
   const listenButton = html`<button type="button" class="btn ghost sm" title="Read aloud from the cursor, or the selection (Alt+R)" onClick=${actions.readAloud}><${Icon} name="volume" size=${15} /><span class="label">Listen</span></button>`;
   const shareButton = html`<button type="button" class="btn ghost sm" title="Share: WhatsApp, Teams, email, copy…" onClick=${actions.share}><${Icon} name="share" size=${15} /><span class="label">Share</span></button>`;
+  const moreItems = (details) => [
+    details && { label: 'Details…', icon: 'tag', run: details },
+    { label: 'History', icon: 'history', run: actions.showHistory },
+    { label: 'Compare with…', icon: 'columns', run: actions.compareWith },
+  ];
   if (repo) {
     // A tracker document: its item's title and project; the path is in the tooltip.
     const doc = store.doc(repo.path);
@@ -85,6 +91,7 @@ export function FileBar({ file, repo, projects, canPreview, preview, settings, a
       <span class="filebar-status ${repo.dirty ? 'pending' : ''}" title=${repo.dirty ? 'Saved on this device; goes to the tracker on the next sync' : 'The same as on the tracker'}>
         <${Icon} name=${repo.dirty ? 'sync' : 'cloud'} size=${14} /><span class="label">${repo.dirty ? 'Not synced yet' : 'Synced'}</span>
       </span>
+      <${MenuButton} label="More" items=${() => moreItems()} />
     </div>`;
   }
   if (!file) return null;
@@ -107,7 +114,7 @@ export function FileBar({ file, repo, projects, canPreview, preview, settings, a
       onClick=${() => actions.openDialog({ type: 'send', id: file.id })}>
       <${Icon} name="send" size=${15} /><span class="label">${linked.length ? 'On tracker' : 'Send to tracker'}</span>
     </button>
-    <button type="button" class="icon-btn sm" aria-label="File details" title="Name, project, tags, language, delete" onClick=${() => actions.openDialog({ type: 'file', id: file.id })}><${Icon} name="more" size=${16} /></button>
+    <${MenuButton} label="More" items=${() => moreItems(() => actions.openDialog({ type: 'file', id: file.id }))} />
   </div>`;
 }
 

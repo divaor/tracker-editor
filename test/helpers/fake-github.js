@@ -12,7 +12,8 @@ const gitSha = (text) => {
 export function createFakeGitHub({ owner = 'me', repo = 'data', defaultBranch = 'main', token = 'good-token', empty = false } = {}) {
   const blobs = new Map(); // sha → text
   const trees = new Map(); // sha → Map(path → blob sha)
-  const commits = new Map(); // sha → { tree, parents, message }
+  const commits = new Map(); // sha → { tree, parents, message, date }
+  let clock = Date.parse('2026-10-01T09:00:00Z'); // commit dates, a minute apart
   const refs = new Map(); // branch → commit sha
   const log = []; // commit messages, newest last
   const requests = [];
@@ -38,7 +39,7 @@ export function createFakeGitHub({ owner = 'me', repo = 'data', defaultBranch = 
     const tree = id('tree');
     trees.set(tree, files);
     const sha = id('commit');
-    commits.set(sha, { tree, parents: parent ? [parent] : [], message });
+    commits.set(sha, { tree, parents: parent ? [parent] : [], message, date: new Date((clock += 60000)).toISOString() });
     refs.set(branch, sha);
     log.push(message);
     return sha;
@@ -93,7 +94,7 @@ export function createFakeGitHub({ owner = 'me', repo = 'data', defaultBranch = 
     if (rest === '/git/commits' && method === 'POST') {
       if (!trees.has(body.tree)) return reply(422, { message: 'Invalid tree' });
       const sha = id('commit');
-      commits.set(sha, { tree: body.tree, parents: body.parents, message: body.message });
+      commits.set(sha, { tree: body.tree, parents: body.parents, message: body.message, date: new Date((clock += 60000)).toISOString() });
       return reply(201, { sha });
     }
     if ((m = rest.match(/^\/git\/refs\/heads\/(.+)$/)) && method === 'PATCH') {
@@ -114,12 +115,38 @@ export function createFakeGitHub({ owner = 'me', repo = 'data', defaultBranch = 
       refs.set(branch, body.sha);
       return reply(201, { ref: body.ref, object: { sha: body.sha } });
     }
+    // Commits that changed a file or anything under a folder, newest first (first parents).
+    if (rest === '/commits' && method === 'GET') {
+      const path = u.searchParams.get('path') ?? '';
+      const under = (files) => [...(files ?? new Map())].filter(([p]) => !path || p === path || p.startsWith(`${path}/`)).sort().join('|');
+      const out = [];
+      let sha = commits.has(u.searchParams.get('sha')) ? u.searchParams.get('sha') : refs.get(u.searchParams.get('sha') || defaultBranch);
+      const limit = Number(u.searchParams.get('per_page') ?? 30);
+      while (sha && out.length < limit) {
+        const c = commits.get(sha);
+        const parent = c.parents[0];
+        if (under(trees.get(c.tree)) !== under(parent ? trees.get(commits.get(parent).tree) : null)) {
+          out.push({ sha, commit: { message: c.message, committer: { date: c.date } } });
+        }
+        sha = parent;
+      }
+      return reply(200, out);
+    }
     if ((m = rest.match(/^\/contents\/(.+)$/))) {
       const path = m[1].split('/').map(decodeURIComponent).join('/');
       if (method === 'GET') {
         const files = resolve(u.searchParams.get('ref'));
         const sha = files?.get(path);
-        if (!sha) return reply(404, { message: 'Not Found' });
+        if (!sha) {
+          // A folder: its direct entries.
+          const entries = new Map();
+          for (const [p, blob] of files ?? []) {
+            if (!p.startsWith(`${path}/`)) continue;
+            const [name, ...deeper] = p.slice(path.length + 1).split('/');
+            entries.set(name, deeper.length ? { name, path: `${path}/${name}`, sha: '', type: 'dir' } : { name, path: p, sha: blob, type: 'file' });
+          }
+          return entries.size ? reply(200, [...entries.values()]) : reply(404, { message: 'Not Found' });
+        }
         return reply(200, { type: 'file', path, sha, size: Buffer.byteLength(blobs.get(sha)), content: Buffer.from(blobs.get(sha)).toString('base64') });
       }
       if (method === 'PUT') {

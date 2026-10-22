@@ -11,6 +11,7 @@ import {
   EditorView,
   HighlightStyle,
   LanguageDescription,
+  MergeView,
   StateEffect,
   StateField,
   autocompletion,
@@ -28,6 +29,9 @@ import {
   dropCursor,
   foldGutter,
   foldKeymap,
+  getChunks,
+  goToNextChunk,
+  goToPreviousChunk,
   gotoLine,
   highlightActiveLine,
   highlightActiveLineGutter,
@@ -55,6 +59,7 @@ import {
   tags,
   toggleComment,
   undo,
+  unifiedMergeView,
 } from '../vendor/cm/codemirror.js';
 
 export { languages };
@@ -186,6 +191,59 @@ export const COMMANDS = {
     return true;
   },
 };
+
+// The smallest single change that turns `old` into `text` (keeps the cursor and undo history useful).
+function minimalChange(old, text) {
+  if (old === text) return null;
+  let start = 0;
+  while (start < old.length && start < text.length && old[start] === text[start]) start++;
+  let endOld = old.length;
+  let endNew = text.length;
+  while (endOld > start && endNew > start && old[endOld - 1] === text[endNew - 1]) {
+    endOld--;
+    endNew--;
+  }
+  return { from: start, to: endOld, insert: text.slice(start, endNew) };
+}
+
+/**
+ * A read-only comparison of two texts in `parent`: side by side, or (unified,
+ * for phones) one text with the removed lines shown in place. Unchanged
+ * stretches fold away. Returns { destroy, next, previous, changes }.
+ */
+export function createCompareView(parent, { left, right, name = '', language = '', dark = false, unified = false, wrap = false }) {
+  const lang = new Compartment();
+  const extensions = () => [
+    lineNumbers(),
+    EditorState.readOnly.of(true),
+    EditorView.editable.of(false),
+    baseTheme(dark),
+    syntaxHighlighting(dark ? DARK_STYLE : LIGHT_STYLE, { fallback: true }),
+    wrap ? EditorView.lineWrapping : [],
+    lang.of([]),
+  ];
+  const collapseUnchanged = { margin: 3, minSize: 8 };
+  let merge = null;
+  let single = null;
+  if (unified) {
+    single = new EditorView({
+      parent,
+      state: EditorState.create({ doc: right, extensions: [...extensions(), unifiedMergeView({ original: left, mergeControls: false, highlightChanges: true, gutter: true, collapseUnchanged })] }),
+    });
+  } else {
+    merge = new MergeView({ a: { doc: left, extensions: extensions() }, b: { doc: right, extensions: extensions() }, parent, highlightChanges: true, gutter: true, collapseUnchanged });
+  }
+  const views = merge ? [merge.a, merge.b] : [single];
+  const desc = findLanguage(name, language);
+  desc?.load().then((support) => views.forEach((v) => v.dispatch({ effects: lang.reconfigure(support) })), () => {});
+  const target = () => (merge ? merge.b : single);
+  return {
+    destroy: () => (merge ?? single).destroy(),
+    next: () => goToNextChunk(target()),
+    previous: () => goToPreviousChunk(target()),
+    changes: () => getChunks(target().state)?.chunks.length ?? 0,
+  };
+}
 
 /**
  * Creates the editor in `parent`. `onChange(key, text, { urgent })` gets the text of the
@@ -336,20 +394,19 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, setti
     /** Replaces a tab's text with a version from elsewhere, touching only what differs. */
     replaceText(key, text) {
       const state = key === active ? view.state : states.get(key);
-      if (!state) return;
-      const old = state.doc.toString();
-      if (old === text) return;
-      let start = 0;
-      while (start < old.length && start < text.length && old[start] === text[start]) start++;
-      let endOld = old.length;
-      let endNew = text.length;
-      while (endOld > start && endNew > start && old[endOld - 1] === text[endNew - 1]) {
-        endOld--;
-        endNew--;
-      }
-      const tr = state.update({ changes: { from: start, to: endOld, insert: text.slice(start, endNew) }, annotations: remote.of(true) });
+      const changes = state && minimalChange(state.doc.toString(), text);
+      if (!changes) return;
+      const tr = state.update({ changes, annotations: remote.of(true) });
       if (key === active) view.dispatch(tr);
       else states.set(key, tr.state);
+    },
+
+    /** Replaces the active tab's text as an edit of yours: saved at once, and Ctrl+Z takes it back. */
+    setTextAsEdit(key, text) {
+      if (key !== active) return false;
+      const changes = minimalChange(view.state.doc.toString(), text);
+      if (changes) view.dispatch({ changes, userEvent: 'input.paste' });
+      return true;
     },
 
     setLanguage: loadLanguage,

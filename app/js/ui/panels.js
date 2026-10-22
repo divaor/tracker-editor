@@ -96,17 +96,23 @@ export function SearchPanel({ files, docs, allFiles, allDocs, openKeys, actions,
 }
 
 /** Ctrl+P: open a file by (fuzzy) name; also matches the project. */
-export function QuickOpen({ files, docs, actions, onClose }) {
+/** Ctrl+P. With onPick, it picks a file instead of opening it (e.g. "Compare with…"). */
+export function QuickOpen({ files, docs, actions, onClose, onPick, title = 'Open a file', exclude = '' }) {
   const [query, setQuery] = useState('');
   const [index, setIndex] = useState(0);
   const recent = useMemo(
-    () => [...files, ...docs.map((d) => ({ id: `r:${d.path}`, name: d.name, project: d.project, modifiedAt: d.modifiedAt, item: d.item.title }))].sort((a, b) => (b.modifiedAt > a.modifiedAt ? 1 : -1)),
+    () =>
+      [...files, ...docs.map((d) => ({ id: `r:${d.path}`, name: d.name, project: d.project, modifiedAt: d.modifiedAt, item: d.item.title }))]
+        .filter((f) => f.id !== exclude)
+        .sort((a, b) => (b.modifiedAt > a.modifiedAt ? 1 : -1)),
     [files, docs],
   );
   const list = quickOpen(recent, query, 60);
+  const input = useRef(null);
   const choose = (file) => {
     onClose();
-    actions.openFile(file.id);
+    if (onPick) onPick(file);
+    else actions.openFile(file.id);
   };
   useEffect(() => setIndex(0), [query]);
   // Escape closes it wherever the focus is (a menu command can open it while
@@ -118,11 +124,14 @@ export function QuickOpen({ files, docs, actions, onClose }) {
       onClose();
     };
     document.addEventListener('keydown', onKey);
+    // Here, once it is in the page (a ref runs before that).
+    input.current?.focus();
     return () => document.removeEventListener('keydown', onKey);
   }, []);
   return html`<div class="modal-backdrop top" onPointerDown=${(e) => e.target === e.currentTarget && onClose()}>
-    <div class="quick-open" role="dialog" aria-label="Open a file">
-      <input value=${query} placeholder="Type part of a file or project name…" aria-label="File name" ref=${(el) => el?.focus()}
+    <div class="quick-open" role="dialog" aria-label=${title}>
+      ${onPick && html`<div class="quick-title">${title}</div>`}
+      <input value=${query} placeholder="Type part of a file or project name…" aria-label="File name" ref=${input}
         onInput=${(e) => setQuery(e.currentTarget.value)}
         onKeyDown=${(e) => {
           if (e.key === 'ArrowDown') {
@@ -134,7 +143,7 @@ export function QuickOpen({ files, docs, actions, onClose }) {
           } else if (e.key === 'Enter' && list[index]) {
             e.preventDefault();
             choose(list[index]);
-          } else if (e.key === 'Enter' && query.trim()) {
+          } else if (e.key === 'Enter' && query.trim() && !onPick) {
             e.preventDefault();
             onClose();
             actions.newFile({ name: query.trim() });
@@ -150,7 +159,7 @@ export function QuickOpen({ files, docs, actions, onClose }) {
             <span class="spacer" /><span class="muted small">${timeAgo(f.modifiedAt)}</span>
           </button>`,
         )}
-        ${!list.length && html`<p class="muted small quick-empty">${query.trim() ? html`No file matches. Press <kbd>Enter</kbd> to create “${query.trim()}”.` : 'No files yet.'}</p>`}
+        ${!list.length && html`<p class="muted small quick-empty">${query.trim() ? (onPick ? 'No file matches.' : html`No file matches. Press <kbd>Enter</kbd> to create “${query.trim()}”.`) : 'No files yet.'}</p>`}
       </div>
     </div>
   </div>`;

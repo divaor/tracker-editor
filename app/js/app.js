@@ -4,6 +4,8 @@ import { onLaunchFiles, takeShared } from './inbox.js';
 import { cleanModelName, isUntitled, MIN_NAMING_TEXT, nameFromHeading, namingMessages, uniqueName } from './naming.js';
 import { llmClient } from './semantic.js';
 import { fileLink, parseRoute, safeName } from './model.js';
+import { fileVersions, versionName } from './versions.js';
+import { formatDateTime } from './format.js';
 import { previewKind } from './previews.js';
 import { getReaderState, onReaderState, setReaderHighlighter, startReading, stopReading, toggleReading } from './reader.js';
 import { getSettings, getToken, isSyncConfigured, onSettings, resolvedTheme, saveSettings } from './settings.js';
@@ -16,6 +18,8 @@ import { FileDialog, SendDialog } from './ui/dialogs.js';
 import { Icon } from './ui/icons.js';
 import { QuickOpen, SearchPanel } from './ui/panels.js';
 import { Preview } from './ui/preview.js';
+import { CompareView } from './ui/compare.js';
+import { HistoryPanel } from './ui/history.js';
 import { ReadAloudBar } from './ui/readAloud.js';
 import { ShareDialog } from './ui/share.js';
 import { SettingsView } from './ui/settingsView.js';
@@ -37,11 +41,30 @@ function download(name, text) {
 }
 
 /** Everything the components need, in one place. */
-function useActions({ hostRef, setView, setPanel, setDialog, setSidebar }) {
+function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setCompare }) {
   return useMemo(() => {
     const activeFile = () => {
       const key = parseKey(store.session.active);
       return key?.kind === 'file' ? store.get(key.id) : null;
+    };
+    // The open tab with its latest text: an editor file or a tracker document.
+    const activeInfo = () => {
+      const key = store.session.active;
+      const k = parseKey(key);
+      if (!k) return null;
+      hostRef.current?.flushAll();
+      if (k.kind === 'file') {
+        const f = store.get(k.id);
+        return f && { key, kind: 'file', id: f.id, name: f.name, language: f.language, project: f.project, tags: f.tags, dirty: f.dirty, text: store.text(f.id) };
+      }
+      const tab = store.repoTab(k.path);
+      return tab && { key, kind: 'repo', path: k.path, name: tab.name, language: '', project: store.doc(k.path)?.project ?? '', tags: store.doc(k.path)?.tags ?? [], dirty: tab.dirty, text: tab.text };
+    };
+    const syncedClient = async () => {
+      const settings = getSettings();
+      const token = await getToken();
+      if (!isSyncConfigured(settings) || !token) throw new Error('Set up sync in Settings first: versions come from your GitHub data repo.');
+      return { client: syncClient(settings, token), branch: settings.branch || undefined };
     };
     const actions = {
       toast,
@@ -185,6 +208,81 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar }) {
         } else download(name, text);
       },
       activeFile,
+      activeInfo,
+
+      // ---- History and comparing ----
+      showHistory() {
+        hostRef.current?.flushAll();
+        setPanel('history');
+      },
+      async loadVersions({ id, path }) {
+        const { client, branch } = await syncedClient();
+        return fileVersions(client, { branch, id, path });
+      },
+      async compareVersion(target, version) {
+        let loaded;
+        try {
+          loaded = await version.load();
+        } catch (err) {
+          toast(err.message, { kind: 'error' });
+          return;
+        }
+        if (!loaded) return toast('The file was deleted in that version.');
+        const now = activeInfo();
+        if (!now || now.key !== target.key) return;
+        const text = loaded.text;
+        const when = `${formatDateTime(version.date)}${version.who ? ` · ${version.who}` : ''}`;
+        // On a phone the panel covers the comparison.
+        if (matchMedia('(max-width: 860px)').matches) setPanel(null);
+        setCompare({
+          key: now.key,
+          sha: version.sha,
+          name: now.name,
+          language: now.language,
+          left: { label: when, text },
+          right: { label: 'Now', text: now.text },
+          actions: [
+            { label: 'Restore this version', icon: 'rotate', primary: true, run: () => actions.restoreText(now.key, text, when) },
+            { label: 'Copy', icon: 'copy', run: () => navigator.clipboard.writeText(text).then(() => toast('This version is on the clipboard')) },
+            {
+              label: 'Open as a new file',
+              icon: 'filePlus',
+              run: () => {
+                setCompare(null);
+                actions.newFile({ name: versionName(loaded.name || now.name, version.date), text, project: now.project, tags: now.tags });
+              },
+            },
+          ],
+        });
+      },
+      compareWith() {
+        hostRef.current?.flushAll();
+        setDialog({ type: 'quickOpen', pick: 'compare' });
+      },
+      async compareWithEntry(entry) {
+        const now = activeInfo();
+        if (!now) return;
+        let other = entry.id.startsWith('r:') ? store.docText(entry.id.slice(2)) : store.text(entry.id);
+        if (other === null) {
+          try {
+            const { client, branch } = await syncedClient();
+            other = (await client.getFile(entry.id.slice(2), branch))?.text ?? '';
+          } catch (err) {
+            return toast(err.message, { kind: 'error' });
+          }
+        }
+        setCompare({ key: now.key, name: now.name, language: now.language, left: { label: entry.name, text: other }, right: { label: now.name, text: now.text }, actions: [] });
+      },
+      /** Puts `text` into a tab as your own edit (saved at once; Undo or Ctrl+Z takes it back). */
+      restoreText(key, text, label) {
+        setCompare(null);
+        if (store.session.active !== key) store.open(key);
+        setTimeout(() => {
+          if (!hostRef.current?.setTextAsEdit(key, text)) return;
+          toast(`Restored the version from ${label}`, { action: { label: 'Undo', run: () => hostRef.current?.run('undo') } });
+        }, 0);
+      },
+
       // Reads the active tab aloud from the cursor (or just the selection); again to pause or resume.
       readAloud() {
         if (getReaderState().status !== 'idle') return toggleReading();
@@ -234,9 +332,10 @@ export function App() {
   const [sidebar, setSidebar] = useState(() => !isNarrow());
   const [cursor, setCursor] = useState(null);
   const [preview, setPreview] = useState(() => new Set());
+  const [compare, setCompare] = useState(null);
   const hostRef = useRef(null);
   const editorEl = useRef(null);
-  const actions = useActions({ hostRef, setView, setPanel, setDialog, setSidebar });
+  const actions = useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setCompare });
   const editorOptions = (s) => ({ ...s, dark: resolvedTheme(s.theme) === 'dark' });
 
   // Re-render on store changes; typing only updates the unsynced markers, so throttle that.
@@ -317,7 +416,11 @@ export function App() {
   const activeName = activeFile?.name ?? activeRepo?.name ?? '';
   const languageName = activeKey ? (findLanguage(activeName, activeFile?.language)?.name ?? PLAIN_TEXT) : '';
   const previewType = activeKey ? previewKind(activeName, languageName) : '';
-  const showPreview = Boolean(previewType) && preview.has(activeKey);
+  const showPreview = Boolean(previewType) && preview.has(activeKey) && !compare;
+  // A comparison belongs to its tab.
+  useEffect(() => {
+    if (compare && compare.key !== activeKey) setCompare(null);
+  }, [activeKey]);
 
   useLayoutEffect(() => {
     const host = hostRef.current;
@@ -451,6 +554,8 @@ export function App() {
         if (store.session.active) actions.close(store.session.active);
       } else if (mod && k === 's') {
         e.preventDefault();
+        // What was just typed goes too.
+        hostRef.current?.flushAll();
         syncNow();
       }
     };
@@ -476,7 +581,10 @@ export function App() {
         'goto-line': () => actions.run('gotoLine'),
         'find-in-files': () => setPanel('search'),
         assistant: () => setPanel((p) => (p === 'assistant' ? null : 'assistant')),
-        sync: () => syncNow(),
+        sync: () => {
+          hostRef.current?.flushAll();
+          syncNow();
+        },
         settings: () => setView('settings'),
         'toggle-sidebar': () => setSidebar((s) => !s),
         'toggle-wrap': () => actions.toggleWrap(),
@@ -544,8 +652,9 @@ export function App() {
         <${TabBar} session=${store.session} actions=${actions} />
         ${activeKey && html`<${FileBar} file=${activeFile} repo=${activeRepo} projects=${projects} language=${languageName}
           canPreview=${Boolean(previewType)} preview=${showPreview} settings=${settings} actions=${actions} />`}
-        <div class="editor-area ${showPreview ? 'split' : ''}">
+        <div class="editor-area ${showPreview ? 'split' : ''} ${compare ? 'comparing' : ''}">
           <div class="editor-host" ref=${editorEl} />
+          ${compare && html`<${CompareView} key=${compare.sha ?? compare.left.label} compare=${compare} settings=${settings} onClose=${() => setCompare(null)} />`}
           ${showPreview && html`<${Preview} key=${activeKey} kind=${previewType} name=${activeName} text=${activeFile ? store.text(activeFile.id) : activeRepo?.text}
             onToggle=${(next) => {
               if (activeFile) store.setText(activeFile.id, next);
@@ -564,9 +673,16 @@ export function App() {
     </main>
 
     ${panel === 'search' && html`<${SearchPanel} files=${scoped} docs=${scopedDocs} allFiles=${store.live()} allDocs=${docs} openKeys=${store.session.open} settings=${settings} actions=${actions} onClose=${() => setPanel(null)} />`}
+    ${panel === 'history' && activeKey && (activeFile || activeRepo) && html`<${HistoryPanel} key=${activeKey} selected=${compare?.sha}
+      target=${{ key: activeKey, kind: activeFile ? 'file' : 'repo', id: activeFile?.id, path: activeRepo?.path, name: activeName, dirty: activeFile?.dirty || activeRepo?.dirty }}
+      actions=${actions} onClose=${() => setPanel(null)} />`}
     ${panel === 'assistant' && html`<${AssistantPanel} files=${scoped} docs=${scopedDocs} activeFile=${activeFile} activeRepo=${activeRepo} settings=${settings} actions=${actions} onClose=${() => setPanel(null)} />`}
 
-    ${dialog?.type === 'quickOpen' && html`<${QuickOpen} files=${store.live()} docs=${docs} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'quickOpen' &&
+    (dialog.pick === 'compare'
+      ? html`<${QuickOpen} files=${store.live()} docs=${docs} actions=${actions} title=${`Compare ${activeName} with…`} exclude=${activeFile ? activeFile.id : activeRepo ? `r:${activeRepo.path}` : ''}
+          onPick=${(entry) => actions.compareWithEntry(entry)} onClose=${() => setDialog(null)} />`
+      : html`<${QuickOpen} files=${store.live()} docs=${docs} actions=${actions} onClose=${() => setDialog(null)} />`)}
     ${dialog?.type === 'file' && store.get(dialog.id) && html`<${FileDialog} file=${store.get(dialog.id)} projects=${projects} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'share' && activeKey && html`<${ShareDialog} name=${activeName} text=${activeFile ? store.text(activeFile.id) : (activeRepo?.text ?? '')}
       link=${activeFile ? fileLink(settings.appUrl, activeFile.id) : `${settings.appUrl.replace(/\/?$/, '/')}#/repo/${activeRepo.path.split('/').map(encodeURIComponent).join('/')}`}

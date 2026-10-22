@@ -2811,6 +2811,253 @@ mark {
   accent-color: var(--accent);
 }
 
+/* ---- Menus ------------------------------------------------------------------------- */
+.menu {
+  position: fixed;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  min-width: 190px;
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  animation: rise 0.1s ease-out;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.menu-item > span:not(.menu-icon) {
+  flex: 1;
+}
+
+.menu-item svg {
+  flex-shrink: 0;
+  color: var(--text-2);
+}
+
+.menu-icon {
+  width: 15px;
+}
+
+.menu-item:hover:not(:disabled),
+.menu-item:focus-visible {
+  background: var(--accent-soft);
+  outline: none;
+}
+
+.menu-item:disabled {
+  opacity: 0.45;
+}
+
+.menu-item.danger,
+.menu-item.danger svg {
+  color: var(--danger);
+}
+
+.menu-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+
+/* ---- Compare and history -------------------------------------------------------------- */
+.editor-area.comparing > .editor-host,
+.editor-area.comparing > .preview-pane {
+  display: none;
+}
+
+.compare {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.compare-bar {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 3px 8px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  scrollbar-width: none;
+}
+
+.compare-heads {
+  display: grid;
+  flex-shrink: 0;
+  grid-template-columns: 1fr 1fr;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 12px;
+}
+
+.compare.unified .compare-heads {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 10px;
+  padding: 0 4px;
+}
+
+.compare-side {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 5px 12px;
+  white-space: nowrap;
+}
+
+.compare.unified .compare-side {
+  padding: 5px 6px;
+}
+
+.compare-side + .compare-side {
+  border-left: 1px solid var(--border);
+}
+
+.compare.unified .compare-side + .compare-side {
+  border-left: 0;
+}
+
+.compare-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.compare-mark {
+  display: inline-grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  font-weight: 700;
+}
+
+.compare-side.old .compare-mark {
+  background: rgba(194, 59, 59, 0.14);
+  color: var(--danger);
+}
+
+.compare-side.new .compare-mark {
+  background: rgba(35, 132, 95, 0.16);
+  color: var(--done);
+}
+
+.compare-count {
+  white-space: nowrap;
+}
+
+.compare-bar .btn {
+  flex-shrink: 0;
+}
+
+.compare-body {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.compare-body > .cm-mergeView,
+.compare-body > .cm-editor {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  overflow: auto;
+}
+
+.compare-body .cm-mergeViewEditors {
+  min-height: 100%;
+}
+
+.compare-body .cm-editor {
+  background: var(--surface);
+}
+
+.compare-body .cm-collapsedLines {
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.icon-btn .up,
+svg.up {
+  transform: rotate(180deg);
+}
+
+.version-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.version-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.version-row:hover {
+  background: var(--surface-2);
+}
+
+.version-row.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.version-date {
+  font-size: 14px;
+  font-weight: 550;
+}
+
+.badge-latest {
+  margin-left: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.quick-title {
+  padding: 10px 14px 0;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+
 /* ---- Phone / narrow window --------------------------------------------------------- */
 .scrim {
   display: none;
@@ -2874,6 +3121,10 @@ mark {
   }
 
   .editor-area.split .editor-host {
+    display: none;
+  }
+
+  .compare-bar .btn .label {
     display: none;
   }
 
