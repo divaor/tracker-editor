@@ -1509,7 +1509,20 @@ export function App() {
     const onHash = () => location.hash === '#/inbox' && takeInbox();
     window.addEventListener('hashchange', onHash);
     onLaunchFiles((files) => actions.importFiles(files));
-    return () => window.removeEventListener('hashchange', onHash);
+    // Desktop: files and folders opened with the app ("Open with", "Edit with Tracker Editor",
+    // the command line): files as tabs on disk, folders in the folders view.
+    const takeLaunched = async () => {
+      for (const item of (await window.desktop?.disk?.takeLaunched?.().catch(() => [])) ?? []) {
+        if (item.dir) await actions.showFolder(item.path);
+        else await actions.openDiskPath(item.path);
+      }
+    };
+    takeLaunched();
+    const offLaunched = window.desktop?.disk?.onLaunched?.(takeLaunched);
+    return () => {
+      window.removeEventListener('hashchange', onHash);
+      offLaunched?.();
+    };
   }, []);
 
   // Keyboard shortcuts that work in the browser too (the desktop menu adds Ctrl+N, Ctrl+W, …).

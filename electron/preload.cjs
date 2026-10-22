@@ -42,6 +42,13 @@ contextBridge.exposeInMainWorld('desktop', {
       ipcRenderer.on('disk:changed', listener);
       return () => ipcRenderer.removeListener('disk:changed', listener);
     },
+    // Files and folders the system gave the app ("Open with", the command line): [{ path, dir }].
+    takeLaunched: () => ipcRenderer.invoke('disk:take-launched'),
+    onLaunched(callback) {
+      const listener = () => callback();
+      ipcRenderer.on('disk:launched', listener);
+      return () => ipcRenderer.removeListener('disk:launched', listener);
+    },
   },
   // Folders picked in the open dialog: their files can be listed and opened.
   folders: {

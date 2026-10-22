@@ -216,6 +216,11 @@ function DesktopCard({ actions }) {
     <div class="field-grid">
       <${Check} checked=${prefs.background} label="Keep running in the tray when the window is closed" hint="So quick capture and the clipboard history work with the window closed. Quit from the tray icon." onChange=${(v) => set({ background: v })} />
       ${prefs.background && !prefs.tray && html`<p class="notice small">This desktop has no system tray, so closing the window still quits.</p>`}
+      ${prefs.shell &&
+      html`<${Check} checked=${prefs.shell.enabled} label="Tracker Editor in Explorer"
+        hint="In Open with for text and code files (without becoming their default program), Edit with Tracker Editor when you right-click a file (Windows 11: under Show more options), and Open in Tracker Editor on folders."
+        onChange=${(v) => set({ shell: { enabled: v } })} />
+      ${prefs.shell.error && html`<p class="notice small" role="alert">Windows did not take it: ${prefs.shell.error}</p>`}`}
     </div>
     <h3 class="settings-sub">Quick capture</h3>
     <p class="muted small">A shortcut that works in any app opens a small window to jot something down. Ctrl+Enter keeps it as a new note, or adds it to Inbox.md under the time.</p>

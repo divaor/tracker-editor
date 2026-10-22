@@ -15,6 +15,7 @@ const folders = require('./folders.cjs');
 const os = require('node:os');
 const clips = require('./clipHistory.cjs');
 const zipFiles = require('./zip.cjs');
+const shellIntegration = require('./shellIntegration.cjs');
 
 const APP_DIR = path.join(__dirname, '..', 'app');
 const APP_ORIGIN = 'app://editor';
@@ -146,6 +147,29 @@ const checkFile = (file) => {
   return file;
 };
 const watched = new Map(); // path → listener
+
+// Files and folders the system gives the app: "Open with" or "Edit with Tracker Editor" in
+// Explorer, a file dropped on its icon, the command line, Finder's open-file. The person
+// chose them, so they are allowed like a pick in the open dialog; the page takes them
+// ('disk:take-launched') when it is ready, and is told when more come ('disk:launched').
+const launched = [];
+// argv[0] is the program; in development (`electron .`) the app's folder comes too and is not opened.
+const launchOptions = (cwd) => ({ cwd, skip: 1, scheme: LINK_SCHEME, exclude: [app.getAppPath()] });
+function takeLaunch(items) {
+  for (const item of items) {
+    if (item.dir) {
+      if (!allowedFolders.includes(item.path)) {
+        allowedFolders.push(item.path);
+        saveFolders();
+      }
+    } else allowFile(item.path);
+    launched.push(item);
+  }
+  if (!items.length || !app.isReady()) return;
+  if (mainWindow && !mainWindow.webContents.isLoading()) mainWindow.webContents.send('disk:launched');
+  showWindow();
+}
+ipcMain.handle('disk:take-launched', guard(() => launched.splice(0)));
 
 // ---- Files on servers (SFTP, FTP, FTPS) -----------------------------------------
 // remote.cjs; files there are remote://<id>/<path>, and the disk:* and folder:*
@@ -1290,6 +1314,8 @@ function loadPrefs() {
     snip: { enabled: false, shortcut: DEFAULT_SNIP, ...saved.snip },
     clipboard: { enabled: false, max: clips.DEFAULT_MAX, ...saved.clipboard },
     toldAboutTray: Boolean(saved.toldAboutTray),
+    // Windows: Open with / Edit with Tracker Editor (on by default where installed; the portable app asks).
+    shell: { enabled: saved.shell?.enabled ?? !process.env.PORTABLE_EXECUTABLE_FILE, applied: saved.shell?.applied ?? '' },
   };
 }
 const prefsState = () => ({
@@ -1298,10 +1324,11 @@ const prefsState = () => ({
   snip: { ...prefs.snip, status: shortcutStatus.snip },
   clipboard: { ...prefs.clipboard, encrypted: safeStorage.isEncryptionAvailable() },
   tray: Boolean(tray),
+  shell: process.platform === 'win32' ? { enabled: prefs.shell.enabled, error: shellError } : null,
 });
 
 ipcMain.handle('prefs:get', guard(() => prefsState()));
-ipcMain.handle('prefs:set', guard((_e, patch = {}) => {
+ipcMain.handle('prefs:set', guard(async (_e, patch = {}) => {
   if ('background' in patch) prefs.background = Boolean(patch.background);
   for (const name of ['capture', 'snip']) {
     if (!patch[name]) continue;
@@ -1309,6 +1336,7 @@ ipcMain.handle('prefs:set', guard((_e, patch = {}) => {
     if (enabled !== undefined) prefs[name].enabled = Boolean(enabled);
     if (typeof shortcut === 'string' && shortcut.trim()) prefs[name].shortcut = shortcut.trim().slice(0, 60);
   }
+  if (patch.shell && process.platform === 'win32') prefs.shell.enabled = Boolean(patch.shell.enabled);
   if (patch.clipboard) {
     const { enabled, max } = patch.clipboard;
     if (enabled !== undefined) {
@@ -1320,8 +1348,29 @@ ipcMain.handle('prefs:set', guard((_e, patch = {}) => {
   }
   writeJson('prefs.json', prefs);
   applyPrefs();
+  if (patch.shell) await applyShellIntegration();
   return prefsState();
 }));
+
+// Windows: registers (or removes) the app as an editor in Explorer, when that changed or the
+// program moved (an update to another folder, the portable exe somewhere else).
+let shellError = '';
+async function applyShellIntegration() {
+  if (process.platform !== 'win32' || !app.isPackaged) return;
+  const exe = process.env.PORTABLE_EXECUTABLE_FILE || process.execPath;
+  const want = prefs.shell.enabled ? exe : '';
+  if (prefs.shell.applied === want) return;
+  try {
+    // Moved: the old program's entries go first.
+    if (prefs.shell.applied && prefs.shell.applied !== want) await shellIntegration.importReg(shellIntegration.regFile(prefs.shell.applied, { on: false }));
+    if (want) await shellIntegration.importReg(shellIntegration.regFile(want));
+    prefs.shell.applied = want;
+    shellError = '';
+    writeJson('prefs.json', prefs);
+  } catch (err) {
+    shellError = err.message;
+  }
+}
 
 function applyPrefs() {
   registerShortcuts();
@@ -1892,10 +1941,17 @@ function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-app.on('second-instance', (_event, argv) => {
+app.on('second-instance', (_event, argv, cwd) => {
   showWindow();
   const link = argv.find((a) => a.startsWith(`${LINK_SCHEME}://`));
   if (link) openLink(link);
+  takeLaunch(shellIntegration.launchedPaths(argv, launchOptions(cwd)));
+});
+
+// macOS: files opened with the app in Finder (also before it is ready).
+app.on('open-file', (event, file) => {
+  event.preventDefault();
+  takeLaunch(shellIntegration.launchedPaths([file], { skip: 0, scheme: LINK_SCHEME }));
 });
 
 app.on('open-url', (event, url) => {
@@ -1919,7 +1975,9 @@ app.whenReady().then(() => {
   folders.cleanExports(DRAG_DIR);
   const link = process.argv.find((a) => a.startsWith(`${LINK_SCHEME}://`));
   if (link) pendingRoute = routeFromLink(link);
+  takeLaunch(shellIntegration.launchedPaths(process.argv, launchOptions(process.cwd())));
   createWindow();
+  applyShellIntegration();
   app.on('activate', showWindow);
 });
 
