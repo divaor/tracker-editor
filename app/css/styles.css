@@ -1933,6 +1933,52 @@ button.project-chip:hover {
   text-overflow: ellipsis;
 }
 
+.share-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.share-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.share-option:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-2);
+}
+
+.share-option svg {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.share-option span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.share-option small {
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.share-note {
+  margin: 12px 0 0;
+}
+
 .read-server {
   overflow: hidden;
   max-width: 140px;

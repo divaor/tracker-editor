@@ -70,6 +70,7 @@ export function FileBar({ file, repo, projects, canPreview, preview, settings, a
     canPreview &&
     html`<button type="button" class="btn ghost sm ${preview ? 'on' : ''}" aria-pressed=${preview} title="Show a reading view next to the text" onClick=${actions.togglePreview}><${Icon} name="eye" size=${15} /><span class="label">Preview</span></button>`;
   const listenButton = html`<button type="button" class="btn ghost sm" title="Read aloud from the cursor, or the selection (Alt+R)" onClick=${actions.readAloud}><${Icon} name="volume" size=${15} /><span class="label">Listen</span></button>`;
+  const shareButton = html`<button type="button" class="btn ghost sm" title="Share: WhatsApp, Teams, email, copy…" onClick=${actions.share}><${Icon} name="share" size=${15} /><span class="label">Share</span></button>`;
   if (repo) {
     // A tracker document: its item's title and project; the path is in the tooltip.
     const doc = store.doc(repo.path);
@@ -80,6 +81,7 @@ export function FileBar({ file, repo, projects, canPreview, preview, settings, a
       <span class="spacer" />
       ${previewButton}
       ${listenButton}
+      ${shareButton}
       <span class="filebar-status ${repo.dirty ? 'pending' : ''}" title=${repo.dirty ? 'Saved on this device; goes to the tracker on the next sync' : 'The same as on the tracker'}>
         <${Icon} name=${repo.dirty ? 'sync' : 'cloud'} size=${14} /><span class="label">${repo.dirty ? 'Not synced yet' : 'Synced'}</span>
       </span>
@@ -99,6 +101,7 @@ export function FileBar({ file, repo, projects, canPreview, preview, settings, a
     <span class="spacer" />
     ${previewButton}
     ${listenButton}
+    ${shareButton}
     ${settings.llm.enabled && html`<button type="button" class="btn ghost sm" title="Summarize with the local model" onClick=${actions.summarize}><${Icon} name="sparkle" size=${15} /><span class="label">Summarize</span></button>`}
     <button type="button" class="btn ghost sm" title=${linked.length ? `On the tracker: ${linked.map((i) => i.title).join(', ')}` : 'Add to the tracker as a task, idea or doc to read'}
       onClick=${() => actions.openDialog({ type: 'send', id: file.id })}>

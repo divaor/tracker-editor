@@ -1,4 +1,4 @@
-import { html, useEffect, useMemo, useRef, useState } from '../../vendor/preact-htm.js';
+import { html, useEffect, useLayoutEffect, useMemo, useRef, useState } from '../../vendor/preact-htm.js';
 import { findInFiles, quickOpen } from '../search.js';
 import { timeAgo } from '../format.js';
 import { fileKey, repoKey, store } from '../store.js';
@@ -110,8 +110,8 @@ export function QuickOpen({ files, docs, actions, onClose }) {
   };
   useEffect(() => setIndex(0), [query]);
   // Escape closes it wherever the focus is (a menu command can open it while
-  // the window is still focusing).
-  useEffect(() => {
+  // the window is still focusing), from the moment it shows.
+  useLayoutEffect(() => {
     const onKey = (e) => {
       if (e.key !== 'Escape') return;
       e.preventDefault();

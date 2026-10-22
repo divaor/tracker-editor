@@ -1,7 +1,7 @@
 // Offline support: precache the app shell and every CodeMirror language
 // chunk (listed in vendor/cm/files.json), then serve network-first so updates
 // show up immediately when online. GitHub and model requests are never intercepted.
-const CACHE = 'editor-v0.3.0';
+const CACHE = 'editor-v0.4.0';
 const INBOX = 'editor-inbox'; // shared files waiting for the app (see js/inbox.js)
 const ASSETS = [
   './',
@@ -25,6 +25,7 @@ const ASSETS = [
   'js/main.js',
   'js/markdown.js',
   'js/model.js',
+  'js/naming.js',
   'js/previews.js',
   'js/reader.js',
   'js/search.js',
@@ -45,6 +46,7 @@ const ASSETS = [
   'js/ui/preview.js',
   'js/ui/readAloud.js',
   'js/ui/settingsView.js',
+  'js/ui/share.js',
   'js/ui/sidebar.js',
   'js/ui/tabs.js',
   'js/version.js',

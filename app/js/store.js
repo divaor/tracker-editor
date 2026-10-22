@@ -30,19 +30,25 @@ export const parseKey = (key) => (key?.startsWith('r:') ? { kind: 'repo', path: 
 
 const timers = new Map();
 let closed = false;
+// Saves after `ms` without further changes; 0 saves now (pasted text, new files).
 function later(key, fn, ms = 250) {
   if (closed) return;
   clearTimeout(timers.get(key));
+  if (ms === 0) {
+    timers.delete(key);
+    fn();
+    return;
+  }
   timers.set(key, setTimeout(() => {
     timers.delete(key);
     fn();
   }, ms));
 }
 const persist = {
-  files: () => later('files', () => kvSet('files', [...files.values()])),
-  text: (id) => later(`text:${id}`, () => (texts.has(id) ? kvSet(`text:${id}`, texts.get(id)) : kvDelete(`text:${id}`))),
-  session: () => later('session', () => kvSet('session', session)),
-  repo: () => later('repoTabs', () => kvSet('repoTabs', [...repoTabs.values()])),
+  files: (ms) => later('files', () => kvSet('files', [...files.values()]), ms),
+  text: (id, ms) => later(`text:${id}`, () => (texts.has(id) ? kvSet(`text:${id}`, texts.get(id)) : kvDelete(`text:${id}`)), ms),
+  session: (ms) => later('session', () => kvSet('session', session), ms),
+  repo: (ms) => later('repoTabs', () => kvSet('repoTabs', [...repoTabs.values()]), ms),
   rest: () => later('rest', () => Promise.all([kvSet('projects', projects), kvSet('trackerItems', trackerItems), kvSet('trackerOps', trackerOps), kvSet('meta', meta)])),
   docs: () => later('docTexts', () => kvSet('docTexts', [...docTexts])),
 };
@@ -183,21 +189,24 @@ export const store = {
     const file = { ...createFile({ name: fileName, project, tags, language, updatedBy: author(), modifiedBy: author() }, now), baseSha: '', dirty: true };
     files.set(file.id, file);
     texts.set(file.id, text);
-    persist.files();
-    persist.text(file.id);
     if (open) store.open(fileKey(file.id), { silent: true });
+    // A new tab is saved at once, so it is there after a crash.
+    persist.files(0);
+    persist.text(file.id, 0);
+    persist.session(0);
     changed('local', { created: file.id });
     return file.id;
   },
 
-  setText(id, text) {
+  /** New text for a file; `urgent` (pasted text) saves it at once instead of after a moment. */
+  setText(id, text, { urgent = false } = {}) {
     const file = files.get(id);
     if (!file || file.deleted || texts.get(id) === text) return;
     texts.set(id, text);
     files.set(id, { ...file, dirty: true, modifiedAt: nowIso(), modifiedBy: author() });
-    persist.text(id);
-    persist.files();
-    changed('text', { id });
+    persist.text(id, urgent ? 0 : undefined);
+    persist.files(urgent ? 0 : undefined);
+    changed('text', { id, urgent });
   },
 
   patch(id, patch) {
@@ -283,12 +292,12 @@ export const store = {
     store.open(repoKey(path));
   },
 
-  setRepoText(path, text) {
+  setRepoText(path, text, { urgent = false } = {}) {
     const tab = repoTabs.get(path);
     if (!tab || tab.text === text) return;
     repoTabs.set(path, { ...tab, text, dirty: true });
-    persist.repo();
-    changed('text', { path });
+    persist.repo(urgent ? 0 : undefined);
+    changed('text', { path, urgent });
   },
 
   // ---- tracker.json ----

@@ -188,7 +188,7 @@ export const COMMANDS = {
 };
 
 /**
- * Creates the editor in `parent`. `onChange(key, text)` gets the text of the
+ * Creates the editor in `parent`. `onChange(key, text, { urgent })` gets the text of the
  * tab after you type (debounced); `onCursor(info)` the cursor position.
  */
 export function createEditorHost(parent, { onChange, onCursor, onShortcut, settings }) {
@@ -212,12 +212,12 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, setti
     gutter: o.lineNumbers ? [lineNumbers(), foldGutter()] : [],
   });
 
-  const flush = (key) => {
+  const flush = (key, urgent = false) => {
     if (!pending.has(key)) return;
     clearTimeout(pending.get(key));
     pending.delete(key);
     const state = key === active ? view.state : states.get(key);
-    if (state) onChange(key, state.doc.toString());
+    if (state) onChange(key, state.doc.toString(), { urgent });
   };
 
   const report = (state) => {
@@ -270,7 +270,11 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, setti
       EditorView.updateListener.of((update) => {
         if (update.docChanged && !update.transactions.some((tr) => tr.annotation(remote))) {
           clearTimeout(pending.get(key));
-          pending.set(key, setTimeout(() => flush(key), 250));
+          // Pasted or dropped text is saved at once; typing a moment after the last key.
+          if (update.transactions.some((tr) => tr.isUserEvent('input.paste') || tr.isUserEvent('input.drop'))) {
+            pending.set(key, null);
+            flush(key, true);
+          } else pending.set(key, setTimeout(() => flush(key), 250));
         }
         if (update.docChanged || update.selectionSet) report(update.state);
       }),

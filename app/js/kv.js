@@ -28,7 +28,8 @@ function run(mode, fn) {
   return openDb().then(
     (db) =>
       new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE, mode);
+        // Writes wait until they are on disk ("strict"), so a crash or power cut keeps them.
+        const tx = mode === 'readwrite' ? db.transaction(STORE, mode, { durability: 'strict' }) : db.transaction(STORE, mode);
         const req = fn(tx.objectStore(STORE));
         // Commit now rather than when the browser gets to it, so a save
         // started as the page closes is not lost with it.

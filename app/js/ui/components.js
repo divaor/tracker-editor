@@ -1,4 +1,4 @@
-import { html, useEffect, useRef, useState } from '../../vendor/preact-htm.js';
+import { html, useEffect, useLayoutEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import { AREAS, areaLabel, cleanTags } from '../tracker-model.js';
 import { Icon } from './icons.js';
 
@@ -43,7 +43,8 @@ export function Toasts() {
 
 export function Modal({ title, onClose, children, footer, wide = false, className = '' }) {
   const ref = useRef(null);
-  useEffect(() => {
+  // A layout effect, so Escape works from the moment the dialog shows.
+  useLayoutEffect(() => {
     const previous = document.activeElement;
     ref.current?.querySelector('input, textarea, select, button.primary')?.focus();
     const onKey = (e) => {

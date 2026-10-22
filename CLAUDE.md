@@ -34,7 +34,15 @@ A Notepad++-style editor whose files sync through the same private GitHub data r
     - `server`: an OpenAI-compatible `/audio/speech` endpoint. It plays audio, fetches the next passages ahead, sets Media Session metadata and handlers, and uses `localFetch` (the main process on desktop).
   - Highlighting goes through `editor.highlightReading`.
 - Sharing to the app: the manifest's `share_target` posts to `share-target`. `sw.js` keeps the items in the `editor-inbox` cache, and `inbox.js` hands them to the app. `file_handlers` with `launchQueue` covers desktop Chrome and Edge.
-- `kv.js` commits each write right away (`tx.commit()`), and `main.js` flushes pending saves on `pagehide` and when the app is hidden, so changes made just before closing are kept.
+- Saving:
+  - Typing is saved 250 ms after the last key (editor debounce plus store debounce).
+  - Pastes, drops and new tabs are saved at once: the editor passes `{ urgent }` and the store saves with ms 0.
+  - `kv.js` writes with `durability: 'strict'` and `tx.commit()`.
+  - `main.js` flushes pending saves on `pagehide` and when the app is hidden.
+  - The Electron crash test kills the app 150 ms after a paste; keep it passing.
+- `naming.js` (pure) names untitled tabs (`new N`) from their content: the model's reply via `cleanModelName`, or `nameFromHeading`. `app.js` runs it a moment after text changes, once per tab, with Undo.
+- `ui/share.js`: Web Share (as text or file) where available, otherwise and also email/WhatsApp links (long text goes to the clipboard), Teams (copy and open), copy text/link, save.
+- Effects that must win races with fast input are layout effects: creating and switching the editor tab, and Escape handlers in Modal and QuickOpen.
 - `tabLock.js`: only one browser tab runs the app (Web Locks + BroadcastChannel). A new tab takes over, and the old one flushes, stops syncing and shows "Use it here".
 - `editor.js`: one CodeMirror `EditorView`, with an `EditorState` per tab. Languages load lazily from `@codemirror/language-data`.
 - Local model:

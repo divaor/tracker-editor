@@ -8,7 +8,9 @@ It is the companion of [Tracker](https://github.com/divaor/tracking_app) and sha
 
 ## Features
 
-- **Many files open at once**: tabs you can reorder, reopen closed tabs (`Ctrl+Shift+T`), untitled `new 1`, `new 2`… files like Notepad++. Paste anything into a new tab and it is kept.
+- **Many files open at once**: tabs you can reorder, reopen closed tabs (`Ctrl+Shift+T`), untitled `new 1`, `new 2`… files like Notepad++. Your tabs and their text come back exactly as you left them, including untitled ones.
+- **Nothing is lost**: pasted text and new tabs are saved to disk immediately, and typing a moment after the last key. Every write waits until it is on disk, so a crash or a power cut keeps your work. The data repo then holds a copy too, synced a few seconds later.
+- **Named from their content**: an untitled tab you paste or write into gets a name that says what it is, from the local model when one is connected (for example `Deploy runbook.md`), otherwise from a heading on its first line. Undo keeps "new 1".
 - **Synced through GitHub**: every device keeps a full local copy and works offline. Changes are committed to `editor/` in your data repo, a batch at a time. If two devices edit the same file, nothing is lost: the other version is kept as a copy named after its device.
 - **Projects and tags**: the tracker's projects and tags, the same Work / Personal filter, and new projects you create here appear in the tracker.
 - **Tracker integration**:
@@ -31,6 +33,7 @@ It is the companion of [Tracker](https://github.com/divaor/tracking_app) and sha
   - It reads the way a person would: Markdown as prose, dates, abbreviations, `#7` and `v2` in words, asides and dashes as short pauses, and longer pauses after headings and paragraphs. Code blocks are skipped.
   - It uses your device's voices, picking the most natural one for the text's language (English, Spanish, Portuguese…).
   - For truly human-sounding voices, connect a speech server; see [5. Natural voices](#5-natural-voices-optional).
+- **Share**: send a file by WhatsApp, Teams, email, Quick Share or any app on the phone (as text or as an attachment), or by email, WhatsApp or Teams on a computer. Copy the text, copy a link that opens it in the editor, or save a copy.
 - **Share to the editor** (Android): in any app, **Share → Tracker Editor** saves the text or file as a new file that syncs like the rest. On a computer, Chrome and Edge can also open text files with the installed app.
 - **Also**: light and dark theme, import files from disk (drag and drop works), save a copy to disk, keyboard shortcuts.
 

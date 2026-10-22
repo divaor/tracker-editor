@@ -1,7 +1,9 @@
 import { html, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from '../vendor/preact-htm.js';
 import { createEditorHost, findLanguage, guessLanguage, PLAIN_TEXT } from './editor.js';
 import { onLaunchFiles, takeShared } from './inbox.js';
-import { parseRoute, safeName } from './model.js';
+import { cleanModelName, isUntitled, MIN_NAMING_TEXT, nameFromHeading, namingMessages, uniqueName } from './naming.js';
+import { llmClient } from './semantic.js';
+import { fileLink, parseRoute, safeName } from './model.js';
 import { previewKind } from './previews.js';
 import { getReaderState, onReaderState, setReaderHighlighter, startReading, stopReading, toggleReading } from './reader.js';
 import { getSettings, getToken, isSyncConfigured, onSettings, resolvedTheme, saveSettings } from './settings.js';
@@ -15,6 +17,7 @@ import { Icon } from './ui/icons.js';
 import { QuickOpen, SearchPanel } from './ui/panels.js';
 import { Preview } from './ui/preview.js';
 import { ReadAloudBar } from './ui/readAloud.js';
+import { ShareDialog } from './ui/share.js';
 import { SettingsView } from './ui/settingsView.js';
 import { Sidebar } from './ui/sidebar.js';
 import { FileBar, StatusBar, SyncBadge, TabBar } from './ui/tabs.js';
@@ -199,6 +202,10 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar }) {
           toast(err.message, { kind: 'error' });
         }
       },
+      share() {
+        hostRef.current?.flushAll();
+        setDialog({ type: 'share' });
+      },
       // Opens the local model panel and summarizes the active file.
       summarize() {
         setPanel('assistant');
@@ -274,13 +281,13 @@ export function App() {
   useLayoutEffect(() => {
     hostRef.current = createEditorHost(editorEl.current, {
       settings: editorOptions(getSettings()),
-      onChange(key, text) {
+      onChange(key, text, { urgent } = {}) {
         const k = parseKey(key);
-        if (k?.kind === 'repo') return store.setRepoText(k.path, text);
+        if (k?.kind === 'repo') return store.setRepoText(k.path, text, { urgent });
         const file = store.get(k.id);
         if (!file) return;
         const before = store.text(k.id);
-        store.setText(k.id, text);
+        store.setText(k.id, text, { urgent });
         // Pasted into a new tab: guess the language.
         if (!before.trim() && text.length > 20 && !file.language && !findLanguage(file.name)) {
           const guess = guessLanguage(text);
@@ -361,6 +368,46 @@ export function App() {
     take();
     window.addEventListener('hashchange', take);
     return () => window.removeEventListener('hashchange', take);
+  }, []);
+
+  // Untitled tabs get a name from what is in them: by the local model when it
+  // is on, else from a heading on the first line. Once per tab; Undo keeps "new N".
+  useEffect(() => {
+    const timers = new Map();
+    const done = new Set();
+    const suggest = async (text, ext) => {
+      const { llm } = getSettings();
+      const signal = AbortSignal.timeout?.(30000);
+      const reply = await llmClient().chat({ model: llm.chatModel, messages: namingMessages(text, ext), signal, temperature: 0.2 });
+      return cleanModelName(reply, ext || 'txt');
+    };
+    const nameIt = async (id) => {
+      const file = store.get(id);
+      const settings = getSettings();
+      if (!file || !isUntitled(file.name) || done.has(id) || !settings.autoName) return;
+      const text = store.text(id);
+      if (text.trim().length < MIN_NAMING_TEXT) return;
+      let name = '';
+      if (settings.llm.enabled && settings.llm.chatModel) {
+        done.add(id);
+        name = await suggest(text, findLanguage('', file.language)?.extensions?.[0] ?? '').catch(() => '');
+      }
+      name ||= nameFromHeading(text);
+      const now = store.get(id);
+      if (!name || !now || !isUntitled(now.name)) return;
+      done.add(id);
+      const unique = uniqueName(name, store.live().filter((f) => f.id !== id).map((f) => f.name));
+      actions.patch(id, { name: unique });
+      toast(`Named “${unique}” from its content`, { action: { label: 'Undo', run: () => actions.patch(id, { name: now.name }) } });
+    };
+    const later = (id, ms) => {
+      clearTimeout(timers.get(id));
+      timers.set(id, setTimeout(() => nameIt(id), ms));
+    };
+    return store.subscribe((reason, detail) => {
+      if (reason === 'text' && detail?.id) later(detail.id, detail.urgent ? 1200 : 4000);
+      if (reason === 'local' && detail?.created) later(detail.created, 1200);
+    });
   }, []);
 
   // Shared from other apps (Android's Share menu) or opened with the installed app.
@@ -521,6 +568,9 @@ export function App() {
 
     ${dialog?.type === 'quickOpen' && html`<${QuickOpen} files=${store.live()} docs=${docs} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'file' && store.get(dialog.id) && html`<${FileDialog} file=${store.get(dialog.id)} projects=${projects} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'share' && activeKey && html`<${ShareDialog} name=${activeName} text=${activeFile ? store.text(activeFile.id) : (activeRepo?.text ?? '')}
+      link=${activeFile ? fileLink(settings.appUrl, activeFile.id) : `${settings.appUrl.replace(/\/?$/, '/')}#/repo/${activeRepo.path.split('/').map(encodeURIComponent).join('/')}`}
+      actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'send' && store.get(dialog.id) && html`<${SendDialog} file=${store.get(dialog.id)} projects=${projects} settings=${settings} actions=${actions} onClose=${() => setDialog(null)} />`}
     <${Toasts} />
   </div>`;
