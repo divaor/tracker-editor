@@ -25,6 +25,7 @@ export function SearchPanel({ files, docs, allFiles, allDocs, openKeys, actions,
   const [options, setOptions] = useState({ caseSensitive: false, wholeWord: false, regex: false });
   const [scope, setScope] = useState('all');
   const [collapsed, setCollapsed] = useState(() => new Set());
+  const [chosen, setChosen] = useState(() => new Set()); // files ticked to open together
   const input = useRef(null);
   useEffect(() => {
     const selected = actions.selectionText();
@@ -46,6 +47,17 @@ export function SearchPanel({ files, docs, allFiles, allDocs, openKeys, actions,
     error = err.message;
   }
   const toggle = (key) => setOptions({ ...options, [key]: !options[key] });
+  const found = result?.files ?? [];
+  const ticked = found.filter((f) => chosen.has(f.id));
+  const tick = (id) =>
+    setChosen((c) => {
+      const next = new Set(c);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  // Each one at its first match; the first file ends up in front.
+  const openMany = (list) => actions.openFiles(list.map((f) => ({ id: f.id, line: f.matches[0]?.line, column: f.matches[0]?.column, length: f.matches[0]?.length })));
+  const allCollapsed = found.length > 0 && found.every((f) => collapsed.has(f.id));
 
   return html`<aside class="panel search-panel" aria-label="Find in files">
     <div class="panel-head">
@@ -70,17 +82,35 @@ export function SearchPanel({ files, docs, allFiles, allDocs, openKeys, actions,
         ${result.total ? `${result.total} match${result.total === 1 ? '' : 'es'} in ${result.files.length} file${result.files.length === 1 ? '' : 's'}` : 'No matches'}
         ${result.truncated ? ' (showing the first ones)' : ''}
       </p>`}
+      ${found.length > 0 &&
+      html`<div class="search-open" role="group" aria-label="Open the files found">
+        <label class="check-inline" title="Tick every file found">
+          <input type="checkbox" checked=${ticked.length === found.length} indeterminate=${ticked.length > 0 && ticked.length < found.length}
+            onChange=${(e) => setChosen(e.currentTarget.checked ? new Set(found.map((f) => f.id)) : new Set())} />All
+        </label>
+        <button type="button" class="btn sm ${ticked.length ? 'primary' : ''}" disabled=${!ticked.length} onClick=${() => openMany(ticked)}>
+          <${Icon} name="file" size=${14} />Open ${ticked.length ? ticked.length : ''} selected
+        </button>
+        <button type="button" class="btn ghost sm" onClick=${() => openMany(found)}>Open all ${found.length}</button>
+        <span class="spacer" />
+        <button type="button" class="icon-btn sm" title=${allCollapsed ? 'Show every match' : 'Only the file names'} aria-label=${allCollapsed ? 'Expand all' : 'Collapse all'}
+          onClick=${() => setCollapsed(allCollapsed ? new Set() : new Set(found.map((f) => f.id)))}><${Icon} name="list" size=${15} /></button>
+      </div>`}
       <div class="search-results">
         ${result?.files.map(
-          (f) => html`<div class="result-file" key=${f.id}>
-            <button type="button" class="result-head" onClick=${() => setCollapsed((c) => {
-              const next = new Set(c);
-              next.has(f.id) ? next.delete(f.id) : next.add(f.id);
-              return next;
-            })}>
-              <${Icon} name="chevronDown" size=${14} class=${collapsed.has(f.id) ? 'collapsed' : ''} />
-              <span class="result-name">${f.name}</span><span class="count">${f.count}</span>
-            </button>
+          (f) => html`<div class="result-file ${chosen.has(f.id) ? 'chosen' : ''}" key=${f.id}>
+            <div class="result-head">
+              <input type="checkbox" class="result-pick" checked=${chosen.has(f.id)} aria-label=${`Select ${f.name}`} onChange=${() => tick(f.id)} />
+              <button type="button" class="result-toggle" aria-expanded=${!collapsed.has(f.id)} onClick=${() => setCollapsed((c) => {
+                const next = new Set(c);
+                next.has(f.id) ? next.delete(f.id) : next.add(f.id);
+                return next;
+              })}>
+                <${Icon} name="chevronDown" size=${14} class=${collapsed.has(f.id) ? 'collapsed' : ''} />
+                <span class="result-name">${f.name}</span><span class="count">${f.count}</span>
+              </button>
+              <button type="button" class="icon-btn sm result-open" aria-label=${`Open ${f.name}`} title="Open this file" onClick=${() => openMany([f])}><${Icon} name="external" size=${14} /></button>
+            </div>
             ${!collapsed.has(f.id) &&
             f.matches.map(
               (m) => html`<button type="button" class="result-line" key=${m.line} onClick=${() => actions.openFile(f.id, { line: m.line, column: m.column, length: m.length })}>

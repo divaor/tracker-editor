@@ -137,6 +137,20 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         setView('editor');
         if (line) setTimeout(() => hostRef.current?.reveal(line, column, length), 60);
       },
+      /** Opens several files at once (Find in files): [{ id, line, column, length }], the first in front at its line. */
+      async openFiles(list) {
+        if (!list.length) return;
+        hostRef.current?.flushAll();
+        for (const f of list) {
+          if (f.id.startsWith('r:')) await actions.openRepoFile(f.id.slice(2));
+          else if (store.get(f.id)) store.open(fileKey(f.id), { silent: true });
+        }
+        const [first] = list;
+        await actions.openFile(first.id, { line: first.line, column: first.column, length: first.length });
+        // On a phone the panel covers the file.
+        if (isNarrow()) setPanel(null);
+        if (list.length > 1) toast(`Opened ${list.length} files`);
+      },
       async openRepoFile(path, { line, column, length } = {}) {
         const doc = store.doc(path);
         const tab = store.repoTab(path);

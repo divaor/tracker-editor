@@ -2476,13 +2476,41 @@ button.project-chip:hover {
 .result-head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   width: 100%;
-  padding: 5px 4px;
+  padding: 2px 0 2px 4px;
+}
+
+.result-toggle {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px 2px;
   border: 0;
   background: transparent;
   font-weight: 600;
   text-align: left;
+}
+
+.result-pick {
+  flex-shrink: 0;
+  margin: 0 2px;
+}
+
+.result-file.chosen > .result-head {
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+}
+
+.search-open {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  padding-left: 4px;
 }
 
 .result-head .icon.collapsed {
