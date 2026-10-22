@@ -424,6 +424,7 @@ function buildMenu() {
         { type: 'separator' },
         shown('Type into Another Window', 'Alt+T', 'type-out'),
         shown('Insert Snippet…', 'Alt+I', 'snippets'),
+        shown('Ask the Model About the Selection…', 'CmdOrCtrl+K', 'ask-selection'),
       ],
     },
     {

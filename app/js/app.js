@@ -24,6 +24,7 @@ import { TrashDialog } from './ui/trash.js';
 import { LockedFile } from './ui/encryption.js';
 import { TypeOutPanel } from './ui/typeOut.js';
 import { SnippetPicker } from './ui/snippets.js';
+import { AskSelectionDialog } from './ui/askSelection.js';
 import { snippetNameFrom } from './snippets.js';
 import { prepareTyping, typingDelay } from './typing.js';
 import { isSealed } from './crypto.js';
@@ -271,6 +272,54 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         const next = { project: filing.project || file.project, tags: filing.tags.length ? filing.tags : file.tags };
         actions.patch(file.id, next);
         toast(`Filed under ${filedAs(next)}`, { action: { label: 'Undo', run: () => actions.patch(file.id, before) } });
+      },
+
+      // ---- Asking the model about the selection (Ctrl+K) ----
+
+      askSelection() {
+        const host = hostRef.current;
+        host?.flushAll();
+        const sel = host?.selectionInfo();
+        if (!sel) return toast('Open a file first.');
+        const k = parseKey(sel.key);
+        const file = k.kind === 'file' ? store.get(k.id) : null;
+        const name = file?.name ?? store.repoTab(k.path)?.name ?? '';
+        const language = findLanguage(name, file?.language)?.name ?? '';
+        const whole = sel.from === sel.to;
+        const text = whole ? sel.doc() : sel.text;
+        if (!text.trim()) return toast('There is nothing to ask about yet.');
+        setDialog({ type: 'ask', context: { key: sel.key, from: whole ? 0 : sel.from, to: whole ? sel.docLength : sel.to, text, whole, name, language } });
+      },
+      /** The model's new version of the text, as a comparison to accept or not. */
+      proposeReplacement(context, text, label) {
+        if (store.session.active !== context.key) store.open(context.key);
+        const accept = () => {
+          setCompare(null);
+          setTimeout(() => {
+            if (!hostRef.current?.replaceRange(context.key, context.from, context.to, context.text, text)) {
+              toast('The text changed meanwhile, so it was left as it is. Ask again, or copy the new version.', { kind: 'error' });
+              return;
+            }
+            toast(`${label}: done`, { action: { label: 'Undo', run: () => hostRef.current?.run('undo') } });
+          }, 0);
+        };
+        setCompare({
+          key: context.key,
+          name: context.name,
+          language: context.language,
+          left: { label: context.whole ? 'Now' : 'The selection now', text: context.text },
+          right: { label, text },
+          actions: [
+            { label: 'Accept', icon: 'check', primary: true, run: accept },
+            { label: 'Copy', icon: 'copy', run: () => navigator.clipboard.writeText(text).then(() => toast('Copied')) },
+          ],
+        });
+      },
+      /** An answer from Ctrl+K kept as a Markdown note. */
+      answerAsNote(context, label, answer) {
+        const quote = context.text.length > 600 ? `${context.text.slice(0, 600)}…` : context.text;
+        const name = uniqueName(safeName(`${label} - ${context.name.replace(/\.[^.]+$/, '')}.md`), store.live().map((f) => f.name));
+        actions.newFile({ name, text: `# ${label}: ${context.name}\n\n\`\`\`\n${quote}\n\`\`\`\n\n${answer}\n` });
       },
 
       // ---- Snippets ----
@@ -803,6 +852,9 @@ export function App() {
       } else if (e.altKey && !mod && k === 'w') {
         e.preventDefault();
         if (store.session.active) actions.close(store.session.active);
+      } else if (mod && !e.shiftKey && !e.altKey && k === 'k') {
+        e.preventDefault();
+        actions.askSelection();
       } else if (e.altKey && !mod && !e.shiftKey && k === 'i') {
         e.preventDefault();
         actions.openSnippets();
@@ -840,6 +892,7 @@ export function App() {
         split: () => actions.toggleSplit(),
         'type-out': () => actions.typeOut(),
         snippets: () => actions.openSnippets(),
+        'ask-selection': () => actions.askSelection(),
         find: () => actions.run('find'),
         replace: () => actions.run('replace'),
         'goto-line': () => actions.run('gotoLine'),
@@ -962,6 +1015,7 @@ export function App() {
           onPick=${(entry) => actions.compareWithEntry(entry)} onClose=${() => setDialog(null)} />`
       : html`<${QuickOpen} files=${store.live()} docs=${docs} actions=${actions} onClose=${() => setDialog(null)} />`)}
     ${dialog?.type === 'trash' && html`<${TrashDialog} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'ask' && html`<${AskSelectionDialog} context=${dialog.context} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'snippets' && html`<${SnippetPicker} selection=${dialog.selection} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'file' && store.get(dialog.id) && html`<${FileDialog} file=${store.get(dialog.id)} projects=${projects} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'share' && activeKey && html`<${ShareDialog} name=${activeName} text=${activeFile ? store.text(activeFile.id) : (activeRepo?.text ?? '')}

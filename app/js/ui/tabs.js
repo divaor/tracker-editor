@@ -153,6 +153,7 @@ export function FileBar({ file, repo, sealed, projects, canPreview, preview, set
     { label: 'History', icon: 'history', run: actions.showHistory },
     { label: 'Compare with…', icon: 'columns', run: actions.compareWith },
     window.desktop?.typing && { label: 'Type into another window', icon: 'keyboard', run: () => actions.typeOut() },
+    settings.llm.enabled && { label: 'Ask the model… (Ctrl+K)', icon: 'sparkle', run: actions.askSelection },
     { label: 'Insert snippet…', icon: 'snippet', run: actions.openSnippets },
     id && { label: 'Save as snippet', icon: 'snippet', run: actions.saveSnippet },
     id && { label: store.get(id)?.snippet ? 'Not a snippet' : 'Use as a snippet', icon: 'snippet', run: () => actions.toggleSnippet(id) },

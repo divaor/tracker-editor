@@ -422,6 +422,23 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, setti
       return true;
     },
 
+    /** The selection of the pane typed in last: { key, from, to, text } (from === to when nothing is selected). */
+    selectionInfo() {
+      const { key, view: v } = current();
+      if (!key) return null;
+      const { from, to } = v.state.selection.main;
+      return { key, from, to, text: v.state.sliceDoc(from, to), docLength: v.state.doc.length, doc: () => v.state.doc.toString() };
+    },
+
+    /** Replaces from–to in a shown tab when it still holds `expected`, as an edit you can undo. False when it changed. */
+    replaceRange(key, from, to, expected, text) {
+      const v = viewOf(key);
+      if (!v || to > v.state.doc.length || v.state.sliceDoc(from, to) !== expected) return false;
+      v.dispatch({ changes: { from, to, insert: text }, selection: { anchor: from, head: from + text.length }, userEvent: 'input.paste', scrollIntoView: true });
+      v.focus();
+      return true;
+    },
+
     /** Inserts text in place of the selection of the pane typed in last, the cursor `cursorOffset` into it. */
     insertAtCursor(text, cursorOffset = text.length) {
       const { key, view: v } = current();
