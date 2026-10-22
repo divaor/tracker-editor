@@ -25,10 +25,21 @@ It is the companion of [Tracker](https://github.com/divaor/tracking_app) and sha
   - The tracker shows **Open in editor** on those items and **Edit in editor** on attached files; your edits are saved back to the tracker.
 - **Search that knows where things are**:
   - `Ctrl+P` opens a file by (fuzzy) name or project.
-  - `Ctrl+Shift+F` finds text in all files, the filtered ones or the open tabs, with case, whole-word and regex options.
+  - `Ctrl+Shift+F` finds text in all files, the filtered ones or the open tabs, with case, whole-word and regex options. Tick the files found and open them together, or open all of them, each at its first match.
+- **Outline, `[[links]]` and backlinks** (`Ctrl+Shift+O`): the headings of a Markdown file or the classes, functions and tables of code, to jump to. Write `[[another note]]` to link notes (Ctrl+click opens it, or offers to create it); the panel lists the links and the files that link here.
+- **Snippets with fields** (`Alt+I`): mark files as snippets and insert them with their `{{fields}}` filled in, plus `{{date}}`, `{{clipboard}}`, `{{selection}}` and `{{cursor}}`. Insert, copy or type them into another window.
+- **Log tools**: **Filter lines** (`Alt+L`) shows only the lines that match (or hides them), with regex; copy them or make a file of them. Very large files open in a lighter mode that stays fast.
+- **Macros**: `Ctrl+Shift+R` records your edits, `Ctrl+Shift+P` plays them back, or run them many times or to the end of the file.
+- **Compare with the clipboard**, and **send a checklist to the tracker**: the open `- [ ]` items of a file or the selection become tasks that link back to it.
 - **A local model on your computer** (Ollama, LM Studio or any OpenAI-compatible server): summarize a file, ask questions about one or all of your files with sources, and **find by meaning** when you don't remember the words. Nothing leaves your machine.
+  - **Help with the text**: the ✦ bubble at the bottom right (or `Ctrl+K`) works on the selection, or the whole file. Fix, rewrite, shorten or expand it; change the tone; **advanced replace** (say what to change: "every date to YYYY-MM-DD"); tidy it, **make it Markdown**, **convert it** to JSON, YAML, CSV, a table…; **check the syntax** of a query, find problems, add comments, rewrite it in another language or SQL dialect, write a regex; translate it; or ask anything and follow up. New versions open as a comparison to accept, keep as a new file or copy.
   - Or a **model service that answers later** (submit a request, get the answer from a status call or a webhook), described by a connection profile; see [4. Model](#4-model-optional).
 - **Type into another window** (desktop): for remote desktops and consoles that do not take pasted text. `Alt+T` types the selection, or the whole file, as key presses into the window you click into before a short countdown ends.
+- **Files on disk** (desktop): **File → Open File (Edit in Place)** (`Ctrl+O`) edits a file where it is, keeping its line endings and encoding. It reloads when the file changes elsewhere, warns before saving over someone else's change, and **Follow** shows new lines as they are written, like `tail -f`. Huge logs open by their last part.
+- **Quick capture** (desktop): a shortcut that works in any app opens a small window to jot something down, kept as a new note or added to `Inbox.md`.
+- **Clipboard history** (desktop, off until you turn it on): what you copy in any app, to search and paste again (`Ctrl+Shift+V`). Kept on the computer, encrypted, and passwords from password managers are skipped.
+- **Text from images and screenshots**: paste, drop or pick an image (on a phone, take a photo), or on the desktop drag around part of the screen, and its text is read on the device (English and Spanish) to insert, keep or copy.
+- **Voice notes** (phone and browsers with a speech service): the microphone button dictates into the open file or a new note, with spoken line breaks ("new line", "nuevo párrafo").
 - **Syntax highlighting** for 140+ languages, detected from the file name or the content of pasted text, or picked in the status bar.
 - **Editing tools**: find and replace (with regex), go to line, multiple cursors, select next occurrence, comment lines, duplicate/delete/sort lines, remove duplicates, trim trailing spaces, upper/lower case, format JSON, word wrap, visible whitespace, bracket matching, code folding.
 - **Preview**: a reading view next to the text (instead of it on phones):
@@ -43,7 +54,7 @@ It is the companion of [Tracker](https://github.com/divaor/tracking_app) and sha
   - For truly human-sounding voices, connect a speech server; see [5. Natural voices](#5-natural-voices-optional).
 - **Share**: send a file by WhatsApp, Teams, email, Quick Share or any app on the phone (as text or as an attachment), or by email, WhatsApp or Teams on a computer. Copy the text, copy a link that opens it in the editor, or save a copy.
 - **Share to the editor** (Android): in any app, **Share → Tracker Editor** saves the text or file as a new file that syncs like the rest. On a computer, Chrome and Edge can also open text files with the installed app.
-- **Also**: light and dark theme, import files from disk (drag and drop works), save a copy to disk, keyboard shortcuts.
+- **Also**: light and dark theme, import files from disk (drag and drop works), save a copy to disk, keyboard shortcuts, and home screen shortcuts for a new note or a voice note.
 
 ## How it fits together
 
@@ -174,6 +185,29 @@ It stops when another window takes the focus, when you hold `Escape` (Windows), 
 - **macOS**: allow Tracker Editor under **System Settings → Privacy & Security → Accessibility** the first time.
 - **Linux**: needs `xdotool` (X11) or `wtype` (Wayland).
 
+## 8. Files on disk and logs (desktop)
+
+**File → Open File (Edit in Place)…** (`Ctrl+O`) opens files from your computer without copying them into your synced files. `Ctrl+S` saves them back with their line endings (CRLF or LF), BOM and encoding (UTF-8 or Windows-1252); the status bar shows which.
+
+- When a file changes on disk and you have no unsaved edits, it reloads by itself. When you do, a notice offers **Compare**, **Reload** or **Keep mine and save over it**; saving never silently overwrites someone else's change.
+- **Follow** shows the lines added to a log as they are written (read-only meanwhile), and starts over when the log is rotated.
+- Files over 20 MB open by their last 5 MB, read-only. **Filter lines** (`Alt+L`) and the lighter editor for big files help with long logs.
+- **Copy into my files** in the ⋯ menu makes a synced copy. The app only reads and writes files you picked in its open dialog.
+
+## 9. Quick capture, clipboard history and screenshots (desktop)
+
+All three are in **Settings → Desktop**, off until you turn them on.
+
+- **Quick capture**: a global shortcut (`Ctrl+Alt+N` by default; click the field and press the keys you want). Write, then `Ctrl+Enter` keeps it as a new note without leaving what you were doing, or adds it to `Inbox.md` under the time; `Ctrl+Shift+Enter` uses the other choice. `Escape` keeps the draft for next time.
+- **Text from a screenshot**: an optional global shortcut (`Ctrl+Alt+O`), or **Edit → Text from a Screenshot**. The editor steps aside, you drag around part of the screen, and its text is read on this computer. On macOS, allow screen recording the first time.
+- **Clipboard history** (`Ctrl+Shift+V`): texts you copy in any app, newest first. Search them, insert one at the cursor, copy it again, open it as a file or type it into another window; pin the ones to keep. They stay on this computer, encrypted with its keychain; copies password managers mark as secret are skipped, and turning it off forgets the history.
+- **Keep running in the tray when the window is closed**, so the shortcuts and the history keep working.
+
+## 10. Text from images and voice notes
+
+- **Images**: paste an image into a file, drop one on the window, pick one with **⋯ → Text from an image…** (on a phone you can take a photo), or share one to the editor from another app. The text is read on the device by [Tesseract](https://github.com/naptha/tesseract.js) in English and Spanish (pick one language for better results), shown to correct, then inserted, kept as a new file or copied. The first time loads about 9 MB; after that it works offline.
+- **Voice notes**: the microphone button at the top dictates into the open file, or a new note when none is open; **Voice note** on the installed app's icon (long-press it on Android) starts one. Say "new line" or "new paragraph" ("nueva línea", "nuevo párrafo", "punto y aparte") for line breaks. It uses the browser's speech service (on Android, Google's), so it needs a connection; pick the language in **Settings → Voice notes**. The desktop app has no speech service, so dictation is not there.
+
 ## Keyboard shortcuts
 
 | Keys | Action |
@@ -181,6 +215,7 @@ It stops when another window takes the focus, when you hold `Escape` (Windows), 
 | `Alt+N` (desktop: `Ctrl+N`) | New file |
 | `Ctrl+P` | Open a file by name |
 | `Ctrl+Shift+F` | Find in files |
+| `Ctrl+O` | Open a file from disk to edit in place (desktop) |
 | `Ctrl+F` / `Ctrl+H` | Find / replace in this file |
 | `Ctrl+G` | Go to line |
 | `Ctrl+D` | Select the next occurrence |
@@ -188,10 +223,16 @@ It stops when another window takes the focus, when you hold `Escape` (Windows), 
 | `Alt+Z` | Word wrap |
 | `Alt+R` | Read aloud, pause or resume |
 | `Alt+T` | Type the selection or file into another window (desktop) |
+| `Ctrl+K` | Ask the model about the selection or the file |
+| `Alt+I` | Insert a snippet |
+| `Alt+L` | Filter lines |
+| `Ctrl+Shift+O` | Outline and links |
+| `Ctrl+Shift+R` / `Ctrl+Shift+P` | Record a macro / play it |
+| `Ctrl+Shift+V` | Clipboard history (desktop) |
 | `Ctrl+\` | Split view: open or close the side pane |
 | `Ctrl+B` | Show or hide the file list |
 | `Ctrl+Shift+A` | Model |
-| `Ctrl+S` | Sync now |
+| `Ctrl+S` | Sync now, or save a file opened from disk |
 | `Ctrl+W` / `Ctrl+Shift+T` | Close tab / reopen it (desktop) |
 
 ## Data format
@@ -234,10 +275,10 @@ npm install
 npm test          # unit tests (node:test): sync engine, search, local model client
 npm run web       # serve the web app at http://localhost:8080
 npm start         # run the desktop app
-npm run vendor    # re-bundle CodeMirror and copy Preact/htm, marked, DOMPurify into app/vendor/
+npm run vendor    # re-bundle CodeMirror and copy Preact/htm, marked, DOMPurify and tesseract.js into app/vendor/
 ```
 
-The web app is plain ES modules with no build step. CodeMirror 6 and its languages are bundled once by `npm run vendor` (esbuild, one chunk per language) into `app/vendor/cm/`.
+The web app is plain ES modules with no build step. CodeMirror 6 and its languages are bundled once by `npm run vendor` (esbuild, one chunk per language) into `app/vendor/cm/`; text recognition (tesseract.js, its WebAssembly core and the English and Spanish models) is copied into `app/vendor/ocr/`.
 
 ```
 app/                  the web app (also loaded by Electron)
@@ -254,10 +295,18 @@ app/                  the web app (also loaded by Electron)
   js/crypto.js, vault.js          encrypted files: AES-GCM, the vault, the key on this device
   js/naming.js        names and filing for new notes
   js/typing.js        text prepared for typing into another window
-  js/ui/              tabs, sidebar, panels, dialogs, assistant, settings, compare, history, trash
+  js/selectionAsk.js  what the model panel can do with the selection or a file
+  js/snippets.js, outline.js, logtools.js, checklist.js   snippets, outline and [[links]], line filters, checklists
+  js/diskTabs.js      files on disk edited in place, reloads and follow mode
+  js/capture.js, ocr.js, ocrEngine.js, dictation.js       quick capture, text from images, voice notes
+  js/ui/              tabs, sidebar, panels, dialogs, model panel, settings, compare, history, trash
+  capture.html, snip.html   the quick capture window and the screenshot overlay (desktop)
   sw.js               offline cache
-electron/             main process + preload (app:// protocol, keychain, model proxy, webhook receiver, tracker-editor:// links)
+electron/             main process + preload (app:// protocol, keychain, model proxy, webhook receiver, tracker-editor:// links,
+                      tray, global shortcuts, clipboard history, screen capture)
   typer.cjs           key presses into another window (Windows, macOS, Linux)
+  diskFiles.cjs       reading and writing files on disk (encodings, line endings, the end of huge files)
+  clipHistory.cjs     the clipboard history list
 scripts/              vendor bundling, icon rendering, local web server
 test/                 unit tests
 .github/workflows/    CI, GitHub Pages deploy, desktop release builds
@@ -270,4 +319,7 @@ test/                 unit tests
 - **Desktop app**: the window is sandboxed with context isolation; the model proxy only accepts `http(s)` requests, and outside links open in your default browser.
 - **Encrypted files**: AES-GCM with a 256-bit key derived from your passphrase (PBKDF2-SHA256, 600,000 rounds). The key is kept on unlocked devices as a non-extractable key; the passphrase is never stored.
 - **Model service secrets**: the API key and webhook secret are kept in the keychain (desktop) and never written to the settings or the data repo. The webhook receiver refuses events whose signature does not match when a secret is set.
+- **Files on disk**: the page can read and write only files you picked in the desktop app's open dialog.
+- **Clipboard history** is off by default, kept only on the computer (encrypted with the keychain; in memory only when there is none), skips copies marked as secret by password managers, and is deleted when turned off.
+- **Text from images** runs in the page: images are never uploaded. **Voice notes** use the browser's speech service, which sends the audio to its provider.
 - **One tab at a time**: in a browser, the editor runs in one tab; opening it again (for example from a tracker link) moves it to the new tab, so two tabs never save over each other.

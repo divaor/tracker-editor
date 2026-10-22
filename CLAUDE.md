@@ -7,12 +7,12 @@ A Notepad++-style editor whose files sync through the same private GitHub data r
 - `npm test` runs the unit tests (`node:test`, no browser needed). Run it before committing.
 - `npm run web` serves `app/` at http://localhost:8080.
 - `npm start` launches the Electron app. As root/in containers: `npx electron --no-sandbox .`
-- `npm run vendor` re-bundles CodeMirror (from `vendor-src/codemirror.js`, esbuild with code splitting) into `app/vendor/cm/` and copies Preact/htm, marked and DOMPurify. Run it after upgrading any of them, and commit the output.
+- `npm run vendor` re-bundles CodeMirror (from `vendor-src/codemirror.js`, esbuild with code splitting) into `app/vendor/cm/` and copies Preact/htm, marked, DOMPurify and tesseract.js (with its core and the eng/spa models, into `app/vendor/ocr/`). Run it after upgrading any of them, and commit the output.
 
 ## Architecture
 
 - `app/` is a no-build ES-module web app. GitHub Pages serves it directly and Electron loads it via the `app://editor` protocol (`electron/main.cjs`). Root `package.json` is `"type": "module"`, so Electron files are `.cjs`.
-- Pure modules (no DOM, imported by the Node tests): `model.js`, `sync.js`, `github.js`, `search.js`, `ai.js`, `llm.js`, `asyncLlm.js`, `tracker-model.js`, `format.js`, `versions.js`, `crypto.js`, `naming.js`, `typing.js`, `previews.js`, `speech.js`.
+- Pure modules (no DOM, imported by the Node tests): `model.js`, `sync.js`, `github.js`, `search.js`, `ai.js`, `llm.js`, `asyncLlm.js`, `tracker-model.js`, `format.js`, `versions.js`, `crypto.js`, `naming.js`, `typing.js`, `previews.js`, `speech.js`, `selectionAsk.js`, `snippets.js`, `outline.js`, `logtools.js`, `checklist.js`, `capture.js`, `ocr.js`, `dictation.js`. The `.cjs` helpers `electron/diskFiles.cjs` and `electron/clipHistory.cjs` are tested too.
 - Data repo layout:
   - `editor/index.json` lists file records; the text of each is in `editor/files/<id>/<safeName(name)>`.
   - `tracker.json` belongs to the tracker. The editor reads its projects and items, and writes it only for queued tracker ops (new projects, "Send to tracker") and for the sha of a tracker attachment edited here.
@@ -53,6 +53,19 @@ A Notepad++-style editor whose files sync through the same private GitHub data r
 - `tabLock.js`: only one browser tab runs the app (Web Locks + BroadcastChannel). A new tab takes over, and the old one flushes, stops syncing and shows "Use it here".
 - `editor.js`: one CodeMirror `EditorView`, with an `EditorState` per tab, plus a second view for the split view's side pane (`openSide`/`closeSide`). A tab's state lives in one view at a time and moves with its undo history; commands and reading aloud use the pane typed in last. Languages load lazily from `@codemirror/language-data`.
 - `ui/menu.js`: `Menu` (fixed position, so bars that scroll sideways do not clip it) and `MenuButton`; the file bar's More menu and the tab context menu use them.
+- The model panel (`ui/askSelection.js`: `AssistPanel`, opened by `AssistBubble` or Ctrl+K; setting `assistBubble`): `selectionAsk.js` lists the actions by group; kind `answer` replies in the panel (follow-ups resend the earlier turns), kind `replace` opens `actions.proposeReplacement` (compare, Accept / As a new file / Copy). `param` actions ask for a value that fills `{param}` (`withParam`). The context is the selection of the pane typed in last, or the whole file (`actions.assistContext`).
+- Tab kinds: `f:<id>` (editor files), `r:<path>` (tracker documents), `d:<path>` (files on disk, desktop). Disk tabs:
+  - `store.diskTabs` (never synced; only unsaved text is persisted, the rest is read again, `stale`). Changes emit `'disk'`, not `'local'`, so they do not start a sync.
+  - `diskTabs.js` saves (refusing when the mtime moved, unless forced), reloads, and follows appends (`readAppended`, a shorter file reloads). Read-only while following or for the tail of a huge file (`editor.setReadOnly`).
+  - `electron/diskFiles.cjs` decodes (BOM, CRLF, UTF-8 or latin1) and encodes back. `main.cjs` keeps an allowlist of picked paths (`disk-files.json`) and polls watched files (`fs.watchFile`, `disk:changed`).
+- Desktop extras in `main.cjs`, set in Settings → Desktop through `prefs:get`/`prefs:set` (kept in `prefs.json`, applied by `applyPrefs`):
+  - Tray: hiding instead of quitting when `background` is on. `quitting` lets Quit pass through the flush on close.
+  - Global shortcuts (`registerShortcuts`): quick capture and text from a screenshot, each with a status (`ok`, `taken`, `invalid`, `off`).
+  - Quick capture: `capture.html` + `capturePreload.cjs`, a separate page (it must not load the app: tab lock). Captures go through `captures.json` until the main window takes them (`capture:take`), as a new file (not opened) or appended to `Inbox.md` (`capture.js`).
+  - Clipboard history: polls `clipboard.readText()` (Electron 44's clipboard API is async), skips concealed formats (`clipHistory.cjs`), stores `clipboard-history.bin` encrypted with `safeStorage` (memory only without it) and deletes it when turned off.
+  - Screenshots: `desktopCapturer` of the display under the pointer (this window hidden first), shown in `snip.html` + `snipPreload.cjs`; the picked rectangle comes back as a PNG (`ocr:snip`).
+- Text from images: `ocrEngine.js` lazy-loads tesseract.js from `vendor/ocr/` (worker, SIMD LSTM core and the eng/spa models, all same-origin; `workerBlobURL: false`) and keeps one worker. Small images are enlarged first (`ocrScale`). `ui/ocr.js` shows the result to correct. Entry points: pasting or dropping an image in the editor (`onImage`), dropping on the window or sharing (`importFiles`), the ⋯ menu, and screenshots.
+- Voice notes: `ui/dictation.js` (Web Speech API, restarted after pauses; phrase by phrase on Android, which repeats results in continuous mode) inserts through `joinDictated` (`dictation.js`: spacing, capitals, spoken line breaks). Not in the desktop app, which has no speech service. `#/voice` and `#/new` are the manifest's home screen shortcuts.
 - Local model:
   - `llm.js` is an OpenAI-compatible client (`/models`, streamed `/chat/completions`, `/embeddings`).
   - On desktop, requests go through the main process (`llm:request` / `llm:chunk` IPC), so they avoid CORS. In the browser they go directly.
@@ -67,9 +80,11 @@ A Notepad++-style editor whose files sync through the same private GitHub data r
 
 ## When changing things
 
-- Adding or removing a file under `app/` → update `ASSETS` in `app/sw.js` (CodeMirror chunks are listed in `vendor/cm/files.json` instead). `test/app.test.js` enforces this.
+- Adding or removing a file under `app/` → update `ASSETS` in `app/sw.js` (CodeMirror chunks are listed in `vendor/cm/files.json` instead, and text recognition in `vendor/ocr/files.json`, cached when first used). `test/app.test.js` enforces this.
 - Bumping the version → update `package.json`, `app/js/version.js` and the `CACHE` name in `app/sw.js`. The tests check that they match.
 - The manifest `id` is `/tracker-editor/`. Ids resolve against the origin, and the tracker on the same origin (divaor.github.io) owns the origin root. Never change it: a new id makes installed copies a different app.
 - The CSP in `app/index.html` allows only same-origin scripts. Fetches may go to any https origin and to `localhost` (the model and speech servers); `media-src` allows `blob:` for speech audio.
   - Do not add inline scripts.
 - Browser tests (Playwright) need `PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK=1` in this sandbox so `localhost` is not sent through the proxy. Electron tests need `xvfb-run`; typing into another window needs `xdotool` (`apt-get install xdotool`).
+  - Playwright's key presses do not reach Electron menu accelerators: click the menu item through `Menu.getApplicationMenu()` instead.
+  - Without a keyring, `safeStorage` is unavailable under xvfb, so the clipboard history stays in memory there.
