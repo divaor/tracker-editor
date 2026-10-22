@@ -254,8 +254,10 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       e.preventDefault();
       const files = [...(e.clipboardData?.files ?? [])];
       const text = e.clipboardData?.getData('text/plain') ?? '';
-      // What was cut or copied here, when the clipboard still holds it (as files, or as their paths).
-      const ours = Boolean(clip) && (clip.system ? await bridge.clipOurs().catch(() => false) : !files.length && (!text || text === clip.text));
+      // What was cut or copied here, when the clipboard still holds it (as files, or as their paths);
+      // files in the paste that are not those came from another app.
+      const same = files.length ? files.map((f) => f.name).sort().join('\n') === (clip?.paths ?? []).map(baseName).sort().join('\n') : true;
+      const ours = Boolean(clip) && same && (clip.system ? await bridge.clipOurs().catch(() => false) : !files.length && (!text || text === clip.text));
       if (clip && !ours) clip = null;
       pasteInto(dir, { files, text, ours });
     };
