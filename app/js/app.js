@@ -618,7 +618,7 @@ export function App() {
     const wait = options.countdown * 1000;
     setTypingJob({ total: text.length, at: Date.now() + wait, delay, typed: 0, what: selected ? 'selection' : 'file' });
     try {
-      const { typed, stopped } = await typer.start(text, { delay, wait, minimize: options.minimize });
+      const { typed, stopped } = await typer.start(text, { delay, wait, minimize: options.minimize, unicode: options.unicode });
       const done = `${typed.toLocaleString()} character${typed === 1 ? '' : 's'}`;
       if (!stopped) toast(`Typed ${done}.`);
       else if (stopped === 'self') toast(`Nothing typed: Tracker Editor still had the focus. Start again, then click into the other window within ${options.countdown} seconds.`, { timeout: 9000 });

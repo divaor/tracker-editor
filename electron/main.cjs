@@ -138,7 +138,7 @@ ipcMain.handle('type:start', guard(async (event, text, opts = {}) => {
   const handle = mainWindow?.getNativeWindowHandle();
   const self = process.platform === 'win32' && handle ? (handle.length >= 8 ? handle.readBigUInt64LE() : BigInt(handle.readUInt32LE())).toString() : '0';
   const sender = event.sender;
-  typing = startTyping(text, { delay, at: Date.now() + wait, self }, {
+  typing = startTyping(text, { delay, at: Date.now() + wait, self, unicode: Boolean(opts.unicode) }, {
     onProgress: (n) => !sender.isDestroyed() && sender.send('type:progress', n),
     isSelfFocused: () => Boolean(mainWindow?.isFocused()),
   });

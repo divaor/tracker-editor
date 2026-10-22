@@ -70,7 +70,7 @@ public static class TrackerEditorTyper {
     } else Send(Key(sc, SCANCODE), Key(sc, SCANCODE | KEYUP));
   }
 
-  public static void Type(string text, int delay, long self) {
+  public static void Type(string text, int delay, long self, bool unicode) {
     IntPtr target = GetForegroundWindow();
     if (self != 0 && target.ToInt64() == self) { Console.WriteLine("stopped self 0"); return; }
     for (int i = 0; i < text.Length; i++) {
@@ -78,6 +78,7 @@ public static class TrackerEditorTyper {
       if ((GetAsyncKeyState(0x1B) & 0x8000) != 0) { Console.WriteLine("stopped escape " + i); return; }
       char ch = text[i];
       if (char.IsHighSurrogate(ch) && i + 1 < text.Length) { Unicode(ch); Unicode(text[i + 1]); i++; }
+      else if (unicode && ch != '\n' && ch != '\t') Unicode(ch);
       else Press(ch);
       if (i % 25 == 0) Console.WriteLine("progress " + i);
       Thread.Sleep(delay);
@@ -97,7 +98,7 @@ function windowsScript() {
     // Starts at the end of the countdown, however long PowerShell took to get here.
     '$wait = [int64]$env:TYPER_AT - [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()',
     'if ($wait -gt 0) { Start-Sleep -Milliseconds $wait }',
-    '[TrackerEditorTyper]::Type($text, [int]$env:TYPER_DELAY, [int64]$env:TYPER_SELF)',
+    "[TrackerEditorTyper]::Type($text, [int]$env:TYPER_DELAY, [int64]$env:TYPER_SELF, ($env:TYPER_UNICODE -eq '1'))",
   ].join('\n');
 }
 
@@ -136,7 +137,7 @@ const STOPPED = { self: 'self', focus: 'focus', escape: 'escape' };
  * 'self' (this app still had the focus), 'focus' (another window took it),
  * 'escape' or 'cancelled'; it rejects with a message to show.
  */
-function startTyping(text, { delay = 15, at = Date.now() + 5000, self = '0' } = {}, deps = {}) {
+function startTyping(text, { delay = 15, at = Date.now() + 5000, self = '0', unicode = false } = {}, deps = {}) {
   const { platform = process.platform, spawn = nodeSpawn, tmpdir = os.tmpdir(), env = process.env, onProgress = () => {}, isSelfFocused = () => false, setTimer = setTimeout, clearTimer = clearTimeout } = deps;
   const dir = fs.mkdtempSync(path.join(tmpdir, 'tracker-editor-typing-'));
   const file = path.join(dir, 'text.txt');
@@ -187,7 +188,7 @@ function startTyping(text, { delay = 15, at = Date.now() + 5000, self = '0' } = 
     if (platform === 'win32') {
       // Started now: PowerShell takes a moment, and waits for the end of the countdown itself.
       run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encodeCommand(windowsScript())], {
-        env: { ...env, TYPER_FILE: file, TYPER_AT: String(at), TYPER_DELAY: String(delay), TYPER_SELF: String(self || 0) },
+        env: { ...env, TYPER_FILE: file, TYPER_AT: String(at), TYPER_DELAY: String(delay), TYPER_SELF: String(self || 0), TYPER_UNICODE: unicode ? '1' : '0' },
       });
       return;
     }

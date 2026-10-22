@@ -149,6 +149,7 @@ function TypingCard({ settings }) {
       </${Field}>
       <${Check} checked=${t.autoIndent} label="The other editor indents new lines by itself" hint="Leaves out the spaces at the start of lines, so they are not doubled" onChange=${(v) => set({ autoIndent: v })} />
       <${Check} checked=${t.minimize} label="Minimize Tracker Editor while it types" hint="The window behind it, often the remote desktop, gets the focus" onChange=${(v) => set({ minimize: v })} />
+      ${window.desktop?.platform === 'win32' && html`<${Check} checked=${t.unicode} label="Send characters instead of key presses" hint="If symbols come out wrong because this computer's keyboard layout differs from the remote one" onChange=${(v) => set({ unicode: v })} />`}
     </div>
   </${Card}>`;
 }

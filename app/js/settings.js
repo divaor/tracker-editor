@@ -69,7 +69,8 @@ export const DEFAULT_SETTINGS = {
   },
   // Typing into another window (desktop app): seconds to switch windows, speed (typing.js), whether the
   // other editor indents new lines by itself, and whether to minimize this window meanwhile.
-  typing: { countdown: 5, speed: 'normal', autoIndent: false, minimize: false },
+  // `unicode` (Windows): characters instead of key presses, for keyboard layouts that differ from the remote one.
+  typing: { countdown: 5, speed: 'normal', autoIndent: false, minimize: false, unicode: false },
   // Settings migrations already applied on this device.
   version: 2,
 };

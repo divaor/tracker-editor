@@ -94,5 +94,7 @@ test('Windows starts PowerShell at once, reports progress and why it stopped', a
   assert.ok(args.includes('-EncodedCommand') && args.includes('-NonInteractive'));
   assert.equal(options.env.TYPER_AT, String(at));
   assert.equal(options.env.TYPER_SELF, '1234');
+  assert.equal(options.env.TYPER_UNICODE, '0');
+  assert.match(windowsScript(), /\(\$env:TYPER_UNICODE -eq '1'\)/);
   assert.equal(options.windowsHide, true);
 });
