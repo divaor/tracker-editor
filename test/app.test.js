@@ -49,3 +49,11 @@ test('the page allows only same-origin scripts', async () => {
   assert.match(csp, /script-src 'self'(;|$)/);
   assert.doesNotMatch(html, /<script(?![^>]*\bsrc=)[^>]*>/, 'no inline scripts');
 });
+
+test('the app id is the editor’s own on the shared origin', async () => {
+  // Browsers resolve a manifest id against the origin, not the app's folder, and
+  // the tracker on the same origin (divaor.github.io) already has "./", which is
+  // the origin root. Sharing it made Android take the editor for the tracker.
+  const manifest = JSON.parse(await readFile(path.join(appDir, 'manifest.webmanifest'), 'utf8'));
+  assert.equal(new URL(manifest.id, 'https://divaor.github.io').href, 'https://divaor.github.io/tracker-editor/');
+});

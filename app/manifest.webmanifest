@@ -2,7 +2,7 @@
   "name": "Tracker Editor",
   "short_name": "Editor",
   "description": "Many open files, synced through GitHub, with projects, tags and search.",
-  "id": "./",
+  "id": "/tracker-editor/",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

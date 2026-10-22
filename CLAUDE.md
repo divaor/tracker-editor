@@ -45,6 +45,7 @@ A Notepad++-style editor whose files sync through the same private GitHub data r
 
 - Adding or removing a file under `app/` → update `ASSETS` in `app/sw.js` (CodeMirror chunks are listed in `vendor/cm/files.json` instead). `test/app.test.js` enforces this.
 - Bumping the version → update `package.json`, `app/js/version.js` and the `CACHE` name in `app/sw.js`. The tests check that they match.
+- The manifest `id` is `/tracker-editor/`. Ids resolve against the origin, and the tracker on the same origin (divaor.github.io) owns the origin root. Never change it: a new id makes installed copies a different app.
 - The CSP in `app/index.html` allows only same-origin scripts. Fetches may go to any https origin and to `localhost` (the model server).
   - Do not add inline scripts.
 - Browser tests (Playwright) need `PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK=1` in this sandbox so `localhost` is not sent through the proxy. Electron tests need `xvfb-run`.
