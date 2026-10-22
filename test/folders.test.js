@@ -196,6 +196,49 @@ test('entries sorted with folders first, by name, date, size or type', () => {
   assert.equal(names('type'), 'alpha Zeta a9.md a10.md b.txt');
 });
 
+test('a reversed sort keeps folders first; which way a column header points', () => {
+  const e = [
+    { name: 'b.txt', dir: false, size: 10, mtimeMs: 3 },
+    { name: 'Zeta', dir: true, size: 0, mtimeMs: 1 },
+    { name: 'a.md', dir: false, size: 30, mtimeMs: 1 },
+    { name: 'alpha', dir: true, size: 0, mtimeMs: 9 },
+  ];
+  assert.equal(page.sortEntries(e, 'name', true).map((x) => x.name).join(' '), 'Zeta alpha b.txt a.md');
+  assert.equal(page.sortEntries(e, 'size', true).map((x) => x.name).join(' '), 'Zeta alpha b.txt a.md');
+  assert.equal(page.sortsUp('name'), true);
+  assert.equal(page.sortsUp('name', true), false);
+  assert.equal(page.sortsUp('modified'), false);
+  assert.equal(page.sortsUp('size', true), true);
+});
+
+test('the folder as a tree: expanded folders show their contents, a filter keeps the way to matches', () => {
+  const f = (path, dir = false, extra = {}) => ({ name: path.split('/').pop(), path, dir, size: 1, mtimeMs: 1, ...extra });
+  const top = [f('/r/src', true), f('/r/docs', true), f('/r/readme.md'), f('/r/.env', false, { hidden: true })];
+  const children = new Map([
+    ['/r/src', [f('/r/src/main.js'), f('/r/src/lib', true)]],
+    ['/r/src/lib', [f('/r/src/lib/util.js')]],
+  ]);
+  const show = (opts) => page.treeRows(top, { children, ...opts }).map((r) => `${'  '.repeat(r.depth)}${r.entry.name}${r.expanded ? '/' : ''}`).join('|');
+  assert.equal(show({}), 'docs|src|readme.md');
+  assert.equal(show({ expanded: new Set(['/r/src']) }), 'docs|src/|  lib|  main.js|readme.md');
+  assert.equal(show({ expanded: new Set(['/r/src', '/r/src/lib']) }), 'docs|src/|  lib/|    util.js|  main.js|readme.md');
+  // A folder expanded inside a collapsed one stays hidden.
+  assert.equal(show({ expanded: new Set(['/r/src/lib']) }), 'docs|src|readme.md');
+  assert.equal(show({ expanded: new Set(['/r/src', '/r/src/lib']), query: 'util' }), 'src/|  lib/|    util.js');
+  assert.equal(show({ query: 'read' }), 'readme.md');
+  assert.equal(show({ hidden: true }), 'docs|src|.env|readme.md');
+  // Not listed yet: nothing under it.
+  assert.equal(show({ expanded: new Set(['/r/docs']) }), 'docs/|src|readme.md');
+});
+
+test('recent and favorite folders', () => {
+  assert.deepEqual(page.pushRecent(['/a', '/b', '/c'], '/b'), ['/b', '/a', '/c']);
+  assert.deepEqual(page.pushRecent(['/a', '/b'], '/c', 2), ['/c', '/a']);
+  assert.deepEqual(page.pushRecent(undefined, '/x'), ['/x']);
+  assert.deepEqual(page.toggleFavorite(['/a'], '/b'), ['/a', '/b']);
+  assert.deepEqual(page.toggleFavorite(['/a', '/b'], '/a'), ['/b']);
+});
+
 test('selection ranges, rename ranges, what opens where', () => {
   assert.deepEqual(page.rangeOf(['a', 'b', 'c', 'd'], 'c', 'a'), ['a', 'b', 'c']);
   assert.deepEqual(page.rangeOf(['a', 'b'], null, 'b'), ['b']);

@@ -87,8 +87,8 @@ export const FOLDER_SORTS = [
   { id: 'type', label: 'Type' },
 ];
 
-/** Folders first, then files: by name, newest first, largest first, or by type (extension). */
-export function sortEntries(entries, sort = 'name') {
+/** Folders first, then files: by name, newest first, largest first, or by type (extension); `reverse` turns the order around (folders stay first). */
+export function sortEntries(entries, sort = 'name', reverse = false) {
   const byName = (a, b) => collator.compare(a.name, b.name);
   const order = {
     name: byName,
@@ -96,8 +96,38 @@ export function sortEntries(entries, sort = 'name') {
     size: (a, b) => (a.dir || b.dir ? 0 : b.size - a.size) || byName(a, b),
     type: (a, b) => collator.compare(extOf(a.name), extOf(b.name)) || byName(a, b),
   }[sort] ?? byName;
-  return [...entries].sort((a, b) => (a.dir === b.dir ? order(a, b) : a.dir ? -1 : 1));
+  const way = reverse ? -1 : 1;
+  return [...entries].sort((a, b) => (a.dir === b.dir ? way * order(a, b) : a.dir ? -1 : 1));
 }
+
+/** Whether a sort goes up (A to Z, oldest first) as shown in a column header: names and types do, dates and sizes start from the top. */
+export const sortsUp = (sort, reverse = false) => (sort === 'modified' || sort === 'size') === reverse;
+
+/**
+ * The rows of the folder as a tree: [{ entry, depth, expanded }] with the contents of
+ * expanded folders (`children`: folder → its entries, as listed) under them. With a
+ * query, a file shows when its name has it and a folder when its name has it or an
+ * expanded folder below shows something.
+ */
+export function treeRows(entries, { expanded = new Set(), children = new Map(), query = '', hidden = false, sort = 'name', reverse = false } = {}) {
+  const q = query.trim().toLowerCase();
+  const walk = (list, depth, seen) => {
+    const rows = [];
+    for (const entry of sortEntries(list.filter((e) => hidden || !e.hidden), sort, reverse)) {
+      const open = entry.dir && expanded.has(entry.path) && !seen.has(entry.path);
+      const below = open && children.has(entry.path) ? walk(children.get(entry.path) ?? [], depth + 1, new Set([...seen, entry.path])) : [];
+      if (q && !entry.name.toLowerCase().includes(q) && !below.length) continue;
+      rows.push({ entry, depth, expanded: open }, ...below);
+    }
+    return rows;
+  };
+  return walk(entries, 0, new Set());
+}
+
+/** The recent folders with `path` first, at most `max`. */
+export const pushRecent = (list = [], path, max = 8) => [path, ...list.filter((p) => p !== path)].slice(0, max);
+/** The favorite folders with `path` added (at the end) or taken out. */
+export const toggleFavorite = (list = [], path) => (list.includes(path) ? list.filter((p) => p !== path) : [...list, path]);
 
 /** The paths from `anchor` to `target` in the order shown (Shift+click); just the target without an anchor. */
 export function rangeOf(order, anchor, target) {

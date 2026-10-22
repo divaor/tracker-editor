@@ -4,7 +4,7 @@ import { Icon } from './icons.js';
 /**
  * A small menu at a point: { x, y }, or { x, y, right: true } to end at x
  * (under a button at the window's edge). Fixed, so bars that scroll sideways
- * do not clip it. Items: { label, icon?, run, disabled?, danger?, checked? }
+ * do not clip it. Items: { label, icon?, run, disabled?, danger?, checked?, hint?, key? }
  * or { separator: true }. Closes on a choice, a click elsewhere or Escape.
  */
 export function Menu({ items, at, onClose, label = 'Menu', owner }) {
@@ -42,12 +42,12 @@ export function Menu({ items, at, onClose, label = 'Menu', owner }) {
     ${items.filter(Boolean).map((item, i) =>
       item.separator
         ? html`<div class="menu-separator" key=${`s${i}`} role="separator" />`
-        : html`<button type="button" key=${item.label} role="menuitem" class="menu-item ${item.danger ? 'danger' : ''}" disabled=${item.disabled}
+        : html`<button type="button" key=${item.key ?? item.label} role="menuitem" class="menu-item ${item.danger ? 'danger' : ''}" disabled=${item.disabled} title=${item.hint}
             onClick=${() => {
               onClose();
               item.run();
             }}>
-            ${item.icon ? html`<${Icon} name=${item.icon} size=${15} />` : html`<span class="menu-icon" />`}<span>${item.label}</span>${item.checked && html`<${Icon} name="check" size=${14} />`}
+            ${item.icon ? html`<${Icon} name=${item.icon} size=${15} />` : html`<span class="menu-icon" />`}<span>${item.label}</span>${item.hint && html`<span class="menu-hint">${item.hint}</span>`}${item.checked && html`<${Icon} name="check" size=${14} />`}
           </button>`,
     )}
   </div>`;

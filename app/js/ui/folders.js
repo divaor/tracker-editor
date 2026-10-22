@@ -1,6 +1,6 @@
 import { html, useEffect, useLayoutEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import { canDragOut, draggedPaths, draggedTab, dropped, isOwnDrop, onDragOutEnd, startDragOut } from '../dragOut.js';
-import { baseName, breadcrumbs, filterEntries, FOLDER_SORTS, isImageName, modeString, opensInEditor, parentOf, quotePath, rangeOf, renameRange, rootOf, selectionSummary, sortEntries } from '../folders.js';
+import { baseName, breadcrumbs, FOLDER_SORTS, isImageName, modeString, opensInEditor, parentOf, pushRecent, quotePath, rangeOf, renameRange, rootOf, selectionSummary, sortsUp, toggleFavorite, treeRows } from '../folders.js';
 import { formatBytes, timeAgo } from '../format.js';
 import { saveSettings } from '../settings.js';
 import { diskKey } from '../store.js';
@@ -23,6 +23,11 @@ const message = (err) => String(err?.message ?? err).replace(/^Error invoking re
 const fail = (err) => toast(message(err), { kind: 'error', timeout: 8000 });
 const dirOf = (p) => p.slice(0, Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'))) || p;
 const count = (n, what) => `${n} ${what}${n === 1 ? '' : 's'}`;
+// A date for the Modified column: the day and time this year, the day before.
+const shortDate = (ms) => {
+  const d = new Date(ms);
+  return d.toLocaleString(undefined, d.getFullYear() === new Date().getFullYear() ? { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' } : { year: 'numeric', month: 'short', day: 'numeric' });
+};
 const binName = () => (window.desktop?.platform === 'win32' ? 'the Recycle Bin' : 'the Trash');
 
 // Cut or copied in this view (kept while you move between folders): { op: 'cut' | 'copy', paths, text }.
@@ -90,6 +95,9 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   const [confirm, setConfirm] = useState(null); // entries to delete
   const [dropTarget, setDropTarget] = useState(null);
   const [, setClipVersion] = useState(0);
+  // The tree: folders opened in place (their chevron) and what they hold, as listed.
+  const [expanded, setExpanded] = useState(() => new Set());
+  const [children, setChildren] = useState(() => new Map()); // folder → entries (or { error })
   const list = useRef(null);
   const typed = useRef({ text: '', at: 0 });
   const pendingSelect = useRef(null); // a path to select once the folder is read (the one you came up from)
@@ -133,11 +141,22 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       stale = true;
     };
   }, [roots, root, dir]);
+  // The folders opened in place (inside the one shown) are read again with it.
+  const loadOpen = async (target = dir, open = expanded) => {
+    const inside = [...open].filter((p) => p !== target && rootOf(p, [target]));
+    const lists = await Promise.all(inside.map((p) => bridge.list(p).then((l) => [p, l.entries], (err) => [p, { error: message(err) }])));
+    setChildren((m) => {
+      const next = new Map(m);
+      for (const [p, entries] of lists) next.set(p, entries);
+      return next;
+    });
+    return lists.flatMap(([, entries]) => (Array.isArray(entries) ? entries : []));
+  };
   const load = async (target = dir) => {
     try {
-      const next = await bridge.list(target);
+      const [next, deeper] = await Promise.all([bridge.list(target), loadOpen(target)]);
       setListing(next);
-      const present = new Set(next.entries.map((e) => e.path));
+      const present = new Set([...next.entries, ...deeper].map((e) => e.path));
       if (pendingSelect.current && present.has(pendingSelect.current)) {
         select([pendingSelect.current]);
         pendingSelect.current = null;
@@ -174,9 +193,18 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     if (remote && connState?.state === 'connected' && listing?.error) load(dir);
   }, [connState?.state]);
 
-  const entries = sortEntries(filterEntries(listing?.dir === dir ? listing.entries : [], { query: filter, hidden: settings.showHidden }), settings.folderSort);
+  const rows = treeRows(listing?.dir === dir ? listing.entries : [], {
+    expanded,
+    children: new Map([...children].filter(([, v]) => Array.isArray(v))),
+    query: filter,
+    hidden: settings.showHidden,
+    sort: settings.folderSort,
+    reverse: settings.folderSortReverse,
+  });
+  const entries = rows.map((r) => r.entry);
   const order = entries.map((e) => e.path);
   const byPath = new Map(entries.map((e) => [e.path, e]));
+  const depthOf = new Map(rows.map((r) => [r.entry.path, r.depth]));
   const chosen = () => entries.filter((e) => selected.has(e.path));
   const targets = () => {
     const picked = chosen();
@@ -218,7 +246,29 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
 
   // ---- Moving around ----
 
+  /** Opens a folder in place (its contents under it) or closes it. */
+  const toggleOpen = async (path, open = !expanded.has(path)) => {
+    const next = new Set(expanded);
+    if (!open) {
+      // Closing a folder closes the ones inside it too.
+      for (const p of next) if (p === path || rootOf(p, [path])) next.delete(p);
+      setExpanded(next);
+      if (cursor && cursor !== path && rootOf(cursor, [path])) select([path]);
+      return;
+    }
+    next.add(path);
+    setExpanded(next);
+    try {
+      const listed = await bridge.list(path);
+      setChildren((m) => new Map(m).set(path, listed.entries));
+    } catch (err) {
+      setChildren((m) => new Map(m).set(path, { error: message(err) }));
+      fail(err);
+    }
+  };
+
   const go = (target) => {
+    if (target !== dir) saveSettings({ folderRecent: pushRecent(settings.folderRecent, target) });
     setFilter('');
     setCreating(null);
     setRenaming(null);
@@ -268,7 +318,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   const after = async ({ moves = [], made = [] }, done, undo) => {
     await load(dir);
     if (moves.length) actions.followDiskMoves(moves);
-    const here = [...moves.map((m) => m.to), ...made].filter((p) => dirOf(p) === dir);
+    const here = [...moves.map((m) => m.to), ...made].filter((p) => dirOf(p) === dir || expanded.has(dirOf(p)));
     if (here.length) select(here);
     if (done) toast(done, undo ? { action: { label: 'Undo', run: undo }, timeout: 8000 } : {});
   };
@@ -444,6 +494,16 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       ev.preventDefault();
       ev.stopPropagation();
     };
+    if ((key === 'ArrowRight' || key === 'ArrowLeft') && !mod && !ev.altKey && cursor && byPath.get(cursor)) {
+      handled();
+      const e = byPath.get(cursor);
+      if (key === 'ArrowRight') {
+        if (e.dir && !expanded.has(e.path)) toggleOpen(e.path, true);
+        else if (e.dir && order[at + 1] && depthOf.get(order[at + 1]) > depthOf.get(e.path)) select([order[at + 1]]);
+      } else if (e.dir && expanded.has(e.path)) toggleOpen(e.path, false);
+      else if (depthOf.get(e.path) > 0) select([dirOf(e.path)]);
+      return;
+    }
     if (key === 'ArrowDown') return handled(), moveCursor(at === -1 ? 0 : at + 1);
     if (key === 'ArrowUp' && !ev.altKey) return handled(), moveCursor(at === -1 ? 0 : at - 1);
     if (key === 'Home') return handled(), moveCursor(0);
@@ -540,8 +600,14 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       one?.dir && { label: 'Find in this folder…', icon: 'search', run: () => actions.findInFolder(one.path) },
       one?.dir && hasTerminal && { label: 'Open a terminal here', icon: 'terminal', run: () => actions.terminalHere(one.path) },
       one?.dir && mirrorItem(one.path),
+      one?.dir && { label: (settings.folderFavorites ?? []).includes(one.path) ? 'Remove from favorites' : 'Add to favorites', icon: 'star', run: () => saveSettings({ folderFavorites: toggleFavorite(settings.folderFavorites, one.path) }) },
     ];
   };
+  const favoriteItems = (p) => [
+    { label: 'Open', icon: 'folderOpen', run: () => go(p) },
+    { label: 'Remove from favorites', icon: 'x', run: () => saveSettings({ folderFavorites: toggleFavorite(settings.folderFavorites, p) }) },
+    { label: 'Copy path', icon: 'copy', run: () => actions.copyPath(p) },
+  ];
   const rootItems = () => [
     ...roots.map((r) => ({ label: r, icon: 'folder', checked: r === root, run: () => go(r) })),
     ...servers().map((c) => ({ label: `${c.name} (${protocolName(c.protocol)} · ${c.host})`, icon: 'server', checked: remoteRoot(c.id) === root, run: () => actions.openServer(c.id) })),
@@ -594,6 +660,13 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
 
   const crumbs = breadcrumbs(dir, root);
   const up = parentOf(dir, root);
+  // Favorites and recent folders (here or on servers), by their name and where they are.
+  const favorites = settings.folderFavorites ?? [];
+  const favorite = favorites.includes(dir);
+  const recent = (settings.folderRecent ?? []).filter((p) => p !== dir);
+  const toggleFav = (p) => saveSettings({ folderFavorites: toggleFavorite(favorites, p) });
+  const placeName = (p) => (isRemotePath(p) && !remoteParts(p).path.replace(/\/+$/, '') ? (server(remoteParts(p).id)?.name ?? 'Server') : baseName(isRemotePath(p) ? remoteParts(p).path || '/' : p));
+  const placeHint = (p) => (isRemotePath(p) ? `${server(remoteParts(p).id)?.name ?? 'Server'}: ${remoteParts(p).path || '/'}` : p);
   const hiddenCount = (listing?.entries ?? []).filter((e) => e.hidden).length;
   const some = targets().length > 0;
   const tool = (label, icon, run, disabled = false) =>
@@ -603,11 +676,22 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     onDragLeave: (ev) => !ev.currentTarget.contains(ev.relatedTarget) && setDropTarget((t) => (t === target ? null : t)),
     onDrop: (ev) => onDrop(ev, target),
   });
-  const row = (e) => {
+  const details = settings.folderView === 'details';
+  const perms = remote && settings.showPermissions;
+  const row = ({ entry: e, depth, expanded: open }) => {
     const key = diskKey(e.path);
     const isSelected = selected.has(e.path);
+    const twisty = e.dir
+      ? html`<button type="button" class="tree-twisty ${open ? 'open' : ''}" tabindex="-1" aria-label=${open ? `Close ${e.name}` : `Open ${e.name} here`}
+          onClick=${(ev) => (ev.stopPropagation(), toggleOpen(e.path))} onDblClick=${(ev) => ev.stopPropagation()}><${Icon} name="chevronRight" size=${13} /></button>`
+      : html`<span class="tree-twisty none" />`;
+    const name = renaming === e.path
+      ? html`<${NameField} initial=${e.name} dir=${e.dir} label=${`New name for ${e.name}`} onDone=${(n) => rename(e, n)} onCancel=${() => (setRenaming(null), list.current?.focus())} />`
+      : html`<span class="folder-name">${e.name}</span>`;
+    const children_ = children.get(e.path);
     return html`<div key=${e.path} data-path=${e.path} role="option" aria-selected=${isSelected} id=${`row-${order.indexOf(e.path)}`}
-      class="folder-row ${e.dir ? 'is-dir' : ''} ${isSelected ? 'selected' : ''} ${cursor === e.path ? 'cursor' : ''} ${activeKey === key ? 'active' : ''} ${e.hidden ? 'hidden-entry' : ''} ${clip?.op === 'cut' && clip.paths.includes(e.path) ? 'is-cut' : ''} ${dropTarget === e.path ? 'drop-target' : ''}"
+      aria-level=${depth + 1} aria-expanded=${e.dir ? open : undefined} style=${{ '--depth': depth }}
+      class="folder-row ${details ? 'with-columns' : ''} ${e.dir ? 'is-dir' : ''} ${isSelected ? 'selected' : ''} ${cursor === e.path ? 'cursor' : ''} ${activeKey === key ? 'active' : ''} ${e.hidden ? 'hidden-entry' : ''} ${clip?.op === 'cut' && clip.paths.includes(e.path) ? 'is-cut' : ''} ${dropTarget === e.path ? 'drop-target' : ''}"
       title=${remote ? `${remoteParts(e.path).path}${e.mode !== undefined ? `\n${modeString(e.mode, e.dir)}${e.owner ? ` ${e.owner}` : ''}${e.group ? ` ${e.group}` : ''}` : ''}` : e.path} draggable=${renaming !== e.path}
       onDragStart=${(ev) => onDragStart(ev, e)}
       onDragEnd=${() => (internalDrag.current = null)}
@@ -634,16 +718,34 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
         if (!selected.has(e.path)) select([e.path]);
         setMenu({ entry: e, at: { x: ev.clientX, y: ev.clientY } });
       }}>
-      <${Icon} name=${e.dir ? 'folder' : isImageName(e.name) ? 'image' : 'file'} size=${15} />
-      ${renaming === e.path
-        ? html`<${NameField} initial=${e.name} dir=${e.dir} label=${`New name for ${e.name}`} onDone=${(name) => rename(e, name)} onCancel=${() => (setRenaming(null), list.current?.focus())} />`
-        : html`<span class="folder-name">${e.name}</span>`}
-      ${openKeys.includes(key) && html`<span class="tab-dot open-dot" title="Open in a tab" />`}
-      <span class="spacer" />
-      ${!e.dir && renaming !== e.path && html`<span class="muted small folder-meta" title=${new Date(e.mtimeMs).toLocaleString()}>${formatBytes(e.size)} · ${timeAgo(new Date(e.mtimeMs).toISOString())}</span>`}
-      ${remote && settings.showPermissions && e.mode !== undefined && renaming !== e.path && html`<code class="folder-perms" title=${`${e.owner ?? ''} ${e.group ?? ''}`.trim()}>${modeString(e.mode, e.dir)}</code>`}
+      <span class="folder-cell-name">
+        ${twisty}
+        <${Icon} name=${e.dir ? (open ? 'folderOpen' : 'folder') : isImageName(e.name) ? 'image' : 'file'} size=${15} />
+        ${name}
+        ${openKeys.includes(key) && html`<span class="tab-dot open-dot" title="Open in a tab" />`}
+        ${open && children_?.error && html`<span class="error-text small" title=${children_.error}>(cannot read it)</span>`}
+      </span>
+      ${details
+        ? html`<span class="folder-cell size">${e.dir ? '' : formatBytes(e.size)}</span>
+            <span class="folder-cell date" title=${e.mtimeMs ? new Date(e.mtimeMs).toLocaleString() : ''}>${e.mtimeMs ? shortDate(e.mtimeMs) : ''}</span>
+            ${perms && html`<code class="folder-cell perms" title=${`${e.owner ?? ''} ${e.group ?? ''}`.trim()}>${e.mode !== undefined ? modeString(e.mode, e.dir) : ''}</code>`}`
+        : html`<span class="spacer" />
+            ${!e.dir && renaming !== e.path && html`<span class="muted small folder-meta" title=${new Date(e.mtimeMs).toLocaleString()}>${formatBytes(e.size)} · ${timeAgo(new Date(e.mtimeMs).toISOString())}</span>`}
+            ${perms && e.mode !== undefined && renaming !== e.path && html`<code class="folder-perms" title=${`${e.owner ?? ''} ${e.group ?? ''}`.trim()}>${modeString(e.mode, e.dir)}</code>`}`}
     </div>`;
   };
+  // Details: column headers that sort (again: the other way).
+  const sortBy = (id) => saveSettings(settings.folderSort === id ? { folderSortReverse: !settings.folderSortReverse } : { folderSort: id, folderSortReverse: false });
+  const header = (id, label, cls) => {
+    const on = (settings.folderSort || 'name') === id;
+    const up = sortsUp(id, settings.folderSortReverse);
+    return html`<button type="button" class="folder-col ${cls} ${on ? 'on' : ''}" aria-sort=${on ? (up ? 'ascending' : 'descending') : 'none'} title=${`Sort by ${label.toLowerCase()}`} onClick=${() => sortBy(id)}>
+      <span>${label}</span>${on && html`<${Icon} name="arrowUp" size=${12} class=${up ? '' : 'down'} />`}
+    </button>`;
+  };
+  const columns = details && html`<div class="folder-columns" role="presentation" onClick=${(ev) => ev.stopPropagation()} onContextMenu=${(ev) => ev.stopPropagation()}>
+    ${header('name', 'Name', 'name')}${header('size', 'Size', 'size')}${header('modified', 'Modified', 'date')}${perms && html`<span class="folder-col perms">Permissions</span>`}
+  </div>`;
 
   return html`
     <div class="folders-head">
@@ -655,8 +757,20 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
         <span class="spacer" />
         ${tool('Up one folder (Backspace)', 'arrowUp', () => go(up), !up)}
         ${tool('Refresh (F5)', 'rotate', () => load(dir))}
+        <button type="button" class="icon-btn sm fav-toggle ${favorite ? 'on' : ''}" aria-pressed=${favorite} aria-label=${favorite ? 'Remove this folder from favorites' : 'Add this folder to favorites'}
+          title=${favorite ? 'Remove this folder from favorites' : 'Add this folder to favorites'} onClick=${() => toggleFav(dir)}><${Icon} name="star" size=${16} /></button>
+        ${recent.length > 0 && html`<${MenuButton} label="Recent folders" icon="clock" items=${() => recent.map((p) => ({ key: p, label: placeName(p), hint: placeHint(p), icon: isRemotePath(p) ? 'server' : 'folder', run: () => go(p) }))} />`}
         <${MenuButton} label="Folders" items=${rootItems} />
       </div>
+      ${favorites.length > 0 &&
+      html`<div class="folders-quick" role="toolbar" aria-label="Favorite folders">
+        ${favorites.map(
+          (p) => html`<button type="button" key=${p} class="fav-chip ${p === dir ? 'current' : ''} ${isRemotePath(p) ? 'kind-remote' : ''} ${dropTarget === p ? 'drop-target' : ''}" title=${placeHint(p)}
+            onClick=${() => go(p)} onContextMenu=${(ev) => (ev.preventDefault(), ev.stopPropagation(), setMenu({ favorite: p, at: { x: ev.clientX, y: ev.clientY } }))} ...${p === dir ? {} : dropProps(p)}>
+            <${Icon} name="star" size=${12} /><span>${placeName(p)}</span>
+          </button>`,
+        )}
+      </div>`}
       <div class="folders-tools" role="toolbar" aria-label="Files">
         ${tool('New file', 'filePlus', () => setCreating({ kind: 'file', name: 'New file.txt' }))}
         ${tool('New folder (Ctrl+Shift+N)', 'folderPlus', () => setCreating({ kind: 'folder', name: 'New folder' }))}
@@ -669,6 +783,9 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
         ${tool('Delete (Del)', 'trash', () => setConfirm(targets()), !some)}
         <span class="tools-sep" />
         ${tool('Find in this folder (Ctrl+Shift+F)', 'search', () => actions.findInFolder(dir))}
+        <span class="spacer" />
+        <button type="button" class="icon-btn sm ${details ? 'on' : ''}" aria-pressed=${details} aria-label="Details (columns)" title=${details ? 'List' : 'Details: size and date in columns, sorted by their headers'}
+          onClick=${() => saveSettings({ folderView: details ? 'list' : 'details' })}><${Icon} name="details" size=${16} /></button>
       </div>
       ${crumbs.length > 1 &&
       html`<nav class="crumbs" aria-label="Folder path">
@@ -688,7 +805,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
         <${ClearButton} value=${filter} onClear=${() => setFilter('')} label="Clear the filter" />
       </div>
     </div>
-    <div class="file-list folder-list ${dropTarget === dir ? 'drop-target' : ''}" role="listbox" aria-multiselectable="true" tabindex="0" ref=${list}
+    <div class="file-list folder-list ${details ? 'details' : ''} ${dropTarget === dir ? 'drop-target' : ''}" role="listbox" aria-multiselectable="true" tabindex="0" ref=${list}
       aria-label=${`Files in ${dir === root ? rootName(root) : baseName(dir)}`} aria-activedescendant=${cursor && order.includes(cursor) ? `row-${order.indexOf(cursor)}` : undefined}
       onKeyDown=${onKeyDown}
       onFocus=${claimSelection}
@@ -699,6 +816,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
         setMenu({ entry: null, at: { x: ev.clientX, y: ev.clientY } });
       }}
       ...${dropProps(dir)}>
+      ${columns}
       ${creating &&
       html`<div class="folder-row creating">
         <${Icon} name=${creating.kind === 'folder' ? 'folder' : 'file'} size=${15} />
@@ -710,7 +828,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
         <p class="error-text small">${listing.error}</p>
         ${remote && html`<p><button type="button" class="btn sm" onClick=${(e) => (e.stopPropagation(), load(dir))}>Try again</button> <button type="button" class="btn ghost sm" onClick=${(e) => (e.stopPropagation(), actions.editServer(conn))}>Edit the server…</button></p>`}
       </div>`}
-      ${entries.map(row)}
+      ${rows.map(row)}
       ${listing?.dir === dir && !listing.error && !entries.length && !creating &&
       html`<p class="muted small empty-list">${filter ? 'Nothing here matches.' : hiddenCount && !settings.showHidden ? `Only hidden files here (${hiddenCount}).` : 'This folder is empty. Drop or paste files here.'}</p>`}
       ${listing?.truncated && html`<p class="muted small empty-list">Showing the first ${listing.entries.length.toLocaleString()} entries. Filter to find the others, or open a folder inside.</p>`}
@@ -721,7 +839,9 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
         <${Icon} name=${remote ? 'server' : 'disk'} size=${14} />
       </span>
     </div>
-    ${menu && html`<${Menu} items=${menu.entry ? entryItems() : backgroundItems()} at=${menu.at} label=${menu.entry?.name ?? (dir === root ? rootName(root) : baseName(dir))} onClose=${() => setMenu(null)} />`}
+    ${menu &&
+    html`<${Menu} items=${menu.favorite ? favoriteItems(menu.favorite) : menu.entry ? entryItems() : backgroundItems()} at=${menu.at}
+      label=${menu.favorite ? placeName(menu.favorite) : (menu.entry?.name ?? (dir === root ? rootName(root) : baseName(dir)))} onClose=${() => setMenu(null)} />`}
     ${confirm && html`<${DeleteDialog} entries=${confirm} onConfirm=${() => remove(confirm)} onClose=${() => (setConfirm(null), list.current?.focus())} />`}
   `;
 }

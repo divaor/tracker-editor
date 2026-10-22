@@ -49,6 +49,12 @@ export const DEFAULT_SETTINGS = {
   folder: '',
   showHidden: false,
   folderSort: 'name',
+  folderSortReverse: false,
+  // 'list' (names, with size and age) or 'details' (columns: name, size, date, sortable by their headers).
+  folderView: 'list',
+  // Folders starred in the folders view, and the ones visited last (paths here or remote:// on servers).
+  folderFavorites: [],
+  folderRecent: [],
   // Servers: permissions (rwxr-xr-x) next to each file in the folders view.
   showPermissions: false,
   // The terminal panel's height (desktop), in pixels.

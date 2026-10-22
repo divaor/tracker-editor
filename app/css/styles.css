@@ -1906,13 +1906,203 @@ button.project-chip:hover {
   font-weight: 600;
 }
 
-.folder-row > .icon {
+.folder-cell-name > .icon {
   flex-shrink: 0;
   color: var(--text-3);
 }
 
-.folder-row.is-dir > .icon {
+.folder-row.is-dir .folder-cell-name > .icon {
   color: var(--accent);
+}
+
+/* The name with the tree's indent and chevron (the rest of the row: meta, or the columns). */
+.folder-cell-name {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding-left: calc(var(--depth, 0) * 14px);
+}
+
+.tree-twisty {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  height: 18px;
+  margin-right: -2px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-3);
+}
+
+.tree-twisty:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.tree-twisty svg {
+  transition: transform 0.12s;
+}
+
+.tree-twisty.open svg {
+  transform: rotate(90deg);
+}
+
+/* Details: name, size and date in columns, sorted by their headers. */
+.folder-columns {
+  position: sticky;
+  top: -6px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -6px -6px 4px;
+  padding: 2px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.folder-col {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+button.folder-col:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.folder-col.on {
+  color: var(--text);
+}
+
+.folder-col .icon.down {
+  transform: rotate(180deg);
+}
+
+.folder-col.name {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-left: -4px;
+  padding-left: 4px;
+}
+
+.folder-col.size,
+.folder-cell.size {
+  flex: none;
+  justify-content: flex-end;
+  width: 64px;
+  text-align: right;
+}
+
+.folder-col.date,
+.folder-cell.date {
+  flex: none;
+  width: 104px;
+}
+
+.folder-col.perms,
+.folder-cell.perms {
+  flex: none;
+  width: 86px;
+}
+
+.folder-cell {
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-row.with-columns {
+  gap: 8px;
+}
+
+.folder-cell.perms {
+  font-family: var(--mono);
+}
+
+/* Favorite folders under the folder's name; the star in its bar. */
+.folders-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-height: 62px;
+  overflow-y: auto;
+}
+
+.fav-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.fav-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fav-chip .icon {
+  flex: none;
+  color: var(--warn);
+  fill: currentColor;
+}
+
+.fav-chip:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.fav-chip.current {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.fav-chip.drop-target {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.fav-toggle.on {
+  color: var(--warn);
+}
+
+.fav-toggle.on .icon {
+  fill: currentColor;
+}
+
+.menu-hint {
+  flex: 0 1 auto !important;
+  max-width: 220px;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 12px;
+  text-overflow: ellipsis;
 }
 
 .folder-row.hidden-entry {
@@ -2100,6 +2290,11 @@ button.project-chip:hover {
   align-items: center;
   gap: 1px;
   margin: -2px 0;
+}
+
+.folders-tools .icon-btn[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .tools-sep {
