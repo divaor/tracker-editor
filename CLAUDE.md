@@ -26,7 +26,13 @@ A Notepad++-style editor whose files sync through the same private GitHub data r
 - Tracker documents: `store.docs()` lists the tracker's attached files from the last sync (`trackerDocs` in `model.js`).
   - Their texts are cached by blob sha (`docTexts`). `syncManager.downloadDocs` fetches missing ones after each sync.
   - Search, quick open and the model index address them as `r:<path>`; `actions.openFile` opens either kind.
-- Read aloud: `speech.js` (pure) splits text into passages with their offsets and turns Markdown into prose; `reader.js` speaks them one at a time with `speechSynthesis` (pause = cancel and restart the passage, which works on Android too), keeps a screen wake lock and highlights the passage through `editor.highlightReading`.
+- Previews: `previews.js` (pure) decides the kind (`previewKind`) and parses CSV and JSON errors; `ui/preview.js` renders them. HTML goes in a `sandbox=""` srcdoc frame (scripts off; the CSP is inherited anyway).
+- Read aloud:
+  - `speech.js` (pure) splits text into passages ({ from, to, text, kind, pause }), rewrites it for speech (`naturalize`: dates, abbreviations, asides; word lists for en/es/pt) and ranks voices.
+  - `reader.js` speaks one passage at a time with one of two engines:
+    - `device`: `speechSynthesis`. Pause cancels and restarts the passage, which works on Android too; a wake lock keeps the screen on.
+    - `server`: an OpenAI-compatible `/audio/speech` endpoint. It plays audio, fetches the next passages ahead, sets Media Session metadata and handlers, and uses `localFetch` (the main process on desktop).
+  - Highlighting goes through `editor.highlightReading`.
 - Sharing to the app: the manifest's `share_target` posts to `share-target`. `sw.js` keeps the items in the `editor-inbox` cache, and `inbox.js` hands them to the app. `file_handlers` with `launchQueue` covers desktop Chrome and Edge.
 - `kv.js` commits each write right away (`tx.commit()`), and `main.js` flushes pending saves on `pagehide` and when the app is hidden, so changes made just before closing are kept.
 - `tabLock.js`: only one browser tab runs the app (Web Locks + BroadcastChannel). A new tab takes over, and the old one flushes, stops syncing and shows "Use it here".
@@ -46,6 +52,6 @@ A Notepad++-style editor whose files sync through the same private GitHub data r
 - Adding or removing a file under `app/` → update `ASSETS` in `app/sw.js` (CodeMirror chunks are listed in `vendor/cm/files.json` instead). `test/app.test.js` enforces this.
 - Bumping the version → update `package.json`, `app/js/version.js` and the `CACHE` name in `app/sw.js`. The tests check that they match.
 - The manifest `id` is `/tracker-editor/`. Ids resolve against the origin, and the tracker on the same origin (divaor.github.io) owns the origin root. Never change it: a new id makes installed copies a different app.
-- The CSP in `app/index.html` allows only same-origin scripts. Fetches may go to any https origin and to `localhost` (the model server).
+- The CSP in `app/index.html` allows only same-origin scripts. Fetches may go to any https origin and to `localhost` (the model and speech servers); `media-src` allows `blob:` for speech audio.
   - Do not add inline scripts.
 - Browser tests (Playwright) need `PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK=1` in this sandbox so `localhost` is not sent through the proxy. Electron tests need `xvfb-run`.

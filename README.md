@@ -20,8 +20,17 @@ It is the companion of [Tracker](https://github.com/divaor/tracking_app) and sha
   - `Ctrl+Shift+F` finds text in all files, the filtered ones or the open tabs, with case, whole-word and regex options.
 - **A local model on your computer** (Ollama, LM Studio or any OpenAI-compatible server): summarize a file, ask questions about one or all of your files with sources, and **find by meaning** when you don't remember the words. Nothing leaves your machine.
 - **Syntax highlighting** for 140+ languages, detected from the file name or the content of pasted text, or picked in the status bar.
-- **Editing tools**: find and replace (with regex), go to line, multiple cursors, select next occurrence, comment lines, duplicate/delete/sort lines, remove duplicates, trim trailing spaces, upper/lower case, format JSON, word wrap, visible whitespace, bracket matching, code folding, Markdown preview with clickable checklists.
-- **Read aloud**: **Listen** (or `Alt+R`) reads the file from the cursor, or just the selection, with your device's voices. The passage being read is highlighted; you can pause, skip, change the speed and pick a voice (by default one that matches the text's language). Markdown is read as prose, and code blocks are skipped.
+- **Editing tools**: find and replace (with regex), go to line, multiple cursors, select next occurrence, comment lines, duplicate/delete/sort lines, remove duplicates, trim trailing spaces, upper/lower case, format JSON, word wrap, visible whitespace, bracket matching, code folding.
+- **Preview**: a reading view next to the text (instead of it on phones):
+  - Markdown, with clickable checklists
+  - HTML pages, in a sandbox with scripts and links off
+  - JSON and XML as trees you can fold, with the place of any syntax error
+  - SVG as a picture
+  - CSV and TSV as a table
+- **Read aloud**: **Listen** (or `Alt+R`) reads the file from the cursor, or just the selection, and highlights the passage being read. You can pause, skip, change the speed and pick a voice.
+  - It reads the way a person would: Markdown as prose, dates, abbreviations, `#7` and `v2` in words, asides and dashes as short pauses, and longer pauses after headings and paragraphs. Code blocks are skipped.
+  - It uses your device's voices, picking the most natural one for the text's language (English, Spanish, Portuguese…).
+  - For truly human-sounding voices, connect a speech server; see [5. Natural voices](#5-natural-voices-optional).
 - **Share to the editor** (Android): in any app, **Share → Tracker Editor** saves the text or file as a new file that syncs like the rest. On a computer, Chrome and Edge can also open text files with the installed app.
 - **Also**: light and dark theme, import files from disk (drag and drop works), save a copy to disk, keyboard shortcuts.
 
@@ -83,6 +92,19 @@ The tracker's **Open in editor** links point at this address. If you host the ed
 The desktop app talks to the model through its main process, so no extra setup is needed. In the browser, Ollama must allow the site's origin: set `OLLAMA_ORIGINS=https://divaor.github.io` and restart Ollama. LM Studio works too (its server runs on `http://localhost:1234/v1`).
 
 Finding by meaning keeps an index of your files on the device and only re-reads files that changed.
+
+## 5. Natural voices (optional)
+
+Device voices range from robotic to good, depending on the device; **Settings → Read aloud** explains how to install better ones. For voices that sound like a person reading, use a speech server with an OpenAI-compatible API (`/v1/audio/speech`). Its audio plays like music: with controls on the lock screen, and it keeps reading with the screen off.
+
+- **Kokoro on your computer** (free, private): install Docker and run
+  ```sh
+  docker run -d -p 8880:8880 --restart unless-stopped ghcr.io/remsky/kokoro-fastapi-cpu:latest
+  ```
+  In **Settings → Read aloud → Speech server**, press **Kokoro (this computer)**, then **Save** and **Hear a sample**. Voices: `af_heart`, `af_bella`, `am_michael`, `bf_emma`… for English, `ef_dora` for Spanish and `pf_dora` for Portuguese. Under *Voices for other languages*, list one per language (`es=ef_dora, pt=pf_dora`) and each file is read in its own language.
+- **OpenAI** (paid, works on the phone too): press **OpenAI**, paste an API key, and describe the reading style you like. `gpt-4o-mini-tts` follows it, for example "a warm audiobook narrator with natural pauses".
+
+A server at `localhost` is only reachable from the computer it runs on; on a phone, use one with an `https` address.
 
 ## Keyboard shortcuts
 

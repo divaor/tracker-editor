@@ -1,6 +1,9 @@
 import { html, useState } from '../../vendor/preact-htm.js';
 import { DEFAULT_LLM_URL } from '../llm.js';
 import { llmClient } from '../semantic.js';
+import { startReading, stopReading } from '../reader.js';
+import { isNaturalVoice, rankVoices } from '../speech.js';
+import { useVoices } from './readAloud.js';
 import { getSettings, getToken, isSyncConfigured, parseSetupCode, saveSettings, setToken } from '../settings.js';
 import { store } from '../store.js';
 import { syncClient, syncNow } from '../syncManager.js';
@@ -184,6 +187,105 @@ function ModelCard({ settings, actions }) {
   </${Card}>`;
 }
 
+const SPEECH_PRESETS = [
+  {
+    id: 'kokoro',
+    label: 'Kokoro (this computer)',
+    server: { baseUrl: 'http://localhost:8880/v1', model: 'kokoro', voice: 'af_heart', otherVoices: 'es=ef_dora, pt=pf_dora', instructions: '' },
+  },
+  {
+    id: 'openai',
+    label: 'OpenAI',
+    server: {
+      baseUrl: 'https://api.openai.com/v1',
+      model: 'gpt-4o-mini-tts',
+      voice: 'coral',
+      otherVoices: '',
+      instructions: 'Read like a warm, engaging audiobook narrator: natural pacing, clear enunciation, and short pauses between ideas.',
+    },
+  },
+];
+const SAMPLE = {
+  en: 'Hi! This is how I sound when I read your files. I take a short breath between sentences, and a longer one between paragraphs.',
+  es: 'Hola. Así sueno cuando leo tus archivos. Hago una pausa corta entre frases, y una más larga entre párrafos.',
+  pt: 'Olá! É assim que eu soo quando leio os seus arquivos. Faço uma pausa curta entre as frases e uma mais longa entre os parágrafos.',
+};
+
+function ReadAloudCard({ settings, actions }) {
+  const { tts } = settings;
+  const [server, setServer] = useState(tts.server);
+  const [sampleLang, setSampleLang] = useState(() => (Object.hasOwn(SAMPLE, navigator.language.slice(0, 2)) ? navigator.language.slice(0, 2) : 'en'));
+  const list = useVoices();
+  const ranked = rankVoices(list, sampleLang);
+  const natural = list.filter(isNaturalVoice).length;
+  const set = (patch) => setServer({ ...server, ...patch });
+  const sample = () => {
+    try {
+      stopReading();
+      startReading({ key: null, name: 'Voice sample', text: SAMPLE[sampleLang], lang: sampleLang });
+    } catch (err) {
+      actions.toast(err.message, { kind: 'error' });
+    }
+  };
+  const field = (key, label, hint, extra = {}) => html`<${Field} label=${label} hint=${hint} wide=${extra.wide}>
+    <input type=${extra.type ?? 'text'} value=${server[key]} onInput=${(e) => set({ [key]: e.currentTarget.value })} placeholder=${extra.placeholder ?? ''} spellcheck=${false} autocomplete="off" />
+  </${Field}>`;
+  return html`<${Card} title="Read aloud" icon="volume" id="read-aloud">
+    <p class="muted">Listen (or Alt+R) reads the file from the cursor, with a reader's pauses after sentences, paragraphs and headings. How human it sounds depends mostly on the voice.</p>
+    <${Segmented} label="Voices" value=${tts.engine} onChange=${(engine) => saveSettings({ tts: { engine } })}
+      options=${[{ id: 'device', label: 'This device' }, { id: 'server', label: 'Speech server' }]} />
+    ${tts.engine === 'device'
+      ? html`<div class="field-grid">
+          <${Field} label="Voice" hint=${list.length ? `${list.length} voices on this device${natural ? `, ${natural} of them natural-sounding (★)` : ''}` : 'This device lists no voices.'} wide>
+            <select value=${tts.voice} onChange=${(e) => saveSettings({ tts: { voice: e.currentTarget.value } })}>
+              <option value="">Automatic: the most natural voice for the text's language</option>
+              ${ranked.map((v) => html`<option key=${v.voiceURI} value=${v.voiceURI}>${isNaturalVoice(v) ? '★ ' : ''}${v.name} (${v.lang})</option>`)}
+            </select>
+          </${Field}>
+        </div>
+        <details class="help"><summary>How do I get more natural voices?</summary>
+          <ul>
+            <li><strong>Android:</strong> in Settings, search for <em>Text-to-speech output</em>, choose <em>Speech Services by Google</em>, open its settings, then <em>Install voice data</em>, pick your language and try its voices. The one you pick is used here.</li>
+            <li><strong>iPhone and Mac:</strong> Settings → Accessibility → Spoken Content → Voices, and download an <em>Enhanced</em> or <em>Premium</em> voice.</li>
+            <li><strong>Windows:</strong> in Microsoft Edge, the voices named <em>Online (Natural)</em> sound the most human; in Chrome, the <em>Google</em> voices. The desktop app only has the voices installed in Windows, so use a speech server there.</li>
+          </ul>
+        </details>`
+      : html`<div class="field-grid">
+          <div class="field span-2"><span>Server</span>
+            <div class="input-row">
+              <input value=${server.baseUrl} onInput=${(e) => set({ baseUrl: e.currentTarget.value })} placeholder="http://localhost:8880/v1" spellcheck=${false} />
+              ${SPEECH_PRESETS.map((p) => html`<button type="button" key=${p.id} class="btn sm ${server.baseUrl === p.server.baseUrl ? 'primary' : ''}" onClick=${() => set({ ...p.server, apiKey: p.id === 'openai' ? server.apiKey : '' })}>${p.label}</button>`)}
+            </div>
+          </div>
+          ${field('model', 'Model', 'kokoro, gpt-4o-mini-tts, tts-1-hd…')}
+          ${field('voice', 'Voice', 'Kokoro: af_heart, af_bella, am_michael, bf_emma… OpenAI: coral, sage, nova, onyx…')}
+          ${field('otherVoices', 'Voices for other languages', 'Used when a file is in that language, e.g. es=ef_dora, pt=pf_dora', { wide: true, placeholder: 'es=ef_dora, pt=pf_dora' })}
+          ${field('instructions', 'Reading style', 'OpenAI gpt-4o-mini-tts only: how to read, in your words', { wide: true })}
+          ${field('apiKey', 'API key', 'Only if the server needs one (OpenAI). Kept on this device.', { type: 'password' })}
+          <div class="form-actions span-2">
+            <button type="button" class="btn primary" onClick=${() => {
+              saveSettings({ tts: { server, engine: 'server' } });
+              actions.toast('Speech server saved');
+            }}>Save</button>
+          </div>
+        </div>
+        ${server.baseUrl.includes('localhost') && html`<p class="notice"><${Icon} name="alert" size=${15} />A server at localhost is only reachable from the computer it runs on. On your phone, use one with an https address, such as OpenAI.</p>`}
+        <details class="help"><summary>How do I run Kokoro on my computer?</summary>
+          <ol>
+            <li>Install Docker Desktop, then run <code>docker run -d -p 8880:8880 --restart unless-stopped ghcr.io/remsky/kokoro-fastapi-cpu:latest</code> (with an NVIDIA graphics card, <code>kokoro-fastapi-gpu</code> is faster).</li>
+            <li>Press <strong>Kokoro (this computer)</strong>, then <strong>Save</strong> and <strong>Hear a sample</strong>. It is free and nothing leaves your computer.</li>
+            <li>Voices starting with <code>a</code> are American English, <code>b</code> British, <code>e</code> Spanish and <code>p</code> Portuguese; <code>f</code>/<code>m</code> is female or male.</li>
+          </ol>
+        </details>`}
+    <div class="form-actions">
+      <button type="button" class="btn" onClick=${sample}><${Icon} name="volume" size=${15} />Hear a sample</button>
+      <select class="sample-lang" aria-label="Sample language" value=${sampleLang} onChange=${(e) => setSampleLang(e.currentTarget.value)}>
+        <option value="en">English</option><option value="es">Español</option><option value="pt">Português</option>
+      </select>
+    </div>
+  </${Card}>`;
+}
+
 function DataCard({ actions }) {
   const files = store.live();
   return html`<${Card} title="This device" icon="folder">
@@ -212,6 +314,7 @@ export function SettingsView({ settings, sync, actions }) {
     <${SyncCard} sync=${sync} actions=${actions} />
     <${EditorCard} settings=${settings} />
     <${ModelCard} settings=${settings} actions=${actions} />
+    <${ReadAloudCard} settings=${settings} actions=${actions} />
     <${DataCard} actions=${actions} />
     <p class="muted small about">Tracker Editor ${APP_VERSION} · ${window.desktop ? `Desktop app (Electron ${window.desktop.versions?.electron ?? ''})` : 'Web app'} · <a href="https://github.com/divaor/tracker-editor" target="_blank" rel="noopener">Source</a></p>
   </div>`;

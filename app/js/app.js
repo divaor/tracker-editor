@@ -1,7 +1,8 @@
-import { html, useEffect, useMemo, useReducer, useRef, useState } from '../vendor/preact-htm.js';
+import { html, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from '../vendor/preact-htm.js';
 import { createEditorHost, findLanguage, guessLanguage, PLAIN_TEXT } from './editor.js';
 import { onLaunchFiles, takeShared } from './inbox.js';
 import { parseRoute, safeName } from './model.js';
+import { previewKind } from './previews.js';
 import { getReaderState, onReaderState, setReaderHighlighter, startReading, stopReading, toggleReading } from './reader.js';
 import { getSettings, getToken, isSyncConfigured, onSettings, resolvedTheme, saveSettings } from './settings.js';
 import { fileKey, flush, parseKey, repoKey, store } from './store.js';
@@ -12,7 +13,7 @@ import { Toasts, toast } from './ui/components.js';
 import { FileDialog, SendDialog } from './ui/dialogs.js';
 import { Icon } from './ui/icons.js';
 import { QuickOpen, SearchPanel } from './ui/panels.js';
-import { MarkdownPreview } from './ui/preview.js';
+import { Preview } from './ui/preview.js';
 import { ReadAloudBar } from './ui/readAloud.js';
 import { SettingsView } from './ui/settingsView.js';
 import { Sidebar } from './ui/sidebar.js';
@@ -268,8 +269,9 @@ export function App() {
     [],
   );
 
-  // The editor.
-  useEffect(() => {
+  // The editor. Layout effects (here and for switching tabs) run in the same
+  // render, so keys typed right after opening a tab go to that tab.
+  useLayoutEffect(() => {
     hostRef.current = createEditorHost(editorEl.current, {
       settings: editorOptions(getSettings()),
       onChange(key, text) {
@@ -307,10 +309,10 @@ export function App() {
   const activeRepo = active?.kind === 'repo' ? store.repoTab(active.path) : null;
   const activeName = activeFile?.name ?? activeRepo?.name ?? '';
   const languageName = activeKey ? (findLanguage(activeName, activeFile?.language)?.name ?? PLAIN_TEXT) : '';
-  const isMarkdown = languageName === 'Markdown';
-  const showPreview = isMarkdown && preview.has(activeKey);
+  const previewType = activeKey ? previewKind(activeName, languageName) : '';
+  const showPreview = Boolean(previewType) && preview.has(activeKey);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const host = hostRef.current;
     if (!host) return;
     if (!activeKey || view !== 'editor' || (!activeFile && !activeRepo)) {
@@ -494,14 +496,18 @@ export function App() {
       <div class="editor-view" hidden=${view === 'settings'}>
         <${TabBar} session=${store.session} actions=${actions} />
         ${activeKey && html`<${FileBar} file=${activeFile} repo=${activeRepo} projects=${projects} language=${languageName}
-          isMarkdown=${isMarkdown} preview=${showPreview} settings=${settings} actions=${actions} />`}
+          canPreview=${Boolean(previewType)} preview=${showPreview} settings=${settings} actions=${actions} />`}
         <div class="editor-area ${showPreview ? 'split' : ''}">
           <div class="editor-host" ref=${editorEl} />
-          ${showPreview && html`<${MarkdownPreview} key=${activeKey} text=${activeFile ? store.text(activeFile.id) : activeRepo?.text}
+          ${showPreview && html`<${Preview} key=${activeKey} kind=${previewType} name=${activeName} text=${activeFile ? store.text(activeFile.id) : activeRepo?.text}
             onToggle=${(next) => {
               if (activeFile) store.setText(activeFile.id, next);
               else store.setRepoText(activeRepo.path, next);
               hostRef.current?.replaceText(activeKey, next);
+            }}
+            onGoTo=${(line, column) => {
+              actions.togglePreview();
+              setTimeout(() => hostRef.current?.reveal(line, column, 1), 60);
             }} />`}
           ${!activeKey && html`<${Welcome} actions=${actions} hasFiles=${store.live().length + docs.length > 0} configured=${isSyncConfigured(settings)} />`}
         </div>

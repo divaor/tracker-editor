@@ -6,38 +6,14 @@
 import { chunkText, rankBySimilarity } from './ai.js';
 import { kvGet, kvSet } from './kv.js';
 import { createLlmClient } from './llm.js';
+import { localFetch } from './localFetch.js';
 import { gitBlobSha } from './model.js';
 import { findInFiles } from './search.js';
 import { getSettings } from './settings.js';
 import { store } from './store.js';
 
-/** fetch() through the desktop app's main process: no CORS setup needed in Ollama or LM Studio. */
-function desktopFetch(url, init = {}) {
-  const bridge = window.desktop.llm;
-  const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-  let controller;
-  const stream = new ReadableStream({
-    start: (c) => (controller = c),
-    cancel: () => bridge.abort(id),
-  });
-  const off = bridge.onChunk(id, (chunk, done, error) => {
-    if (chunk) controller.enqueue(chunk);
-    if (error) controller.error(new Error(error));
-    else if (done) controller.close();
-    if (done || error) off();
-  });
-  init.signal?.addEventListener('abort', () => bridge.abort(id));
-  return bridge.request(id, url, { method: init.method ?? 'GET', headers: init.headers ?? {}, body: init.body ?? null }).then(
-    (meta) => new Response(stream, { status: meta.status, statusText: meta.statusText, headers: meta.headers }),
-    (err) => {
-      off();
-      throw new TypeError(err?.message ?? 'Request failed');
-    },
-  );
-}
-
 export function llmClient(settings = getSettings()) {
-  return createLlmClient({ baseUrl: settings.llm.baseUrl, apiKey: settings.llm.apiKey, fetchImpl: window.desktop?.llm ? desktopFetch : undefined });
+  return createLlmClient({ baseUrl: settings.llm.baseUrl, apiKey: settings.llm.apiKey, fetchImpl: localFetch });
 }
 
 // What the model reads: { id, name, project, text }. Tracker documents have

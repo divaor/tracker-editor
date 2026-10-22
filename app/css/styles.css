@@ -1933,6 +1933,17 @@ button.project-chip:hover {
   text-overflow: ellipsis;
 }
 
+.read-server {
+  overflow: hidden;
+  max-width: 140px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sample-lang {
+  width: auto;
+}
+
 .read-rate {
   min-width: 46px;
   font-variant-numeric: tabular-nums;
@@ -1986,6 +1997,184 @@ button.project-chip:hover {
   max-width: 820px;
   margin: 0 auto;
   padding: 18px 24px 40px;
+}
+
+.preview-pane:is(.preview-html, .preview-csv, .preview-tsv) {
+  display: flex;
+  flex-direction: column;
+}
+
+.preview-frame-wrap {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.preview-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 6px 12px;
+}
+
+.preview-frame {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: #fff;
+}
+
+.preview-image {
+  display: grid;
+  place-items: center;
+  min-height: 100%;
+  padding: 24px;
+  background: repeating-conic-gradient(var(--surface-2) 0 25%, var(--surface) 0 50%) 0 0 / 20px 20px;
+}
+
+.preview-image img {
+  max-width: 100%;
+  max-height: 80vh;
+}
+
+.preview-problem {
+  flex-wrap: wrap;
+}
+
+.tree {
+  max-width: none;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.tree-toolbar {
+  display: flex;
+  gap: 4px;
+  margin: -8px 0 8px -8px;
+  font-family: var(--font);
+}
+
+.tree-toggle {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tree-toggle svg {
+  align-self: center;
+  flex-shrink: 0;
+  margin-left: -16px;
+  color: var(--text-3);
+  transition: transform 0.15s;
+}
+
+.tree-toggle svg.collapsed {
+  transform: rotate(-90deg);
+}
+
+.tree-summary {
+  margin-left: 6px;
+  color: var(--text-3);
+}
+
+.tree-children {
+  margin-left: 6px;
+  padding-left: 14px;
+  border-left: 1px solid var(--border);
+}
+
+.tree-branch,
+.tree-leaf {
+  padding-left: 16px;
+  overflow-wrap: anywhere;
+}
+
+.tree-children > .tree-branch,
+.tree-children > .tree-leaf {
+  padding-left: 16px;
+}
+
+.tree-more {
+  margin-left: 16px;
+  font-family: var(--font);
+}
+
+.j-key,
+.x-tag {
+  color: var(--accent);
+}
+
+.j-string,
+.x-value {
+  color: var(--done);
+}
+
+.j-number {
+  color: var(--progress);
+}
+
+.j-boolean {
+  color: var(--claude);
+}
+
+.j-null,
+.x-comment {
+  color: var(--text-3);
+}
+
+.x-attr {
+  color: var(--idea);
+}
+
+.preview-table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.preview-table {
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.preview-table th,
+.preview-table td {
+  max-width: 360px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+  white-space: pre-wrap;
+}
+
+.preview-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-2);
+  font-weight: 600;
+}
+
+.preview-table .row-no {
+  color: var(--text-3);
+  text-align: right;
+}
+
+.preview-table tbody tr:nth-child(even) {
+  background: var(--surface-2);
 }
 
 .statusbar {

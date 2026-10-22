@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { detectLanguage, passageAt, speakableMarkdown, speechPassages } from '../app/js/speech.js';
+import { detectLanguage, isNaturalVoice, naturalize, passageAt, PAUSES, rankVoices, serverVoiceFor, speakableMarkdown, speechPassages } from '../app/js/speech.js';
 
 test('turns Markdown into words to say', () => {
   assert.equal(speakableMarkdown('## The **setup** today ##'), 'The setup today');
@@ -33,12 +33,57 @@ test('splits a Markdown file into passages that point back into the text', () =>
   ].join('\n');
   const passages = speechPassages(text, { markdown: true });
   assert.deepEqual(
-    passages.map((p) => p.text),
-    ['Database override guide', 'A report can pick, per request, which database it reads. It falls back to the default.', 'Code block skipped.', 'Connection, Database', '#7, OOR', 'first step', 'second step'],
+    passages.map((p) => [p.kind, p.text]),
+    [
+      ['heading', 'Database override guide.'],
+      ['paragraph', 'A report can pick, per request, which database it reads. It falls back to the default.'],
+      ['code', 'Code block skipped.'],
+      ['row', 'Connection, Database.'],
+      ['row', 'number 7, OOR.'],
+      ['item', 'first step.'],
+      ['item', 'second step.'],
+    ],
   );
   for (const p of passages) assert.ok(p.to > p.from && p.from >= 0 && p.to <= text.length);
   assert.equal(text.slice(passages[0].from, passages[0].to), '# Database override guide');
   assert.ok(text.slice(passages[2].from, passages[2].to).startsWith('```sql') && text.slice(passages[2].from, passages[2].to).endsWith('```'));
+});
+
+test('pauses like a reader: longer after headings and paragraphs, and before a new section', () => {
+  const text = '# Plan\n\nFirst we build the whole thing on the work PC. Then we ship it to everyone who asked, which takes a while because there are many servers and every one of them needs a restart.\n\n## Rollout\n\n- Monday\n- Tuesday\n';
+  const passages = speechPassages(text, { markdown: true, maxPassage: 60 });
+  assert.deepEqual(passages.map((p) => [p.kind, p.pause]), [
+    ['heading', PAUSES.heading],
+    ['sentence', PAUSES.sentence],
+    ['paragraph', PAUSES.heading],
+    ['heading', PAUSES.heading],
+    ['item', PAUSES.item],
+    ['item', PAUSES.item],
+  ]);
+});
+
+test('says dates, abbreviations and symbols the way a person would', () => {
+  assert.equal(naturalize('Decided 2026-10-21 (below) — phases 0, 1 and 2 built.'), 'Decided October 21, 2026, below, phases 0, 1 and 2 built.');
+  assert.equal(naturalize('Use tools, e.g. the broker / the toolkit, etc.'), 'Use tools, for example, the broker, the toolkit, et cetera.');
+  assert.equal(naturalize('R&D vs. ops & support → done 🎉'), 'R&D versus ops and support, done');
+  assert.equal(naturalize('Ticket #23 needs v2.1 of dba_agent_ro'), 'Ticket number 23 needs version 2.1 of dba agent ro');
+  assert.equal(naturalize('Entrega el 2026-03-05, p. ej. mañana', 'es'), 'Entrega el 5 de marzo de 2026, por ejemplo, mañana');
+  assert.equal(naturalize('Entrega em 2026-03-05 & depois', 'pt'), 'Entrega em 5 de março de 2026 e depois');
+  assert.equal(naturalize('Rendez-vous 2026-03-05 & après', 'fr'), 'Rendez-vous 2026-03-05 & après', 'no word list for French');
+  assert.equal(naturalize('10-20 users, -5 degrees, a-b test'), '10-20 users, -5 degrees, a-b test', 'hyphens without spaces stay');
+});
+
+test('picks natural-sounding voices for the language first', () => {
+  const voices = [
+    { name: 'Microsoft David - English (United States)', lang: 'en-US', localService: true, default: true },
+    { name: 'Google US English', lang: 'en-US', localService: false },
+    { name: 'Microsoft Aria Online (Natural) - English (United States)', lang: 'en-US', localService: false },
+    { name: 'Microsoft Elvira Online (Natural) - Spanish (Spain)', lang: 'es-ES', localService: false },
+    { name: 'Google español', lang: 'es-ES', localService: false },
+  ];
+  assert.ok(isNaturalVoice(voices[2]) && !isNaturalVoice(voices[0]));
+  assert.deepEqual(rankVoices(voices, 'en').slice(0, 3).map((v) => v.name.split(' ')[1]), ['Aria', 'US', 'David']);
+  assert.equal(rankVoices(voices, 'es')[0].name, 'Microsoft Elvira Online (Natural) - Spanish (Spain)');
 });
 
 test('long paragraphs are read sentence by sentence', () => {
@@ -47,6 +92,8 @@ test('long paragraphs are read sentence by sentence', () => {
   const passages = speechPassages(text);
   assert.ok(passages.length >= 3, `${passages.length} passages`);
   assert.equal(passages.map((p) => p.text).join(' '), text);
+  assert.deepEqual([...new Set(passages.map((p) => p.kind))], ['sentence', 'paragraph']);
+  assert.ok(speechPassages(text, { maxPassage: 1000 }).length === 1, 'a speech server reads whole paragraphs');
   assert.ok(passages.every((p) => p.to - p.from <= 320));
   const unpunctuated = 'word '.repeat(400);
   assert.ok(speechPassages(unpunctuated).every((p) => p.to - p.from <= 320));
@@ -55,6 +102,15 @@ test('long paragraphs are read sentence by sentence', () => {
 test('plain text keeps its symbols, but not URLs', () => {
   const passages = speechPassages('# not a heading here\nx = a * b  # see https://example.com\n');
   assert.deepEqual(passages.map((p) => p.text), ['# not a heading here x = a * b # see link']);
+});
+
+test('a speech server reads each language with its own voice', () => {
+  const server = { voice: 'af_heart', otherVoices: 'es=ef_dora, PT = pf_dora' };
+  assert.equal(serverVoiceFor(server, 'en'), 'af_heart');
+  assert.equal(serverVoiceFor(server, 'es'), 'ef_dora');
+  assert.equal(serverVoiceFor(server, 'pt'), 'pf_dora');
+  assert.equal(serverVoiceFor(server, 'fr'), 'af_heart');
+  assert.equal(serverVoiceFor({ voice: 'coral' }, 'es'), 'coral');
 });
 
 test('starts from the passage at the cursor', () => {

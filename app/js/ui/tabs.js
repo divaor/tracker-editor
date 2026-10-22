@@ -65,10 +65,10 @@ export function TabBar({ session, actions }) {
 }
 
 /** Project, tags and actions for the file in the active tab. */
-export function FileBar({ file, repo, projects, isMarkdown, preview, settings, actions }) {
+export function FileBar({ file, repo, projects, canPreview, preview, settings, actions }) {
   const previewButton =
-    isMarkdown &&
-    html`<button type="button" class="btn ghost sm ${preview ? 'on' : ''}" aria-pressed=${preview} title="Show the Markdown rendered next to the text" onClick=${actions.togglePreview}><${Icon} name="eye" size=${15} /><span class="label">Preview</span></button>`;
+    canPreview &&
+    html`<button type="button" class="btn ghost sm ${preview ? 'on' : ''}" aria-pressed=${preview} title="Show a reading view next to the text" onClick=${actions.togglePreview}><${Icon} name="eye" size=${15} /><span class="label">Preview</span></button>`;
   const listenButton = html`<button type="button" class="btn ghost sm" title="Read aloud from the cursor, or the selection (Alt+R)" onClick=${actions.readAloud}><${Icon} name="volume" size=${15} /><span class="label">Listen</span></button>`;
   if (repo) {
     // A tracker document: its item's title and project; the path is in the tooltip.

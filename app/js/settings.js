@@ -40,8 +40,15 @@ export const DEFAULT_SETTINGS = {
   trackerUrl: TRACKER_APP_URL,
   // Local model with an OpenAI-compatible API (Ollama, LM Studio, …).
   llm: { enabled: false, baseUrl: DEFAULT_LLM_URL, chatModel: '', embedModel: '', apiKey: '' },
-  // Reading aloud: a voice URI ('' = pick one for the text's language) and the speed.
-  tts: { voice: '', rate: 1 },
+  // Reading aloud: the device's voices (a voice URI, '' = the best one for the
+  // text's language) or a speech server with an OpenAI-compatible API, and the speed.
+  tts: {
+    engine: 'device',
+    voice: '',
+    rate: 1,
+    // otherVoices: voices for other languages, as "es=ef_dora, pt=pf_dora" (Kokoro voices speak one language each).
+    server: { baseUrl: 'http://localhost:8880/v1', apiKey: '', model: 'kokoro', voice: 'af_heart', otherVoices: 'es=ef_dora, pt=pf_dora', instructions: '' },
+  },
   // Settings migrations already applied on this device.
   version: 2,
 };
@@ -49,7 +56,12 @@ export const DEFAULT_SETTINGS = {
 let settings = { ...DEFAULT_SETTINGS };
 try {
   const saved = JSON.parse(localStorage.getItem(KEY) ?? '{}');
-  settings = { ...DEFAULT_SETTINGS, ...saved, llm: { ...DEFAULT_SETTINGS.llm, ...saved.llm }, tts: { ...DEFAULT_SETTINGS.tts, ...saved.tts } };
+  settings = {
+    ...DEFAULT_SETTINGS,
+    ...saved,
+    llm: { ...DEFAULT_SETTINGS.llm, ...saved.llm },
+    tts: { ...DEFAULT_SETTINGS.tts, ...saved.tts, server: { ...DEFAULT_SETTINGS.tts.server, ...saved.tts?.server } },
+  };
   // Version 2: phones wrap long lines by default (earlier versions stored `false` for everyone).
   if ((saved.version ?? 1) < 2) settings = { ...settings, wordWrap: DEFAULT_SETTINGS.wordWrap || settings.wordWrap, version: 2 };
 } catch {
@@ -61,7 +73,12 @@ const listeners = new Set();
 export const getSettings = () => settings;
 
 export function saveSettings(patch) {
-  settings = { ...settings, ...patch, llm: { ...settings.llm, ...patch.llm }, tts: { ...settings.tts, ...patch.tts } };
+  settings = {
+    ...settings,
+    ...patch,
+    llm: { ...settings.llm, ...patch.llm },
+    tts: { ...settings.tts, ...patch.tts, server: { ...settings.tts.server, ...patch.tts?.server } },
+  };
   try {
     localStorage.setItem(KEY, JSON.stringify(settings));
   } catch {
