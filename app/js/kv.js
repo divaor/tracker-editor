@@ -30,6 +30,9 @@ function run(mode, fn) {
       new Promise((resolve, reject) => {
         const tx = db.transaction(STORE, mode);
         const req = fn(tx.objectStore(STORE));
+        // Commit now rather than when the browser gets to it, so a save
+        // started as the page closes is not lost with it.
+        if (mode === 'readwrite') tx.commit?.();
         tx.oncomplete = () => resolve(req.result);
         tx.onerror = () => reject(tx.error);
         tx.onabort = () => reject(tx.error);

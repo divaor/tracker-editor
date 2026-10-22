@@ -49,6 +49,7 @@ const persist = {
 
 /** Writes everything still waiting for its debounce (before closing the app). */
 export async function flush() {
+  if (closed) return;
   const pending = [...timers.entries()];
   for (const [key, timer] of pending) clearTimeout(timer);
   timers.clear();
@@ -73,8 +74,8 @@ export async function flush() {
  * save: false, changes still waiting for their debounce are dropped.
  */
 export async function closeStore({ save = true } = {}) {
-  closed = true;
   if (save) await flush();
+  closed = true;
   for (const timer of timers.values()) clearTimeout(timer);
   timers.clear();
 }

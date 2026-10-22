@@ -1852,11 +1852,98 @@ button.project-chip:hover {
 
 .filebar-note {
   display: inline-flex;
+  flex: 0 1 auto;
   align-items: center;
   gap: 6px;
+  min-width: 0;
   color: var(--text-2);
   font-size: 13px;
   white-space: nowrap;
+}
+
+.filebar-note svg {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.filebar-title {
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 550;
+  text-overflow: ellipsis;
+}
+
+.filebar .project-chip {
+  flex-shrink: 0;
+}
+
+.filebar-status {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 5px;
+  padding: 0 4px;
+  color: var(--done);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.filebar-status.pending {
+  color: var(--warn);
+}
+
+/* ---- Read aloud ---------------------------------------------------------------- */
+.read-bar {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  padding: 4px 8px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.read-bar .icon-btn.play {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.read-bar .icon-btn.play:hover {
+  background: var(--accent-hover);
+}
+
+.read-bar .icon-btn:disabled {
+  opacity: 0.4;
+}
+
+.read-progress {
+  display: inline-flex;
+  gap: 6px;
+  min-width: 0;
+  margin-left: 4px;
+  color: var(--text-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.read-name {
+  overflow: hidden;
+  max-width: 220px;
+  text-overflow: ellipsis;
+}
+
+.read-rate {
+  min-width: 46px;
+  font-variant-numeric: tabular-nums;
+}
+
+.read-voice {
+  width: auto;
+  max-width: 190px;
+  min-height: 30px;
+  padding: 2px 22px 2px 6px;
+  font-size: 12px;
 }
 
 .filebar .btn.on {
@@ -2511,6 +2598,14 @@ mark {
 
   .topbar > .spacer {
     display: none;
+  }
+
+  .read-name {
+    display: none;
+  }
+
+  .read-voice {
+    max-width: 132px;
   }
 
   .welcome .shortcuts {

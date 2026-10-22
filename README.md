@@ -21,6 +21,8 @@ It is the companion of [Tracker](https://github.com/divaor/tracking_app) and sha
 - **A local model on your computer** (Ollama, LM Studio or any OpenAI-compatible server): summarize a file, ask questions about one or all of your files with sources, and **find by meaning** when you don't remember the words. Nothing leaves your machine.
 - **Syntax highlighting** for 140+ languages, detected from the file name or the content of pasted text, or picked in the status bar.
 - **Editing tools**: find and replace (with regex), go to line, multiple cursors, select next occurrence, comment lines, duplicate/delete/sort lines, remove duplicates, trim trailing spaces, upper/lower case, format JSON, word wrap, visible whitespace, bracket matching, code folding, Markdown preview with clickable checklists.
+- **Read aloud**: **Listen** (or `Alt+R`) reads the file from the cursor, or just the selection, with your device's voices. The passage being read is highlighted; you can pause, skip, change the speed and pick a voice (by default one that matches the text's language). Markdown is read as prose, and code blocks are skipped.
+- **Share to the editor** (Android): in any app, **Share → Tracker Editor** saves the text or file as a new file that syncs like the rest. On a computer, Chrome and Edge can also open text files with the installed app.
 - **Also**: light and dark theme, import files from disk (drag and drop works), save a copy to disk, keyboard shortcuts.
 
 ## How it fits together
@@ -60,6 +62,7 @@ To publish a release, run **Actions → Release desktop app → Run workflow** w
 1. In this repo, go to **Settings → Pages → Build and deployment → Source** and choose **GitHub Actions**. The *Deploy web app to GitHub Pages* workflow publishes `app/` on every push to `main`.
 2. On your phone, open `https://divaor.github.io/tracker-editor/` and install it (iPhone: Share → **Add to Home Screen**; Android: ⋮ → **Install app**).
 3. Connect it with the setup code as in step 1.
+4. To send text or files from other apps to the editor, use their **Share** button and pick **Tracker Editor**. If it isn't in the list, remove the app from your home screen and install it again: Android only reads the list of what an app accepts when it is installed.
 
 The tracker's **Open in editor** links point at this address. If you host the editor elsewhere, set the address in the tracker under **Settings → Tracker Editor**, and in the editor under **Settings → This device → Links to files**.
 
@@ -93,6 +96,7 @@ Finding by meaning keeps an index of your files on the device and only re-reads 
 | `Ctrl+D` | Select the next occurrence |
 | `Ctrl+/` | Comment lines |
 | `Alt+Z` | Word wrap |
+| `Alt+R` | Read aloud, pause or resume |
 | `Ctrl+B` | Show or hide the file list |
 | `Ctrl+Shift+A` | Local model |
 | `Ctrl+S` | Sync now |

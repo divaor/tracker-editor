@@ -29,7 +29,8 @@ export const DEFAULT_SETTINGS = {
   theme: 'system',
   fontSize: 14,
   tabSize: 4,
-  wordWrap: false,
+  // Phones wrap long lines; on a computer you scroll sideways like Notepad++.
+  wordWrap: typeof matchMedia === 'function' && matchMedia('(max-width: 860px)').matches,
   showWhitespace: false,
   lineNumbers: true,
   // Project filter for the file list (see matchesScope in tracker-model.js).
@@ -39,12 +40,18 @@ export const DEFAULT_SETTINGS = {
   trackerUrl: TRACKER_APP_URL,
   // Local model with an OpenAI-compatible API (Ollama, LM Studio, …).
   llm: { enabled: false, baseUrl: DEFAULT_LLM_URL, chatModel: '', embedModel: '', apiKey: '' },
+  // Reading aloud: a voice URI ('' = pick one for the text's language) and the speed.
+  tts: { voice: '', rate: 1 },
+  // Settings migrations already applied on this device.
+  version: 2,
 };
 
 let settings = { ...DEFAULT_SETTINGS };
 try {
   const saved = JSON.parse(localStorage.getItem(KEY) ?? '{}');
-  settings = { ...DEFAULT_SETTINGS, ...saved, llm: { ...DEFAULT_SETTINGS.llm, ...saved.llm } };
+  settings = { ...DEFAULT_SETTINGS, ...saved, llm: { ...DEFAULT_SETTINGS.llm, ...saved.llm }, tts: { ...DEFAULT_SETTINGS.tts, ...saved.tts } };
+  // Version 2: phones wrap long lines by default (earlier versions stored `false` for everyone).
+  if ((saved.version ?? 1) < 2) settings = { ...settings, wordWrap: DEFAULT_SETTINGS.wordWrap || settings.wordWrap, version: 2 };
 } catch {
   // keep defaults
 }
@@ -54,7 +61,7 @@ const listeners = new Set();
 export const getSettings = () => settings;
 
 export function saveSettings(patch) {
-  settings = { ...settings, ...patch, llm: { ...settings.llm, ...patch.llm } };
+  settings = { ...settings, ...patch, llm: { ...settings.llm, ...patch.llm }, tts: { ...settings.tts, ...patch.tts } };
   try {
     localStorage.setItem(KEY, JSON.stringify(settings));
   } catch {

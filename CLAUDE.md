@@ -26,6 +26,9 @@ A Notepad++-style editor whose files sync through the same private GitHub data r
 - Tracker documents: `store.docs()` lists the tracker's attached files from the last sync (`trackerDocs` in `model.js`).
   - Their texts are cached by blob sha (`docTexts`). `syncManager.downloadDocs` fetches missing ones after each sync.
   - Search, quick open and the model index address them as `r:<path>`; `actions.openFile` opens either kind.
+- Read aloud: `speech.js` (pure) splits text into passages with their offsets and turns Markdown into prose; `reader.js` speaks them one at a time with `speechSynthesis` (pause = cancel and restart the passage, which works on Android too), keeps a screen wake lock and highlights the passage through `editor.highlightReading`.
+- Sharing to the app: the manifest's `share_target` posts to `share-target`. `sw.js` keeps the items in the `editor-inbox` cache, and `inbox.js` hands them to the app. `file_handlers` with `launchQueue` covers desktop Chrome and Edge.
+- `kv.js` commits each write right away (`tx.commit()`), and `main.js` flushes pending saves on `pagehide` and when the app is hidden, so changes made just before closing are kept.
 - `tabLock.js`: only one browser tab runs the app (Web Locks + BroadcastChannel). A new tab takes over, and the old one flushes, stops syncing and shows "Use it here".
 - `editor.js`: one CodeMirror `EditorView`, with an `EditorState` per tab. Languages load lazily from `@codemirror/language-data`.
 - Local model:

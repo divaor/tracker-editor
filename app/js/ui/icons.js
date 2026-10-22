@@ -52,6 +52,11 @@ const PATHS = {
   replace: () => html`<path d="M4 7h11l-3-3M20 17H9l3 3" />`,
   more: () => html`<circle cx="5" cy="12" r="1.2" /><circle cx="12" cy="12" r="1.2" /><circle cx="19" cy="12" r="1.2" />`,
   stop: () => html`<rect x="6" y="6" width="12" height="12" rx="2" />`,
+  volume: () => html`<path d="M4 9.5v5h3.5L12 19V5L7.5 9.5z" /><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" />`,
+  play: () => html`<path d="M7 4.5v15l12.5-7.5z" />`,
+  pause: () => html`<path d="M8 5v14M16 5v14" />`,
+  skipBack: () => html`<path d="M18 5v14L9 12zM6 5v14" />`,
+  skipForward: () => html`<path d="M6 5v14l9-7zM18 5v14" />`,
 };
 
 export function Icon({ name, size = 18, class: cls = '' }) {

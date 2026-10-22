@@ -5,10 +5,14 @@
 import {
   Annotation,
   Compartment,
+  Decoration,
   EditorSelection,
   EditorState,
   EditorView,
+  HighlightStyle,
   LanguageDescription,
+  StateEffect,
+  StateField,
   autocompletion,
   bracketMatching,
   closeBrackets,
@@ -48,6 +52,7 @@ import {
   searchKeymap,
   selectNextOccurrence,
   syntaxHighlighting,
+  tags,
   toggleComment,
   undo,
 } from '../vendor/cm/codemirror.js';
@@ -55,6 +60,24 @@ import {
 export { languages };
 
 const remote = Annotation.define();
+
+// Markdown headings in bold and the accent color (the default style underlines them, spaces included).
+const withHeadings = (style) => HighlightStyle.define([...style.specs.filter((s) => s.tag !== tags.heading), { tag: tags.heading, fontWeight: 'bold', color: 'var(--accent)' }]);
+const LIGHT_STYLE = withHeadings(defaultHighlightStyle);
+const DARK_STYLE = withHeadings(oneDarkHighlightStyle);
+
+// The passage being read aloud.
+const setReading = StateEffect.define();
+const readingMark = Decoration.mark({ class: 'cm-reading' });
+const readingField = StateField.define({
+  create: () => Decoration.none,
+  update(marks, tr) {
+    marks = marks.map(tr.changes);
+    for (const e of tr.effects) if (e.is(setReading)) marks = e.value ? Decoration.set([readingMark.range(e.value.from, e.value.to)]) : Decoration.none;
+    return marks;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
 
 export const PLAIN_TEXT = 'Plain text';
 export const languageNames = () => [PLAIN_TEXT, ...languages.map((l) => l.name).sort((a, b) => a.localeCompare(b))];
@@ -108,6 +131,7 @@ function baseTheme(dark) {
       '.cm-foldPlaceholder': { backgroundColor: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-2)' },
       '.cm-highlightSpace': { backgroundImage: `radial-gradient(circle at 50% 55%, ${dark ? '#6d6a63' : '#b8b4aa'} 11%, transparent 5%)` },
       '.cm-trailingSpace': { backgroundColor: dark ? 'rgba(239,107,107,.18)' : 'rgba(194,59,59,.12)' },
+      '.cm-reading': { backgroundColor: dark ? 'rgba(52,211,153,.2)' : 'rgba(16,185,129,.18)', borderRadius: '2px' },
     },
     { dark },
   );
@@ -181,7 +205,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, setti
   let active = null;
 
   const configFor = (o) => ({
-    theme: [baseTheme(o.dark), syntaxHighlighting(o.dark ? oneDarkHighlightStyle : defaultHighlightStyle, { fallback: true })],
+    theme: [baseTheme(o.dark), syntaxHighlighting(o.dark ? DARK_STYLE : LIGHT_STYLE, { fallback: true })],
     wrap: o.wordWrap ? EditorView.lineWrapping : [],
     whitespace: o.showWhitespace ? [highlightWhitespace(), highlightTrailingWhitespace()] : [],
     tabs: [EditorState.tabSize.of(o.tabSize), indentUnit.of(' '.repeat(o.tabSize))],
@@ -221,6 +245,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, setti
       crosshairCursor(),
       highlightActiveLine(),
       highlightSelectionMatches(),
+      readingField,
       search({ top: true }),
       placeholder('Type or paste here. Everything is saved on this device as you type and synced to GitHub.'),
       keymap.of([
@@ -339,6 +364,26 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, setti
       if (key === active) this.hide();
       states.delete(key);
       scroll.delete(key);
+    },
+
+    /** Marks the passage being read aloud in a tab ({ from, to }, or null to clear) and scrolls to it. */
+    highlightReading(key, range) {
+      const isActive = key === active;
+      const state = isActive ? view.state : states.get(key);
+      if (!state) return;
+      const len = state.doc.length;
+      const r = range && { from: Math.min(range.from, len), to: Math.min(range.to, len) };
+      const effects = [setReading.of(r && r.to > r.from ? r : null)];
+      if (isActive && r && r.to > r.from) effects.push(EditorView.scrollIntoView(r.from, { y: 'center' }));
+      if (isActive) view.dispatch({ effects });
+      else states.set(key, state.update({ effects }).state);
+    },
+
+    /** The text and selection of the active tab: { key, text, from, to } (for reading aloud). */
+    snapshot() {
+      if (!active) return null;
+      const { main } = view.state.selection;
+      return { key: active, text: view.state.doc.toString(), from: main.from, to: main.to };
     },
 
     flushAll() {

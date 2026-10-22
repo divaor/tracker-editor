@@ -2,7 +2,7 @@ import { html, render } from '../vendor/preact-htm.js';
 import { App } from './app.js';
 import { requestPersistence } from './kv.js';
 import { applyTheme, getSettings, onSettings } from './settings.js';
-import { closeStore, store } from './store.js';
+import { closeStore, flush, store } from './store.js';
 import { startSync, stopSync } from './syncManager.js';
 import { claimActiveTab } from './tabLock.js';
 
@@ -43,6 +43,13 @@ try {
     render(html`<${App} />`, root);
     startSync();
     requestPersistence();
+    // Changes wait a moment before they are saved; save them right away when the app is hidden or closed.
+    const saveNow = () => {
+      window.dispatchEvent(new Event('editor:flush'));
+      flush();
+    };
+    document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && saveNow());
+    window.addEventListener('pagehide', saveNow);
   } else showInactive();
 } catch (err) {
   console.error(err);

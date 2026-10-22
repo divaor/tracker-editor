@@ -322,6 +322,7 @@ function buildMenu() {
       submenu: [
         item('Files', 'CmdOrCtrl+B', 'toggle-sidebar'),
         item('Word Wrap', 'Alt+Z', 'toggle-wrap'),
+        item('Read Aloud', 'Alt+R', 'read-aloud'),
         item('Local Model', 'CmdOrCtrl+Shift+A', 'assistant'),
         { type: 'separator' },
         item('Next Tab', 'Ctrl+Tab', 'next-tab'),

@@ -1,6 +1,8 @@
 import { html, useEffect, useMemo, useReducer, useRef, useState } from '../vendor/preact-htm.js';
 import { createEditorHost, findLanguage, guessLanguage, PLAIN_TEXT } from './editor.js';
+import { onLaunchFiles, takeShared } from './inbox.js';
 import { parseRoute, safeName } from './model.js';
+import { getReaderState, onReaderState, setReaderHighlighter, startReading, stopReading, toggleReading } from './reader.js';
 import { getSettings, getToken, isSyncConfigured, onSettings, resolvedTheme, saveSettings } from './settings.js';
 import { fileKey, flush, parseKey, repoKey, store } from './store.js';
 import { getSyncState, onSyncResult, onSyncState, syncClient, syncNow } from './syncManager.js';
@@ -11,6 +13,7 @@ import { FileDialog, SendDialog } from './ui/dialogs.js';
 import { Icon } from './ui/icons.js';
 import { QuickOpen, SearchPanel } from './ui/panels.js';
 import { MarkdownPreview } from './ui/preview.js';
+import { ReadAloudBar } from './ui/readAloud.js';
 import { SettingsView } from './ui/settingsView.js';
 import { Sidebar } from './ui/sidebar.js';
 import { FileBar, StatusBar, SyncBadge, TabBar } from './ui/tabs.js';
@@ -96,6 +99,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar }) {
         const k = parseKey(key);
         const file = k?.kind === 'file' ? store.get(k.id) : null;
         hostRef.current?.drop(key);
+        if (getReaderState().key === key) stopReading();
         store.close(key);
         // Empty untitled tabs are not worth keeping.
         if (file && /^new \d+$/.test(file.name) && !store.text(file.id).trim() && !file.sha) store.remove(file.id);
@@ -142,6 +146,17 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar }) {
           added++;
         }
         if (added > 1) toast(`Added ${added} files`);
+        return added;
+      },
+      // Text or files shared from another app: each becomes a new file that syncs like the rest.
+      async importShared({ title = '', text = '', url = '', files = [] }) {
+        const added = files.length ? await actions.importFiles(files) : 0;
+        const body = [text.trim(), url && !text.includes(url) ? url : ''].filter(Boolean).join('\n\n');
+        if (body) {
+          const name = title.trim() ? safeName(title.trim().slice(0, 80)) : undefined;
+          actions.newFile({ name, text: body, language: (name && findLanguage(name)) ? '' : (guessLanguage(body) ?? '') });
+        }
+        if (added + (body ? 1 : 0) === 1) toast('Saved what you shared as a new file. It syncs like your other files.');
       },
       async openFromDisk() {
         if (window.desktop?.openFiles) {
@@ -166,6 +181,23 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar }) {
         } else download(name, text);
       },
       activeFile,
+      // Reads the active tab aloud from the cursor (or just the selection); again to pause or resume.
+      readAloud() {
+        if (getReaderState().status !== 'idle') return toggleReading();
+        const host = hostRef.current;
+        host?.flushAll();
+        const snap = host?.snapshot();
+        if (!snap) return;
+        const k = parseKey(snap.key);
+        const file = k.kind === 'file' ? store.get(k.id) : null;
+        const name = file?.name ?? store.repoTab(k.path)?.name ?? '';
+        const markdown = findLanguage(name, file?.language)?.name === 'Markdown';
+        try {
+          startReading({ key: snap.key, name, text: snap.text, markdown, from: snap.from, to: snap.to });
+        } catch (err) {
+          toast(err.message, { kind: 'error' });
+        }
+      },
       // Opens the local model panel and summarizes the active file.
       summarize() {
         setPanel('assistant');
@@ -216,6 +248,11 @@ export function App() {
     });
   }, []);
   useEffect(() => onSettings(setSettings), []);
+  // Reading aloud highlights the passage in the editor; problems become a message.
+  useEffect(() => {
+    setReaderHighlighter((key, range) => hostRef.current?.highlightReading(key, range));
+    return onReaderState((s) => s.status === 'idle' && s.error && toast(s.error, { kind: 'error' }));
+  }, []);
   useEffect(() => onSyncState(setSync), []);
   useEffect(
     () =>
@@ -324,6 +361,19 @@ export function App() {
     return () => window.removeEventListener('hashchange', take);
   }, []);
 
+  // Shared from other apps (Android's Share menu) or opened with the installed app.
+  useEffect(() => {
+    const takeInbox = async () => {
+      if (location.hash === '#/inbox') history.replaceState(null, '', location.pathname + location.search);
+      for (const shared of await takeShared().catch(() => [])) await actions.importShared(shared);
+    };
+    takeInbox();
+    const onHash = () => location.hash === '#/inbox' && takeInbox();
+    window.addEventListener('hashchange', onHash);
+    onLaunchFiles((files) => actions.importFiles(files));
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
   // Keyboard shortcuts that work in the browser too (the desktop menu adds Ctrl+N, Ctrl+W, …).
   useEffect(() => {
     const onKey = (e) => {
@@ -344,6 +394,9 @@ export function App() {
       } else if (e.altKey && !mod && k === 'n') {
         e.preventDefault();
         actions.newFile();
+      } else if (e.altKey && !mod && k === 'r') {
+        e.preventDefault();
+        actions.readAloud();
       } else if (e.altKey && !mod && k === 'w') {
         e.preventDefault();
         if (store.session.active) actions.close(store.session.active);
@@ -378,6 +431,7 @@ export function App() {
         settings: () => setView('settings'),
         'toggle-sidebar': () => setSidebar((s) => !s),
         'toggle-wrap': () => actions.toggleWrap(),
+        'read-aloud': () => actions.readAloud(),
         flush: async () => {
           hostRef.current?.flushAll();
           await flush();
@@ -451,6 +505,7 @@ export function App() {
             }} />`}
           ${!activeKey && html`<${Welcome} actions=${actions} hasFiles=${store.live().length + docs.length > 0} configured=${isSyncConfigured(settings)} />`}
         </div>
+        <${ReadAloudBar} />
         <${StatusBar} cursor=${activeKey ? cursor : null} language=${languageName} file=${activeFile} repo=${activeRepo} settings=${settings} sync=${sync} actions=${actions} />
       </div>
     </main>

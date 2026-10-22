@@ -1,7 +1,8 @@
 // Offline support: precache the app shell and every CodeMirror language
 // chunk (listed in vendor/cm/files.json), then serve network-first so updates
 // show up immediately when online. GitHub and model requests are never intercepted.
-const CACHE = 'editor-v0.1.1';
+const CACHE = 'editor-v0.2.0';
+const INBOX = 'editor-inbox'; // shared files waiting for the app (see js/inbox.js)
 const ASSETS = [
   './',
   'css/styles.css',
@@ -17,14 +18,17 @@ const ASSETS = [
   'js/editor.js',
   'js/format.js',
   'js/github.js',
+  'js/inbox.js',
   'js/kv.js',
   'js/llm.js',
   'js/main.js',
   'js/markdown.js',
   'js/model.js',
+  'js/reader.js',
   'js/search.js',
   'js/semantic.js',
   'js/settings.js',
+  'js/speech.js',
   'js/store.js',
   'js/sync.js',
   'js/syncManager.js',
@@ -37,6 +41,7 @@ const ASSETS = [
   'js/ui/icons.js',
   'js/ui/panels.js',
   'js/ui/preview.js',
+  'js/ui/readAloud.js',
   'js/ui/settingsView.js',
   'js/ui/sidebar.js',
   'js/ui/tabs.js',
@@ -67,13 +72,40 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE && k !== INBOX).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
   );
 });
 
+// Android's Share menu posts text and files here (share_target in the
+// manifest); they wait in the inbox until the app opens and takes them.
+async function receiveShare(request) {
+  try {
+    const form = await request.formData();
+    const inbox = await caches.open(INBOX);
+    const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const files = form.getAll('files').filter((f) => typeof f !== 'string' && f.size > 0);
+    const at = (path) => new URL(path, self.registration.scope).href;
+    const meta = {
+      title: String(form.get('title') ?? ''),
+      text: String(form.get('text') ?? ''),
+      url: String(form.get('url') ?? ''),
+      files: files.map((f, i) => ({ name: f.name || `shared-${i + 1}.txt`, type: f.type, key: at(`inbox/${id}/${i}`) })),
+    };
+    await Promise.all(files.map((f, i) => inbox.put(meta.files[i].key, new Response(f))));
+    await inbox.put(at(`inbox/${id}.json`), new Response(JSON.stringify(meta), { headers: { 'content-type': 'application/json' } }));
+  } catch (err) {
+    console.warn('Could not keep the shared items', err);
+  }
+  return Response.redirect(new URL('./#/inbox', self.registration.scope).href, 303);
+}
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
+  if (request.method === 'POST' && new URL(request.url).pathname.endsWith('/share-target')) {
+    event.respondWith(receiveShare(request));
+    return;
+  }
   if (request.method !== 'GET' || new URL(request.url).origin !== self.location.origin) return;
   // A navigate-mode Request cannot be re-fetched with an init object, so use its URL.
   const network = request.mode === 'navigate' ? fetch(request.url, { cache: 'no-cache' }) : fetch(request, { cache: 'no-cache' });

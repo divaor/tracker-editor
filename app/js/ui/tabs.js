@@ -66,12 +66,23 @@ export function TabBar({ session, actions }) {
 
 /** Project, tags and actions for the file in the active tab. */
 export function FileBar({ file, repo, projects, isMarkdown, preview, settings, actions }) {
+  const previewButton =
+    isMarkdown &&
+    html`<button type="button" class="btn ghost sm ${preview ? 'on' : ''}" aria-pressed=${preview} title="Show the Markdown rendered next to the text" onClick=${actions.togglePreview}><${Icon} name="eye" size=${15} /><span class="label">Preview</span></button>`;
+  const listenButton = html`<button type="button" class="btn ghost sm" title="Read aloud from the cursor, or the selection (Alt+R)" onClick=${actions.readAloud}><${Icon} name="volume" size=${15} /><span class="label">Listen</span></button>`;
   if (repo) {
+    // A tracker document: its item's title and project; the path is in the tooltip.
+    const doc = store.doc(repo.path);
+    const project = doc?.project && projects.find((p) => p.key === projectKey(doc.project));
     return html`<div class="filebar">
-      <span class="filebar-note"><${Icon} name="paperclip" size=${14} />From the tracker: <code>${repo.path}</code></span>
+      <span class="filebar-note" title=${`From the tracker: ${repo.path}`}><${Icon} name="doc" size=${14} /><span class="filebar-title">${doc?.item.title || repo.name}</span></span>
+      ${doc?.project && html`<${ProjectChip} project=${project} name=${doc.project} />`}
       <span class="spacer" />
-      ${isMarkdown && html`<button type="button" class="btn ghost sm ${preview ? 'on' : ''}" aria-pressed=${preview} onClick=${actions.togglePreview}><${Icon} name="eye" size=${15} />Preview</button>`}
-      <span class="muted small">${repo.dirty ? 'Saved here; goes to the tracker on the next sync' : 'In sync with the tracker'}</span>
+      ${previewButton}
+      ${listenButton}
+      <span class="filebar-status ${repo.dirty ? 'pending' : ''}" title=${repo.dirty ? 'Saved on this device; goes to the tracker on the next sync' : 'The same as on the tracker'}>
+        <${Icon} name=${repo.dirty ? 'sync' : 'cloud'} size=${14} /><span class="label">${repo.dirty ? 'Not synced yet' : 'Synced'}</span>
+      </span>
     </div>`;
   }
   if (!file) return null;
@@ -86,7 +97,8 @@ export function FileBar({ file, repo, projects, isMarkdown, preview, settings, a
       <button type="button" class="btn ghost sm" title="Name, project, tags and language" onClick=${() => actions.openDialog({ type: 'file', id: file.id })}><${Icon} name="tag" size=${14} />${file.tags.length ? 'Edit' : 'Tags'}</button>
     </span>
     <span class="spacer" />
-    ${isMarkdown && html`<button type="button" class="btn ghost sm ${preview ? 'on' : ''}" aria-pressed=${preview} title="Show the Markdown rendered next to the text" onClick=${actions.togglePreview}><${Icon} name="eye" size=${15} /><span class="label">Preview</span></button>`}
+    ${previewButton}
+    ${listenButton}
     ${settings.llm.enabled && html`<button type="button" class="btn ghost sm" title="Summarize with the local model" onClick=${actions.summarize}><${Icon} name="sparkle" size=${15} /><span class="label">Summarize</span></button>`}
     <button type="button" class="btn ghost sm" title=${linked.length ? `On the tracker: ${linked.map((i) => i.title).join(', ')}` : 'Add to the tracker as a task, idea or doc to read'}
       onClick=${() => actions.openDialog({ type: 'send', id: file.id })}>

@@ -14,8 +14,9 @@ export {
   rectangularSelection,
   crosshairCursor,
   placeholder,
+  Decoration,
 } from '@codemirror/view';
-export { EditorState, EditorSelection, Compartment, Prec, Annotation, Transaction } from '@codemirror/state';
+export { EditorState, EditorSelection, Compartment, Prec, Annotation, Transaction, StateField, StateEffect } from '@codemirror/state';
 export {
   defaultKeymap,
   history,
