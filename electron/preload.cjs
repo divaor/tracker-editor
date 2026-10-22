@@ -64,6 +64,10 @@ contextBridge.exposeInMainWorld('desktop', {
     open: () => ipcRenderer.invoke('capture:open'),
     take: () => ipcRenderer.invoke('capture:take'),
   },
+  // Text from a screenshot: you drag around part of the screen; resolves to its PNG bytes (or null).
+  ocr: {
+    snip: () => ipcRenderer.invoke('ocr:snip'),
+  },
   clipboardHistory: {
     list: () => ipcRenderer.invoke('clip:list'),
     copy: (id) => ipcRenderer.invoke('clip:copy', id),

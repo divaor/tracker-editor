@@ -72,6 +72,7 @@ import { parseLinks } from './outline.js';
 export { languages };
 
 const remote = Annotation.define();
+const imageIn = (data) => [...(data?.files ?? [])].find((f) => f.type.startsWith('image/')) ?? null;
 
 // Markdown headings in bold and the accent color (the default style underlines them, spaces included).
 const withHeadings = (style) => HighlightStyle.define([...style.specs.filter((s) => s.tag !== tags.heading), { tag: tags.heading, fontWeight: 'bold', color: 'var(--accent)' }]);
@@ -319,7 +320,7 @@ function linkAt(state, pos) {
  * `openSide(key, el, …)` shows a second tab next to it (the split view); a tab's
  * state, with its undo history, moves between the panes.
  */
-export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpenLink, linkTargets, settings }) {
+export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpenLink, onImage, linkTargets, settings }) {
   const states = new Map(); // key → EditorState
   const scroll = new Map(); // key → scroll position
   const pending = new Map(); // key → timer for onChange
@@ -472,6 +473,24 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       EditorView.contentAttributes.of({ spellcheck: 'false', autocorrect: 'off', autocapitalize: 'off' }),
       EditorView.domEventHandlers({
         scroll: (_e, v) => scroll.set(key, v.scrollDOM.scrollTop),
+        // An image (and no text) pasted or dropped: `onImage` reads its text instead of inserting bytes.
+        paste(e) {
+          const image = imageIn(e.clipboardData);
+          if (!image || !onImage || e.clipboardData.getData('text/plain')) return false;
+          e.preventDefault();
+          onImage(image);
+          return true;
+        },
+        drop(e, v) {
+          const image = imageIn(e.dataTransfer);
+          if (!image || !onImage) return false;
+          e.preventDefault();
+          e.stopPropagation();
+          const pos = v.posAtCoords({ x: e.clientX, y: e.clientY });
+          if (pos !== null) v.dispatch({ selection: { anchor: pos } });
+          onImage(image);
+          return true;
+        },
         mousedown(e, v) {
           if (!(e.ctrlKey || e.metaKey) || !onOpenLink) return false;
           const pos = v.posAtCoords({ x: e.clientX, y: e.clientY });
@@ -675,13 +694,21 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
     isBig: (key) => bigKeys.has(key),
 
     /** Inserts text in place of the selection of the pane typed in last, the cursor `cursorOffset` into it. */
-    insertAtCursor(text, cursorOffset = text.length) {
+    insertAtCursor(text, cursorOffset = text.length, { focus = true } = {}) {
       const { key, view: v } = current();
       if (!key) return false;
       const { from, to } = v.state.selection.main;
       v.dispatch({ changes: { from, to, insert: text }, selection: { anchor: from + cursorOffset }, userEvent: 'input.paste', scrollIntoView: true });
-      v.focus();
+      if (focus) v.focus();
       return true;
+    },
+
+    /** The last `n` characters before the cursor of the pane typed in last ('' when none is open). */
+    textBeforeCursor(n) {
+      const { key, view: v } = current();
+      if (!key) return '';
+      const at = v.state.selection.main.from;
+      return v.state.sliceDoc(Math.max(0, at - n), at);
     },
 
     /** Shows `key` in the second pane, inside `el` (never the main pane's tab). */

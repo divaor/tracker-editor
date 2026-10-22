@@ -27,8 +27,11 @@ test('service worker precaches every app file and its cache name tracks the vers
   const assets = JSON.parse(`[${/const ASSETS = \[([\s\S]*?)\];/.exec(sw)[1].replace(/'/g, '"').replace(/,\s*$/, '')}]`);
   // CodeMirror's language chunks are listed by `npm run vendor` in files.json.
   const chunks = JSON.parse(await readFile(path.join(appDir, 'vendor/cm/files.json'), 'utf8')).map((f) => `vendor/cm/${f}`);
-  const files = (await listFiles(appDir)).map((f) => path.relative(appDir, f).split(path.sep).join('/')).filter((f) => f !== 'sw.js' && f !== 'vendor/cm/files.json');
-  assert.deepEqual([...assets.filter((a) => a !== './'), ...chunks].sort(), files.sort());
+  // Text recognition (about 9 MB) is cached when first used instead; vendor/ocr/files.json lists it.
+  const ocr = JSON.parse(await readFile(path.join(appDir, 'vendor/ocr/files.json'), 'utf8')).map((f) => `vendor/ocr/${f}`);
+  const files = (await listFiles(appDir)).map((f) => path.relative(appDir, f).split(path.sep).join('/')).filter((f) => !['sw.js', 'vendor/cm/files.json', 'vendor/ocr/files.json'].includes(f));
+  assert.deepEqual([...assets.filter((a) => a !== './'), ...chunks, ...ocr].sort(), files.sort());
+  assert.ok(!assets.some((a) => a.startsWith('vendor/ocr/')), 'text recognition is not precached');
   assert.match(sw, new RegExp(`const CACHE = 'editor-v${APP_VERSION.replace(/\./g, '\\.')}'`));
 });
 

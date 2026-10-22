@@ -70,6 +70,8 @@ const PATHS = {
   disk: () => html`<rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 14h18M7 17h.01M11 17h.01" />`,
   follow: () => html`<path d="M12 4v12M6.5 10.5 12 16l5.5-5.5M5 20h14" />`,
   save: () => html`<path d="M5 3h11l3 3v15H5z" /><path d="M8 3v5h7V3M8 21v-7h8v7" />`,
+  scan: () => html`<path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3" /><path d="M8 9h8M8 12h8M8 15h5" />`,
+  mic: () => html`<rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" />`,
 };
 
 export function Icon({ name, size = 18, class: cls = '' }) {

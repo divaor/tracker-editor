@@ -1,0 +1,7 @@
+[
+  "tesseract.js",
+  "worker.min.js",
+  "tesseract-core-simd-lstm.wasm.js",
+  "eng.traineddata.gz",
+  "spa.traineddata.gz"
+]

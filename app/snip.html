@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'self'; frame-src 'none'" />
+    <title>Text from a screenshot</title>
+    <link rel="stylesheet" href="css/styles.css" />
+    <script type="module" src="js/snipPage.js"></script>
+  </head>
+  <body class="snip-page">
+    <img id="shot" alt="" draggable="false" />
+    <div id="shade" class="snip-shade"></div>
+    <div id="box" class="snip-box" hidden></div>
+    <p class="snip-hint">Drag around the text to read · Esc cancels</p>
+  </body>
+</html>

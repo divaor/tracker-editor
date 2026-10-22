@@ -71,6 +71,10 @@ export const DEFAULT_SETTINGS = {
   // other editor indents new lines by itself, and whether to minimize this window meanwhile.
   // `unicode` (Windows): characters instead of key presses, for keyboard layouts that differ from the remote one.
   typing: { countdown: 5, speed: 'normal', autoIndent: false, minimize: false, unicode: false },
+  // Text from images: the languages to read (ocr.js OCR_LANGUAGES).
+  ocrLang: 'eng+spa',
+  // Dictation (voice notes): a BCP 47 language, '' = the device's.
+  dictationLang: '',
   // Settings migrations already applied on this device.
   version: 2,
 };

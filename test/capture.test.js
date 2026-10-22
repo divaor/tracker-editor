@@ -50,3 +50,20 @@ test('copies a password manager marks as concealed are recognized', () => {
   assert.equal(isConcealed([raw('ExcludeClipboardContentFromMonitorProcessing')]), true);
   assert.equal(isConcealed(['x-kde-passwordManagerHint']), true);
 });
+
+test('dictated phrases join the text with spaces, capitals and spoken line breaks', async () => {
+  const { applyCommands, joinDictated } = await import('../app/js/dictation.js');
+  assert.equal(joinDictated('', 'buy milk'), 'Buy milk');
+  assert.equal(joinDictated('Buy milk', 'and eggs'), ' and eggs');
+  assert.equal(joinDictated('Buy milk.', 'then call Ana'), ' Then call Ana');
+  assert.equal(joinDictated('Buy milk ', 'and eggs'), 'and eggs');
+  assert.equal(joinDictated('Notes\n', 'first point'), 'First point');
+  assert.equal(joinDictated('Done', ', thanks'), ', thanks');
+  assert.equal(applyCommands('first item new line second item', 'en-US'), 'first item\nsecond item');
+  assert.equal(joinDictated('List', 'new paragraph tomatoes', 'en'), '\n\nTomatoes');
+  assert.equal(joinDictated('', 'comprar pan punto y aparte llamar a Ana', 'es-MX'), 'Comprar pan.\nLlamar a Ana');
+  assert.equal(joinDictated('Lista', 'nueva línea huevos nuevo párrafo leche', 'es'), '\nHuevos\n\nLeche');
+  assert.equal(joinDictated('Lista', 'nova linha ovos', 'pt-BR'), '\nOvos');
+  assert.equal(applyCommands('en este punto', 'es'), 'en este punto', 'ordinary words stay');
+  assert.equal(joinDictated('x', '   '), '');
+});

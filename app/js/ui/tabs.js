@@ -7,6 +7,7 @@ import { syncNow } from '../syncManager.js';
 import { projectKey } from '../tracker-model.js';
 import { ProjectChip } from './components.js';
 import { Icon } from './icons.js';
+import { dictationSupported } from './dictation.js';
 import { Menu, MenuButton } from './menu.js';
 
 function tabInfo(key) {
@@ -210,6 +211,9 @@ export function FileBar({ file, repo, disk, sealed, projects, canPreview, previe
     !disk && { label: 'History', icon: 'history', run: actions.showHistory },
     { label: 'Compare with…', icon: 'columns', run: actions.compareWith },
     { label: 'Compare with clipboard', icon: 'copy', run: actions.compareWithClipboard },
+    { label: 'Text from an image…', icon: 'scan', run: actions.imageToText },
+    dictationSupported() && !disk?.follow && { label: 'Dictate', icon: 'mic', run: actions.startDictation },
+    window.desktop?.ocr && { label: 'Text from a screenshot…', icon: 'scan', run: actions.screenshotToText },
     id && { label: 'Send checklist to tracker…', icon: 'checklist', run: actions.sendChecklist },
     window.desktop?.typing && { label: 'Type into another window', icon: 'keyboard', run: () => actions.typeOut() },
     settings.llm.enabled && { label: 'Ask the model… (Ctrl+K)', icon: 'sparkle', run: actions.askSelection },

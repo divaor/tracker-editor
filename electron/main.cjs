@@ -3,7 +3,7 @@
 // with the OS keychain, opens and saves files on disk, forwards requests to a
 // local model server (no CORS setup needed), opens tracker-editor:// links
 // from the tracker, and lets the app save and sync before the window closes.
-const { app, BrowserWindow, Menu, Notification, Tray, clipboard, dialog, globalShortcut, ipcMain, nativeImage, net, protocol, safeStorage, screen, shell } = require('electron');
+const { app, BrowserWindow, Menu, Notification, Tray, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, nativeImage, net, protocol, safeStorage, screen, shell } = require('electron');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const http = require('node:http');
@@ -332,19 +332,22 @@ ipcMain.handle('webhook:close', guard(() => {
 // Kept by the main process (prefs.json), which needs them before the page loads.
 
 const DEFAULT_CAPTURE = 'CommandOrControl+Alt+N';
+const DEFAULT_SNIP = 'CommandOrControl+Alt+O';
 let prefs = null;
 function loadPrefs() {
   const saved = readJson('prefs.json', {});
   prefs = {
     background: Boolean(saved.background),
     capture: { enabled: false, shortcut: DEFAULT_CAPTURE, ...saved.capture },
+    snip: { enabled: false, shortcut: DEFAULT_SNIP, ...saved.snip },
     clipboard: { enabled: false, max: clips.DEFAULT_MAX, ...saved.clipboard },
     toldAboutTray: Boolean(saved.toldAboutTray),
   };
 }
 const prefsState = () => ({
   background: prefs.background,
-  capture: { ...prefs.capture, status: captureStatus },
+  capture: { ...prefs.capture, status: shortcutStatus.capture },
+  snip: { ...prefs.snip, status: shortcutStatus.snip },
   clipboard: { ...prefs.clipboard, encrypted: safeStorage.isEncryptionAvailable() },
   tray: Boolean(tray),
 });
@@ -352,10 +355,11 @@ const prefsState = () => ({
 ipcMain.handle('prefs:get', guard(() => prefsState()));
 ipcMain.handle('prefs:set', guard((_e, patch = {}) => {
   if ('background' in patch) prefs.background = Boolean(patch.background);
-  if (patch.capture) {
-    const { enabled, shortcut } = patch.capture;
-    if (enabled !== undefined) prefs.capture.enabled = Boolean(enabled);
-    if (typeof shortcut === 'string' && shortcut.trim()) prefs.capture.shortcut = shortcut.trim().slice(0, 60);
+  for (const name of ['capture', 'snip']) {
+    if (!patch[name]) continue;
+    const { enabled, shortcut } = patch[name];
+    if (enabled !== undefined) prefs[name].enabled = Boolean(enabled);
+    if (typeof shortcut === 'string' && shortcut.trim()) prefs[name].shortcut = shortcut.trim().slice(0, 60);
   }
   if (patch.clipboard) {
     const { enabled, max } = patch.clipboard;
@@ -372,7 +376,7 @@ ipcMain.handle('prefs:set', guard((_e, patch = {}) => {
 }));
 
 function applyPrefs() {
-  registerCapture();
+  registerShortcuts();
   watchClipboard();
   updateTray();
 }
@@ -401,6 +405,7 @@ function updateTray() {
     Menu.buildFromTemplate([
       { label: 'Open Tracker Editor', click: showWindow },
       { label: 'Quick Capture', accelerator: prefs.capture.enabled ? prefs.capture.shortcut : undefined, registerAccelerator: false, click: openCapture },
+      { label: 'Text from a Screenshot', accelerator: prefs.snip.enabled ? prefs.snip.shortcut : undefined, registerAccelerator: false, click: snipFromShortcut },
       { label: 'Clipboard History', enabled: prefs.clipboard.enabled, click: () => send('clipboard-history') },
       { type: 'separator' },
       { label: 'Quit Tracker Editor', click: () => app.quit() },
@@ -413,23 +418,32 @@ function updateTray() {
 // through captures.json so nothing is lost if that window is not up yet.
 
 let captureWindow = null;
-let captureStatus = 'off'; // 'ok' | 'taken' | 'invalid' | 'off'
-let captureShortcut = null;
 let captureDraft = '';
 const pendingCaptures = [];
 
-function registerCapture() {
-  if (captureShortcut) globalShortcut.unregister(captureShortcut);
-  captureShortcut = null;
-  captureStatus = 'off';
-  if (!prefs.capture.enabled) return;
-  try {
-    if (globalShortcut.register(prefs.capture.shortcut, openCapture)) {
-      captureShortcut = prefs.capture.shortcut;
-      captureStatus = 'ok';
-    } else captureStatus = 'taken';
-  } catch {
-    captureStatus = 'invalid';
+// Global shortcuts: quick capture and text from a screenshot. Status per
+// shortcut: 'ok' | 'taken' (another app has it) | 'invalid' | 'off'.
+const shortcutStatus = { capture: 'off', snip: 'off' };
+const registered = {};
+function registerShortcuts() {
+  const actions = { capture: openCapture, snip: snipFromShortcut };
+  for (const name of Object.keys(actions)) {
+    if (registered[name]) globalShortcut.unregister(registered[name]);
+    registered[name] = null;
+    shortcutStatus[name] = 'off';
+  }
+  for (const [name, run] of Object.entries(actions)) {
+    const { enabled, shortcut } = prefs[name];
+    if (!enabled) continue;
+    try {
+      if (Object.values(registered).includes(shortcut)) shortcutStatus[name] = 'taken';
+      else if (globalShortcut.register(shortcut, run)) {
+        registered[name] = shortcut;
+        shortcutStatus[name] = 'ok';
+      } else shortcutStatus[name] = 'taken';
+    } catch {
+      shortcutStatus[name] = 'invalid';
+    }
   }
 }
 
@@ -503,6 +517,107 @@ ipcMain.handle('capture:take', guard((event) => {
   const taken = pendingCaptures.splice(0);
   writeJson('captures.json', []);
   return taken;
+}));
+
+// ---- Text from a screenshot: drag around a part of the screen -----------------
+// The screen under the pointer is captured (this app's window hidden first) and
+// shown full screen in snip.html, where you drag around the text. The page
+// gets that part as a PNG and reads the text from it (tesseract, in the page).
+
+let snipWindow = null;
+let snipShot = null; // { image: NativeImage, display }
+let snipResolve = null;
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function openSnipWindow(display) {
+  snipWindow = new BrowserWindow({
+    ...display.bounds,
+    frame: false,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    enableLargerThanScreen: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    show: false,
+    title: 'Text from a screenshot',
+    backgroundColor: '#000000',
+    webPreferences: {
+      preload: path.join(__dirname, 'snipPreload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  snipWindow.setAlwaysOnTop(true, 'screen-saver');
+  snipWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  snipWindow.webContents.on('will-navigate', (event) => event.preventDefault());
+  snipWindow.once('ready-to-show', () => {
+    snipWindow.show();
+    snipWindow.focus();
+  });
+  snipWindow.on('closed', () => {
+    snipWindow = null;
+    snipResolve?.(null);
+    snipResolve = null;
+  });
+  snipWindow.loadURL(`${APP_ORIGIN}/snip.html`);
+}
+
+/** Lets you pick a part of the screen: its PNG, or null when cancelled. */
+async function snip() {
+  if (snipWindow) return null;
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const hidden = mainWindow?.isVisible() && !mainWindow.isMinimized();
+  if (hidden) {
+    mainWindow.hide();
+    await wait(350);
+  }
+  try {
+    const thumbnailSize = { width: Math.round(display.size.width * display.scaleFactor), height: Math.round(display.size.height * display.scaleFactor) };
+    const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize });
+    const source = sources.find((s) => s.display_id === String(display.id)) ?? sources[0];
+    if (!source || source.thumbnail.isEmpty()) {
+      throw new Error(process.platform === 'darwin' ? 'The screen could not be captured. Allow Tracker Editor to record the screen in System Settings, Privacy & Security, then try again.' : 'The screen could not be captured.');
+    }
+    snipShot = { image: source.thumbnail, display };
+    const rect = await new Promise((resolve) => {
+      snipResolve = resolve;
+      openSnipWindow(display);
+    });
+    if (!rect) return null;
+    const scale = snipShot.image.getSize().width / display.bounds.width;
+    const px = (n) => Math.max(0, Math.round(n * scale));
+    return snipShot.image.crop({ x: px(rect.x), y: px(rect.y), width: Math.max(1, px(rect.width)), height: Math.max(1, px(rect.height)) }).toPNG();
+  } finally {
+    snipShot = null;
+    if (hidden) showWindow();
+  }
+}
+
+// From the tray or the global shortcut: the page asks for the snip, so the result shows there.
+function snipFromShortcut() {
+  if (!mainWindow) return createWindow();
+  mainWindow.webContents.send('command', 'screenshot-ocr');
+}
+
+const fromSnip = (event) => snipWindow && event.sender === snipWindow.webContents;
+ipcMain.handle('snip:image', guard((event) => (fromSnip(event) && snipShot ? `data:image/jpeg;base64,${snipShot.image.toJPEG(85).toString('base64')}` : null)));
+ipcMain.handle('snip:done', guard((event, rect) => {
+  if (!fromSnip(event)) return false;
+  const ok = rect && ['x', 'y', 'width', 'height'].every((k) => Number.isFinite(rect[k])) && rect.width >= 4 && rect.height >= 4;
+  snipResolve?.(ok ? rect : null);
+  snipResolve = null;
+  snipWindow.close();
+  return true;
+}));
+ipcMain.handle('ocr:snip', guard(async (event) => {
+  if (event.sender !== mainWindow?.webContents) return null;
+  const png = await snip();
+  if (png) showWindow();
+  return png;
 }));
 
 // ---- Clipboard history (opt-in) -----------------------------------------------
@@ -790,6 +905,8 @@ function buildMenu() {
         { type: 'separator' },
         shown('Clipboard History…', 'CmdOrCtrl+Shift+V', 'clipboard-history'),
         { label: 'Quick Capture', click: () => openCapture() },
+        item('Text from a Screenshot…', undefined, 'screenshot-ocr'),
+        item('Text from an Image…', undefined, 'image-ocr'),
       ],
     },
     {
@@ -853,6 +970,7 @@ app.whenReady().then(() => {
 app.on('before-quit', () => {
   quitting = true;
   captureWindow?.destroy();
+  snipWindow?.destroy();
 });
 
 app.on('will-quit', () => {

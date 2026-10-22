@@ -15,6 +15,8 @@ import { APP_VERSION } from '../version.js';
 import { Card, Check, Field, Segmented } from './components.js';
 import { EncryptionCard } from './encryption.js';
 import { TYPING_SPEEDS } from '../typing.js';
+import { DICTATION_LANGUAGES } from '../dictation.js';
+import { dictationSupported } from './dictation.js';
 import { Icon } from './icons.js';
 
 const SYNC_FIELDS = ['owner', 'repo', 'branch', 'trackerPath', 'device'];
@@ -172,16 +174,37 @@ const CAPTURE_STATUS = {
   invalid: 'That is not a shortcut this computer can use. Pick another one.',
 };
 
-/** Desktop: keep running in the tray, quick capture, clipboard history (the main process keeps these). */
+/** A global shortcut, set by pressing it, with a button to try what it does. */
+function ShortcutField({ value, problem, label, onChange, onTry }) {
+  const [recording, setRecording] = useState(false);
+  return html`<${Field} label="Shortcut">
+    <span class="shortcut-field">
+      <input readonly value=${recording ? 'Press the keys…' : shortcutLabel(value)} aria-label=${label} class=${problem ? 'invalid' : ''}
+        onFocus=${() => setRecording(true)} onBlur=${() => setRecording(false)}
+        onKeyDown=${(e) => {
+          if (e.key === 'Tab') return;
+          e.preventDefault();
+          if (e.key === 'Escape') return e.currentTarget.blur();
+          const accelerator = acceleratorFrom(e);
+          if (!accelerator) return;
+          e.currentTarget.blur();
+          onChange(accelerator);
+        }} />
+      <button type="button" class="btn sm" onClick=${onTry}>Try it</button>
+    </span>
+  </${Field}>`;
+}
+
+/** Desktop: keep running in the tray, quick capture, text from a screenshot, clipboard history (the main process keeps these). */
 function DesktopCard({ actions }) {
   const [prefs, setPrefs] = useState(null);
-  const [recording, setRecording] = useState(false);
   useEffect(() => {
     window.desktop.prefs.get().then(setPrefs);
   }, []);
   if (!prefs) return null;
   const set = async (patch) => setPrefs(await window.desktop.prefs.set(patch));
   const problem = prefs.capture.enabled && CAPTURE_STATUS[prefs.capture.status];
+  const snipProblem = prefs.snip.enabled && CAPTURE_STATUS[prefs.snip.status];
   return html`<${Card} title="Desktop" icon="settings">
     <div class="field-grid">
       <${Check} checked=${prefs.background} label="Keep running in the tray when the window is closed" hint="So quick capture and the clipboard history work with the window closed. Quit from the tray icon." onChange=${(v) => set({ background: v })} />
@@ -191,23 +214,15 @@ function DesktopCard({ actions }) {
     <p class="muted small">A shortcut that works in any app opens a small window to jot something down. Ctrl+Enter keeps it as a new note, or adds it to Inbox.md under the time.</p>
     <div class="field-grid">
       <${Check} checked=${prefs.capture.enabled} label="Quick capture" onChange=${(v) => set({ capture: { enabled: v } })} />
-      <${Field} label="Shortcut">
-        <span class="shortcut-field">
-          <input readonly value=${recording ? 'Press the keys…' : shortcutLabel(prefs.capture.shortcut)} aria-label="Quick capture shortcut" class=${problem ? 'invalid' : ''}
-            onFocus=${() => setRecording(true)} onBlur=${() => setRecording(false)}
-            onKeyDown=${(e) => {
-              if (e.key === 'Tab') return;
-              e.preventDefault();
-              if (e.key === 'Escape') return e.currentTarget.blur();
-              const accelerator = acceleratorFrom(e);
-              if (!accelerator) return;
-              e.currentTarget.blur();
-              set({ capture: { shortcut: accelerator } });
-            }} />
-          <button type="button" class="btn sm" onClick=${() => window.desktop.capture.open()}>Try it</button>
-        </span>
-      </${Field}>
+      <${ShortcutField} value=${prefs.capture.shortcut} problem=${problem} label="Quick capture shortcut" onChange=${(shortcut) => set({ capture: { shortcut } })} onTry=${() => window.desktop.capture.open()} />
       ${problem && html`<p class="notice small" role="alert">${problem}</p>`}
+    </div>
+    <h3 class="settings-sub">Text from a screenshot</h3>
+    <p class="muted small">A shortcut that works in any app: drag around part of the screen and its text is read on this computer (English and Spanish), to insert, keep as a file or copy. Also in Edit, Text from a Screenshot.</p>
+    <div class="field-grid">
+      <${Check} checked=${prefs.snip.enabled} label="Screenshot shortcut" onChange=${(v) => set({ snip: { enabled: v } })} />
+      <${ShortcutField} value=${prefs.snip.shortcut} problem=${snipProblem} label="Screenshot shortcut" onChange=${(shortcut) => set({ snip: { shortcut } })} onTry=${actions.screenshotToText} />
+      ${snipProblem && html`<p class="notice small" role="alert">${snipProblem}</p>`}
     </div>
     <h3 class="settings-sub">Clipboard history</h3>
     <p class="muted small">Keeps the texts you copy in any app, to find and paste them again (Ctrl+Shift+V). They stay on this computer${prefs.clipboard.encrypted ? ', encrypted with its keychain' : ' (in memory only: there is no keychain to encrypt them)'}, and copies that password managers mark as secret are skipped. Turning it off forgets the history.</p>
@@ -219,6 +234,19 @@ function DesktopCard({ actions }) {
         </select>
       </${Field}>
       ${prefs.clipboard.enabled && html`<span><button type="button" class="btn sm" onClick=${actions.openClipboardHistory}>Open the history</button></span>`}
+    </div>
+  </${Card}>`;
+}
+
+function DictationCard({ settings }) {
+  return html`<${Card} title="Voice notes" icon="mic">
+    <p class="muted small">The microphone button at the top dictates into the open file, or a new note. Your browser's speech service turns speech into text (on Android, Google's). Say “new line” or “new paragraph” (“nueva línea”, “nuevo párrafo”, “punto y aparte” in Spanish) for line breaks.</p>
+    <div class="field-grid">
+      <${Field} label="Language">
+        <select value=${settings.dictationLang} onChange=${(e) => saveSettings({ dictationLang: e.currentTarget.value })}>
+          ${DICTATION_LANGUAGES.map((l) => html`<option key=${l.id} value=${l.id}>${l.label}</option>`)}
+        </select>
+      </${Field}>
     </div>
   </${Card}>`;
 }
@@ -516,6 +544,7 @@ export function SettingsView({ settings, sync, actions }) {
     <${ReadAloudCard} settings=${settings} actions=${actions} />
     ${window.desktop?.typing && html`<${TypingCard} settings=${settings} />`}
     ${window.desktop?.prefs && html`<${DesktopCard} actions=${actions} />`}
+    ${dictationSupported() && html`<${DictationCard} settings=${settings} />`}
     <${EncryptionCard} actions=${actions} />
     <${DataCard} actions=${actions} />
     <p class="muted small about">Tracker Editor ${APP_VERSION} · ${window.desktop ? `Desktop app (Electron ${window.desktop.versions?.electron ?? ''})` : 'Web app'} · <a href="https://github.com/divaor/tracker-editor" target="_blank" rel="noopener">Source</a></p>

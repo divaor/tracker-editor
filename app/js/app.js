@@ -31,6 +31,9 @@ import { FilterBar } from './ui/filterBar.js';
 import { MacroDialog } from './ui/macro.js';
 import { CloseDiskDialog, ReloadDiskDialog } from './ui/diskDialogs.js';
 import { ClipboardHistory } from './ui/clipboardHistory.js';
+import { OcrDialog } from './ui/ocr.js';
+import { DictationBar, dictationSupported } from './ui/dictation.js';
+import { joinDictated } from './dictation.js';
 import { appendToInbox, findInbox, INBOX_NAME } from './capture.js';
 import { snippetNameFrom } from './snippets.js';
 import { linkName, resolveLink } from './outline.js';
@@ -108,13 +111,15 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
     };
     const actions = {
       toast,
-      newFile(fields = {}) {
+      /** A new tab (its id). `focus: false` leaves the keyboard closed on phones (dictation). */
+      newFile({ focus = true, ...fields } = {}) {
         const scope = getSettings().projectScope;
         const project = fields.project ?? (scope.length === 1 && scope[0].startsWith('project:') ? (projectList(store.live(), store.projects()).find((p) => `project:${p.key}` === scope[0])?.name ?? '') : '');
-        store.create({ ...fields, project });
+        const id = store.create({ ...fields, project });
         setView('editor');
         if (isNarrow()) setSidebar(false);
-        setTimeout(() => hostRef.current?.focus(), 30);
+        if (focus) setTimeout(() => hostRef.current?.focus(), 30);
+        return id;
       },
       // Ids starting with "r:" are tracker documents (files elsewhere in the data repo).
       openFile(id, position = {}) {
@@ -219,7 +224,10 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       sync: () => syncNow(),
       async importFiles(fileList) {
         let added = 0;
-        for (const f of fileList) {
+        // Images: their text is read instead.
+        const images = fileList.filter((f) => f.type?.startsWith('image/'));
+        if (images.length) actions.readImages(images.map((blob) => ({ blob, name: blob.name || 'Image' })));
+        for (const f of fileList.filter((x) => !images.includes(x))) {
           if (f.size > 5 * 1024 * 1024) {
             toast(`${f.name} is larger than 5 MB`, { kind: 'error' });
             continue;
@@ -411,6 +419,34 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       copyToFiles(path) {
         const tab = store.diskTab(path);
         if (tab) actions.newFile({ name: tab.name, text: tab.text });
+      },
+
+      // ---- Text from images (OCR) ----
+
+      /** Reads the text in images ([{ blob, name }]) on this device, to insert or keep. */
+      readImages(images) {
+        if (!images.length) return;
+        hostRef.current?.flushAll();
+        setDialog({ type: 'ocr', images });
+      },
+      /** Picks images (on a phone: the camera or the gallery). */
+      imageToText() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.multiple = true;
+        input.onchange = () => actions.readImages([...input.files].map((blob) => ({ blob, name: blob.name })));
+        input.click();
+      },
+      /** Desktop: drag around part of the screen, then read its text. */
+      async screenshotToText() {
+        if (!window.desktop?.ocr) return actions.imageToText();
+        try {
+          const png = await window.desktop.ocr.snip();
+          if (png) actions.readImages([{ blob: new Blob([png], { type: 'image/png' }), name: 'Screenshot' }]);
+        } catch (err) {
+          toast(err.message, { kind: 'error', timeout: 10000 });
+        }
       },
 
       // ---- Quick capture and the clipboard history (desktop) ----
@@ -763,6 +799,8 @@ export function App() {
     hostRef.current = createEditorHost(editorEl.current, {
       settings: editorOptions(getSettings()),
       onOpenLink: (target) => actions.openLink(target),
+      // An image pasted or dropped into the text: read its text.
+      onImage: (file) => actions.readImages([{ blob: file, name: file.name || 'Pasted image' }]),
       linkTargets: () => store.live().map((f) => linkName(f.name)),
       onChange(key, text, { urgent } = {}) {
         const k = parseKey(key);
@@ -855,6 +893,29 @@ export function App() {
     });
   };
   actions.toggleSplit = () => (store.session.side ? actions.closeSide() : actions.openSide());
+
+  // Dictation (voice notes): the tab being dictated into; switching tabs stops it.
+  const [dictating, setDictating] = useState(null);
+  useEffect(() => {
+    if (dictating && dictating !== activeKey) setDictating(null);
+  }, [activeKey]);
+  actions.startDictation = () => {
+    if (!dictationSupported()) return toast('Dictation works in a browser with a speech service: Chrome or Edge, or Safari, for example on your phone.', { kind: 'error' });
+    hostRef.current?.flushAll();
+    // Into the open tab when it can be edited, else a new note.
+    const k = parseKey(store.session.active);
+    const disk = k?.kind === 'disk' ? store.diskTab(k.path) : null;
+    const editable = k && view === 'editor' && !(k.kind === 'file' && store.isSealed(k.id)) && !(disk && (disk.follow || disk.truncated));
+    setDictating(editable ? store.session.active : fileKey(actions.newFile({ focus: false })));
+  };
+  actions.voiceNote = () => setDictating(fileKey(actions.newFile({ focus: false })));
+  actions.stopDictation = () => setDictating(null);
+  /** A dictated phrase, at the cursor, fitted to the text before it. */
+  actions.dictate = (phrase, lang) => {
+    const host = hostRef.current;
+    const text = host && joinDictated(host.textBeforeCursor(4), phrase, lang);
+    if (text) host.insertAtCursor(text, text.length, { focus: false });
+  };
 
   // Filtering lines (Alt+L): the tabs whose filter bar is open.
   const [filterKeys, setFilterKeys] = useState(() => new Set());
@@ -994,6 +1055,13 @@ export function App() {
       const route = parseRoute(location.hash);
       if (route.kind === 'none') {
         if (location.hash === '#/settings') setView('settings');
+        // The home screen shortcuts of the installed app.
+        if (location.hash === '#/new' || location.hash === '#/voice') {
+          const voice = location.hash === '#/voice';
+          history.replaceState(null, '', location.pathname + location.search);
+          if (voice && dictationSupported()) actions.voiceNote();
+          else actions.newFile();
+        }
         return;
       }
       history.replaceState(null, '', location.pathname + location.search);
@@ -1158,6 +1226,8 @@ export function App() {
         'disk-open': () => actions.openDiskFiles(),
         'clipboard-history': () => actions.openClipboardHistory(),
         captures: () => actions.takeCaptures(),
+        'screenshot-ocr': () => actions.screenshotToText(),
+        'image-ocr': () => actions.imageToText(),
         snippets: () => actions.openSnippets(),
         'ask-selection': () => actions.askSelection(),
         outline: () => actions.toggleOutline(),
@@ -1226,6 +1296,8 @@ export function App() {
       </button>
       <span class="spacer" />
       <button type="button" class="icon-btn" aria-label="New file" title="New file (Alt+N)" onClick=${() => actions.newFile()}><${Icon} name="plus" /></button>
+      ${dictationSupported() && html`<button type="button" class="icon-btn ${dictating ? 'on' : ''}" aria-label="Voice note" title=${dictating ? 'Stop dictating' : 'Dictate: into this file, or a new note'} aria-pressed=${Boolean(dictating)}
+        onClick=${() => (dictating ? actions.stopDictation() : actions.startDictation())}><${Icon} name="mic" /></button>`}
       <button type="button" class="icon-btn" aria-label="Find in files" title="Find in files (Ctrl+Shift+F)" aria-pressed=${panel === 'search'} onClick=${() => actions.togglePanel('search')}><${Icon} name="search" /></button>
       ${settings.llm.enabled && html`<button type="button" class="icon-btn" aria-label="Assistant" title="Local model (Ctrl+Shift+A)" aria-pressed=${panel === 'assistant'} onClick=${() => actions.togglePanel('assistant')}><${Icon} name="sparkle" /></button>`}
       <${SyncBadge} sync=${sync} compact=${narrow} />
@@ -1243,6 +1315,7 @@ export function App() {
           canPreview=${Boolean(previewType)} preview=${showPreview} settings=${settings} actions=${actions} />`}
         ${activeKey && filterKeys.has(activeKey) && !compare && !activeSealed &&
         html`<${FilterBar} key=${activeKey} tabKey=${activeKey} actions=${actions} onClose=${actions.toggleFilter} />`}
+        ${dictating && dictating === activeKey && html`<${DictationBar} lang=${settings.dictationLang} onPhrase=${actions.dictate} onStop=${actions.stopDictation} />`}
         ${typingJob && html`<${TypeOutPanel} job=${typingJob} onStop=${() => window.desktop?.typing?.stop()} />`}
         <div class="editor-area ${showPreview ? 'split' : ''} ${showSide ? 'side-split' : ''} ${compare ? 'comparing' : ''}">
           <div class="editor-host" ref=${editorEl} />
@@ -1292,6 +1365,7 @@ export function App() {
       ? html`<${QuickOpen} files=${store.live()} docs=${docs} actions=${actions} title=${`Compare ${activeName} with…`} exclude=${activeFile ? activeFile.id : activeRepo ? `r:${activeRepo.path}` : ''}
           onPick=${(entry) => actions.compareWithEntry(entry)} onClose=${() => setDialog(null)} />`
       : html`<${QuickOpen} files=${store.live()} docs=${docs} actions=${actions} onClose=${() => setDialog(null)} />`)}
+    ${dialog?.type === 'ocr' && html`<${OcrDialog} images=${dialog.images} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'clipboard' && html`<${ClipboardHistory} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'macro' && html`<${MacroDialog} steps=${dialog.steps} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'trash' && html`<${TrashDialog} actions=${actions} onClose=${() => setDialog(null)} />`}
