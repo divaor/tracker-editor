@@ -120,6 +120,8 @@ function EditorCard({ settings }) {
         onChange=${(v) => saveSettings({ groupTabs: v })} />
       <${Check} checked=${settings.autoName} label="Name new files from what is in them" hint="By the local model when it is on, otherwise from a heading on the first line"
         onChange=${(v) => saveSettings({ autoName: v })} />
+      <${Check} checked=${settings.autoFile} label="File new notes under a project, with tags" hint="By the local model, from your projects and the tags you use. Undo is in the message."
+        onChange=${(v) => saveSettings({ autoFile: v })} />
     </div>
   </${Card}>`;
 }

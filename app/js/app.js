@@ -1,7 +1,7 @@
 import { html, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from '../vendor/preact-htm.js';
 import { createEditorHost, findLanguage, guessLanguage, PLAIN_TEXT } from './editor.js';
 import { onLaunchFiles, takeShared } from './inbox.js';
-import { cleanModelName, isUntitled, MIN_NAMING_TEXT, nameFromHeading, namingMessages, uniqueName } from './naming.js';
+import { cleanModelName, filingMessages, isUntitled, MIN_NAMING_TEXT, nameFromHeading, namingMessages, parseFiling, uniqueName } from './naming.js';
 import { llmClient } from './semantic.js';
 import { fileLink, parseRoute, safeName } from './model.js';
 import { fileVersions, versionName } from './versions.js';
@@ -28,6 +28,25 @@ import { Sidebar } from './ui/sidebar.js';
 import { FileBar, StatusBar, SyncBadge, TabBar } from './ui/tabs.js';
 
 const isNarrow = () => matchMedia('(max-width: 860px)').matches;
+
+// What the model may file a note under: your projects, and the tags in use (most used first).
+function filingChoices() {
+  const projects = projectList(store.live(), store.projects());
+  const counts = new Map();
+  for (const f of store.live()) for (const t of f.tags) counts.set(t, (counts.get(t) ?? 0) + 1);
+  return { projects, tags: [...counts].sort((a, b) => b[1] - a[1]).map(([t]) => t) };
+}
+
+/** Asks the local model to file a text: { name, project, tags } (name only when `name`), or null. */
+async function askFiling(text, { ext = '', name = true } = {}) {
+  const { llm } = getSettings();
+  const choices = filingChoices();
+  const reply = await llmClient().chat({ model: llm.chatModel, messages: filingMessages(text, { ext, name, ...choices }), signal: AbortSignal.timeout?.(30000), temperature: 0.2 });
+  return parseFiling(reply, { ...choices, ext: ext || 'txt' });
+}
+
+// "Platform · #sql #reports"
+const filedAs = ({ project, tags }) => [project, tags.map((t) => `#${t}`).join(' ')].filter(Boolean).join(' · ');
 const looksBinary = (text) => text.slice(0, 8000).includes('\u0000');
 
 function download(name, text) {
@@ -224,6 +243,28 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       },
       activeFile,
       activeInfo,
+
+      /** The local model suggests a project and tags for the active file (Undo puts back what it had). */
+      async suggestFiling() {
+        const now = activeInfo();
+        if (now?.kind !== 'file') return;
+        const { llm } = getSettings();
+        if (!llm.enabled || !llm.chatModel) return toast('Turn on the local model in Settings first.', { kind: 'error' });
+        if (!now.text.trim()) return toast('Write something first: the model files a note by what it says.');
+        toast('Asking the local model…', { timeout: 2500 });
+        let filing;
+        try {
+          filing = await askFiling(now.text, { ext: findLanguage(now.name, now.language)?.extensions?.[0] ?? '', name: false });
+        } catch (err) {
+          return toast(err.message, { kind: 'error' });
+        }
+        const file = store.get(now.id);
+        if (!file || (!filing?.project && !filing?.tags.length)) return toast('The model had no project or tags to suggest.');
+        const before = { project: file.project, tags: file.tags };
+        const next = { project: filing.project || file.project, tags: filing.tags.length ? filing.tags : file.tags };
+        actions.patch(file.id, next);
+        toast(`Filed under ${filedAs(next)}`, { action: { label: 'Undo', run: () => actions.patch(file.id, before) } });
+      },
 
       /** Brings a file back from the trash, with the text kept here or the one in the data repo. */
       async restoreDeleted(file) {
@@ -544,35 +585,47 @@ export function App() {
     return () => window.removeEventListener('hashchange', take);
   }, []);
 
-  // Untitled tabs get a name from what is in them: by the local model when it
-  // is on, else from a heading on the first line. Once per tab; Undo keeps "new N".
+  // New notes are named and filed from what is in them, once per tab, with Undo:
+  // an untitled tab ("new 3") gets a name (by the local model when it is on,
+  // else from a heading on the first line), and the model also picks one of
+  // your projects and a few tags for a file created here that has none.
   useEffect(() => {
     const timers = new Map();
     const done = new Set();
-    const suggest = async (text, ext) => {
-      const { llm } = getSettings();
-      const signal = AbortSignal.timeout?.(30000);
-      const reply = await llmClient().chat({ model: llm.chatModel, messages: namingMessages(text, ext), signal, temperature: 0.2 });
-      return cleanModelName(reply, ext || 'txt');
-    };
+    const created = new Set();
     const nameIt = async (id) => {
       const file = store.get(id);
       const settings = getSettings();
-      if (!file || !isUntitled(file.name) || done.has(id) || !settings.autoName) return;
+      if (!file || done.has(id)) return;
+      const model = settings.llm.enabled && settings.llm.chatModel;
+      const wantName = settings.autoName && isUntitled(file.name);
+      const wantFiling = Boolean(model && settings.autoFile && created.has(id) && !file.project && !file.tags.length);
+      if (!wantName && !wantFiling) return;
       const text = store.text(id);
       if (text.trim().length < MIN_NAMING_TEXT) return;
-      let name = '';
-      if (settings.llm.enabled && settings.llm.chatModel) {
+      let suggestion = { name: '', project: '', tags: [] };
+      if (model) {
         done.add(id);
-        name = await suggest(text, findLanguage('', file.language)?.extensions?.[0] ?? '').catch(() => '');
+        const ext = findLanguage('', file.language)?.extensions?.[0] ?? '';
+        suggestion = (await askFiling(text, { ext, name: wantName }).catch(() => null)) ?? suggestion;
+        // A model that does not answer in JSON can still name it.
+        if (wantName && !suggestion.name) suggestion.name = await llmClient().chat({ model: settings.llm.chatModel, messages: namingMessages(text, ext), signal: AbortSignal.timeout?.(30000), temperature: 0.2 }).then((r) => cleanModelName(r, ext || 'txt'), () => '');
       }
-      name ||= nameFromHeading(text);
+      if (wantName) suggestion.name ||= nameFromHeading(text);
+      // Only what is still empty, in case you set it meanwhile.
       const now = store.get(id);
-      if (!name || !now || !isUntitled(now.name)) return;
+      if (!now) return;
+      const patch = {};
+      if (wantName && suggestion.name && isUntitled(now.name)) patch.name = uniqueName(suggestion.name, store.live().filter((f) => f.id !== id).map((f) => f.name));
+      if (wantFiling && suggestion.project && !now.project) patch.project = suggestion.project;
+      if (wantFiling && suggestion.tags.length && !now.tags.length) patch.tags = suggestion.tags;
+      if (!Object.keys(patch).length) return;
       done.add(id);
-      const unique = uniqueName(name, store.live().filter((f) => f.id !== id).map((f) => f.name));
-      actions.patch(id, { name: unique });
-      toast(`Named “${unique}” from its content`, { action: { label: 'Undo', run: () => actions.patch(id, { name: now.name }) } });
+      const before = Object.fromEntries(Object.keys(patch).map((k) => [k, now[k]]));
+      actions.patch(id, patch);
+      const filed = filedAs({ project: patch.project ?? '', tags: patch.tags ?? [] });
+      const message = patch.name ? `Named “${patch.name}” from its content${filed ? ` · filed under ${filed}` : ''}` : `Filed under ${filed}`;
+      toast(message, { timeout: 8000, action: { label: 'Undo', run: () => actions.patch(id, before) } });
     };
     const later = (id, ms) => {
       clearTimeout(timers.get(id));
@@ -580,7 +633,10 @@ export function App() {
     };
     return store.subscribe((reason, detail) => {
       if (reason === 'text' && detail?.id) later(detail.id, detail.urgent ? 1200 : 4000);
-      if (reason === 'local' && detail?.created) later(detail.created, 1200);
+      if (reason === 'local' && detail?.created) {
+        created.add(detail.created);
+        later(detail.created, 1200);
+      }
     });
   }, []);
 

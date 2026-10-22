@@ -31,6 +31,8 @@ export const DEFAULT_SETTINGS = {
   tabSize: 4,
   // Untitled tabs get a name from their content (by the local model when it is on).
   autoName: true,
+  // New files without a project or tags get them from the local model (when it is on).
+  autoFile: true,
   // Phones wrap long lines; on a computer you scroll sideways like Notepad++.
   wordWrap: typeof matchMedia === 'function' && matchMedia('(max-width: 860px)').matches,
   showWhitespace: false,
