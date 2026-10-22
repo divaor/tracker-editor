@@ -422,6 +422,16 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, setti
       return true;
     },
 
+    /** Inserts text in place of the selection of the pane typed in last, the cursor `cursorOffset` into it. */
+    insertAtCursor(text, cursorOffset = text.length) {
+      const { key, view: v } = current();
+      if (!key) return false;
+      const { from, to } = v.state.selection.main;
+      v.dispatch({ changes: { from, to, insert: text }, selection: { anchor: from + cursorOffset }, userEvent: 'input.paste', scrollIntoView: true });
+      v.focus();
+      return true;
+    },
+
     /** Shows `key` in the second pane, inside `el` (never the main pane's tab). */
     openSide(key, el, { text, name, language }) {
       if (key === active) return Promise.resolve(null);

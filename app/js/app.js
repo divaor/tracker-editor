@@ -23,6 +23,8 @@ import { HistoryPanel } from './ui/history.js';
 import { TrashDialog } from './ui/trash.js';
 import { LockedFile } from './ui/encryption.js';
 import { TypeOutPanel } from './ui/typeOut.js';
+import { SnippetPicker } from './ui/snippets.js';
+import { snippetNameFrom } from './snippets.js';
 import { prepareTyping, typingDelay } from './typing.js';
 import { isSealed } from './crypto.js';
 import { decodeFor, encodeFor, lock, onVault, openText, setUpVault, unlock, vaultState } from './vault.js';
@@ -269,6 +271,36 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         const next = { project: filing.project || file.project, tags: filing.tags.length ? filing.tags : file.tags };
         actions.patch(file.id, next);
         toast(`Filed under ${filedAs(next)}`, { action: { label: 'Undo', run: () => actions.patch(file.id, before) } });
+      },
+
+      // ---- Snippets ----
+
+      /** The snippet picker; what is selected now fills {{selection}}. */
+      openSnippets() {
+        const host = hostRef.current;
+        host?.flushAll();
+        setDialog({ type: 'snippets', selection: host?.snapshot() ? host.selectionText() : '' });
+      },
+      /** Text at the cursor of the open file, or a new file when none is open. */
+      insertText(text, cursor = text.length) {
+        setView('editor');
+        if (!hostRef.current?.insertAtCursor(text, cursor)) actions.newFile({ text });
+      },
+      /** The selection (or the file) as a new snippet. */
+      saveSnippet() {
+        const now = activeInfo();
+        if (!now) return;
+        const text = hostRef.current?.selectionText() || now.text;
+        if (!text.trim()) return toast('Select the text to keep as a snippet first.');
+        const name = uniqueName(snippetNameFrom(text), store.live().map((f) => f.name));
+        actions.newFile({ name, text, project: now.project, snippet: true });
+        toast('Saved as a snippet (Alt+I to use it). Write {{name}} where a value changes.', { timeout: 9000 });
+      },
+      toggleSnippet(id) {
+        const file = store.get(id);
+        if (!file) return;
+        actions.patch(id, { snippet: !file.snippet });
+        toast(file.snippet ? `“${file.name}” is a normal file again.` : `“${file.name}” is a snippet now: Alt+I inserts it.`);
       },
 
       // ---- Encryption ----
@@ -602,21 +634,22 @@ export function App() {
   // Typing into another window (desktop app): the selection, or the whole file.
   const [typingJob, setTypingJob] = useState(null);
   useEffect(() => window.desktop?.typing?.onProgress((typed) => setTypingJob((job) => job && { ...job, typed })), []);
-  actions.typeOut = async ({ whole = false } = {}) => {
+  // `text` types that text (a snippet, a clipboard entry); otherwise the selection, or the file.
+  actions.typeOut = async ({ whole = false, text: given = null, what = '' } = {}) => {
     const typer = window.desktop?.typing;
     if (!typer) return toast('Typing into other windows works in the desktop app.', { kind: 'error' });
     if (typingJob) return;
     const host = hostRef.current;
     host?.flushAll();
-    const snap = host?.snapshot();
-    if (!snap) return toast('Open a file first.');
-    const selected = whole ? '' : host.selectionText();
+    const snap = given === null ? host?.snapshot() : null;
+    if (given === null && !snap) return toast('Open a file first.');
+    const selected = given !== null || whole ? '' : host.selectionText();
     const options = getSettings().typing;
-    const text = prepareTyping(selected || snap.text, { autoIndent: options.autoIndent });
+    const text = prepareTyping(given ?? (selected || snap.text), { autoIndent: options.autoIndent });
     if (!text) return toast('Nothing to type: the file is empty.');
     const delay = typingDelay(options.speed);
     const wait = options.countdown * 1000;
-    setTypingJob({ total: text.length, at: Date.now() + wait, delay, typed: 0, what: selected ? 'selection' : 'file' });
+    setTypingJob({ total: text.length, at: Date.now() + wait, delay, typed: 0, what: what || (selected ? 'selection' : 'file') });
     try {
       const { typed, stopped } = await typer.start(text, { delay, wait, minimize: options.minimize, unicode: options.unicode });
       const done = `${typed.toLocaleString()} character${typed === 1 ? '' : 's'}`;
@@ -770,6 +803,9 @@ export function App() {
       } else if (e.altKey && !mod && k === 'w') {
         e.preventDefault();
         if (store.session.active) actions.close(store.session.active);
+      } else if (e.altKey && !mod && !e.shiftKey && k === 'i') {
+        e.preventDefault();
+        actions.openSnippets();
       } else if (e.altKey && !mod && !e.shiftKey && k === 't' && window.desktop?.typing) {
         e.preventDefault();
         actions.typeOut();
@@ -803,6 +839,7 @@ export function App() {
         trash: () => setDialog({ type: 'trash' }),
         split: () => actions.toggleSplit(),
         'type-out': () => actions.typeOut(),
+        snippets: () => actions.openSnippets(),
         find: () => actions.run('find'),
         replace: () => actions.run('replace'),
         'goto-line': () => actions.run('gotoLine'),
@@ -925,6 +962,7 @@ export function App() {
           onPick=${(entry) => actions.compareWithEntry(entry)} onClose=${() => setDialog(null)} />`
       : html`<${QuickOpen} files=${store.live()} docs=${docs} actions=${actions} onClose=${() => setDialog(null)} />`)}
     ${dialog?.type === 'trash' && html`<${TrashDialog} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'snippets' && html`<${SnippetPicker} selection=${dialog.selection} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'file' && store.get(dialog.id) && html`<${FileDialog} file=${store.get(dialog.id)} projects=${projects} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'share' && activeKey && html`<${ShareDialog} name=${activeName} text=${activeFile ? store.text(activeFile.id) : (activeRepo?.text ?? '')}
       link=${activeFile ? fileLink(settings.appUrl, activeFile.id) : `${settings.appUrl.replace(/\/?$/, '/')}#/repo/${activeRepo.path.split('/').map(encodeURIComponent).join('/')}`}

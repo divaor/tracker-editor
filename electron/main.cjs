@@ -423,6 +423,7 @@ function buildMenu() {
         item('Find in Files', 'CmdOrCtrl+Shift+F', 'find-in-files'),
         { type: 'separator' },
         shown('Type into Another Window', 'Alt+T', 'type-out'),
+        shown('Insert Snippet…', 'Alt+I', 'snippets'),
       ],
     },
     {

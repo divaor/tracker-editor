@@ -13,7 +13,7 @@ function tabInfo(key) {
   const k = parseKey(key);
   if (k?.kind === 'file') {
     const f = store.get(k.id);
-    return f && { name: f.name, project: f.project, encrypted: f.encrypted, unsynced: f.dirty || f.pending, title: [f.project, f.name].filter(Boolean).join(' / ') + (f.encrypted ? ' · encrypted' : '') };
+    return f && { name: f.name, project: f.project, encrypted: f.encrypted, snippet: f.snippet, unsynced: f.dirty || f.pending, title: [f.project, f.name].filter(Boolean).join(' / ') + (f.encrypted ? ' · encrypted' : '') };
   }
   const t = k && store.repoTab(k.path);
   return t && { name: t.name, project: store.doc(k.path)?.project ?? '', unsynced: t.dirty, repo: true, title: `From the tracker: ${t.path}` };
@@ -109,6 +109,7 @@ export function TabBar({ session, projects, settings, actions }) {
       ${isSide && html`<${Icon} name="columns" size=${13} class="tab-side" />`}
       ${info.repo && html`<${Icon} name="paperclip" size=${13} />`}
       ${info.encrypted && html`<${Icon} name="lock" size=${12} class="tab-lock" />`}
+      ${info.snippet && html`<${Icon} name="snippet" size=${12} class="tab-lock" />`}
       <span class="tab-name">${info.name}</span>
       <span class="tab-dot" title="Not synced yet" />
       <button type="button" class="tab-close" aria-label=${`Close ${info.name}`} tabindex="-1"
@@ -152,6 +153,9 @@ export function FileBar({ file, repo, sealed, projects, canPreview, preview, set
     { label: 'History', icon: 'history', run: actions.showHistory },
     { label: 'Compare with…', icon: 'columns', run: actions.compareWith },
     window.desktop?.typing && { label: 'Type into another window', icon: 'keyboard', run: () => actions.typeOut() },
+    { label: 'Insert snippet…', icon: 'snippet', run: actions.openSnippets },
+    id && { label: 'Save as snippet', icon: 'snippet', run: actions.saveSnippet },
+    id && { label: store.get(id)?.snippet ? 'Not a snippet' : 'Use as a snippet', icon: 'snippet', run: () => actions.toggleSnippet(id) },
     id && settings.llm.enabled && { label: 'Suggest project and tags', icon: 'sparkle', run: actions.suggestFiling },
     id && { label: store.get(id)?.encrypted ? 'Stop encrypting' : 'Encrypt', icon: store.get(id)?.encrypted ? 'unlock' : 'lock', run: () => actions.setEncrypted(id, !store.get(id)?.encrypted) },
     id && { separator: true },

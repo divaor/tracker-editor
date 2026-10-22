@@ -78,6 +78,8 @@ export function normalizeFile(raw) {
   if (r.deleted) file.deleted = true;
   // The text is stored encrypted in the repo (crypto.js); the metadata is not.
   if (r.encrypted) file.encrypted = true;
+  // A snippet: text with {{fields}} to insert, copy or type (snippets.js).
+  if (r.snippet) file.snippet = true;
   return file;
 }
 

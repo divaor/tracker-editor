@@ -7,7 +7,7 @@ import { getSettings } from './settings.js';
 import { applyFilePatch, createFile, nowIso, tombstone, trackerDocs, untitledName } from './model.js';
 import { newId } from './tracker-model.js';
 
-const META_FIELDS = ['name', 'project', 'tags', 'language', 'deleted', 'encrypted', 'updatedAt', 'updatedBy'];
+const META_FIELDS = ['name', 'project', 'tags', 'language', 'deleted', 'encrypted', 'snippet', 'updatedAt', 'updatedBy'];
 
 let files = new Map(); // id → record (+ baseSha, dirty)
 let texts = new Map(); // id → text
@@ -233,10 +233,10 @@ export const store = {
 
   // ---- Files ----
 
-  create({ name, text = '', project = '', tags = [], language = '', encrypted = false, open = true } = {}) {
+  create({ name, text = '', project = '', tags = [], language = '', encrypted = false, snippet = false, open = true } = {}) {
     const fileName = name || untitledName(store.live().map((f) => f.name));
     const now = nowIso();
-    const file = { ...createFile({ name: fileName, project, tags, language, encrypted, updatedBy: author(), modifiedBy: author() }, now), baseSha: '', dirty: true };
+    const file = { ...createFile({ name: fileName, project, tags, language, encrypted, snippet, updatedBy: author(), modifiedBy: author() }, now), baseSha: '', dirty: true };
     files.set(file.id, file);
     texts.set(file.id, text);
     if (open) store.open(fileKey(file.id), { silent: true });

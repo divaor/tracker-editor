@@ -19,7 +19,7 @@ function tagCounts(rows) {
 }
 
 // One list for the editor's files and the tracker's documents.
-const fileRow = (f) => ({ key: fileKey(f.id), name: f.name, project: f.project, tags: f.tags, modifiedAt: f.modifiedAt, updatedAt: f.updatedAt, unsynced: f.dirty || f.pending, id: f.id, encrypted: f.encrypted });
+const fileRow = (f) => ({ key: fileKey(f.id), name: f.name, project: f.project, tags: f.tags, modifiedAt: f.modifiedAt, updatedAt: f.updatedAt, unsynced: f.dirty || f.pending, id: f.id, encrypted: f.encrypted, snippet: f.snippet });
 const docRow = (d) => ({ key: repoKey(d.path), name: d.name, project: d.project, tags: d.tags, modifiedAt: d.modifiedAt, updatedAt: d.modifiedAt, unsynced: store.repoTab(d.path)?.dirty, id: `r:${d.path}`, item: d.item.title });
 
 export function Sidebar({ files, docs, projects, settings, activeKey, actions }) {
@@ -66,7 +66,7 @@ export function Sidebar({ files, docs, projects, settings, activeKey, actions })
           <button type="button" key=${f.key} class="file-row ${activeKey === f.key ? 'active' : ''}" onClick=${() => actions.openFile(f.id)}
             title=${f.item ? `${f.name} · from the tracker: ${f.item}` : f.name}>
             <span class="file-row-main">
-              <span class="file-name">${f.encrypted && html`<${Icon} name="lock" size=${12} />`}${f.name}</span>
+              <span class="file-name">${f.encrypted && html`<${Icon} name="lock" size=${12} />`}${f.snippet && html`<${Icon} name="snippet" size=${12} />`}${f.name}</span>
               ${f.unsynced && html`<span class="tab-dot" title="Not synced yet" />`}
             </span>
             ${f.item && html`<span class="file-item"><${Icon} name="doc" size=${13} /><span>${f.item}</span></span>`}
