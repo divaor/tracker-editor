@@ -90,8 +90,24 @@ export function keysFor(command, { mac = false, desktop = false } = {}) {
   return mac ? keys.replace(/Mod\+/g, 'Cmd+').replace(/Alt\+/g, 'Option+') : keys.replace(/Mod\+/g, 'Ctrl+');
 }
 
-/** The commands for this place (desktop-only ones left out in the browser), matching every word of `query`. */
+/**
+ * The commands for this place (desktop-only ones left out in the browser), matching every
+ * word of `query`; while searching, the ones whose label matches come first.
+ */
 export function findCommands(query = '', { desktop = false, list = COMMAND_LIST, mac = false } = {}) {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-  return list.filter((c) => (desktop || c.only !== 'desktop') && words.every((w) => `${c.label} ${c.group} ${keysFor(c, { mac, desktop })} ${c.hint ?? ''}`.toLowerCase().includes(w)));
+  const found = list.filter(
+    (c) => (desktop || c.only !== 'desktop') && words.every((w) => `${c.label} ${c.group} ${keysFor(c, { mac, desktop })} ${c.hint ?? ''}`.toLowerCase().includes(w)),
+  );
+  if (!words.length) return found;
+  const rank = (c) => {
+    const label = c.label.toLowerCase();
+    return label.startsWith(words.join(' ')) ? 0 : words.every((w) => label.includes(w)) ? 1 : 2;
+  };
+  return found.map((c, i) => [rank(c), i, c]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map((x) => x[2]);
+}
+
+/** The groups to show for `found`: in their usual order, or while searching in the order of their best match. */
+export function groupsOf(found, searching) {
+  return searching ? [...new Set(found.map((c) => c.group))] : COMMAND_GROUPS.filter((g) => found.some((c) => c.group === g));
 }

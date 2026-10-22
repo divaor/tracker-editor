@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { COMMAND_GROUPS, COMMAND_LIST, findCommands, keysFor } from '../app/js/commands.js';
+import { COMMAND_GROUPS, COMMAND_LIST, findCommands, groupsOf, keysFor } from '../app/js/commands.js';
 
 test('every command in Help runs something the app has', async () => {
   const app = await readFile(new URL('../app/js/app.js', import.meta.url), 'utf8');
@@ -29,4 +29,13 @@ test('finding commands by words or keys; desktop ones only there', () => {
   assert.ok(!findCommands('folders').some((c) => c.id === 'folders'));
   assert.ok(findCommands('folders', { desktop: true }).some((c) => c.id === 'folders'));
   assert.ok(findCommands('format').some((c) => c.id === 'format'));
+});
+
+test('while searching, label matches come first, and their group with them', () => {
+  // "tab" is in many groups' words; the tab commands come first.
+  const found = findCommands('close tab', { desktop: true });
+  assert.equal(found[0].id, 'close-tab');
+  assert.equal(groupsOf(found, true)[0], 'Files and tabs');
+  assert.equal(findCommands('format')[0].id, 'format');
+  assert.deepEqual(groupsOf(findCommands('', { desktop: true }), false), COMMAND_GROUPS);
 });

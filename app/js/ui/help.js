@@ -1,5 +1,5 @@
 import { html, useEffect, useMemo, useRef, useState } from '../../vendor/preact-htm.js';
-import { COMMAND_GROUPS, findCommands, keysFor } from '../commands.js';
+import { findCommands, groupsOf, keysFor } from '../commands.js';
 import { renderMarkdown } from '../markdown.js';
 import { ClearButton, Modal, Segmented } from './components.js';
 import { Icon } from './icons.js';
@@ -50,7 +50,7 @@ function CommandsTab({ query, setQuery, onRun }) {
       }}><${Icon} name="download" size=${15} />Print</button>
     </div>
     <div class="help-list" ref=${list} onKeyDown=${(e) => (e.key === 'ArrowDown' ? move(e, 1) : e.key === 'ArrowUp' ? move(e, -1) : null)}>
-      ${COMMAND_GROUPS.map((group) => {
+      ${groupsOf(found, Boolean(query.trim())).map((group) => {
         const rows = found.filter((c) => c.group === group);
         if (!rows.length) return null;
         return html`<section class="help-group" key=${group}>
