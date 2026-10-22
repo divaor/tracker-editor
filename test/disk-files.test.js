@@ -62,3 +62,20 @@ test('very large files open by their last part', () => {
   assert.ok(info.text.startsWith('x'.repeat(99)));
   assert.ok(info.text.length <= 5 * 1024 * 1024);
 });
+
+test('the start of a file for a preview: whole lines, never half a character', () => {
+  const { cutText, readHead } = require('../electron/diskFiles.cjs');
+  assert.equal(cutText(Buffer.from('one\ntwo\nthr')).toString(), 'one\ntwo\n');
+  // One long line: a character that does not fit is left out, not broken.
+  const text = Buffer.from('añ€😀');
+  for (let n = 1; n <= text.length; n++) {
+    const cut = cutText(text.subarray(0, n)).toString();
+    assert.ok(!cut.includes('�') && 'añ€😀'.startsWith(cut), `${n}: ${JSON.stringify(cut)}`);
+  }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'editor-head-'));
+  const file = path.join(dir, 'min.json');
+  fs.writeFileSync(file, `{"name":"${'é'.repeat(200)}"}`);
+  const head = readHead(file, 101);
+  assert.equal(head.more, true);
+  assert.ok(head.text.startsWith('{"name":"éé') && !head.text.includes('Ã'), head.text.slice(0, 20));
+});

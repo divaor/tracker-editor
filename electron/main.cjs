@@ -707,14 +707,25 @@ async function copyAcross(paths, dir) {
   return [...(local.length ? folders.copyInto(local, dir) : []), ...(await remote.downloadInto(paths.filter(isRemote), dir, folders.freePath))];
 }
 const sameServer = (paths, dir) => isRemote(dir) && paths.every((p) => isRemote(p) && remoteFiles.parseUri(p).id === remoteFiles.parseUri(dir).id);
-// Names already in a folder: asked about before a copy or move ('folder:existing'), then
-// with `onExists` 'skip' those are left out and with 'replace' the ones there go first
-// (to the Recycle Bin here; deleted on a server). 'keep' (the default) keeps both ("name (2)").
+// Names already in a folder: asked about first ('folder:existing'); then `onExists` says what
+// happens to them: 'keep' (both: the new one gets " (2)"), 'skip' (left out) or 'replace'.
+// Replace never deletes first: the new one is copied or moved in under a free name, and only
+// then does the old one go (to the Recycle Bin here; on a server it is deleted) and the new one
+// take its name. A folder on a server is never replaced (what only it holds would be lost for
+// good): both are kept. Nothing is replaced by itself or by something inside it.
 const nameOf = (p) => (isRemote(p) ? path.posix.basename(remoteFiles.parseUri(p).path) : path.basename(p));
+const childOf = (dir, name) => {
+  if (!isRemote(dir)) return path.join(dir, name);
+  const { id, path: d } = remoteFiles.parseUri(dir);
+  return remoteFiles.toUri(id, path.posix.join(d, name));
+};
 async function takenNames(dir) {
-  if (isRemote(dir)) return new Set((await remote.list(dir)).entries.map((e) => e.name));
+  if (isRemote(dir)) {
+    const byName = new Map((await remote.list(dir)).entries.map((e) => [e.name, e]));
+    return { has: (name) => byName.has(name), isDir: (name) => Boolean(byName.get(name)?.dir) };
+  }
   checkDir(dir);
-  return { has: (name) => fs.existsSync(path.join(dir, name)) };
+  return { has: (name) => fs.existsSync(path.join(dir, name)), isDir: (name) => fs.statSync(path.join(dir, name)).isDirectory() };
 }
 const inFolder = (p, dir) => {
   if (isRemote(p) !== isRemote(dir)) return false;
@@ -723,31 +734,60 @@ const inFolder = (p, dir) => {
   const b = remoteFiles.parseUri(dir);
   return a.id === b.id && path.posix.dirname(a.path) === b.path;
 };
-async function resolveExisting(paths, dir, onExists) {
-  if (onExists !== 'skip' && onExists !== 'replace') return paths;
-  const taken = await takenNames(dir);
-  const out = [];
+// How `source` stands to `target` (an existing entry): 'same' (the same file, also through a
+// link or another letter case), 'inside' (the source is inside the target folder) or null.
+function relation(source, target) {
+  if (isRemote(source) !== isRemote(target)) return null;
+  if (isRemote(source)) {
+    const a = remoteFiles.parseUri(source);
+    const b = remoteFiles.parseUri(target);
+    if (a.id !== b.id) return null;
+    return a.path === b.path ? 'same' : a.path.startsWith(`${b.path}/`) ? 'inside' : null;
+  }
+  const real = (p) => fs.realpathSync.native(p);
+  const [rs, rt] = [real(source), real(target)];
+  const [ss, st] = [fs.statSync(source), fs.statSync(target)];
+  if (rs === rt || (ss.ino === st.ino && ss.dev === st.dev && ss.ino !== 0)) return 'same';
+  return folders.isInside(rt, rs) ? 'inside' : null;
+}
+async function placeWithExisting(paths, dir, onExists, run) {
+  const taken = onExists === 'skip' || onExists === 'replace' ? await takenNames(dir) : null;
+  const sources = [];
+  const replacing = new Set();
   for (const p of paths) {
     const name = nameOf(p);
-    if (inFolder(p, dir) || !taken.has(name)) {
-      out.push(p);
+    if (!taken || inFolder(p, dir) || !taken.has(name)) {
+      sources.push(p);
       continue;
     }
     if (onExists === 'skip') continue;
-    if (isRemote(dir)) {
-      const { id, path: d } = remoteFiles.parseUri(dir);
-      const target = remoteFiles.toUri(id, path.posix.join(d, name));
-      const from = isRemote(p) ? remoteFiles.parseUri(p) : null;
-      if (from?.id === id && (from.path === path.posix.join(d, name) || from.path.startsWith(`${path.posix.join(d, name)}/`))) throw new Error(`${name} cannot replace the folder it is in.`);
-      await remote.remove([target]);
-    } else {
-      const target = path.join(dir, name);
-      if (!isRemote(p) && (path.resolve(p) === path.resolve(target) || folders.isInside(path.resolve(target), path.resolve(p)))) throw new Error(`${name} cannot replace the folder it is in.`);
-      await shell.trashItem(checkEntry(target));
-    }
-    out.push(p);
+    const how = relation(p, childOf(dir, name));
+    if (how === 'same') continue;
+    if (how === 'inside') throw new Error(`${name} cannot replace the folder it is in.`);
+    sources.push(p);
+    if (!(isRemote(dir) && taken.isDir(name))) replacing.add(p);
   }
-  return out;
+  if (!sources.length) return [];
+  const results = await run(sources);
+  for (const r of results) {
+    if (!replacing.has(r.from)) continue;
+    const name = nameOf(r.from);
+    const target = childOf(dir, name);
+    if (r.to === target) continue;
+    try {
+      if (isRemote(dir)) {
+        await remote.remove([target]);
+        r.to = await remote.rename(r.to, name);
+      } else {
+        await shell.trashItem(checkEntry(target));
+        fs.renameSync(r.to, target);
+        r.to = target;
+      }
+    } catch (err) {
+      r.kept = err.message;
+    }
+  }
+  return results;
 }
 ipcMain.handle('folder:existing', guard(async (_e, dir, names) => {
   if (!Array.isArray(names) || names.length > 5000) throw new Error('Nothing to check.');
@@ -756,33 +796,36 @@ ipcMain.handle('folder:existing', guard(async (_e, dir, names) => {
 }));
 ipcMain.handle('folder:move', guard(async (_e, paths, dir, opts = {}) => {
   checkList(paths);
-  paths = await resolveExisting(paths, dir, opts?.onExists);
-  if (!paths.length) return [];
-  if (!isRemote(dir) && !paths.some(isRemote)) return folders.moveInto(paths.map(checkEntry), checkDir(dir));
-  if (sameServer(paths, dir)) return remote.moveWithin(paths, dir);
-  // Between this computer and a server: copied, then the originals removed (from here, to the Recycle Bin).
+  // Everything is checked before anything changes.
   for (const p of paths) if (!isRemote(p)) checkEntry(p);
-  const copies = await copyAcross(paths, dir);
-  for (const c of copies) await (isRemote(c.from) ? remote.remove([c.from]) : shell.trashItem(c.from));
-  return copies;
+  if (!isRemote(dir)) checkDir(dir);
+  return placeWithExisting(paths, dir, opts?.onExists, async (sources) => {
+    if (!isRemote(dir) && !sources.some(isRemote)) return folders.moveInto(sources, dir);
+    if (sameServer(sources, dir)) return remote.moveWithin(sources, dir);
+    // Between this computer and a server: copied, then the originals removed (from here, to the Recycle Bin).
+    const copies = await copyAcross(sources, dir);
+    for (const c of copies) await (isRemote(c.from) ? remote.remove([c.from]) : shell.trashItem(c.from));
+    return copies;
+  });
 }));
 ipcMain.handle('folder:copy', guard(async (_e, paths, dir, opts = {}) => {
   checkList(paths);
-  paths = await resolveExisting(paths, dir, opts?.onExists);
-  if (!paths.length) return [];
-  if (!isRemote(dir) && !paths.some(isRemote)) return folders.copyInto(paths.map((p) => (checkFile(p), p)), checkDir(dir));
-  return copyAcross(paths, dir);
+  for (const p of paths) if (!isRemote(p) && !fs.existsSync(checkFile(p))) throw new Error(`${path.basename(p)} is not there any more.`);
+  if (!isRemote(dir)) checkDir(dir);
+  return placeWithExisting(paths, dir, opts?.onExists, (sources) => {
+    if (!isRemote(dir) && !sources.some(isRemote)) return folders.copyInto(sources, dir);
+    return copyAcross(sources, dir);
+  });
 }));
 // Files pasted or dropped from another app: the preload takes their paths from the
 // File objects (webUtils), so the page cannot name other files. They are copied in;
 // they do not become reachable themselves.
 ipcMain.handle('folder:copy-in', guard(async (_e, paths, dir, opts = {}) => {
-  let sources = (Array.isArray(paths) ? paths : []).filter((p) => typeof p === 'string' && path.isAbsolute(p) && fs.existsSync(p));
+  const sources = (Array.isArray(paths) ? paths : []).filter((p) => typeof p === 'string' && path.isAbsolute(p) && fs.existsSync(p));
   if (!sources.length) throw new Error('Those files are not on disk.');
-  sources = await resolveExisting(sources, dir, opts?.onExists);
-  if (!sources.length) return [];
-  if (isRemote(dir)) return remote.copyInto(checkList(sources), dir);
-  return folders.copyInto(checkList(sources), checkDir(dir));
+  checkList(sources);
+  if (!isRemote(dir)) checkDir(dir);
+  return placeWithExisting(sources, dir, opts?.onExists, (list) => (isRemote(dir) ? remote.copyInto(list, dir) : folders.copyInto(list, dir)));
 }));
 // Zip archives (folders on this computer): the selection compressed next to it, or an
 // archive extracted into a new folder beside it (zip.cjs: never outside it).
@@ -932,8 +975,11 @@ ipcMain.handle('folder:peek-bytes', guard(async (_e, file) => {
 }));
 ipcMain.handle('folder:peek-text', guard(async (_e, file) => {
   if (!isRemote(file)) return disk.readHead(checkFile(file), 256 * 1024);
+  // On a server the whole file comes over the network: only for files up to 2 MB.
+  const st = await remote.stat(file);
+  if (st?.size > 2 * 1024 * 1024) throw new Error('This file is too large to preview from the server. Open it to see it.');
   const bytes = Buffer.from(await remote.readBytes(file, 2 * 1024 * 1024));
-  const cut = bytes.length > 256 * 1024 ? bytes.subarray(0, bytes.subarray(0, 256 * 1024).lastIndexOf(10) + 1 || 256 * 1024) : bytes;
+  const cut = bytes.length > 256 * 1024 ? disk.cutText(bytes.subarray(0, 256 * 1024)) : bytes;
   return { text: disk.decode(cut).text, more: cut.length < bytes.length };
 }));
 // An image's bytes, for reading its text.

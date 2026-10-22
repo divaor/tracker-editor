@@ -51,12 +51,22 @@ function readRange(file, start, length) {
   }
 }
 
+/** Bytes cut to whole lines, or (one long line) never in the middle of a UTF-8 character. */
+function cutText(buf) {
+  if (buf.lastIndexOf(10) > 0) return buf.subarray(0, buf.lastIndexOf(10) + 1);
+  let i = buf.length - 1;
+  while (i > 0 && i > buf.length - 4 && (buf[i] & 0xc0) === 0x80) i--;
+  const lead = buf[i];
+  const length = lead >= 0xf0 ? 4 : lead >= 0xe0 ? 3 : lead >= 0xc0 ? 2 : 1;
+  return buf.length - i < length ? buf.subarray(0, i) : buf;
+}
+
 /** The start of a file as text, for a preview: { text, more } (whole lines when cut). Throws for binary files. */
 function readHead(file, max = 256 * 1024) {
   const size = fs.statSync(file).size;
   let buf = readRange(file, 0, Math.min(size, max));
   const more = size > buf.length;
-  if (more && buf.lastIndexOf(10) > 0) buf = buf.subarray(0, buf.lastIndexOf(10) + 1);
+  if (more) buf = cutText(buf);
   return { text: decode(buf).text, more };
 }
 
@@ -102,4 +112,4 @@ function writeTextFile(file, text, { eol, bom, encoding, expectedMtime, force = 
   return { mtimeMs: stat.mtimeMs, size: stat.size };
 }
 
-module.exports = { decode, encode, readHead, readTextFile, readAppended, writeTextFile, MAX_FULL, TAIL };
+module.exports = { cutText, decode, encode, readHead, readTextFile, readAppended, writeTextFile, MAX_FULL, TAIL };

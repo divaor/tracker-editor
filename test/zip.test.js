@@ -89,3 +89,35 @@ test('a file that is not a zip', async () => {
   await assert.rejects(unzipFile(file, path.join(dir, 'fake')), /not a zip/);
   assert.ok(!fs.existsSync(path.join(dir, 'fake')));
 });
+
+test('files holding zip data (a stored Office file, a zip in a database) come out whole', async () => {
+  const dir = tmp();
+  fs.mkdirSync(path.join(dir, 'p'));
+  // A .docx is a zip: stored as it is, its bytes hold local headers.
+  const docx = Buffer.from(zipSync({ '[Content_Types].xml': strToU8('<Types/>'), 'word/document.xml': strToU8('<w:document>hello</w:document>') }, { level: 0 }));
+  fs.writeFileSync(path.join(dir, 'p', 'report.docx'), docx);
+  // Incompressible bytes with a zip inside, under a name that is compressed.
+  const noise = Buffer.from(Array.from({ length: 50000 }, (_, i) => (i * 2654435761) >>> 24));
+  fs.writeFileSync(path.join(dir, 'p', 'data.sqlite'), Buffer.concat([noise, docx, noise]));
+  // Before 1980: a zip cannot hold that date, so it is clamped instead of failing.
+  fs.writeFileSync(path.join(dir, 'p', 'old.txt'), 'old');
+  fs.utimesSync(path.join(dir, 'p', 'old.txt'), new Date('1970-01-02'), new Date('1970-01-02'));
+  const out = path.join(dir, 'p.zip');
+  await zipPaths([path.join(dir, 'p')], out);
+  const dest = path.join(dir, 'x');
+  const got = await unzipFile(out, dest);
+  assert.equal(got.files, 3);
+  assert.deepEqual(fs.readdirSync(path.join(dest, 'p')).sort(), ['data.sqlite', 'old.txt', 'report.docx']);
+  assert.ok(fs.readFileSync(path.join(dest, 'p', 'report.docx')).equals(docx));
+  assert.ok(fs.readFileSync(path.join(dest, 'p', 'data.sqlite')).equals(fs.readFileSync(path.join(dir, 'p', 'data.sqlite'))));
+});
+
+test('a damaged entry is found by its checksum', async () => {
+  const dir = tmp();
+  const zip = Buffer.from(zipSync({ 'a.txt': strToU8('hello hello hello') }, { level: 0 }));
+  const at = zip.indexOf(Buffer.from('hello'));
+  zip[at] = 'j'.charCodeAt(0);
+  fs.writeFileSync(path.join(dir, 'bad.zip'), zip);
+  await assert.rejects(unzipFile(path.join(dir, 'bad.zip'), path.join(dir, 'bad')), /damaged/);
+  assert.ok(!fs.existsSync(path.join(dir, 'bad')));
+});

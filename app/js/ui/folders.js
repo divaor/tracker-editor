@@ -1,6 +1,6 @@
 import { html, useEffect, useLayoutEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import { canDragOut, draggedPaths, draggedTab, dropped, isOwnDrop, onDragOutEnd, startDragOut } from '../dragOut.js';
-import { baseName, breadcrumbs, FOLDER_SORTS, isImageName, modeString, opensInEditor, parentOf, pushRecent, quotePath, rangeOf, renameRange, rootOf, selectionSummary, sortsUp, toggleFavorite, treeRows } from '../folders.js';
+import { baseName, breadcrumbs, FOLDER_SORTS, isImageName, modeString, opensInEditor, parentOf, pushRecent, quotePath, rangeOf, renameRange, rootOf, selectionSummary, sortsUp, toggleFavorite, topmost, treeRows } from '../folders.js';
 import { formatBytes, timeAgo } from '../format.js';
 import { saveSettings } from '../settings.js';
 import { diskKey } from '../store.js';
@@ -226,9 +226,12 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   const byPath = new Map(entries.map((e) => [e.path, e]));
   const depthOf = new Map(rows.map((r) => [r.entry.path, r.depth]));
   const chosen = () => entries.filter((e) => selected.has(e.path));
+  // What an action works on: the selection (a folder with what is inside it once), or the row the keyboard is on.
   const targets = () => {
     const picked = chosen();
-    return picked.length ? picked : cursor && byPath.get(cursor) ? [byPath.get(cursor)] : [];
+    if (!picked.length) return cursor && byPath.get(cursor) ? [byPath.get(cursor)] : [];
+    const top = new Set(topmost(picked.map((e) => e.path)));
+    return picked.filter((e) => top.has(e.path));
   };
   useLayoutEffect(() => {
     if (cursor) list.current?.querySelector(`[data-path="${CSS.escape(cursor)}"]`)?.scrollIntoView({ block: 'nearest' });
@@ -255,10 +258,14 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       const files = [...(e.clipboardData?.files ?? [])];
       const text = e.clipboardData?.getData('text/plain') ?? '';
       // What was cut or copied here, when the clipboard still holds it (as files, or as their paths);
-      // files in the paste that are not those came from another app.
-      const same = files.length ? files.map((f) => f.name).sort().join('\n') === (clip?.paths ?? []).map(baseName).sort().join('\n') : true;
-      const ours = Boolean(clip) && same && (clip.system ? await bridge.clipOurs().catch(() => false) : !files.length && (!text || text === clip.text));
-      if (clip && !ours) clip = null;
+      // files in the paste that are not those came from another app. A copy made a moment ago is
+      // waited for first.
+      const mine = clip;
+      await mine?.ready;
+      const same = files.length ? files.map((f) => f.name).sort().join('\n') === (mine?.paths ?? []).map(baseName).sort().join('\n') : true;
+      const asText = !files.length && (!text || text.replace(/\r\n/g, '\n') === mine?.text);
+      const ours = Boolean(mine) && same && (mine.system ? (await bridge.clipOurs().catch(() => false)) || asText : asText);
+      if (mine && !ours && clip === mine) clip = null;
       pasteInto(dir, { files, text, ours });
     };
     document.addEventListener('copy', onCopy);
@@ -383,7 +390,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     setExists({ names: taken, target, run });
   };
   const elsewhere = (paths, target) => paths.filter((p) => dirOf(p) !== target).map(baseName);
-  const moveTo = (paths, target) => askExisting(elsewhere(paths, target), target, (onExists) => moveNow(paths, target, onExists));
+  const moveTo = (paths, target, onGo) => askExisting(elsewhere(paths, target), target, (onExists) => (onGo?.(), moveNow(paths, target, onExists)));
   const copyTo = (paths, target) => askExisting(elsewhere(paths, target), target, (onExists) => copyNow(paths, target, onExists));
   const copyIn = (files, target) => askExisting([...files].map((f) => f.name).filter(Boolean), target, (onExists) => copyInNow(files, target, onExists));
   const moveNow = async (paths, target, onExists) => {
@@ -437,26 +444,36 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   // `write(text)` puts the paths on the clipboard as text. Files here then go there as files too
   // (with their paths as text), so the file explorer can paste them; that comes a moment later,
   // after the copy event's own text.
+  // `write(text)` puts the paths on the clipboard as text at once (they stay there when the next
+  // step fails). Files here then go there as files too (with their paths as text), so the file
+  // explorer can paste them; `ready` settles when that is done, and a paste here waits for it.
   function setClip(op, items, write) {
     const paths = items.map((e) => e.path);
-    clip = { op, paths, text: paths.join('\n') };
-    write(clip.text);
+    const mine = { op, paths, text: paths.join('\n'), ready: Promise.resolve() };
+    clip = mine;
+    const written = Promise.resolve(write(mine.text)).catch(() => {});
     if (!remote && bridge.clipFiles) {
-      const mine = clip;
-      setTimeout(() => bridge.clipFiles(paths, op).then((ok) => ok && clip === mine && (mine.system = true), () => {}), 30);
+      // After the copy event's own text, so that does not win.
+      mine.ready = written
+        .then(() => new Promise((r) => setTimeout(r, 30)))
+        .then(() => bridge.clipFiles(paths, op))
+        .then((ok) => (mine.system = Boolean(ok)), () => (mine.system = false));
     }
     setClipVersion((v) => v + 1);
     toast(`${op === 'cut' ? 'Cut' : 'Copied'} ${count(paths.length, 'item')}. Ctrl+V pastes ${paths.length === 1 ? 'it' : 'them'} in a folder.`, { timeout: 2500 });
   }
-  const clipFromMenu = (op) => targets().length && setClip(op, targets(), (text) => (remote || !bridge.clipFiles) && navigator.clipboard.writeText(text).catch(() => {}));
+  const clipFromMenu = (op) => targets().length && setClip(op, targets(), (text) => navigator.clipboard.writeText(text));
   /** Files from another app are copied in; what was cut or copied here is moved or copied; plain text becomes a new file. */
   async function pasteInto(target, { files = [], text = '', ours = Boolean(clip) && !files.length && (!text || text === clip.text) }) {
     if (ours && clip) {
       const { op, paths } = clip;
       if (op === 'cut') {
-        clip = null;
-        setClipVersion((v) => v + 1);
-        return moveTo(paths, target);
+        const cut = clip;
+        // Forgotten only when the move happens (Cancel in the "Already there" question keeps it).
+        return moveTo(paths, target, () => {
+          if (clip === cut) clip = null;
+          setClipVersion((v) => v + 1);
+        });
       }
       return copyTo(paths, target);
     }
@@ -503,7 +520,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
 
   // ---- Dragging ----
 
-  const dragPaths = (e) => (selected.has(e.path) ? order.filter((p) => selected.has(p)) : [e.path]);
+  const dragPaths = (e) => (selected.has(e.path) ? topmost(order.filter((p) => selected.has(p))) : [e.path]);
   const onDragStart = (ev, e) => {
     const paths = dragPaths(e);
     if (!selected.has(e.path)) select([e.path]);

@@ -58,6 +58,7 @@ const Facts = ({ entry, extra = '' }) =>
 export function FilePeek({ entry, big = false, onOpen, onOpenOutside }) {
   const peek = usePeek(entry);
   const [size, setSize] = useState('');
+  useEffect(() => setSize(''), [entry?.path]);
   if (!entry) return html`<div class="peek-empty muted small">Pick a file to see it here.</div>`;
   const icon = entry.dir ? 'folder' : peekKind(entry.name) === 'image' ? 'image' : 'file';
   if (entry.dir || peek?.kind === 'none') {
@@ -68,7 +69,9 @@ export function FilePeek({ entry, big = false, onOpen, onOpenOutside }) {
       ${peek?.error && html`<p class="muted small">${peek.error}</p>`}
       ${entry.dir
         ? html`<button type="button" class="btn sm" onClick=${() => onOpen(entry)}><${Icon} name="folderOpen" size=${15} />Open the folder</button>`
-        : html`<button type="button" class="btn sm" onClick=${() => onOpenOutside(entry)}><${Icon} name="external" size=${15} />Open with its program</button>`}
+        : peekKind(entry.name) === 'text'
+          ? html`<button type="button" class="btn sm" onClick=${() => onOpen(entry)}><${Icon} name="edit" size=${15} />Open it</button>`
+          : html`<button type="button" class="btn sm" onClick=${() => onOpenOutside(entry)}><${Icon} name="external" size=${15} />Open with its program</button>`}
     </div>`;
   }
   if (!peek) return html`<div class="peek-empty muted small">Loading ${entry.name}…</div>`;

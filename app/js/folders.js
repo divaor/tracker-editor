@@ -124,6 +124,11 @@ export function treeRows(entries, { expanded = new Set(), children = new Map(), 
   return walk(entries, 0, new Set());
 }
 
+/** The paths without those inside another one of them (a folder selected with what is in it acts once). */
+export function topmost(paths) {
+  return paths.filter((p) => !paths.some((q) => q !== p && isWithin(p, q)));
+}
+
 /** The recent folders with `path` first, at most `max`. */
 export const pushRecent = (list = [], path, max = 8) => [path, ...list.filter((p) => p !== path)].slice(0, max);
 /** The favorite folders with `path` added (at the end) or taken out. */

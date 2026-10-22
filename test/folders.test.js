@@ -241,6 +241,13 @@ test('what the preview shows for a file', () => {
   assert.equal(page.peekKind('photo.heic'), 'none');
 });
 
+test('a folder selected with what is inside it counts once', () => {
+  assert.deepEqual(page.topmost(['/r/src', '/r/src/a.js', '/r/src/lib/b.js', '/r/doc.md']), ['/r/src', '/r/doc.md']);
+  assert.deepEqual(page.topmost(['/r/srcx/a', '/r/src']), ['/r/srcx/a', '/r/src']);
+  assert.deepEqual(page.topmost(['C:\\r\\src', 'C:\\r\\SRC\\a.txt']), ['C:\\r\\src']);
+  assert.deepEqual(page.topmost(['remote://s1/home/a', 'remote://s1/home/a/b']), ['remote://s1/home/a']);
+});
+
 test('recent and favorite folders', () => {
   assert.deepEqual(page.pushRecent(['/a', '/b', '/c'], '/b'), ['/b', '/a', '/c']);
   assert.deepEqual(page.pushRecent(['/a', '/b'], '/c', 2), ['/c', '/a']);

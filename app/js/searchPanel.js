@@ -68,8 +68,9 @@ function el(tag, attrs = {}, children = []) {
   return node;
 }
 
-// The replace line stays open (or closed) from one search to the next.
+// The replace line stays open (or closed) from one search to the next, and so does the replacement.
 let replaceShown = false;
+let lastReplace = '';
 const panels = new WeakMap(); // view → its panel
 
 class SearchPanel {
@@ -83,7 +84,7 @@ class SearchPanel {
       el('input', { class: 'sp-input', name, placeholder: label, 'aria-label': label, autocomplete: 'off', spellcheck: 'false', form: '', ...extra, oninput: () => this.commit() });
     const toggle = (name, text, title) => el('button', { type: 'button', class: 'sp-toggle', name, title, 'aria-label': title, 'aria-pressed': 'false', onmousedown: (e) => e.preventDefault(), onclick: () => this.flip(name) }, [text]);
     const button = (name, title, iconName, run) =>
-      el('button', { type: 'button', class: 'sp-icon', name, title, 'aria-label': title, html: icon(iconName), onclick: () => (run(view), this.recount()) });
+      el('button', { type: 'button', class: 'sp-icon', name, title, 'aria-label': title, html: icon(iconName), onclick: () => this.ready() && (run(view), this.recount()) });
 
     this.searchField = field('search', 'Find', { 'main-field': 'true' });
     this.replaceField = field('replace', 'Replace');
@@ -105,7 +106,7 @@ class SearchPanel {
     this.replaceRow = el('div', { class: 'sp-row sp-replace-row' }, [
       el('div', { class: 'sp-field' }, [this.replaceField]),
       el('button', { type: 'button', class: 'sp-btn', name: 'replace', title: 'Replace the next match (Enter)', onclick: () => this.replaceOne() }, ['Replace']),
-      el('button', { type: 'button', class: 'sp-btn', name: 'replaceAll', title: 'Replace every match (Ctrl+Enter)', onclick: () => (replaceAll(view), this.recount()) }, ['Replace all']),
+      el('button', { type: 'button', class: 'sp-btn', name: 'replaceAll', title: 'Replace every match (Ctrl+Enter)', onclick: () => this.ready() && (replaceAll(view), this.recount()) }, ['Replace all']),
     ]);
     this.dom = el('div', { class: 'find-bar', onkeydown: (e) => this.keydown(e) }, [
       this.expand,
@@ -123,6 +124,7 @@ class SearchPanel {
         this.replaceRow,
       ]),
     ]);
+    this.replaceField.value = lastReplace;
     this.setQuery(this.query);
     this.showReplace(replaceShown);
   }
@@ -170,6 +172,7 @@ class SearchPanel {
   }
 
   commit() {
+    lastReplace = this.replaceField.value;
     const query = new SearchQuery({
       search: this.searchField.value,
       replace: this.replaceField.value,
@@ -184,9 +187,14 @@ class SearchPanel {
   }
 
   setQuery(query) {
+    // CodeMirror makes a new query from the selection when the bar is opened again, without the
+    // replacement: the one typed stays (put back into the query right after this update).
+    if (!query.replace && this.replaceField.value) {
+      this.query = query;
+      queueMicrotask(() => this.commit());
+    } else this.replaceField.value = query.replace;
     this.query = query;
     this.searchField.value = query.search;
-    this.replaceField.value = query.replace;
     this.toggles.case.setAttribute('aria-pressed', String(query.caseSensitive));
     this.toggles.word.setAttribute('aria-pressed', String(query.wholeWord));
     this.toggles.re.setAttribute('aria-pressed', String(query.regexp));
@@ -197,12 +205,14 @@ class SearchPanel {
     const mod = e.ctrlKey || e.metaKey;
     if (e.key === 'Enter' && e.target === this.searchField) {
       e.preventDefault();
+      // (CodeMirror's commands would make a new query from the selection, losing the replacement.)
+      if (!this.ready()) return;
       if (e.altKey) selectMatches(this.view);
       else (e.shiftKey ? findPrevious : findNext)(this.view);
       this.recount();
     } else if (e.key === 'Enter' && e.target === this.replaceField) {
       e.preventDefault();
-      if (mod) replaceAll(this.view), this.recount();
+      if (mod) this.ready() && (replaceAll(this.view), this.recount());
       else this.replaceOne();
     } else if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'h') {
       e.preventDefault();
@@ -210,11 +220,19 @@ class SearchPanel {
     }
   }
 
+  /** Whether there is something to look for. */
+  ready() {
+    return this.query.valid && Boolean(this.query.search);
+  }
+
   /** Replaces the match the selection is on, or else the next one (CodeMirror's command only selects it first). */
   replaceOne() {
+    // Nothing to find (or a pattern still being typed): nothing is replaced.
+    if (!this.ready()) return;
     const { state } = this.view;
     const { from, to } = state.selection.main;
-    const at = this.query.valid && this.query.search ? this.query.getCursor(state, from, to).next() : { done: true };
+    // The first match from the selection on (the text after it counts, for lookaheads).
+    const at = this.query.getCursor(state, from).next();
     if (at.done || at.value.from !== from || at.value.to !== to) findNext(this.view);
     replaceNext(this.view);
     this.recount();
