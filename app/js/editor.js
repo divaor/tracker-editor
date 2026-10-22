@@ -703,6 +703,17 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       return true;
     },
 
+    /** Adds `text` as its own paragraph below the line where `pos` is (or the line before, at a line start), as an edit you can undo. */
+    insertBelow(key, pos, text) {
+      const v = viewOf(key);
+      if (!v || pos > v.state.doc.length) return false;
+      let line = v.state.doc.lineAt(pos);
+      if (pos === line.from && pos > 0) line = v.state.doc.lineAt(pos - 1);
+      const insert = `\n\n${text.trim()}`;
+      v.dispatch({ changes: { from: line.to, insert }, selection: { anchor: line.to + insert.length }, userEvent: 'input.paste', scrollIntoView: true });
+      return true;
+    },
+
     /** The last `n` characters before the cursor of the pane typed in last ('' when none is open). */
     textBeforeCursor(n) {
       const { key, view: v } = current();

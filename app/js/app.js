@@ -25,7 +25,8 @@ import { TrashDialog } from './ui/trash.js';
 import { LockedFile } from './ui/encryption.js';
 import { TypeOutPanel } from './ui/typeOut.js';
 import { SnippetPicker } from './ui/snippets.js';
-import { AskSelectionDialog } from './ui/askSelection.js';
+import { AssistBubble, AssistPanel } from './ui/askSelection.js';
+import { resultExtension } from './selectionAsk.js';
 import { OutlinePanel } from './ui/outline.js';
 import { FilterBar } from './ui/filterBar.js';
 import { MacroDialog } from './ui/macro.js';
@@ -302,23 +303,31 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
 
       // ---- Asking the model about the selection (Ctrl+K) ----
 
-      askSelection() {
+      /** What the model panel asks about: the selection of the pane typed in last, or its whole file. */
+      assistContext() {
         const host = hostRef.current;
         host?.flushAll();
         const sel = host?.selectionInfo();
-        if (!sel) return toast('Open a file first.');
+        if (!sel) return toast('Open a file first.'), null;
         const k = parseKey(sel.key);
         const file = k.kind === 'file' ? store.get(k.id) : null;
-        const name = file?.name ?? store.repoTab(k.path)?.name ?? '';
+        const name = file?.name ?? (k.kind === 'disk' ? store.diskTab(k.path) : store.repoTab(k.path))?.name ?? '';
         const language = findLanguage(name, file?.language)?.name ?? '';
         const whole = sel.from === sel.to;
         const text = whole ? sel.doc() : sel.text;
-        if (!text.trim()) return toast('There is nothing to ask about yet.');
-        setDialog({ type: 'ask', context: { key: sel.key, from: whole ? 0 : sel.from, to: whole ? sel.docLength : sel.to, text, whole, name, language } });
+        if (!text.trim()) return toast('There is nothing to ask about yet.'), null;
+        return { key: sel.key, from: whole ? 0 : sel.from, to: whole ? sel.docLength : sel.to, text, whole, name, language };
       },
-      /** The model's new version of the text, as a comparison to accept or not. */
-      proposeReplacement(context, text, label) {
+      /** The model's new version of the text (for `action`), as a comparison to accept, keep as a new file, or copy. */
+      proposeReplacement(context, text, action) {
+        const label = action.label;
         if (store.session.active !== context.key) store.open(context.key);
+        const asNewFile = () => {
+          setCompare(null);
+          const base = context.name.replace(/\.[^.]+$/, '') || 'Untitled';
+          const ext = resultExtension(action) || /\.([^.]+)$/.exec(context.name)?.[1] || 'txt';
+          actions.newFile({ name: uniqueName(safeName(`${base} - ${label}.${ext}`), store.live().map((f) => f.name)), text });
+        };
         const accept = () => {
           setCompare(null);
           setTimeout(() => {
@@ -337,11 +346,20 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
           right: { label, text },
           actions: [
             { label: 'Accept', icon: 'check', primary: true, run: accept },
+            { label: 'As a new file', icon: 'filePlus', run: asNewFile },
             { label: 'Copy', icon: 'copy', run: () => navigator.clipboard.writeText(text).then(() => toast('Copied')) },
           ],
         });
       },
-      /** An answer from Ctrl+K kept as a Markdown note. */
+      /** An answer put below the text it is about. */
+      insertAfter(context, answer) {
+        if (store.session.active !== context.key) store.open(context.key);
+        setTimeout(() => {
+          if (!hostRef.current?.insertBelow(context.key, context.to, answer)) return toast('The file is not open any more. Copy the answer instead.', { kind: 'error' });
+          toast('Added below', { action: { label: 'Undo', run: () => hostRef.current?.run('undo') } });
+        }, 0);
+      },
+      /** An answer from the model panel kept as a Markdown note. */
       answerAsNote(context, label, answer) {
         const quote = context.text.length > 600 ? `${context.text.slice(0, 600)}…` : context.text;
         const name = uniqueName(safeName(`${label} - ${context.name.replace(/\.[^.]+$/, '')}.md`), store.live().map((f) => f.name));
@@ -894,6 +912,16 @@ export function App() {
   };
   actions.toggleSplit = () => (store.session.side ? actions.closeSide() : actions.openSide());
 
+  // The model panel (the bubble, or Ctrl+K): about the selection, or the whole file.
+  const [assist, setAssist] = useState(false);
+  actions.askSelection = () => {
+    if (assist) return setAssist(false);
+    if (!activeKey || view !== 'editor') return toast('Open a file first.');
+    setAssist(true);
+  };
+  const modelReady = Boolean(settings.llm.enabled && settings.llm.chatModel);
+  const assistScope = cursor?.selected ? `Selection · ${cursor.selected.toLocaleString()} character${cursor.selected === 1 ? '' : 's'}` : `Whole file · ${activeName}`;
+
   // Dictation (voice notes): the tab being dictated into; switching tabs stops it.
   const [dictating, setDictating] = useState(null);
   useEffect(() => {
@@ -1319,6 +1347,8 @@ export function App() {
         ${typingJob && html`<${TypeOutPanel} job=${typingJob} onStop=${() => window.desktop?.typing?.stop()} />`}
         <div class="editor-area ${showPreview ? 'split' : ''} ${showSide ? 'side-split' : ''} ${compare ? 'comparing' : ''}">
           <div class="editor-host" ref=${editorEl} />
+          ${assist && activeKey && view === 'editor' && !compare && !activeSealed && html`<${AssistPanel} key=${activeKey} scope=${assistScope} actions=${actions} onClose=${() => (setAssist(false), hostRef.current?.focus())} />`}
+          ${!assist && modelReady && settings.assistBubble && activeKey && !compare && !activeSealed && !typingJob && html`<${AssistBubble} onOpen=${() => setAssist(true)} />`}
           ${showSide &&
           html`<div class="side-pane" aria-label=${`Side view: ${sideFile?.name ?? sideRepo.name}`}>
             <div class="side-head">
@@ -1370,7 +1400,6 @@ export function App() {
     ${dialog?.type === 'macro' && html`<${MacroDialog} steps=${dialog.steps} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'trash' && html`<${TrashDialog} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'checklist' && store.get(dialog.id) && html`<${ChecklistDialog} file=${store.get(dialog.id)} text=${dialog.text} firstLine=${dialog.firstLine} projects=${projects} actions=${actions} onClose=${() => setDialog(null)} />`}
-    ${dialog?.type === 'ask' && html`<${AskSelectionDialog} context=${dialog.context} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'snippets' && html`<${SnippetPicker} selection=${dialog.selection} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'file' && store.get(dialog.id) && html`<${FileDialog} file=${store.get(dialog.id)} projects=${projects} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'share' && activeKey && html`<${ShareDialog} name=${activeName} text=${activeText()}

@@ -3993,3 +3993,222 @@ svg.up {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ---- The model bubble and panel ------------------------------------------------------- */
+.assist-bubble {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  z-index: 15;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: var(--shadow-lg);
+  color: var(--on-accent);
+  cursor: pointer;
+  opacity: 0.92;
+  transition: transform 0.12s ease, opacity 0.12s ease;
+}
+
+.assist-bubble:hover,
+.assist-bubble:focus-visible {
+  opacity: 1;
+  transform: scale(1.06);
+}
+
+.assist-panel {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 16;
+  display: flex;
+  flex-direction: column;
+  width: min(460px, calc(100% - 28px));
+  max-height: min(640px, calc(100% - 28px));
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  animation: rise 0.12s ease-out;
+}
+
+.assist-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.assist-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.assist-title .icon {
+  color: var(--accent);
+}
+
+.assist-scope {
+  min-width: 0;
+  overflow: hidden;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--text-2);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assist-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 14px;
+}
+
+.assist-group + .assist-group {
+  margin-top: 10px;
+}
+
+.assist-group-label {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--text-2);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.assist-group .ask-actions {
+  margin-bottom: 0;
+}
+
+.assist-param {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.assist-param .btn {
+  align-self: flex-start;
+}
+
+.assist-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.assist-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.assist-question {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  font-weight: 550;
+}
+
+.assist-turn .ask-answer {
+  max-height: none;
+  margin-top: 6px;
+}
+
+.assist-busy {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.assist-answer-actions {
+  flex-wrap: wrap;
+}
+
+.assist-ask {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--border);
+}
+
+.assist-mode {
+  display: flex;
+  gap: 6px;
+}
+
+.assist-input {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.assist-input textarea {
+  flex: 1;
+  min-height: 40px;
+  max-height: 140px;
+  resize: vertical;
+}
+
+@media (max-width: 860px) {
+  .assist-bubble {
+    right: 12px;
+    bottom: 12px;
+  }
+
+  .assist-panel {
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: auto;
+    max-height: 75%;
+    border-radius: 14px 14px 0 0;
+  }
+}
+
+.assist-panel .chip {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.assist-panel .chip:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.assist-panel .chip.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.assist-input .icon-btn.primary {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.assist-input .icon-btn.primary:disabled {
+  opacity: 0.45;
+}

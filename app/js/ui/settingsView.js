@@ -268,6 +268,9 @@ function ModelCard({ settings, actions }) {
       <${Segmented} options=${PROVIDERS} value=${provider} onChange=${setProvider} label="Connection" />
     </div>
     ${provider === 'async' ? html`<${AsyncModelForm} settings=${settings} actions=${actions} />` : html`<${OpenAiModelForm} settings=${settings} actions=${actions} />`}
+    <div class="field-grid">
+      <${Check} checked=${settings.assistBubble} label="Model button at the bottom right of the editor" hint="Help with the selection, or the whole file: fix, convert, check the syntax, translate, ask. Ctrl+K opens it too." onChange=${(v) => saveSettings({ assistBubble: v })} />
+    </div>
   </${Card}>`;
 }
 
