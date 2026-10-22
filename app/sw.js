@@ -44,6 +44,7 @@ const ASSETS = [
   'js/ui/components.js',
   'js/ui/dialogs.js',
   'js/ui/history.js',
+  'js/ui/trash.js',
   'js/ui/icons.js',
   'js/ui/menu.js',
   'js/ui/panels.js',

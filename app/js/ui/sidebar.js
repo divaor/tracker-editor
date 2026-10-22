@@ -38,6 +38,7 @@ export function Sidebar({ files, docs, projects, settings, activeKey, actions })
       return (b.modifiedAt > a.modifiedAt ? 1 : b.modifiedAt < a.modifiedAt ? -1 : 0) || (b.updatedAt > a.updatedAt ? 1 : -1);
     });
   const tags = tagCounts(rows);
+  const trashCount = store.trash().length;
   let lastProject = null;
 
   return html`<aside class="sidebar" aria-label="Files">
@@ -86,6 +87,9 @@ export function Sidebar({ files, docs, projects, settings, activeKey, actions })
     <div class="sidebar-foot">
       <button type="button" class="btn sm" onClick=${() => actions.newFile()}><${Icon} name="plus" size=${15} />New</button>
       <button type="button" class="btn sm" onClick=${() => actions.openFromDisk()}><${Icon} name="upload" size=${15} />Import</button>
+      <button type="button" class="btn sm trash-btn" aria-label="Trash" title="Deleted files: restore them" onClick=${() => actions.openDialog({ type: 'trash' })}>
+        <${Icon} name="trash" size=${15} />${trashCount > 0 && html`<span class="count">${trashCount}</span>`}
+      </button>
     </div>
   </aside>`;
 }

@@ -20,6 +20,7 @@ import { QuickOpen, SearchPanel } from './ui/panels.js';
 import { Preview } from './ui/preview.js';
 import { CompareView } from './ui/compare.js';
 import { HistoryPanel } from './ui/history.js';
+import { TrashDialog } from './ui/trash.js';
 import { ReadAloudBar } from './ui/readAloud.js';
 import { ShareDialog } from './ui/share.js';
 import { SettingsView } from './ui/settingsView.js';
@@ -63,7 +64,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
     const syncedClient = async () => {
       const settings = getSettings();
       const token = await getToken();
-      if (!isSyncConfigured(settings) || !token) throw new Error('Set up sync in Settings first: versions come from your GitHub data repo.');
+      if (!isSyncConfigured(settings) || !token) throw new Error('Set up sync in Settings first: this comes from your GitHub data repo.');
       return { client: syncClient(settings, token), branch: settings.branch || undefined };
     };
     const actions = {
@@ -140,7 +141,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       remove(id) {
         const previous = store.remove(id);
         hostRef.current?.drop(fileKey(id));
-        if (previous) toast(`Deleted “${previous.file.name}”`, { action: { label: 'Undo', run: () => store.restore(previous) } });
+        if (previous) toast(`Moved “${previous.file.name}” to the trash`, { action: { label: 'Undo', run: () => store.restore(previous) } });
       },
       patch(id, patch) {
         store.patch(id, patch);
@@ -209,6 +210,28 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       },
       activeFile,
       activeInfo,
+
+      /** Brings a file back from the trash, with the text kept here or the one in the data repo. */
+      async restoreDeleted(file) {
+        let text = await store.trashText(file.id);
+        if (text === null && file.sha) {
+          try {
+            const { client } = await syncedClient();
+            text = await client.getBlobText(file.sha);
+          } catch (err) {
+            toast(err.message, { kind: 'error' });
+            return false;
+          }
+        }
+        if (typeof text !== 'string') {
+          toast('The text of that file is not on this device or in the data repo.', { kind: 'error' });
+          return false;
+        }
+        store.restore({ file, text });
+        setView('editor');
+        toast(`Restored “${file.name}”`);
+        return true;
+      },
 
       // ---- History and comparing ----
       showHistory() {
@@ -576,6 +599,7 @@ export function App() {
         'next-tab': () => actions.cycleTab(1),
         'prev-tab': () => actions.cycleTab(-1),
         'quick-open': () => setDialog({ type: 'quickOpen' }),
+        trash: () => setDialog({ type: 'trash' }),
         find: () => actions.run('find'),
         replace: () => actions.run('replace'),
         'goto-line': () => actions.run('gotoLine'),
@@ -683,6 +707,7 @@ export function App() {
       ? html`<${QuickOpen} files=${store.live()} docs=${docs} actions=${actions} title=${`Compare ${activeName} with…`} exclude=${activeFile ? activeFile.id : activeRepo ? `r:${activeRepo.path}` : ''}
           onPick=${(entry) => actions.compareWithEntry(entry)} onClose=${() => setDialog(null)} />`
       : html`<${QuickOpen} files=${store.live()} docs=${docs} actions=${actions} onClose=${() => setDialog(null)} />`)}
+    ${dialog?.type === 'trash' && html`<${TrashDialog} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'file' && store.get(dialog.id) && html`<${FileDialog} file=${store.get(dialog.id)} projects=${projects} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'share' && activeKey && html`<${ShareDialog} name=${activeName} text=${activeFile ? store.text(activeFile.id) : (activeRepo?.text ?? '')}
       link=${activeFile ? fileLink(settings.appUrl, activeFile.id) : `${settings.appUrl.replace(/\/?$/, '/')}#/repo/${activeRepo.path.split('/').map(encodeURIComponent).join('/')}`}

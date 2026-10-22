@@ -1732,6 +1732,16 @@ button.project-chip:hover {
   flex: 1;
 }
 
+.sidebar-foot .trash-btn {
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
+.trash-btn .count {
+  color: var(--text-2);
+  font-size: 12px;
+}
+
 /* ---- Tabs ------------------------------------------------------------------- */
 .tabbar {
   display: flex;
@@ -3056,6 +3066,53 @@ svg.up {
   color: var(--text-2);
   font-size: 13px;
   font-weight: 600;
+}
+
+.trash-filter {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.trash-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: min(420px, 55vh);
+  overflow-y: auto;
+}
+
+.trash-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.trash-row > svg {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+
+.trash-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.trash-name {
+  overflow: hidden;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trash-empty {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0;
 }
 
 /* ---- Phone / narrow window --------------------------------------------------------- */

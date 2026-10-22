@@ -18,6 +18,7 @@ let docTexts = new Map(); // blob sha → text of a tracker document (for search
 let docs = { items: null, list: [] }; // trackerDocs(trackerItems), computed once per sync
 let session = { open: [], active: null, closed: [] }; // tab keys: "f:<id>" | "r:<path>"
 let meta = { lastSyncAt: null };
+let trashed = new Set(); // deleted files whose text this device kept (kv "trash:<id>")
 let changeCounter = 0;
 const listeners = new Set();
 const author = () => getSettings().device || '';
@@ -52,6 +53,24 @@ const persist = {
   rest: () => later('rest', () => Promise.all([kvSet('projects', projects), kvSet('trackerItems', trackerItems), kvSet('trackerOps', trackerOps), kvSet('meta', meta)])),
   docs: () => later('docTexts', () => kvSet('docTexts', [...docTexts])),
 };
+
+// The text of a deleted file stays on this device until its tombstone is pruned,
+// so the trash can bring it back offline.
+function keepInTrash(id, text) {
+  if (!text) return;
+  trashed.add(id);
+  kvSet(`trash:${id}`, text);
+  kvSet('trashIds', [...trashed]);
+}
+function forgetTrash(ids) {
+  let any = false;
+  for (const id of ids) {
+    if (!trashed.delete(id)) continue;
+    kvDelete(`trash:${id}`);
+    any = true;
+  }
+  if (any) kvSet('trashIds', [...trashed]);
+}
 
 /** Writes everything still waiting for its debounce (before closing the app). */
 export async function flush() {
@@ -110,6 +129,7 @@ export const store = {
     trackerOps = (await kvGet('trackerOps')) ?? [];
     docTexts = new Map((await kvGet('docTexts')) ?? []);
     meta = { ...meta, ...((await kvGet('meta')) ?? {}) };
+    trashed = new Set(((await kvGet('trashIds')) ?? []).filter((id) => files.get(id)?.deleted));
     // Drop tabs whose file is gone.
     session.open = session.open.filter((k) => (k.startsWith('r:') ? repoTabs.has(k.slice(2)) : files.get(k.slice(2)) && !files.get(k.slice(2)).deleted));
     if (!session.open.includes(session.active)) session.active = session.open[0] ?? null;
@@ -222,6 +242,7 @@ export const store = {
     if (!file || file.deleted) return null;
     const previous = { file, text: texts.get(id) ?? '' };
     files.set(id, { ...tombstone(file, nowIso(), author()), baseSha: file.baseSha, dirty: false, pending: true });
+    keepInTrash(id, previous.text);
     texts.delete(id);
     persist.files();
     persist.text(id);
@@ -230,15 +251,24 @@ export const store = {
     return previous;
   },
 
-  /** Undo for remove(): brings the file back with its text. */
+  /** Undo for remove(), and the trash: brings the file back with its text. */
   restore({ file, text }) {
     files.set(file.id, { ...applyFilePatch(file, { deleted: false, updatedBy: author() }), baseSha: file.baseSha, dirty: true, sha: file.sha, size: file.size });
     texts.set(file.id, text);
+    forgetTrash([file.id]);
     persist.files();
     persist.text(file.id);
     store.open(fileKey(file.id), { silent: true });
     changed('local', { id: file.id });
   },
+
+  // ---- Trash ----
+
+  /** Deleted files that can come back: synced ones (text on GitHub) and ones whose text is kept here. Newest first. */
+  trash: () =>
+    [...files.values()].filter((f) => f.deleted && (f.sha || trashed.has(f.id))).sort((a, b) => (b.updatedAt > a.updatedAt ? 1 : -1)),
+  /** The text this device kept for a deleted file, or null. */
+  trashText: async (id) => (trashed.has(id) ? ((await kvGet(`trash:${id}`)) ?? null) : null),
 
   // ---- Tabs ----
 
@@ -317,6 +347,7 @@ export const store = {
       texts: new Map([...files.values()].filter((f) => f.dirty && !f.deleted).map((f) => [f.id, texts.get(f.id) ?? ''])),
       repo: [...repoTabs.values()].filter((t) => t.dirty).map((t) => ({ path: t.path, text: t.text, baseSha: t.baseSha })),
       ops: trackerOps.map((o) => o.id),
+      ids: new Set(files.keys()),
     };
   },
 
@@ -346,13 +377,18 @@ export const store = {
         rec = { ...rec, dirty: true };
       }
       if (rec.deleted) {
-        if (texts.delete(r.id)) persist.text(r.id);
+        if (texts.has(r.id)) {
+          keepInTrash(r.id, texts.get(r.id));
+          texts.delete(r.id);
+          persist.text(r.id);
+        }
         if (session.open.includes(fileKey(r.id))) store.close(fileKey(r.id), { silent: true });
       }
       next.set(r.id, rec);
     }
-    // Files created here while the sync ran.
-    for (const [id, f] of files) if (!next.has(id)) next.set(id, f);
+    // Files created here while the sync ran (the others missing were pruned).
+    for (const [id, f] of files) if (!next.has(id) && !snap.ids?.has(id)) next.set(id, f);
+    forgetTrash([...trashed].filter((id) => !next.get(id)?.deleted));
     files = next;
 
     for (const res of result.repoResults ?? []) {
@@ -375,6 +411,7 @@ export const store = {
 
   clear() {
     for (const id of texts.keys()) kvDelete(`text:${id}`);
+    forgetTrash([...trashed]);
     files = new Map();
     texts = new Map();
     repoTabs = new Map();

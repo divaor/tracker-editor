@@ -290,6 +290,7 @@ function buildMenu() {
         item('Open a File…', 'CmdOrCtrl+P', 'quick-open'),
         item('Add Files from Disk…', 'CmdOrCtrl+O', 'open-disk'),
         item('Save a Copy to Disk…', 'CmdOrCtrl+Shift+S', 'save-copy'),
+        item('Trash…', undefined, 'trash'),
         { type: 'separator' },
         item('Close Tab', 'CmdOrCtrl+W', 'close-tab'),
         item('Reopen Closed Tab', 'CmdOrCtrl+Shift+T', 'reopen-tab'),

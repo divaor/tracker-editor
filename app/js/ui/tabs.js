@@ -72,10 +72,12 @@ export function FileBar({ file, repo, projects, canPreview, preview, settings, a
     html`<button type="button" class="btn ghost sm ${preview ? 'on' : ''}" aria-pressed=${preview} title="Show a reading view next to the text" onClick=${actions.togglePreview}><${Icon} name="eye" size=${15} /><span class="label">Preview</span></button>`;
   const listenButton = html`<button type="button" class="btn ghost sm" title="Read aloud from the cursor, or the selection (Alt+R)" onClick=${actions.readAloud}><${Icon} name="volume" size=${15} /><span class="label">Listen</span></button>`;
   const shareButton = html`<button type="button" class="btn ghost sm" title="Share: WhatsApp, Teams, email, copy…" onClick=${actions.share}><${Icon} name="share" size=${15} /><span class="label">Share</span></button>`;
-  const moreItems = (details) => [
-    details && { label: 'Details…', icon: 'tag', run: details },
+  const moreItems = (id) => [
+    id && { label: 'Details…', icon: 'tag', run: () => actions.openDialog({ type: 'file', id }) },
     { label: 'History', icon: 'history', run: actions.showHistory },
     { label: 'Compare with…', icon: 'columns', run: actions.compareWith },
+    id && { separator: true },
+    id && { label: 'Move to trash', icon: 'trash', danger: true, run: () => actions.remove(id) },
   ];
   if (repo) {
     // A tracker document: its item's title and project; the path is in the tooltip.
@@ -114,7 +116,7 @@ export function FileBar({ file, repo, projects, canPreview, preview, settings, a
       onClick=${() => actions.openDialog({ type: 'send', id: file.id })}>
       <${Icon} name="send" size=${15} /><span class="label">${linked.length ? 'On tracker' : 'Send to tracker'}</span>
     </button>
-    <${MenuButton} label="More" items=${() => moreItems(() => actions.openDialog({ type: 'file', id: file.id }))} />
+    <${MenuButton} label="More" items=${() => moreItems(file.id)} />
   </div>`;
 }
 
