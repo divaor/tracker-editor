@@ -11,6 +11,8 @@ import { mirrorOf } from '../mirrors.js';
 import { MirrorBar } from './mirrors.js';
 import { Icon } from './icons.js';
 import { Menu, MenuButton } from './menu.js';
+import { FileViewer, PeekPane } from './folderPreview.js';
+import { Splitter } from './splitter.js';
 
 const PLACES = [
   { id: 'documents', label: 'Documents' },
@@ -111,6 +113,8 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   const [dropTarget, setDropTarget] = useState(null);
   const [, setClipVersion] = useState(0);
   // The tree: folders opened in place (their chevron) and what they hold, as listed.
+  const [viewing, setViewing] = useState(null); // the file shown large (Space)
+  const peekDrag = useRef({ start: 0, height: 0 });
   const [exists, setExists] = useState(null); // { names, target, run }: asked before a copy or move
   const [expanded, setExpanded] = useState(() => new Set());
   const [children, setChildren] = useState(() => new Map()); // folder → entries (or { error })
@@ -584,6 +588,8 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       return setSelected(next);
     }
     if (key === 'Enter' && ev.altKey) return handled(), targets().length === 1 && actions.showProperties(targets()[0].path);
+    // Space: the file large, over the window (arrows for the others), like Quick Look.
+    if (key === ' ' && !mod && cursor && byPath.get(cursor) && !byPath.get(cursor).dir) return handled(), setViewing(cursor);
     if (key === 'Enter') return handled(), openSelected();
     if (key === 'Backspace' || (key === 'ArrowUp' && ev.altKey)) {
       handled();
@@ -649,6 +655,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     const images = files.filter((e) => isImageName(e.name));
     return [
       { label: one?.dir ? 'Open' : 'Open (Enter)', icon: one?.dir ? 'folderOpen' : 'file', run: openSelected },
+      one && !one.dir && { label: 'View it large (Space)', icon: 'fullscreen', run: () => setViewing(one.path) },
       one && !one.dir && { label: 'Open with its program', icon: 'external', run: () => openOutside(one) },
       images.length && images.length === items.length && { label: `Text from ${images.length === 1 ? 'the image' : `${images.length} images`}…`, icon: 'scan', run: () => actions.readImageFiles(images.map((e) => e.path), dir) },
       files.length === 2 && items.length === 2 && files.every((e) => opensInEditor(e.name)) && { label: 'Compare the two', icon: 'columns', run: () => actions.compareDiskFiles(files[0].path, files[1].path) },
@@ -730,6 +737,9 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
 
   const crumbs = breadcrumbs(dir, root);
   const up = parentOf(dir, root);
+  // The preview's file: the one the keyboard is on, or the only one selected.
+  const peekEntry = (cursor && byPath.get(cursor)) || (selected.size === 1 ? (byPath.get([...selected][0]) ?? null) : null);
+  const peekHeight = Math.max(120, settings.folderPreviewHeight || 260);
   // Favorites and recent folders (here or on servers), by their name and where they are.
   const favorites = settings.folderFavorites ?? [];
   const favorite = favorites.includes(dir);
@@ -854,6 +864,8 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
         <span class="tools-sep" />
         ${tool('Find in this folder (Ctrl+Shift+F)', 'search', () => actions.findInFolder(dir))}
         <span class="spacer" />
+        <button type="button" class="icon-btn sm" aria-pressed=${Boolean(settings.folderPreview)} aria-label="Preview" title=${settings.folderPreview ? 'Hide the preview' : 'Preview: the file picked, under the list (Space: large)'}
+          onClick=${() => saveSettings({ folderPreview: !settings.folderPreview })}><${Icon} name="eye" size=${16} /></button>
         <button type="button" class="icon-btn sm ${details ? 'on' : ''}" aria-pressed=${details} aria-label="Details (columns)" title=${details ? 'List' : 'Details: size and date in columns, sorted by their headers'}
           onClick=${() => saveSettings({ folderView: details ? 'list' : 'details' })}><${Icon} name="details" size=${16} /></button>
       </div>
@@ -903,6 +915,23 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       html`<p class="muted small empty-list">${filter ? 'Nothing here matches.' : hiddenCount && !settings.showHidden ? `Only hidden files here (${hiddenCount}).` : 'This folder is empty. Drop or paste files here.'}</p>`}
       ${listing?.truncated && html`<p class="muted small empty-list">Showing the first ${listing.entries.length.toLocaleString()} entries. Filter to find the others, or open a folder inside.</p>`}
     </div>
+    ${settings.folderPreview &&
+    html`<${Splitter} orientation="horizontal" className="peek-resize" label="Resize the preview"
+        onStart=${() => (peekDrag.current = { start: peekHeight, height: peekHeight })}
+        onMove=${(delta) => {
+          peekDrag.current.height = Math.round(Math.max(120, Math.min(innerHeight - 260, peekDrag.current.start - delta)));
+          list.current?.parentElement?.querySelector('.peek-pane')?.style.setProperty('height', `${peekDrag.current.height}px`);
+        }}
+        onEnd=${() => saveSettings({ folderPreviewHeight: peekDrag.current.height })}
+        onReset=${() => saveSettings({ folderPreviewHeight: 260 })} />
+      <${PeekPane} entry=${peekEntry} height=${peekHeight} onOpen=${(e) => openEntry(e)} onOpenOutside=${openOutside} onExpand=${(e) => setViewing(e.path)}
+        onClose=${() => saveSettings({ folderPreview: false })} />`}
+    ${viewing &&
+    html`<${FileViewer} entries=${entries.filter((e) => !e.dir)} path=${viewing}
+      onPath=${(p) => (setViewing(p), select([p]))}
+      onOpen=${(e) => (setViewing(null), openEntry(e))}
+      onOpenOutside=${openOutside}
+      onClose=${() => (setViewing(null), list.current?.focus())} />`}
     <div class="sidebar-foot folders-foot">
       <span class="muted small folders-status" aria-live="polite">${selectionSummary(entries, selected, formatBytes)}</span>
       <span class="folders-where ${remote ? 'kind-remote' : 'kind-disk'}" title=${remote ? `On ${conn?.name}: files are saved back to the server, not synced. Copy into my files makes a synced copy.` : 'Files on this computer: edited in place, not synced. Copy into my files makes a synced copy.'}>

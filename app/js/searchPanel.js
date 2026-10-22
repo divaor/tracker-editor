@@ -232,15 +232,16 @@ class SearchPanel {
     if (changed) this.recount();
   }
 
-  /** Counts again a moment later (typing in a big file stays smooth). */
+  /** Counts again a moment later (later still in a big file, so typing there stays smooth). */
   recount() {
     clearTimeout(this.timer);
+    const delay = this.view.state.doc.length > 1_000_000 ? 300 : 40;
     this.timer = setTimeout(() => {
       const counted = countMatches(this.query, this.view.state);
       this.count.textContent = countLabel(counted, this.query.search);
       this.count.classList.toggle('none', !!this.query.search && (!counted.valid || !counted.total));
       this.searchField.classList.toggle('invalid', !counted.valid);
-    }, 40);
+    }, delay);
   }
 }
 

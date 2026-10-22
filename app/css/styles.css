@@ -2038,6 +2038,202 @@ button.folder-col:hover {
   font-family: var(--mono);
 }
 
+/* The preview under the list (ui/folderPreview.js), and files viewed large. */
+.peek-pane {
+  display: flex;
+  flex-shrink: 0;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.peek-head {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 4px 0 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.peek-title {
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.peek-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+}
+
+.peek-empty {
+  margin: auto;
+  padding: 16px;
+  text-align: center;
+}
+
+.peek-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin: auto;
+  padding: 16px;
+  text-align: center;
+}
+
+.peek-card > .icon {
+  color: var(--text-3);
+}
+
+.peek-name {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.peek-facts {
+  margin: 0;
+}
+
+.peek-image {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 0;
+  padding: 10px;
+  background: repeating-conic-gradient(var(--surface-2) 0 25%, var(--surface) 0 50%) 0 0 / 16px 16px;
+}
+
+.peek-image img {
+  min-height: 0;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.peek-image .peek-facts {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+.peek-pdf {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+  background: var(--surface-2);
+}
+
+.peek-text-wrap {
+  flex: 1;
+  min-height: 0;
+}
+
+.peek-text {
+  margin: 0;
+  padding: 8px 10px;
+  font: 12px/1.5 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.peek-text-wrap .preview-body {
+  padding: 10px 14px 16px;
+  font-size: 13px;
+}
+
+.peek-text-wrap.peek-html,
+.peek-text-wrap:is(.peek-csv, .peek-tsv) {
+  display: flex;
+  flex-direction: column;
+}
+
+.peek-more {
+  margin: 0;
+  padding: 6px 10px 10px;
+}
+
+.viewer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 14, 12, 0.62);
+}
+
+.viewer {
+  display: flex;
+  flex-direction: column;
+  width: min(1200px, 100%);
+  height: min(900px, 100%);
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.viewer-head {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 8px 0 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.viewer-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.viewer-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+}
+
+.viewer-body .peek-text {
+  font-size: 13px;
+}
+
+.viewer-body .preview-body {
+  font-size: 15px;
+}
+
+.icon.turn-left {
+  transform: rotate(-90deg);
+}
+
+.icon.turn-right {
+  transform: rotate(90deg);
+}
+
+.peek-resize.splitter.horizontal {
+  margin: -4px 0 -5px;
+}
+
 /* Favorite folders under the folder's name; the star in its bar. */
 .folders-quick {
   display: flex;

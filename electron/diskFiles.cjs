@@ -51,6 +51,15 @@ function readRange(file, start, length) {
   }
 }
 
+/** The start of a file as text, for a preview: { text, more } (whole lines when cut). Throws for binary files. */
+function readHead(file, max = 256 * 1024) {
+  const size = fs.statSync(file).size;
+  let buf = readRange(file, 0, Math.min(size, max));
+  const more = size > buf.length;
+  if (more && buf.lastIndexOf(10) > 0) buf = buf.subarray(0, buf.lastIndexOf(10) + 1);
+  return { text: decode(buf).text, more };
+}
+
 /**
  * A file as the editor opens it: { path, name, text, eol, bom, encoding,
  * mtimeMs, size, truncated }. Above 20 MB only the last 5 MB, from a whole line.
@@ -93,4 +102,4 @@ function writeTextFile(file, text, { eol, bom, encoding, expectedMtime, force = 
   return { mtimeMs: stat.mtimeMs, size: stat.size };
 }
 
-module.exports = { decode, encode, readTextFile, readAppended, writeTextFile, MAX_FULL, TAIL };
+module.exports = { decode, encode, readHead, readTextFile, readAppended, writeTextFile, MAX_FULL, TAIL };

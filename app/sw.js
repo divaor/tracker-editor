@@ -3,7 +3,7 @@
 // show up immediately when online. GitHub and model requests are never intercepted.
 // Text recognition (vendor/ocr/, about 9 MB) and the terminal (vendor/xterm/,
 // desktop only) are cached the first time they are used.
-const CACHE = 'editor-v0.10.0';
+const CACHE = 'editor-v0.11.0';
 const INBOX = 'editor-inbox'; // shared files waiting for the app (see js/inbox.js)
 const ASSETS = [
   './',
@@ -77,6 +77,7 @@ const ASSETS = [
   'js/servers.js',
   'js/ui/servers.js',
   'js/folders.js',
+  'js/ui/folderPreview.js',
   'js/ui/folders.js',
   'js/ui/ocr.js',
   'js/ui/dictation.js',

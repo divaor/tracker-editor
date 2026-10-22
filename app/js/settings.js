@@ -55,6 +55,9 @@ export const DEFAULT_SETTINGS = {
   // Folders starred in the folders view, and the ones visited last (paths here or remote:// on servers).
   folderFavorites: [],
   folderRecent: [],
+  // The preview under the list of files (on or off) and its height in pixels.
+  folderPreview: false,
+  folderPreviewHeight: 260,
   // Servers: permissions (rwxr-xr-x) next to each file in the folders view.
   showPermissions: false,
   // The terminal panel's height (desktop), in pixels.

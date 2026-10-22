@@ -97,6 +97,9 @@ contextBridge.exposeInMainWorld('desktop', {
     trash: (paths) => ipcRenderer.invoke('folder:trash', paths),
     openExternal: (file) => ipcRenderer.invoke('folder:open-external', file),
     readImage: (file) => ipcRenderer.invoke('folder:read-image', file),
+    // For the preview: a picture's or PDF's bytes; the start of a text file ({ text, more }).
+    peekBytes: (file) => ipcRenderer.invoke('folder:peek-bytes', file),
+    peekText: (file) => ipcRenderer.invoke('folder:peek-text', file),
     watch: (dir) => ipcRenderer.invoke('folder:watch', dir),
     onChanged(callback) {
       const listener = (_event, change) => callback(change);

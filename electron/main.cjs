@@ -786,9 +786,11 @@ ipcMain.handle('folder:unzip', guard(async (_e, file) => {
 // are pasted back here.
 let clipStamp = null;
 const rawFormat = (format) => `electron application/osclipboard;format="${format}"`;
-const fileClipboardScript = (files, cut, stamp) => `
+// The paths come on stdin (base64 of JSON, so any name survives the console's code page and
+// a long list is not limited by the command line).
+const fileClipboardScript = (cut, stamp) => `
 Add-Type -AssemblyName System.Windows.Forms
-$paths = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${Buffer.from(JSON.stringify(files)).toString('base64')}')) | ConvertFrom-Json
+$paths = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String([Console]::In.ReadToEnd().Trim())) | ConvertFrom-Json
 $list = New-Object System.Collections.Specialized.StringCollection
 foreach ($p in $paths) { [void]$list.Add($p) }
 $data = New-Object System.Windows.Forms.DataObject
@@ -820,10 +822,14 @@ ipcMain.handle('folder:clip-files', guard(async (_e, paths, op) => {
   clipStamp = null;
   if (process.platform === 'win32') {
     // Explorer reads CF_HDROP, which only the system's own data object writes.
-    const script = Buffer.from(fileClipboardScript(files, cut, stamp), 'utf16le').toString('base64');
-    await new Promise((resolve, reject) =>
-      require('node:child_process').execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-STA', '-EncodedCommand', script], { windowsHide: true, timeout: 15000 }, (err) => (err ? reject(err) : resolve())),
-    );
+    const script = Buffer.from(fileClipboardScript(cut, stamp), 'utf16le').toString('base64');
+    await new Promise((resolve, reject) => {
+      const child = require('node:child_process').spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-STA', '-EncodedCommand', script], { windowsHide: true });
+      const timer = setTimeout(() => child.kill(), 15000);
+      child.on('error', (err) => (clearTimeout(timer), reject(err)));
+      child.on('exit', (code) => (clearTimeout(timer), code === 0 ? resolve() : reject(new Error('The files could not be put on the clipboard.'))));
+      child.stdin.end(Buffer.from(JSON.stringify(files)).toString('base64'));
+    });
   } else {
     const urls = files.map((f) => pathToFileURL(f).href);
     const formats = {
@@ -888,6 +894,23 @@ ipcMain.handle('folder:chmod', guard((_e, paths, mode, opts = {}) => {
   const recursive = Boolean(opts.recursive);
   if (paths.some(isRemote)) return remote.chmod(paths.filter(isRemote), mode, { recursive });
   return folders.chmodEntries(paths.map(checkFile), mode, { recursive });
+}));
+// The folders view's preview: a picture's or a PDF's bytes, the start of a text file.
+const PEEK_BYTES = { png: 40, jpg: 40, jpeg: 40, gif: 40, bmp: 40, webp: 40, ico: 10, avif: 40, pdf: 100 };
+ipcMain.handle('folder:peek-bytes', guard(async (_e, file) => {
+  const name = nameOf(file);
+  const mb = PEEK_BYTES[/\.([^.]+)$/.exec(name)?.[1]?.toLowerCase() ?? ''];
+  if (!mb) throw new Error('No preview for that kind of file.');
+  if (isRemote(file)) return remote.readBytes(file, mb * 1024 * 1024);
+  checkFile(file);
+  if (fs.statSync(file).size > mb * 1024 * 1024) throw new Error(`${name} is larger than ${mb} MB.`);
+  return fs.readFileSync(file);
+}));
+ipcMain.handle('folder:peek-text', guard(async (_e, file) => {
+  if (!isRemote(file)) return disk.readHead(checkFile(file), 256 * 1024);
+  const bytes = Buffer.from(await remote.readBytes(file, 2 * 1024 * 1024));
+  const cut = bytes.length > 256 * 1024 ? bytes.subarray(0, bytes.subarray(0, 256 * 1024).lastIndexOf(10) + 1 || 256 * 1024) : bytes;
+  return { text: disk.decode(cut).text, more: cut.length < bytes.length };
 }));
 // An image's bytes, for reading its text.
 ipcMain.handle('folder:read-image', guard((_e, file) => {
@@ -1725,6 +1748,8 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: true,
       spellcheck: false,
+      // The built-in PDF viewer, for PDFs in the folders view's preview.
+      plugins: true,
     },
   });
   if (maximized) mainWindow.maximize();
