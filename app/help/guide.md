@@ -2,7 +2,7 @@
 
 Tracker Editor is a Notepad++-style editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs. Everything is saved the moment you paste or type, and synced to the same private GitHub data repo as the tracker, so your files are on your computers and your phone.
 
-Version 0.11.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.11.0 · Web app: https://divaor.github.io/tracker-editor/
+Version 0.12.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.12.0 · Web app: https://divaor.github.io/tracker-editor/
 
 ---
 
@@ -14,9 +14,9 @@ Download from **https://github.com/divaor/tracker-editor/releases/latest**:
 
 | System | File |
 | --- | --- |
-| Windows | `Tracker Editor Setup 0.11.0.exe` (installer) or `Tracker Editor-0.11.0-portable.exe` (no install, no admin rights) |
-| macOS | `Tracker Editor-0.11.0-arm64.dmg` |
-| Linux | `Tracker Editor-0.11.0.AppImage` |
+| Windows | `Tracker Editor Setup 0.12.0.exe` (installer) or `Tracker Editor-0.12.0-portable.exe` (no install, no admin rights) |
+| macOS | `Tracker Editor-0.12.0-arm64.dmg` |
+| Linux | `Tracker Editor-0.12.0.AppImage` |
 
 The builds are not code-signed, so the first launch warns you. On Windows, choose *More info → Run anyway*. On macOS, right-click the app → *Open*. Installing the desktop app also registers `tracker-editor://` links, so the tracker's **Open in editor** opens files straight in it.
 
