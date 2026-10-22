@@ -1,10 +1,12 @@
-import { html, useState } from '../../vendor/preact-htm.js';
+import { html, useEffect, useState } from '../../vendor/preact-htm.js';
 import { DEFAULT_LLM_URL } from '../llm.js';
 import { llmClient } from '../semantic.js';
 import { startReading, stopReading } from '../reader.js';
 import { isNaturalVoice, rankVoices } from '../speech.js';
 import { useVoices } from './readAloud.js';
-import { getSettings, getToken, isSyncConfigured, parseSetupCode, saveSettings, setToken } from '../settings.js';
+import { getSecret, getSettings, getToken, isSyncConfigured, parseSetupCode, saveSettings, setSecret, setToken } from '../settings.js';
+import { createAsyncLlmClient, parseProfile, PLACEHOLDERS, PROFILE_EXAMPLE } from '../asyncLlm.js';
+import { localFetch } from '../localFetch.js';
 import { store } from '../store.js';
 import { syncClient, syncNow } from '../syncManager.js';
 import { parseData } from '../tracker-model.js';
@@ -156,7 +158,104 @@ const PRESETS = [
   { id: 'lmstudio', label: 'LM Studio', url: 'http://localhost:1234/v1' },
 ];
 
+const PROVIDERS = [
+  { id: 'openai', label: 'OpenAI-compatible server' },
+  { id: 'async', label: 'Service that answers later' },
+];
+
 function ModelCard({ settings, actions }) {
+  const [provider, setProvider] = useState(settings.llm.provider || 'openai');
+  return html`<${Card} title="Model" icon="sparkle" id="model">
+    <div class="field span-2 provider-choice"><span>Connection</span>
+      <${Segmented} options=${PROVIDERS} value=${provider} onChange=${setProvider} label="Connection" />
+    </div>
+    ${provider === 'async' ? html`<${AsyncModelForm} settings=${settings} actions=${actions} />` : html`<${OpenAiModelForm} settings=${settings} actions=${actions} />`}
+  </${Card}>`;
+}
+
+// A model service that takes a request, answers with a task id, and gives the
+// answer later (asyncLlm.js). Everything about the service is in the profile.
+function AsyncModelForm({ settings, actions }) {
+  const { llm } = settings;
+  const [profileText, setProfileText] = useState(llm.profile);
+  const [model, setModel] = useState(llm.provider === 'async' ? llm.chatModel : '');
+  const [apiKey, setApiKey] = useState('');
+  const [hookSecret, setHookSecret] = useState('');
+  const [hook, setHook] = useState(llm.webhook);
+  const [check, setCheck] = useState(null);
+  const [saved, setSaved] = useState({ key: false, secret: false });
+  useEffect(() => {
+    Promise.all([getSecret('llm-api-key'), getSecret('llm-webhook-secret')]).then(([k, sec]) => setSaved({ key: Boolean(k), secret: Boolean(sec) }));
+  }, []);
+  const parsed = profileText.trim() ? parseProfile(profileText) : { error: 'Paste the connection profile for your service, or start from the example.' };
+  const setHookField = (patch) => setHook({ ...hook, ...patch });
+  const storeSecrets = async () => {
+    if (apiKey) await setSecret('llm-api-key', apiKey);
+    if (hookSecret) await setSecret('llm-webhook-secret', hookSecret);
+    setSaved({ key: saved.key || Boolean(apiKey), secret: saved.secret || Boolean(hookSecret) });
+    setApiKey('');
+    setHookSecret('');
+  };
+  const test = async () => {
+    if (parsed.error) return setCheck({ state: 'error', text: parsed.error });
+    setCheck({ state: 'busy', text: 'Sending a test question…' });
+    try {
+      const client = createAsyncLlmClient({ profile: parsed.profile, apiKey: apiKey || (await getSecret('llm-api-key')), fetchImpl: localFetch });
+      const started = Date.now();
+      const answer = await client.chat({
+        model,
+        purpose: 'test',
+        messages: [{ role: 'user', content: 'Reply with one short sentence: say that the connection works.' }],
+        onState: (state) => setCheck({ state: 'busy', text: `Task ${state || 'sent'}… (${Math.round((Date.now() - started) / 1000)} s)` }),
+      });
+      setCheck({ state: 'ok', text: `It answered in ${Math.round((Date.now() - started) / 1000)} s: ${answer.slice(0, 300)}` });
+    } catch (err) {
+      setCheck({ state: 'error', text: err.message });
+    }
+  };
+  const save = async () => {
+    if (parsed.error) return setCheck({ state: 'error', text: parsed.error });
+    await storeSecrets();
+    saveSettings({ llm: { enabled: true, provider: 'async', profile: profileText, chatModel: model || 'default', embedModel: '', webhook: hook } });
+    actions.toast('Model service saved. Open it with the ✦ button or Ctrl+Shift+A.');
+  };
+  return html`<p class="muted">For a model service that answers later: a request gives back a task id, and the answer comes from a status address, or by webhook to this computer. You describe the service in a connection profile; the API key is stored ${window.desktop ? 'in this computer’s keychain' : 'in this browser'}, not in the profile.</p>
+    ${!window.desktop && html`<p class="notice"><${Icon} name="alert" size=${15} />In a browser the service must allow requests from this page (CORS), and webhooks are not available. The desktop app needs neither.</p>`}
+    <div class="field-grid">
+      <label class="field span-2"><span>Connection profile (JSON)</span>
+        <textarea class="profile-input" rows="14" spellcheck=${false} value=${profileText} onInput=${(e) => setProfileText(e.currentTarget.value)} placeholder="{ &quot;submit&quot;: { … }, &quot;status&quot;: { … } }" />
+      </label>
+      <div class="form-actions span-2">
+        <button type="button" class="btn sm" onClick=${() => setProfileText(JSON.stringify(PROFILE_EXAMPLE, null, 2))}>Start from the example</button>
+        <span class="muted small ${parsed.error ? 'error-text' : ''}">${parsed.error ?? 'The profile looks right.'}</span>
+      </div>
+      <${Field} label="Model or agent name" hint="Fills {{model}} in the profile"><input value=${model} onInput=${(e) => setModel(e.currentTarget.value)} spellcheck=${false} /></${Field}>
+      <${Field} label="API key" hint=${saved.key ? 'Saved. Type a new one to replace it.' : 'Sent in the header the profile names'}><input type="password" value=${apiKey} onInput=${(e) => setApiKey(e.currentTarget.value)} placeholder=${saved.key ? '••••••••' : ''} autocomplete="off" /></${Field}>
+      ${window.desktop?.webhook &&
+      html`<${Check} checked=${hook.enabled} label="Receive answers by webhook" hint="The service calls this computer when a task ends; the app still checks the status now and then, since deliveries can be lost" onChange=${(v) => setHookField({ enabled: v })} />
+        ${hook.enabled &&
+        html`<${Field} label="Port"><input type="number" min="1024" max="65535" value=${hook.port} onInput=${(e) => setHookField({ port: Number(e.currentTarget.value) })} /></${Field}>
+          <${Field} label="Path"><input value=${hook.path} onInput=${(e) => setHookField({ path: e.currentTarget.value })} spellcheck=${false} /></${Field}>
+          <${Field} label="Address the service calls" wide hint="Fills {{webhook_url}}: this computer's name or IP as the service reaches it, e.g. http://my-pc.example.com:${hook.port}${hook.path}"><input value=${hook.publicUrl} onInput=${(e) => setHookField({ publicUrl: e.currentTarget.value.trim() })} spellcheck=${false} /></${Field}>
+          <${Field} label="Webhook secret" wide hint=${saved.secret ? 'Saved. Events must be signed with it (HMAC-SHA256).' : 'Strongly advised: without it, anything on your network could send answers.'}><input type="password" value=${hookSecret} onInput=${(e) => setHookSecret(e.currentTarget.value)} placeholder=${saved.secret ? '••••••••' : ''} autocomplete="off" /></${Field}>`}`}
+      <div class="form-actions span-2">
+        <button type="button" class="btn primary" disabled=${Boolean(parsed.error)} onClick=${save}>Save and turn on</button>
+        <button type="button" class="btn" disabled=${check?.state === 'busy'} onClick=${test}>Send a test question</button>
+        ${llm.enabled && llm.provider === 'async' && html`<button type="button" class="btn ghost" onClick=${() => saveSettings({ llm: { enabled: false } })}>Turn off</button>`}
+      </div>
+      ${check && html`<p class="notice span-2 ${check.state === 'error' ? 'error' : ''}"><${Icon} name=${check.state === 'error' ? 'alert' : check.state === 'ok' ? 'check' : 'sync'} size=${15} />${check.text}</p>`}
+    </div>
+    <details class="help"><summary>How do I write the profile?</summary>
+      <ul>
+        <li><code>submit</code>: the address (<code>url</code>), <code>method</code> and JSON <code>body</code> that send a question, and <code>taskId</code>, where the task id is in the answer (e.g. <code>data.0.id</code>).</li>
+        <li><code>status</code>: the address and body that ask how the task is going; <code>state</code>, <code>answer</code> and <code>error</code> say where those are in its answer, <code>done</code> and <code>failed</code> list the states that end it. With <code>rev</code> (where a revision is), the next call sends it as <code>{{rev}}</code> and the service can hold the call open until the task changes; otherwise the app asks every <code>interval</code> seconds.</li>
+        <li>Optional: <code>status.sources</code> (a list of sources to add under the answer), <code>auth</code> (<code>header</code> and <code>prefix</code> for the API key), <code>headers</code>, <code>ok</code> (a field that must be true in every answer), <code>errorMessage</code>, <code>timeout</code> (seconds), and <code>webhook</code> (<code>taskId</code>, <code>state</code>, <code>answer</code>, <code>error</code> and <code>signatureHeader</code> for the events it posts).</li>
+        <li>Placeholders: ${PLACEHOLDERS.map((p, i) => html`${i ? ', ' : ''}<code>{{${p}}}</code>`)}. A value that is only a placeholder keeps its type, and is left out when empty.</li>
+      </ul>
+    </details>`;
+}
+
+function OpenAiModelForm({ settings, actions }) {
   const { llm } = settings;
   const [form, setForm] = useState(llm);
   const [models, setModels] = useState(null);
@@ -165,7 +264,7 @@ function ModelCard({ settings, actions }) {
   const test = async () => {
     setCheck({ state: 'busy', text: 'Connecting…' });
     try {
-      const list = await llmClient({ llm: form }).listModels();
+      const list = await llmClient({ llm: { ...form, provider: 'openai' } }).listModels();
       setModels(list);
       const guessEmbed = list.find((m) => /embed|bge|e5|minilm|nomic/i.test(m)) ?? '';
       const guessChat = list.find((m) => !/embed|bge|e5|minilm|nomic/i.test(m)) ?? '';
@@ -176,11 +275,11 @@ function ModelCard({ settings, actions }) {
     }
   };
   const save = () => {
-    saveSettings({ llm: { ...form, enabled: true } });
+    saveSettings({ llm: { ...form, provider: 'openai', webhook: llm.webhook, enabled: true } });
     actions.toast('Local model saved. Open it with the ✦ button or Ctrl+Shift+A.');
   };
   const options = (current) => [...new Set([current, ...(models ?? [])].filter(Boolean))];
-  return html`<${Card} title="Local model" icon="sparkle" id="model">
+  return html`
     <p class="muted">Summarize files, ask questions about them and find things by meaning with a model running on this computer. Nothing leaves your machine. Works with <a href="https://ollama.com" target="_blank" rel="noopener">Ollama</a>, <a href="https://lmstudio.ai" target="_blank" rel="noopener">LM Studio</a> and other servers with an OpenAI-compatible API.</p>
     ${!window.desktop && html`<p class="notice"><${Icon} name="alert" size=${15} />In a browser this only reaches the model if the page runs on the same computer and the server allows it. The desktop app needs no extra setup.</p>`}
     <div class="field-grid">
@@ -202,7 +301,7 @@ function ModelCard({ settings, actions }) {
       <div class="form-actions span-2">
         <button type="button" class="btn primary" disabled=${!form.chatModel} onClick=${save}>Save and turn on</button>
         <button type="button" class="btn" onClick=${test}>Test and list models</button>
-        ${llm.enabled && html`<button type="button" class="btn ghost" onClick=${() => saveSettings({ llm: { enabled: false } })}>Turn off</button>`}
+        ${llm.enabled && llm.provider !== 'async' && html`<button type="button" class="btn ghost" onClick=${() => saveSettings({ llm: { enabled: false } })}>Turn off</button>`}
       </div>
       ${check && html`<p class="notice span-2 ${check.state === 'error' ? 'error' : ''}"><${Icon} name=${check.state === 'error' ? 'alert' : check.state === 'ok' ? 'check' : 'sync'} size=${15} />${check.text}</p>`}
     </div>
@@ -214,8 +313,7 @@ function ModelCard({ settings, actions }) {
         ${!window.desktop &&
         html`<li>In the browser, Ollama must also allow this site: set the environment variable <code>OLLAMA_ORIGINS=${location.origin}</code> and restart it (LM Studio: turn on CORS in its server settings). The desktop app needs none of this.</li>`}
       </ol>
-    </details>
-  </${Card}>`;
+    </details>`;
 }
 
 const SPEECH_PRESETS = [

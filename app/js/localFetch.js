@@ -18,7 +18,8 @@ function desktopFetch(url, init = {}) {
   });
   init.signal?.addEventListener('abort', () => bridge.abort(id));
   return bridge.request(id, url, { method: init.method ?? 'GET', headers: init.headers ?? {}, body: init.body ?? null }).then(
-    (meta) => new Response(stream, { status: meta.status, statusText: meta.statusText, headers: meta.headers }),
+    // 204 and the like may not have a body.
+    (meta) => new Response([101, 204, 205, 304].includes(meta.status) ? null : stream, { status: meta.status, statusText: meta.statusText, headers: meta.headers }),
     (err) => {
       off();
       throw new TypeError(err?.message ?? 'Request failed');

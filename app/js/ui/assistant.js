@@ -97,7 +97,7 @@ export function AssistantPanel({ files, docs, activeFile, activeRepo, settings, 
       if (!text.trim()) throw new Error('Open a file with some text first.');
       setSummary('');
       let out = '';
-      await llmClient().chat({ model: llm.chatModel, messages: summaryMessages(name, text, { selection: selectionOnly && Boolean(selected) }), signal, onToken: (t) => setSummary((out += t)) });
+      await llmClient().chat({ model: llm.chatModel, purpose: 'summarize', messages: summaryMessages(name, text, { selection: selectionOnly && Boolean(selected) }), signal, onToken: (t) => setSummary((out += t)) });
     });
 
   // "Summarize" in the file bar opens the panel and asks for this.
@@ -133,6 +133,7 @@ export function AssistantPanel({ files, docs, activeFile, activeRepo, settings, 
       setChat((c) => [...c, turn]);
       let out = '';
       await llmClient().chat({
+        purpose: 'ask',
         model: llm.chatModel,
         messages: askMessages(q, passages, { history }),
         signal,
@@ -149,7 +150,7 @@ export function AssistantPanel({ files, docs, activeFile, activeRepo, settings, 
     const q = question.trim();
     if (!q) return;
     run(async (signal) => {
-      if (!llm.embedModel) throw new Error('Finding by meaning needs an embedding model (Settings → Local model), e.g. nomic-embed-text.');
+      if (!llm.embedModel) throw new Error('Finding by meaning needs an embedding model (Settings → Model, an OpenAI-compatible server), e.g. nomic-embed-text.');
       await updateIndex({ onProgress: setProgress, signal });
       setProgress(null);
       setFound(await semanticSearch(q, { k: 15, fileIds: new Set(pool().map((f) => f.id)), signal }));
@@ -166,10 +167,11 @@ export function AssistantPanel({ files, docs, activeFile, activeRepo, settings, 
     </aside>`;
   }
 
-  return html`<aside class="panel assistant-panel" aria-label="Local model">
+  const title = llm.provider === 'async' ? 'Model' : 'Local model';
+  return html`<aside class="panel assistant-panel" aria-label=${title}>
     <div class="panel-head">
-      <h2><${Icon} name="sparkle" size=${16} />Local model</h2>
-      <span class="muted small model-name" title=${llm.baseUrl}>${llm.chatModel}</span>
+      <h2><${Icon} name="sparkle" size=${16} />${title}</h2>
+      <span class="muted small model-name" title=${llm.provider === 'async' ? 'A model service that answers later' : llm.baseUrl}>${llm.chatModel}</span>
       <span class="spacer" />
       <button type="button" class="icon-btn sm" aria-label="Close" onClick=${onClose}><${Icon} name="x" size=${16} /></button>
     </div>

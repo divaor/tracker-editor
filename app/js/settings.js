@@ -44,8 +44,20 @@ export const DEFAULT_SETTINGS = {
   // Where links to files point (the tracker opens these).
   appUrl: PUBLIC_APP_URL,
   trackerUrl: TRACKER_APP_URL,
-  // Local model with an OpenAI-compatible API (Ollama, LM Studio, …).
-  llm: { enabled: false, baseUrl: DEFAULT_LLM_URL, chatModel: '', embedModel: '', apiKey: '' },
+  // The model: a server with an OpenAI-compatible API (Ollama, LM Studio, …), or
+  // provider 'async': a service that answers later (asyncLlm.js), described by
+  // `profile` (JSON). Its API key and webhook secret are kept with getSecret.
+  // `webhook` (desktop app): receive its answers on this port and address.
+  llm: {
+    enabled: false,
+    provider: 'openai',
+    baseUrl: DEFAULT_LLM_URL,
+    chatModel: '',
+    embedModel: '',
+    apiKey: '',
+    profile: '',
+    webhook: { enabled: false, port: 8765, path: '/llm-webhook', publicUrl: '' },
+  },
   // Reading aloud: the device's voices (a voice URI, '' = the best one for the
   // text's language) or a speech server with an OpenAI-compatible API, and the speed.
   tts: {
@@ -68,7 +80,7 @@ try {
   settings = {
     ...DEFAULT_SETTINGS,
     ...saved,
-    llm: { ...DEFAULT_SETTINGS.llm, ...saved.llm },
+    llm: { ...DEFAULT_SETTINGS.llm, ...saved.llm, webhook: { ...DEFAULT_SETTINGS.llm.webhook, ...saved.llm?.webhook } },
     tts: { ...DEFAULT_SETTINGS.tts, ...saved.tts, server: { ...DEFAULT_SETTINGS.tts.server, ...saved.tts?.server } },
     typing: { ...DEFAULT_SETTINGS.typing, ...saved.typing },
   };
@@ -86,7 +98,7 @@ export function saveSettings(patch) {
   settings = {
     ...settings,
     ...patch,
-    llm: { ...settings.llm, ...patch.llm },
+    llm: { ...settings.llm, ...patch.llm, webhook: { ...settings.llm.webhook, ...patch.llm?.webhook } },
     tts: { ...settings.tts, ...patch.tts, server: { ...settings.tts.server, ...patch.tts?.server } },
     typing: { ...settings.typing, ...patch.typing },
   };
@@ -136,6 +148,35 @@ export async function setToken(value) {
   else if (token) localStorage.setItem(TOKEN_KEY, token);
   else localStorage.removeItem(TOKEN_KEY);
   tokenCache = token;
+}
+
+// Other secrets (the model service's API key, its webhook secret): the
+// keychain on desktop, this browser's storage on the web.
+export const SECRET_NAMES = ['llm-api-key', 'llm-webhook-secret'];
+const secretCache = new Map();
+
+export async function getSecret(name) {
+  if (!SECRET_NAMES.includes(name)) throw new Error(`Unknown secret ${name}`);
+  if (secretCache.has(name)) return secretCache.get(name);
+  const secrets = globalThis.window?.desktop?.secrets;
+  let value = '';
+  try {
+    value = secrets ? ((await secrets.get(name)) ?? '') : (localStorage.getItem(`${TOKEN_KEY}:${name}`) ?? '');
+  } catch {
+    value = '';
+  }
+  secretCache.set(name, value);
+  return value;
+}
+
+export async function setSecret(name, value) {
+  if (!SECRET_NAMES.includes(name)) throw new Error(`Unknown secret ${name}`);
+  const v = String(value ?? '').trim();
+  const secrets = globalThis.window?.desktop?.secrets;
+  if (secrets) await secrets.set(name, v);
+  else if (v) localStorage.setItem(`${TOKEN_KEY}:${name}`, v);
+  else localStorage.removeItem(`${TOKEN_KEY}:${name}`);
+  secretCache.set(name, v);
 }
 
 /** The tracker's setup code ("tracker-setup:" + base64 JSON) works here too. */

@@ -20,6 +20,16 @@ contextBridge.exposeInMainWorld('desktop', {
       return () => ipcRenderer.removeListener('llm:chunk', listener);
     },
   },
+  // Receives a model service's answers by webhook (port and path from Settings).
+  webhook: {
+    listen: (opts) => ipcRenderer.invoke('webhook:listen', opts),
+    close: () => ipcRenderer.invoke('webhook:close'),
+    onEvent(callback) {
+      const listener = (_event, data) => callback(data);
+      ipcRenderer.on('webhook:event', listener);
+      return () => ipcRenderer.removeListener('webhook:event', listener);
+    },
+  },
   // Types text into the window that has the focus after `wait` ms (remote desktops that block pasting).
   typing: {
     start: (text, opts) => ipcRenderer.invoke('type:start', text, opts),

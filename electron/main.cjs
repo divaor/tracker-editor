@@ -4,7 +4,9 @@
 // local model server (no CORS setup needed), opens tracker-editor:// links
 // from the tracker, and lets the app save and sync before the window closes.
 const { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, safeStorage, screen, shell } = require('electron');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
+const http = require('node:http');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { startTyping } = require('./typer.cjs');
@@ -13,7 +15,7 @@ const APP_DIR = path.join(__dirname, '..', 'app');
 const APP_ORIGIN = 'app://editor';
 const LINK_SCHEME = 'tracker-editor';
 const REPO_URL = 'https://github.com/divaor/tracker-editor';
-const SECRET_KEYS = new Set(['github-token']);
+const SECRET_KEYS = new Set(['github-token', 'llm-api-key', 'llm-webhook-secret']);
 const MAX_FILE = 5 * 1024 * 1024;
 
 protocol.registerSchemesAsPrivileged([
@@ -152,8 +154,8 @@ ipcMain.on('type:stop', (event) => {
   if (fromApp(event)) typing?.cancel();
 });
 
-// ---- Local model requests (Ollama, LM Studio, …) ----------------------------
-// Made here rather than in the page so the model server needs no CORS settings.
+// ---- Model requests (Ollama, LM Studio, a model service, …) ------------------
+// Made here rather than in the page so the server needs no CORS settings.
 // The body streams back to the page in chunks.
 
 const requests = new Map(); // id → AbortController
@@ -165,10 +167,12 @@ ipcMain.handle('llm:request', guard(async (event, id, url, init) => {
   requests.set(id, controller);
   let res;
   try {
-    res = await fetch(target, { method: init.method, headers: init.headers, body: init.body ?? undefined, signal: controller.signal });
+    // Chromium's network stack: the system's certificates and proxy, as at work.
+    res = await net.fetch(target.href, { method: init.method, headers: init.headers, body: init.body ?? undefined, signal: controller.signal, bypassCustomProtocolHandlers: true });
   } catch (err) {
     requests.delete(id);
-    throw new Error(err?.cause?.code === 'ECONNREFUSED' ? `Nothing is listening at ${target.origin}` : (err?.message ?? 'Request failed'));
+    const refused = err?.cause?.code === 'ECONNREFUSED' || /ERR_CONNECTION_REFUSED/.test(err?.message ?? '');
+    throw new Error(refused ? `Nothing is listening at ${target.origin}` : (err?.message ?? 'Request failed'));
   }
   const sender = event.sender;
   (async () => {
@@ -187,6 +191,75 @@ ipcMain.handle('llm:request', guard(async (event, id, url, init) => {
 ipcMain.on('llm:abort', (event, id) => {
   if (fromApp(event)) requests.get(id)?.abort();
 });
+
+// ---- Answers from a model service, by webhook --------------------------------
+// For services that answer later (see asyncLlm.js): they POST each task's
+// events here. With a webhook secret set, the body must carry its HMAC-SHA256
+// (hex, in the profile's signature header); anything else is refused.
+
+let hook = null; // { server, port, path, header, sender }
+
+function onHook(req, res) {
+  if (req.method !== 'POST' || new URL(req.url, 'http://localhost').pathname !== hook.path) {
+    res.writeHead(404).end();
+    return;
+  }
+  const chunks = [];
+  let size = 0;
+  req.on('data', (chunk) => {
+    size += chunk.length;
+    if (size > 2 * 1024 * 1024) req.destroy();
+    else chunks.push(chunk);
+  });
+  req.on('end', () => {
+    const body = Buffer.concat(chunks);
+    const secret = getSecret('llm-webhook-secret');
+    if (secret) {
+      const expected = crypto.createHmac('sha256', secret).update(body).digest('hex');
+      const got = String(req.headers[hook.header.toLowerCase()] ?? '').trim().replace(/^sha256=/i, '').toLowerCase();
+      if (got.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(got), Buffer.from(expected))) {
+        res.writeHead(401).end();
+        return;
+      }
+    }
+    // Answered at once: services wait only a few seconds.
+    res.writeHead(204).end();
+    let data;
+    try {
+      data = JSON.parse(body.toString('utf8'));
+    } catch {
+      return;
+    }
+    if (hook && !hook.sender.isDestroyed()) hook.sender.send('webhook:event', data);
+  });
+}
+
+ipcMain.handle('webhook:listen', guard(async (event, opts = {}) => {
+  const port = Number(opts.port);
+  const hookPath = String(opts.path || '/llm-webhook');
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('Use a port between 1024 and 65535.');
+  if (!hookPath.startsWith('/')) throw new Error('The webhook path must start with /.');
+  const header = String(opts.signatureHeader || 'X-Signature');
+  if (hook?.port === port) {
+    Object.assign(hook, { path: hookPath, header, sender: event.sender });
+    return { port };
+  }
+  hook?.server.close();
+  hook = null;
+  const server = http.createServer(onHook);
+  await new Promise((resolve, reject) => {
+    server.once('error', (err) => reject(new Error(err.code === 'EADDRINUSE' ? `Port ${port} is already in use on this computer.` : err.message)));
+    server.listen(port, '0.0.0.0', resolve);
+  });
+  hook = { server, port, path: hookPath, header, sender: event.sender };
+  return { port };
+}));
+
+ipcMain.handle('webhook:close', guard(() => {
+  hook?.server.close();
+  hook = null;
+  return true;
+}));
 
 // ---- Closing: let the app save and sync first --------------------------------
 

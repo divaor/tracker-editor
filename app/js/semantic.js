@@ -3,6 +3,7 @@
 // split into chunks with line ranges, embedded with the local model and kept
 // in IndexedDB; only files whose text changed are embedded again. Without an
 // embedding model, questions fall back to keyword search.
+import { asyncClient } from './asyncConnection.js';
 import { chunkText, rankBySimilarity } from './ai.js';
 import { kvGet, kvSet } from './kv.js';
 import { createLlmClient } from './llm.js';
@@ -13,6 +14,7 @@ import { getSettings } from './settings.js';
 import { store } from './store.js';
 
 export function llmClient(settings = getSettings()) {
+  if (settings.llm.provider === 'async') return asyncClient(settings);
   return createLlmClient({ baseUrl: settings.llm.baseUrl, apiKey: settings.llm.apiKey, fetchImpl: localFetch });
 }
 

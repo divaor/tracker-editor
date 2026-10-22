@@ -46,7 +46,7 @@ function filingChoices() {
 async function askFiling(text, { ext = '', name = true } = {}) {
   const { llm } = getSettings();
   const choices = filingChoices();
-  const reply = await llmClient().chat({ model: llm.chatModel, messages: filingMessages(text, { ext, name, ...choices }), signal: AbortSignal.timeout?.(30000), temperature: 0.2 });
+  const reply = await llmClient().chat({ model: llm.chatModel, messages: filingMessages(text, { ext, name, ...choices }), purpose: name ? 'name' : 'file', signal: AbortSignal.timeout?.(60000), temperature: 0.2 });
   return parseFiling(reply, { ...choices, ext: ext || 'txt' });
 }
 
@@ -700,7 +700,7 @@ export function App() {
         const ext = findLanguage('', file.language)?.extensions?.[0] ?? '';
         suggestion = (await askFiling(text, { ext, name: wantName }).catch(() => null)) ?? suggestion;
         // A model that does not answer in JSON can still name it.
-        if (wantName && !suggestion.name) suggestion.name = await llmClient().chat({ model: settings.llm.chatModel, messages: namingMessages(text, ext), signal: AbortSignal.timeout?.(30000), temperature: 0.2 }).then((r) => cleanModelName(r, ext || 'txt'), () => '');
+        if (wantName && !suggestion.name) suggestion.name = await llmClient().chat({ model: settings.llm.chatModel, messages: namingMessages(text, ext), purpose: 'name', signal: AbortSignal.timeout?.(60000), temperature: 0.2 }).then((r) => cleanModelName(r, ext || 'txt'), () => '');
       }
       if (wantName) suggestion.name ||= nameFromHeading(text);
       // Only what is still empty, in case you set it meanwhile.

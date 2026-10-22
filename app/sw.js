@@ -15,6 +15,8 @@ const ASSETS = [
   'index.html',
   'js/ai.js',
   'js/app.js',
+  'js/asyncConnection.js',
+  'js/asyncLlm.js',
   'js/crypto.js',
   'js/editor.js',
   'js/format.js',
