@@ -315,7 +315,7 @@ Working there:
 - **Ctrl+S** saves it to the server. Or turn on **Save to the server automatically** in the server's settings (⋯ next to its name → Edit), and it saves a moment after you stop typing.
 - **Changed on the server?** Tabs you haven't edited update by themselves. With your edits, you get **Compare**, **Reload** or **Keep mine and save over it**. **Follow** shows lines added to a log on the server.
 - **Server unreachable?** Your edits stay on this device, even if you close the app; the tab says **Not connected · not saved**. **Reconnect** (in the file bar) and then **Ctrl+S**.
-- PDFs, pictures and other files open with their program from a downloaded copy (changes made there are not sent back). Pictures can also have their text read (see 13).
+- Pictures and PDFs show large here, as on this computer; other files (and pictures and PDFs with **Open with its program**) open with their program from a downloaded copy (changes made there are not sent back). Pictures can also have their text read (see 13).
 - Your password and key passphrase are kept in this computer's keychain and never shown again; the editor only uses key files you choose (or the ones your SSH config names).
 - ⋯ next to the server's name: switch between folders and servers, edit or disconnect the server, add another, **Show permissions** (`rw-r--r--` next to each file), **Mirrors…**.
 - **Find in this folder**, **Properties** (with permissions you can change) and the rest of the Folders view work on servers too.
