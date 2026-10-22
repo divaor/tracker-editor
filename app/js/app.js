@@ -14,7 +14,7 @@ import { getSyncState, onSyncResult, onSyncState, syncClient, syncNow } from './
 import { matchesScope, projectList } from './tracker-model.js';
 import { AssistantPanel } from './ui/assistant.js';
 import { Toasts, toast } from './ui/components.js';
-import { FileDialog, SendDialog } from './ui/dialogs.js';
+import { ChecklistDialog, FileDialog, SendDialog } from './ui/dialogs.js';
 import { Icon } from './ui/icons.js';
 import { QuickOpen, SearchPanel } from './ui/panels.js';
 import { Preview } from './ui/preview.js';
@@ -488,13 +488,43 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         setCompare({ key: now.key, name: now.name, language: now.language, left: { label: entry.name, text: other }, right: { label: now.name, text: now.text }, actions: [] });
       },
       /** Puts `text` into a tab as your own edit (saved at once; Undo or Ctrl+Z takes it back). */
-      restoreText(key, text, label) {
+      restoreText(key, text, label, message = `Restored the version from ${label}`) {
         setCompare(null);
         if (store.session.active !== key) store.open(key);
         setTimeout(() => {
           if (!hostRef.current?.setTextAsEdit(key, text)) return;
-          toast(`Restored the version from ${label}`, { action: { label: 'Undo', run: () => hostRef.current?.run('undo') } });
+          toast(message, { action: { label: 'Undo', run: () => hostRef.current?.run('undo') } });
         }, 0);
+      },
+      /** The clipboard compared with the open file; its text can replace the file's. */
+      async compareWithClipboard() {
+        const now = activeInfo();
+        if (!now) return;
+        let clip;
+        try {
+          clip = await navigator.clipboard.readText();
+        } catch {
+          return toast('The clipboard could not be read here. Allow it, or paste into a new file and use Compare with….', { kind: 'error' });
+        }
+        if (!clip) return toast('The clipboard has no text.');
+        setCompare({
+          key: now.key,
+          name: now.name,
+          language: now.language,
+          left: { label: 'Clipboard', text: clip },
+          right: { label: now.name, text: now.text },
+          actions: [{ label: 'Use the clipboard text', icon: 'rotate', run: () => actions.restoreText(now.key, clip, '', 'Replaced the text with the clipboard') }],
+        });
+      },
+      /** The checklist in the selection (or the file) as tracker tasks. */
+      sendChecklist() {
+        const now = activeInfo();
+        if (now?.kind !== 'file') return;
+        const sel = hostRef.current?.selectionInfo();
+        const whole = !sel || sel.from === sel.to;
+        const text = whole ? now.text : sel.text;
+        const firstLine = whole ? 1 : now.text.slice(0, sel.from).split('\n').length;
+        setDialog({ type: 'checklist', id: now.id, text, firstLine });
       },
 
       // Reads the active tab aloud from the cursor (or just the selection); again to pause or resume.
@@ -1015,6 +1045,7 @@ export function App() {
           onPick=${(entry) => actions.compareWithEntry(entry)} onClose=${() => setDialog(null)} />`
       : html`<${QuickOpen} files=${store.live()} docs=${docs} actions=${actions} onClose=${() => setDialog(null)} />`)}
     ${dialog?.type === 'trash' && html`<${TrashDialog} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'checklist' && store.get(dialog.id) && html`<${ChecklistDialog} file=${store.get(dialog.id)} text=${dialog.text} firstLine=${dialog.firstLine} projects=${projects} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'ask' && html`<${AskSelectionDialog} context=${dialog.context} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'snippets' && html`<${SnippetPicker} selection=${dialog.selection} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'file' && store.get(dialog.id) && html`<${FileDialog} file=${store.get(dialog.id)} projects=${projects} actions=${actions} onClose=${() => setDialog(null)} />`}

@@ -5,6 +5,7 @@ import { contentPath, fileLink } from '../model.js';
 import { getSettings } from '../settings.js';
 import { store } from '../store.js';
 import { syncNow } from '../syncManager.js';
+import { checklistItems } from '../checklist.js';
 import { AREAS, newId, projectKey, resolveProjectName } from '../tracker-model.js';
 import { Field, Modal, Segmented, TagInput } from './components.js';
 import { Icon } from './icons.js';
@@ -127,5 +128,62 @@ export function SendDialog({ file, projects, actions, onClose }) {
       <button type="submit" hidden />
     </form>
     <p class="muted small">The tracker item links back to this file, so “Open in editor” on the tracker brings you here.</p>
+  </${Modal}>`;
+}
+
+/**
+ * The open items of a checklist (in the selection or the file) as tracker
+ * tasks, each linking back to the file. Items already on the tracker from this
+ * file start unticked.
+ */
+export function ChecklistDialog({ file, text, firstLine, projects, actions, onClose }) {
+  const link = fileLink(getSettings().appUrl, file.id);
+  const existing = new Set(
+    store
+      .trackerItems()
+      .filter((i) => !i.deleted && i.url === link)
+      .map((i) => i.title.toLowerCase()),
+  );
+  const [items, setItems] = useState(() => checklistItems(text, { firstLine }).map((it) => ({ ...it, on: !existing.has(it.title.toLowerCase()), known: existing.has(it.title.toLowerCase()) })));
+  const [type, setType] = useState('task');
+  const [project, setProject] = useState(file.project);
+  const [area, setArea] = useState('');
+  const [tags, setTags] = useState(file.tags);
+  const chosen = items.filter((it) => it.on);
+  const send = () => {
+    const projectName = resolveProjectName(project, projects);
+    queueProject(projectName, area, projects);
+    for (const it of chosen) {
+      store.addTrackerOp({
+        op: 'item',
+        item: { id: newId(), type, title: it.title, url: link, project: projectName, tags, due: it.due || undefined, notes: `From ${file.name}, line ${it.line}.` },
+      });
+    }
+    onClose();
+    actions.toast(`Adding ${chosen.length} item${chosen.length === 1 ? '' : 's'} to your tracker…`);
+    syncNow().then((r) => r && actions.toast(`Added ${chosen.length} item${chosen.length === 1 ? '' : 's'} to your tracker.`));
+  };
+  const toggle = (i) => setItems(items.map((it, j) => (j === i ? { ...it, on: !it.on } : it)));
+  return html`<${Modal} title="Send the checklist to the tracker" onClose=${onClose} className="checklist-dialog"
+    footer=${html`<span class="muted small">${chosen.length} of ${items.length} chosen</span><span class="spacer" /><button type="button" class="btn" onClick=${onClose}>Cancel</button>
+      <button type="button" class="btn primary" disabled=${!chosen.length} onClick=${send}><${Icon} name="send" size=${15} />Add ${chosen.length || ''} to tracker</button>`}>
+    ${!items.length && html`<p class="muted">No open items here. Write them as a checklist (<code>- [ ] call the vendor</code>), a list, or one per line, then select them.</p>`}
+    <div class="checklist-items">
+      ${items.map(
+        (it, i) => html`<label class="checklist-item" key=${`${it.line}-${i}`}>
+          <input type="checkbox" checked=${it.on} onChange=${() => toggle(i)} />
+          <span class="checklist-title">${it.title}</span>
+          ${it.due && html`<span class="badge-latest">${it.due}</span>`}
+          ${it.known && html`<span class="muted small">already on the tracker</span>`}
+          <span class="muted small">line ${it.line}</span>
+        </label>`,
+      )}
+    </div>
+    ${items.length > 0 &&
+    html`<div class="field-grid">
+      <div class="field span-2"><span>Add as</span><${Segmented} options=${SEND_TYPES.filter((t) => t.id !== 'doc')} value=${type} onChange=${setType} label="Type" /></div>
+      <${ProjectField} value=${project} onChange=${setProject} area=${area} onArea=${setArea} projects=${projects} />
+      <div class="field span-2"><span>Tags</span><${TagInput} value=${tags} onChange=${setTags} suggestions=${allTags()} /></div>
+    </div>`}
   </${Modal}>`;
 }

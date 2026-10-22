@@ -3403,6 +3403,28 @@ svg.up {
   overflow: auto;
 }
 
+.checklist-items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 40vh;
+  margin-bottom: 12px;
+  overflow-y: auto;
+}
+
+.checklist-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.checklist-title {
+  flex: 1;
+  min-width: 0;
+}
+
 /* ---- Phone / narrow window --------------------------------------------------------- */
 .scrim {
   display: none;

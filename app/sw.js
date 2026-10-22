@@ -17,6 +17,7 @@ const ASSETS = [
   'js/app.js',
   'js/asyncConnection.js',
   'js/asyncLlm.js',
+  'js/checklist.js',
   'js/crypto.js',
   'js/editor.js',
   'js/format.js',
