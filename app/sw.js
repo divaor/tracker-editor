@@ -58,6 +58,7 @@ const ASSETS = [
   'js/ui/trash.js',
   'js/ui/typeOut.js',
   'js/ui/icons.js',
+  'js/ui/macro.js',
   'js/ui/menu.js',
   'js/ui/outline.js',
   'js/ui/panels.js',

@@ -153,6 +153,8 @@ export function FileBar({ file, repo, sealed, projects, canPreview, preview, set
     id && { label: 'Details…', icon: 'tag', run: () => actions.openDialog({ type: 'file', id }) },
     { label: 'Outline and links (Ctrl+Shift+O)', icon: 'list', run: actions.toggleOutline },
     { label: 'Filter lines (Alt+L)', icon: 'search', run: actions.toggleFilter },
+    { label: 'Record or stop a macro (Ctrl+Shift+R)', icon: 'play', run: actions.toggleRecording },
+    { label: 'Run the macro…', icon: 'skipForward', run: actions.runMacro },
     { label: 'History', icon: 'history', run: actions.showHistory },
     { label: 'Compare with…', icon: 'columns', run: actions.compareWith },
     { label: 'Compare with clipboard', icon: 'copy', run: actions.compareWithClipboard },
@@ -251,13 +253,14 @@ export function SyncBadge({ sync, compact = false }) {
   </button>`;
 }
 
-export function StatusBar({ big, cursor, language, file, repo, settings, actions }) {
+export function StatusBar({ recording, big, cursor, language, file, repo, settings, actions }) {
   const setLanguage = (value) => file && actions.patch(file.id, { language: value === 'auto' ? '' : value });
   let state = '';
   if (file) state = file.dirty ? 'Saved on this device · not synced yet' : file.sha ? `Synced · edited ${timeAgo(file.modifiedAt)}${file.modifiedBy ? ` on ${file.modifiedBy}` : ''}` : 'Saved on this device';
   if (repo) state = repo.dirty ? 'Edited · goes to the tracker on the next sync' : 'Tracker file';
   return html`<footer class="statusbar">
     <span class="status-item status-state" title=${file ? `${formatBytes(store.text(file.id).length)}` : ''}>${state}</span>
+    ${recording && html`<button type="button" class="status-item status-btn-text status-recording" title="Recording a macro: Ctrl+Shift+R stops" onClick=${actions.toggleRecording}>● Recording macro</button>`}
     ${big && html`<span class="status-item status-big" title="A very large file: highlighting, wrapping and completion are off to keep it fast">Large file</span>`}
     <span class="spacer" />
     ${cursor && html`<span class="status-item">Ln ${cursor.line}, Col ${cursor.column}${cursor.selected ? ` (${cursor.selected} selected)` : ''}${cursor.cursors > 1 ? ` · ${cursor.cursors} cursors` : ''}</span>`}

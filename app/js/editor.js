@@ -61,6 +61,7 @@ import {
   toggleComment,
   undo,
   unifiedMergeView,
+  runScopeHandlers,
   ViewPlugin,
   WidgetType,
 } from '../vendor/cm/codemirror.js';
@@ -331,6 +332,40 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
   let active = null;
   let side = null; // { key, view } of the split view's second pane
   const bigKeys = new Set(); // tabs in the lighter editor for very large files
+  // Macro being recorded: keys the keymaps handle, and typed or pasted text, in order.
+  let recording = null;
+  const MACRO_KEYS = (e) => (e.ctrlKey || e.metaKey) && e.shiftKey && /^[rp]$/i.test(e.key);
+  const recorder = [
+    EditorView.domEventHandlers({
+      keydown(e) {
+        if (!recording || ['Shift', 'Control', 'Alt', 'Meta', 'CapsLock'].includes(e.key) || MACRO_KEYS(e)) return false;
+        // Plain characters arrive as text (below); keep named keys and shortcuts.
+        if (e.key.length > 1 || e.ctrlKey || e.metaKey || e.altKey) {
+          recording.push({ type: 'key', key: e.key, code: e.code, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, altKey: e.altKey, metaKey: e.metaKey });
+        }
+        return false;
+      },
+      paste(e) {
+        const text = e.clipboardData?.getData('text/plain');
+        if (recording && text) recording.push({ type: 'text', text });
+        return false;
+      },
+    }),
+    EditorView.inputHandler.of((_view, _from, _to, text) => {
+      if (recording) recording.push({ type: 'text', text });
+      return false;
+    }),
+  ];
+
+  // Replays one recorded step in a view, the way the keymaps and input handlers would.
+  function replay(v, step) {
+    if (step.type === 'key') return runScopeHandlers(v, new KeyboardEvent('keydown', step), 'editor');
+    const { from, to } = v.state.selection.main;
+    const handlers = v.state.facet(EditorView.inputHandler);
+    const fallback = () => v.state.replaceSelection(step.text);
+    if (!handlers.some((h) => h(v, from, to, step.text, fallback))) v.dispatch(v.state.replaceSelection(step.text), { userEvent: 'input.type', scrollIntoView: true });
+    return true;
+  }
   let focused = 'main'; // the pane typed in last: commands and reading aloud use it
   // The view showing a tab, if one does.
   const viewOf = (key) => (key && key === active ? view : key && key === side?.key ? side.view : null);
@@ -382,6 +417,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
     const big = isBigText(text);
     if (big) bigKeys.add(key);
     return [
+      recorder,
       lineFilterField,
       gutter.of(config.gutter),
       highlightActiveLineGutter(),
@@ -571,6 +607,46 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       }
       return out.join('\n');
     },
+    // ---- Macros ----
+    startRecording() {
+      recording = [];
+      current().view.focus();
+    },
+    /** Stops recording; returns the steps (an empty list when nothing was done). */
+    stopRecording() {
+      const steps = recording ?? [];
+      recording = null;
+      return steps;
+    },
+    get recording() {
+      return Boolean(recording);
+    },
+    /**
+     * Plays a macro in the pane typed in last: `times` times, or with 'end'
+     * until the cursor reaches the end of the file or stops moving. Returns how many times it ran.
+     */
+    playMacro(steps, times = 1) {
+      const { key, view: v } = current();
+      if (!key || !steps?.length || recording) return 0;
+      const limit = times === 'end' ? 10000 : Math.max(1, Math.min(10000, times));
+      let runs = 0;
+      for (; runs < limit; runs++) {
+        const before = v.state.selection.main.head;
+        const lengthBefore = v.state.doc.length;
+        for (const step of steps) replay(v, step);
+        if (times !== 'end') continue;
+        // Until the end: it has to move forward (or shorten the file) each time.
+        const head = v.state.selection.main.head;
+        const progressed = head > before || v.state.doc.length < lengthBefore;
+        if (head >= v.state.doc.length || !progressed) {
+          runs++;
+          break;
+        }
+      }
+      v.focus();
+      return runs;
+    },
+
     /** Whether a tab is in the lighter editor for very large files. */
     isBig: (key) => bigKeys.has(key),
 

@@ -3569,6 +3569,22 @@ svg.up {
   color: var(--warn);
 }
 
+.status-recording {
+  color: var(--danger) !important;
+  font-weight: 600;
+}
+
+.macro-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.macro-form .field {
+  width: 110px;
+}
+
 /* ---- Phone / narrow window --------------------------------------------------------- */
 .scrim {
   display: none;

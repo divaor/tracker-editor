@@ -27,6 +27,7 @@ import { SnippetPicker } from './ui/snippets.js';
 import { AskSelectionDialog } from './ui/askSelection.js';
 import { OutlinePanel } from './ui/outline.js';
 import { FilterBar } from './ui/filterBar.js';
+import { MacroDialog } from './ui/macro.js';
 import { snippetNameFrom } from './snippets.js';
 import { linkName, resolveLink } from './outline.js';
 import { prepareTyping, typingDelay } from './typing.js';
@@ -745,6 +746,47 @@ export function App() {
   actions.lineFilter = (key) => hostRef.current?.lineFilter(key) ?? { filter: null, shown: 0, total: 0 };
   actions.shownLines = (key) => hostRef.current?.shownLines(key) ?? '';
 
+  // Macros (Ctrl+Shift+R records, Ctrl+Shift+P plays). The last one is kept on this device.
+  const [recording, setRecording] = useState(false);
+  const MACRO_KEY = 'tracker-editor:macro';
+  const savedMacro = () => {
+    try {
+      return JSON.parse(localStorage.getItem(MACRO_KEY) ?? 'null');
+    } catch {
+      return null;
+    }
+  };
+  actions.toggleRecording = () => {
+    const host = hostRef.current;
+    if (!host) return;
+    if (host.recording) {
+      const steps = host.stopRecording();
+      setRecording(false);
+      if (!steps.length) return toast('Nothing was recorded.');
+      try {
+        localStorage.setItem(MACRO_KEY, JSON.stringify(steps));
+      } catch {
+        // kept for this session only
+      }
+      toast(`Macro recorded (${steps.length} step${steps.length === 1 ? '' : 's'}). Ctrl+Shift+P plays it.`);
+      return;
+    }
+    if (!activeKey) return toast('Open a file first.');
+    host.startRecording();
+    setRecording(true);
+  };
+  actions.playMacro = (times = 1) => {
+    const steps = savedMacro();
+    if (!steps?.length) return toast('Record a macro first: Ctrl+Shift+R, do the edit, Ctrl+Shift+R again.');
+    const runs = hostRef.current?.playMacro(steps, times) ?? 0;
+    if (times !== 1) toast(`Ran the macro ${runs.toLocaleString()} time${runs === 1 ? '' : 's'}.`);
+  };
+  actions.runMacro = () => {
+    const steps = savedMacro();
+    if (!steps?.length) return actions.playMacro();
+    setDialog({ type: 'macro', steps: steps.length });
+  };
+
   // Typing into another window (desktop app): the selection, or the whole file.
   const [typingJob, setTypingJob] = useState(null);
   useEffect(() => window.desktop?.typing?.onProgress((typed) => setTypingJob((job) => job && { ...job, typed })), []);
@@ -918,6 +960,12 @@ export function App() {
       } else if (e.altKey && !mod && k === 'w') {
         e.preventDefault();
         if (store.session.active) actions.close(store.session.active);
+      } else if (mod && e.shiftKey && k === 'r') {
+        e.preventDefault();
+        actions.toggleRecording();
+      } else if (mod && e.shiftKey && k === 'p') {
+        e.preventDefault();
+        actions.playMacro();
       } else if (mod && e.shiftKey && k === 'o') {
         e.preventDefault();
         actions.toggleOutline();
@@ -967,6 +1015,9 @@ export function App() {
         'ask-selection': () => actions.askSelection(),
         outline: () => actions.toggleOutline(),
         'filter-lines': () => actions.toggleFilter(),
+        'macro-record': () => actions.toggleRecording(),
+        'macro-play': () => actions.playMacro(),
+        'macro-run': () => actions.runMacro(),
         find: () => actions.run('find'),
         replace: () => actions.run('replace'),
         'goto-line': () => actions.run('gotoLine'),
@@ -1075,7 +1126,7 @@ export function App() {
           ${!activeKey && html`<${Welcome} actions=${actions} hasFiles=${store.live().length + docs.length > 0} configured=${isSyncConfigured(settings)} />`}
         </div>
         <${ReadAloudBar} />
-        <${StatusBar} big=${big && Boolean(activeKey)} cursor=${activeKey ? cursor : null} language=${languageName} file=${activeFile} repo=${activeRepo} settings=${settings} sync=${sync} actions=${actions} />
+        <${StatusBar} recording=${recording} big=${big && Boolean(activeKey)} cursor=${activeKey ? cursor : null} language=${languageName} file=${activeFile} repo=${activeRepo} settings=${settings} sync=${sync} actions=${actions} />
       </div>
     </main>
 
@@ -1093,6 +1144,7 @@ export function App() {
       ? html`<${QuickOpen} files=${store.live()} docs=${docs} actions=${actions} title=${`Compare ${activeName} with…`} exclude=${activeFile ? activeFile.id : activeRepo ? `r:${activeRepo.path}` : ''}
           onPick=${(entry) => actions.compareWithEntry(entry)} onClose=${() => setDialog(null)} />`
       : html`<${QuickOpen} files=${store.live()} docs=${docs} actions=${actions} onClose=${() => setDialog(null)} />`)}
+    ${dialog?.type === 'macro' && html`<${MacroDialog} steps=${dialog.steps} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'trash' && html`<${TrashDialog} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'checklist' && store.get(dialog.id) && html`<${ChecklistDialog} file=${store.get(dialog.id)} text=${dialog.text} firstLine=${dialog.firstLine} projects=${projects} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'ask' && html`<${AskSelectionDialog} context=${dialog.context} actions=${actions} onClose=${() => setDialog(null)} />`}
