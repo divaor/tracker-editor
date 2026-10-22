@@ -3252,6 +3252,45 @@ svg.up {
   vertical-align: -1px;
 }
 
+.type-out {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--accent-soft);
+  font-size: 13px;
+}
+
+.type-out > svg {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.type-out-text {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.type-out-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 26px;
+  height: 26px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 15px;
+}
+
+.type-out progress {
+  flex: 1 1 120px;
+  accent-color: var(--accent);
+}
+
 /* ---- Phone / narrow window --------------------------------------------------------- */
 .scrim {
   display: none;

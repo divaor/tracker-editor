@@ -7,6 +7,7 @@ const { app, BrowserWindow, Menu, dialog, ipcMain, net, protocol, safeStorage, s
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
+const { startTyping } = require('./typer.cjs');
 
 const APP_DIR = path.join(__dirname, '..', 'app');
 const APP_ORIGIN = 'app://editor';
@@ -119,6 +120,37 @@ ipcMain.handle('files:save', guard(async (_e, name, text) => {
   fs.writeFileSync(filePath, text, 'utf8');
   return filePath;
 }));
+
+// ---- Typing into another window ----------------------------------------------
+// For remote desktops that block pasting: key presses into whichever window has
+// the focus when the countdown ends (typer.cjs). One at a time.
+
+let typing = null;
+
+ipcMain.handle('type:start', guard(async (event, text, opts = {}) => {
+  if (typeof text !== 'string' || !text) throw new Error('Nothing to type');
+  if (typing) throw new Error('Already typing');
+  const delay = Math.min(200, Math.max(1, Number(opts.delay) || 15));
+  const wait = Math.min(30000, Math.max(1000, Number(opts.wait) || 5000));
+  // This window's handle, so Windows never types into the editor itself.
+  const handle = mainWindow?.getNativeWindowHandle();
+  const self = process.platform === 'win32' && handle ? (handle.length >= 8 ? handle.readBigUInt64LE() : BigInt(handle.readUInt32LE())).toString() : '0';
+  const sender = event.sender;
+  typing = startTyping(text, { delay, at: Date.now() + wait, self }, {
+    onProgress: (n) => !sender.isDestroyed() && sender.send('type:progress', n),
+    isSelfFocused: () => Boolean(mainWindow?.isFocused()),
+  });
+  if (opts.minimize) mainWindow?.minimize();
+  try {
+    return await typing.done;
+  } finally {
+    typing = null;
+  }
+}));
+
+ipcMain.on('type:stop', (event) => {
+  if (fromApp(event)) typing?.cancel();
+});
 
 // ---- Local model requests (Ollama, LM Studio, …) ----------------------------
 // Made here rather than in the page so the model server needs no CORS settings.
@@ -316,6 +348,8 @@ function buildMenu() {
         shown('Replace', 'CmdOrCtrl+H', 'replace'),
         shown('Go to Line', 'CmdOrCtrl+G', 'goto-line'),
         item('Find in Files', 'CmdOrCtrl+Shift+F', 'find-in-files'),
+        { type: 'separator' },
+        shown('Type into Another Window', 'Alt+T', 'type-out'),
       ],
     },
     {

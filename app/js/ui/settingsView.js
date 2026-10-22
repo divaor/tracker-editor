@@ -12,6 +12,7 @@ import { timeAgo } from '../format.js';
 import { APP_VERSION } from '../version.js';
 import { Card, Check, Field, Segmented } from './components.js';
 import { EncryptionCard } from './encryption.js';
+import { TYPING_SPEEDS } from '../typing.js';
 import { Icon } from './icons.js';
 
 const SYNC_FIELDS = ['owner', 'repo', 'branch', 'trackerPath', 'device'];
@@ -123,6 +124,29 @@ function EditorCard({ settings }) {
         onChange=${(v) => saveSettings({ autoName: v })} />
       <${Check} checked=${settings.autoFile} label="File new notes under a project, with tags" hint="By the local model, from your projects and the tags you use. Undo is in the message."
         onChange=${(v) => saveSettings({ autoFile: v })} />
+    </div>
+  </${Card}>`;
+}
+
+// Desktop only: typing a selection or file into another window (Alt+T).
+function TypingCard({ settings }) {
+  const t = settings.typing;
+  const set = (patch) => saveSettings({ typing: patch });
+  return html`<${Card} title="Typing into other windows" icon="keyboard">
+    <p class="muted small">For remote desktops and consoles that do not take pasted text: Alt+T (or Edit, Type into Another Window) types the selection, or the whole file, into the window you click into before the countdown ends. Holding Escape there, or clicking another window, stops it.</p>
+    <div class="field-grid">
+      <${Field} label="Time to switch windows">
+        <select value=${String(t.countdown)} onChange=${(e) => set({ countdown: Number(e.currentTarget.value) })}>
+          ${[3, 5, 10].map((n) => html`<option key=${n} value=${n}>${n} seconds</option>`)}
+        </select>
+      </${Field}>
+      <${Field} label="Speed">
+        <select value=${t.speed} onChange=${(e) => set({ speed: e.currentTarget.value })}>
+          ${TYPING_SPEEDS.map((sp) => html`<option key=${sp.id} value=${sp.id}>${sp.label}</option>`)}
+        </select>
+      </${Field}>
+      <${Check} checked=${t.autoIndent} label="The other editor indents new lines by itself" hint="Leaves out the spaces at the start of lines, so they are not doubled" onChange=${(v) => set({ autoIndent: v })} />
+      <${Check} checked=${t.minimize} label="Minimize Tracker Editor while it types" hint="The window behind it, often the remote desktop, gets the focus" onChange=${(v) => set({ minimize: v })} />
     </div>
   </${Card}>`;
 }
@@ -322,6 +346,7 @@ export function SettingsView({ settings, sync, actions }) {
     <${EditorCard} settings=${settings} />
     <${ModelCard} settings=${settings} actions=${actions} />
     <${ReadAloudCard} settings=${settings} actions=${actions} />
+    ${window.desktop?.typing && html`<${TypingCard} settings=${settings} />`}
     <${EncryptionCard} actions=${actions} />
     <${DataCard} actions=${actions} />
     <p class="muted small about">Tracker Editor ${APP_VERSION} · ${window.desktop ? `Desktop app (Electron ${window.desktop.versions?.electron ?? ''})` : 'Web app'} · <a href="https://github.com/divaor/tracker-editor" target="_blank" rel="noopener">Source</a></p>

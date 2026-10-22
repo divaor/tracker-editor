@@ -20,6 +20,16 @@ contextBridge.exposeInMainWorld('desktop', {
       return () => ipcRenderer.removeListener('llm:chunk', listener);
     },
   },
+  // Types text into the window that has the focus after `wait` ms (remote desktops that block pasting).
+  typing: {
+    start: (text, opts) => ipcRenderer.invoke('type:start', text, opts),
+    stop: () => ipcRenderer.send('type:stop'),
+    onProgress(callback) {
+      const listener = (_event, typed) => callback(typed);
+      ipcRenderer.on('type:progress', listener);
+      return () => ipcRenderer.removeListener('type:progress', listener);
+    },
+  },
   closeReady: () => ipcRenderer.send('app:close-ready'),
   onCommand(callback) {
     const listener = (_event, command) => callback(command);

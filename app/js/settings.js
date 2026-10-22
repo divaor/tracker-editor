@@ -55,6 +55,9 @@ export const DEFAULT_SETTINGS = {
     // otherVoices: voices for other languages, as "es=ef_dora, pt=pf_dora" (Kokoro voices speak one language each).
     server: { baseUrl: 'http://localhost:8880/v1', apiKey: '', model: 'kokoro', voice: 'af_heart', otherVoices: 'es=ef_dora, pt=pf_dora', instructions: '' },
   },
+  // Typing into another window (desktop app): seconds to switch windows, speed (typing.js), whether the
+  // other editor indents new lines by itself, and whether to minimize this window meanwhile.
+  typing: { countdown: 5, speed: 'normal', autoIndent: false, minimize: false },
   // Settings migrations already applied on this device.
   version: 2,
 };
@@ -67,6 +70,7 @@ try {
     ...saved,
     llm: { ...DEFAULT_SETTINGS.llm, ...saved.llm },
     tts: { ...DEFAULT_SETTINGS.tts, ...saved.tts, server: { ...DEFAULT_SETTINGS.tts.server, ...saved.tts?.server } },
+    typing: { ...DEFAULT_SETTINGS.typing, ...saved.typing },
   };
   // Version 2: phones wrap long lines by default (earlier versions stored `false` for everyone).
   if ((saved.version ?? 1) < 2) settings = { ...settings, wordWrap: DEFAULT_SETTINGS.wordWrap || settings.wordWrap, version: 2 };
@@ -84,6 +88,7 @@ export function saveSettings(patch) {
     ...patch,
     llm: { ...settings.llm, ...patch.llm },
     tts: { ...settings.tts, ...patch.tts, server: { ...settings.tts.server, ...patch.tts?.server } },
+    typing: { ...settings.typing, ...patch.typing },
   };
   try {
     localStorage.setItem(KEY, JSON.stringify(settings));

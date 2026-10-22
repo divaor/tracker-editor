@@ -73,7 +73,10 @@
       "target": [
         "dmg"
       ],
-      "category": "public.app-category.developer-tools"
+      "category": "public.app-category.developer-tools",
+      "extendInfo": {
+        "NSAppleEventsUsageDescription": "Tracker Editor types text into another window when you ask it to (Type into another window)."
+      }
     },
     "linux": {
       "target": [

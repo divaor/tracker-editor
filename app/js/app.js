@@ -22,6 +22,8 @@ import { CompareView } from './ui/compare.js';
 import { HistoryPanel } from './ui/history.js';
 import { TrashDialog } from './ui/trash.js';
 import { LockedFile } from './ui/encryption.js';
+import { TypeOutPanel } from './ui/typeOut.js';
+import { prepareTyping, typingDelay } from './typing.js';
 import { isSealed } from './crypto.js';
 import { decodeFor, encodeFor, lock, onVault, openText, setUpVault, unlock, vaultState } from './vault.js';
 import { ReadAloudBar } from './ui/readAloud.js';
@@ -597,6 +599,39 @@ export function App() {
   };
   actions.toggleSplit = () => (store.session.side ? actions.closeSide() : actions.openSide());
 
+  // Typing into another window (desktop app): the selection, or the whole file.
+  const [typingJob, setTypingJob] = useState(null);
+  useEffect(() => window.desktop?.typing?.onProgress((typed) => setTypingJob((job) => job && { ...job, typed })), []);
+  actions.typeOut = async ({ whole = false } = {}) => {
+    const typer = window.desktop?.typing;
+    if (!typer) return toast('Typing into other windows works in the desktop app.', { kind: 'error' });
+    if (typingJob) return;
+    const host = hostRef.current;
+    host?.flushAll();
+    const snap = host?.snapshot();
+    if (!snap) return toast('Open a file first.');
+    const selected = whole ? '' : host.selectionText();
+    const options = getSettings().typing;
+    const text = prepareTyping(selected || snap.text, { autoIndent: options.autoIndent });
+    if (!text) return toast('Nothing to type: the file is empty.');
+    const delay = typingDelay(options.speed);
+    const wait = options.countdown * 1000;
+    setTypingJob({ total: text.length, at: Date.now() + wait, delay, typed: 0, what: selected ? 'selection' : 'file' });
+    try {
+      const { typed, stopped } = await typer.start(text, { delay, wait, minimize: options.minimize });
+      const done = `${typed.toLocaleString()} character${typed === 1 ? '' : 's'}`;
+      if (!stopped) toast(`Typed ${done}.`);
+      else if (stopped === 'self') toast(`Nothing typed: Tracker Editor still had the focus. Start again, then click into the other window within ${options.countdown} seconds.`, { timeout: 9000 });
+      else if (stopped === 'focus') toast(`Stopped after ${done}: another window got the focus.`, { timeout: 9000 });
+      else if (stopped === 'escape') toast(`Stopped after ${done} (Escape).`);
+      else toast(typed ? `Stopped after ${done}.` : 'Typing cancelled.');
+    } catch (err) {
+      toast(err.message, { kind: 'error', timeout: 12000 });
+    } finally {
+      setTypingJob(null);
+    }
+  };
+
   // The split view's second pane, after the main one so a tab moving between them hands over its state.
   const sideEl = useRef(null);
   const sideKey = store.session.side;
@@ -735,6 +770,9 @@ export function App() {
       } else if (e.altKey && !mod && k === 'w') {
         e.preventDefault();
         if (store.session.active) actions.close(store.session.active);
+      } else if (e.altKey && !mod && !e.shiftKey && k === 't' && window.desktop?.typing) {
+        e.preventDefault();
+        actions.typeOut();
       } else if (mod && e.key === '\\') {
         e.preventDefault();
         actions.toggleSplit();
@@ -764,6 +802,7 @@ export function App() {
         'quick-open': () => setDialog({ type: 'quickOpen' }),
         trash: () => setDialog({ type: 'trash' }),
         split: () => actions.toggleSplit(),
+        'type-out': () => actions.typeOut(),
         find: () => actions.run('find'),
         replace: () => actions.run('replace'),
         'goto-line': () => actions.run('gotoLine'),
@@ -840,6 +879,7 @@ export function App() {
         <${TabBar} session=${store.session} projects=${projects} settings=${settings} actions=${actions} />
         ${activeKey && html`<${FileBar} file=${activeFile} repo=${activeRepo} sealed=${activeSealed} projects=${projects} language=${languageName}
           canPreview=${Boolean(previewType)} preview=${showPreview} settings=${settings} actions=${actions} />`}
+        ${typingJob && html`<${TypeOutPanel} job=${typingJob} onStop=${() => window.desktop?.typing?.stop()} />`}
         <div class="editor-area ${showPreview ? 'split' : ''} ${showSide ? 'side-split' : ''} ${compare ? 'comparing' : ''}">
           <div class="editor-host" ref=${editorEl} />
           ${showSide &&

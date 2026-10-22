@@ -56,6 +56,7 @@ const PATHS = {
   columns: () => html`<rect x="3" y="4" width="18" height="16" rx="2" /><path d="M12 4v16" />`,
   pin: () => html`<path d="M9 4h6l-1 6 3 3H7l3-3zM12 13v7" />`,
   lock: () => html`<rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" />`,
+  keyboard: () => html`<rect x="2" y="6" width="20" height="12" rx="2" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" />`,
   unlock: () => html`<rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V8a4 4 0 0 1 7.5-2" />`,
   share: () => html`<circle cx="18" cy="5" r="2.5" /><circle cx="6" cy="12" r="2.5" /><circle cx="18" cy="19" r="2.5" /><path d="M8.2 10.8l7.6-4.4M8.2 13.2l7.6 4.4" />`,
   mail: () => html`<rect x="3" y="5" width="18" height="14" rx="2" /><path d="m4 7 8 6 8-6" />`,
