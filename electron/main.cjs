@@ -1943,6 +1943,22 @@ function buildMenu() {
         item('Find in Files', 'CmdOrCtrl+Shift+F', 'find-in-files'),
         shown('Filter Lines', 'Alt+L', 'filter-lines'),
         { type: 'separator' },
+        shown('Format Document', 'Shift+Alt+F', 'format'),
+        {
+          label: 'Text',
+          submenu: [
+            shown('Comment or Uncomment Lines', 'CmdOrCtrl+/', 'toggleComment'),
+            shown('Duplicate Line', 'CmdOrCtrl+Shift+D', 'duplicateLine'),
+            shown('Delete Line', 'CmdOrCtrl+Shift+K', 'deleteLine'),
+            { type: 'separator' },
+            item('UPPER CASE', undefined, 'upperCase'),
+            item('lower case', undefined, 'lowerCase'),
+            item('Sort Lines', undefined, 'sortLines'),
+            item('Remove Duplicate Lines', undefined, 'removeDuplicateLines'),
+            item('Trim Trailing Spaces', undefined, 'trimTrailing'),
+          ],
+        },
+        { type: 'separator' },
         shown('Start or Stop Recording a Macro', 'CmdOrCtrl+Shift+R', 'macro-record'),
         shown('Play the Macro', 'CmdOrCtrl+Shift+P', 'macro-play'),
         item('Run the Macro…', undefined, 'macro-run'),
@@ -1982,7 +1998,15 @@ function buildMenu() {
       ],
     },
     { role: 'windowMenu' },
-    { role: 'help', submenu: [{ label: 'Project on GitHub', click: () => shell.openExternal(REPO_URL) }] },
+    {
+      role: 'help',
+      submenu: [
+        shown('Commands and Shortcuts', 'F1', 'help'),
+        item('Guide', undefined, 'help-guide'),
+        { type: 'separator' },
+        { label: 'Project on GitHub', click: () => shell.openExternal(REPO_URL) },
+      ],
+    },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }

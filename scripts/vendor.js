@@ -76,6 +76,33 @@ await writeFile(path.join(xtermDir, 'xterm.css'), `/* @xterm/xterm@${xtermVersio
 await writeFile(path.join(xtermDir, 'files.json'), `${JSON.stringify(['xterm.js', 'xterm.css'], null, 2)}\n`);
 console.log(`app/vendor/xterm/ <- @xterm/xterm@${xtermVersion}, @xterm/addon-fit@${fitVersion}`);
 
+// Formatting (Format document): Prettier's standalone build with the parsers used here, and
+// sql-formatter bundled. Loaded when first used, and cached then (vendor/format/files.json).
+const formatDir = path.join(outDir, 'format');
+await rm(formatDir, { recursive: true, force: true });
+await mkdir(path.join(formatDir, 'plugins'), { recursive: true });
+const { version: prettierVersion } = await pkgInfo('prettier');
+const { version: sqlVersion } = await pkgInfo('sql-formatter');
+// Saved as .js: every server (and the app:// protocol) serves those as JavaScript modules.
+const prettierFiles = ['standalone', ...['babel', 'estree', 'typescript', 'postcss', 'html', 'markdown', 'yaml', 'graphql'].map((p) => `plugins/${p}`)];
+for (const file of prettierFiles) {
+  const source = await readFile(path.join(root, 'node_modules', 'prettier', `${file}.mjs`), 'utf8');
+  await writeFile(path.join(formatDir, `${file}.js`), `/* prettier@${prettierVersion} (MIT) - vendored by scripts/vendor.js */\n${source.replace(/\n?\/\/# sourceMappingURL=.*\s*$/, '\n')}`);
+}
+await build({
+  stdin: { contents: "export { format } from 'sql-formatter';", resolveDir: root },
+  bundle: true,
+  format: 'esm',
+  minify: true,
+  target: 'es2022',
+  outfile: path.join(formatDir, 'sql-formatter.js'),
+  banner: { js: `/* sql-formatter@${sqlVersion} (MIT) - bundled by scripts/vendor.js */` },
+  legalComments: 'none',
+  logLevel: 'warning',
+});
+await writeFile(path.join(formatDir, 'files.json'), `${JSON.stringify([...prettierFiles.map((f) => `${f}.js`), 'sql-formatter.js'], null, 2)}\n`);
+console.log(`app/vendor/format/ <- prettier@${prettierVersion}, sql-formatter@${sqlVersion}`);
+
 const ocrDir = path.join(outDir, 'ocr');
 await rm(ocrDir, { recursive: true, force: true });
 await mkdir(ocrDir, { recursive: true });

@@ -1,8 +1,8 @@
 // Offline support: precache the app shell and every CodeMirror language
 // chunk (listed in vendor/cm/files.json), then serve network-first so updates
 // show up immediately when online. GitHub and model requests are never intercepted.
-// Text recognition (vendor/ocr/, about 9 MB) and the terminal (vendor/xterm/,
-// desktop only) are cached the first time they are used.
+// Text recognition (vendor/ocr/, about 9 MB), the terminal (vendor/xterm/,
+// desktop only) and the formatters (vendor/format/) are cached the first time they are used.
 const CACHE = 'editor-v0.11.0';
 const INBOX = 'editor-inbox'; // shared files waiting for the app (see js/inbox.js)
 const ASSETS = [
@@ -16,15 +16,18 @@ const ASSETS = [
   'icons/icon.svg',
   'index.html',
   'capture.html',
+  'help/guide.md',
   'snip.html',
   'js/ai.js',
   'js/app.js',
   'js/asyncConnection.js',
   'js/asyncLlm.js',
   'js/checklist.js',
+  'js/commands.js',
   'js/crypto.js',
   'js/editor.js',
   'js/format.js',
+  'js/formatter.js',
   'js/github.js',
   'js/inbox.js',
   'js/kv.js',
@@ -60,6 +63,7 @@ const ASSETS = [
   'js/ui/encryption.js',
   'js/ui/filterBar.js',
   'js/ui/history.js',
+  'js/ui/help.js',
   'js/ui/trash.js',
   'js/ui/typeOut.js',
   'js/ui/icons.js',

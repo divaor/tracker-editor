@@ -1,0 +1,12 @@
+[
+  "standalone.js",
+  "plugins/babel.js",
+  "plugins/estree.js",
+  "plugins/typescript.js",
+  "plugins/postcss.js",
+  "plugins/html.js",
+  "plugins/markdown.js",
+  "plugins/yaml.js",
+  "plugins/graphql.js",
+  "sql-formatter.js"
+]

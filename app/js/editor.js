@@ -190,12 +190,7 @@ export const COMMANDS = {
   sortLines: withLines((lines) => [...lines].sort((a, b) => a.localeCompare(b))),
   removeDuplicateLines: withLines((lines) => [...new Set(lines)]),
   trimTrailing: withLines((lines) => lines.map((l) => l.replace(/[ \t]+$/, ''))),
-  formatJson: (view) => {
-    const text = view.state.doc.toString();
-    const formatted = `${JSON.stringify(JSON.parse(text), null, view.state.tabSize)}\n`;
-    view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: formatted }, userEvent: 'input' });
-    return true;
-  },
+  // (Format document is actions.formatDocument: formatter.js, which loads its parts when needed.)
 };
 
 // The smallest single change that turns `old` into `text` (keeps the cursor and undo history useful).
@@ -442,6 +437,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
         { key: 'Mod-g', run: gotoLine, preventDefault: true },
         { key: 'Mod-h', mac: 'Mod-Alt-f', run: openReplacePanel, preventDefault: true },
         { key: 'Alt-z', run: () => onShortcut?.('toggleWrap') ?? true },
+        { key: 'Shift-Alt-f', run: () => onShortcut?.('format') ?? true, preventDefault: true },
         { key: 'Mod-s', run: () => onShortcut?.('sync') ?? true, preventDefault: true },
         { key: 'Mod-Shift-d', run: copyLineDown },
         { key: 'Mod-Shift-k', run: deleteLine },

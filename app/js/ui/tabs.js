@@ -272,6 +272,8 @@ export function FileBar({ file, repo, disk, sealed, projects, canPreview, previe
     disk && (!isRemotePath(disk.path) || server(remoteParts(disk.path).id)?.protocol === 'sftp') && { label: 'Open a terminal in its folder', icon: 'terminal', run: () => actions.terminalHere(disk.path.slice(0, Math.max(disk.path.lastIndexOf('/'), disk.path.lastIndexOf('\\'))) || disk.path) },
     disk && { separator: true },
     id && { label: 'Details…', icon: 'tag', run: () => actions.openDialog({ type: 'file', id }) },
+    !disk?.follow && { label: 'Format document (Shift+Alt+F)', icon: 'code', run: () => actions.formatDocument() },
+    { label: 'Text tools: case, sort, duplicates, trim…', icon: 'edit', run: () => actions.openDialog({ type: 'help', query: 'Edit and text' }) },
     { label: 'Outline and links (Ctrl+Shift+O)', icon: 'list', run: actions.toggleOutline },
     { label: 'Filter lines (Alt+L)', icon: 'search', run: actions.toggleFilter },
     { label: 'Record or stop a macro (Ctrl+Shift+R)', icon: 'play', run: actions.toggleRecording },

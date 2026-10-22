@@ -7,6 +7,7 @@ import { fileLink, parseRoute, safeName } from './model.js';
 import { fileVersions, versionName } from './versions.js';
 import { formatDateTime } from './format.js';
 import { previewKind } from './previews.js';
+import { FORMATTABLE, formatText, formatterFor, guessFormatter } from './formatter.js';
 import { getReaderState, onReaderState, setReaderHighlighter, startReading, stopReading, toggleReading } from './reader.js';
 import { getSettings, getToken, isSyncConfigured, onSettings, resolvedTheme, saveSettings } from './settings.js';
 import { diskKey, fileKey, flush, parseKey, repoKey, store } from './store.js';
@@ -30,6 +31,7 @@ import { ChecklistDialog, FileDialog, SendDialog } from './ui/dialogs.js';
 import { Icon } from './ui/icons.js';
 import { QuickOpen, SearchPanel } from './ui/panels.js';
 import { Preview } from './ui/preview.js';
+import { HelpDialog } from './ui/help.js';
 import { CompareView } from './ui/compare.js';
 import { HistoryPanel } from './ui/history.js';
 import { TrashDialog } from './ui/trash.js';
@@ -242,11 +244,44 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         if (file && ('name' in patch || 'language' in patch)) hostRef.current?.setLanguage(fileKey(id), file.name, file.language);
       },
       run: (name) => {
+        if (name === 'format' || name === 'formatJson') return actions.formatDocument();
         try {
           hostRef.current?.run(name);
         } catch (err) {
-          toast(name === 'formatJson' ? `Not valid JSON: ${err.message}` : err.message, { kind: 'error' });
+          toast(err.message, { kind: 'error' });
         }
+      },
+      /**
+       * Format document (Shift+Alt+F): the selection, or the whole file, by its kind (formatter.js);
+       * an edit Ctrl+Z takes back. Text with no known kind is formatted when it looks like JSON or XML.
+       */
+      async formatDocument() {
+        const now = activeInfo();
+        if (!now) return;
+        const disk = now.kind === 'disk' ? store.diskTab(now.path) : null;
+        if (disk?.follow || disk?.truncated) return toast('This tab is read-only (followed, or the end of a large file).');
+        if (now.kind === 'file' && store.isSealed(now.id)) return;
+        const sel = hostRef.current?.selectionInfo();
+        const part = sel && sel.key === now.key && sel.from !== sel.to ? sel : null;
+        const source = part ? part.text : now.text;
+        if (!source.trim()) return;
+        const formatter = formatterFor(now.name, findLanguage(now.name, now.language)?.name ?? '') ?? guessFormatter(source);
+        if (!formatter) return toast(`No formatter for this kind of file. Pick its language in the status bar; these can be formatted: ${FORMATTABLE}.`, { timeout: 8000 });
+        if (source.length > 5 * 1024 * 1024 && !['json', 'xml'].includes(formatter.kind)) return toast('This is too large to format here.');
+        const { tabSize = 4 } = getSettings();
+        let out;
+        try {
+          out = await formatText(source, formatter, { tabSize });
+        } catch (err) {
+          toast(`Not formatted as ${formatter.label}: ${err.message}`, { kind: 'error', timeout: 9000 });
+          if (!part && err.line) hostRef.current?.reveal(err.line, err.column ?? 1, 1);
+          return;
+        }
+        if (part) out = out.replace(/\n$/, '');
+        if (out === source) return toast(`Already formatted (${formatter.label})`);
+        const done = part ? hostRef.current?.replaceRange(now.key, part.from, part.to, part.text, out) : hostRef.current?.setTextAsEdit(now.key, out);
+        if (!done) return toast('The text changed meanwhile; format it again.');
+        toast(`Formatted ${part ? 'the selection ' : ''}as ${formatter.label}`, { action: { label: 'Undo', run: () => hostRef.current?.run('undo') } });
       },
       reveal: (line, column, length) => hostRef.current?.reveal(line, column, length),
       selectionText: () => hostRef.current?.selectionText() ?? '',
@@ -1130,6 +1165,7 @@ export function App() {
       onShortcut(name) {
         // Ctrl+S is handled by the window's key handler (saveOrSync), which sees it too.
         if (name === 'toggleWrap') actions.toggleWrap?.();
+        if (name === 'format') actions.formatDocument?.();
         return true;
       },
     });
@@ -1530,7 +1566,10 @@ export function App() {
     const onKey = (e) => {
       const mod = e.ctrlKey || e.metaKey;
       const k = e.key.toLowerCase();
-      if (mod && !e.shiftKey && k === 'p') {
+      if (e.key === 'F1' && !mod && !e.altKey) {
+        e.preventDefault();
+        actions.command('help');
+      } else if (mod && !e.shiftKey && k === 'p') {
         e.preventDefault();
         setDialog({ type: 'quickOpen' });
       } else if (mod && e.shiftKey && k === 'f') {
@@ -1591,64 +1630,76 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // Commands by name: the desktop menu's, and Help's (commands.js), so both run the same.
+  actions.command = (command) => {
+    const run = {
+      new: () => actions.newFile(),
+      'open-disk': () => actions.openFromDisk(),
+      'save-copy': () => actions.saveCopy(),
+      'close-tab': () => store.session.active && actions.close(store.session.active),
+      'reopen-tab': () => actions.reopenClosed(),
+      'next-tab': () => actions.cycleTab(1),
+      'prev-tab': () => actions.cycleTab(-1),
+      'quick-open': () => setDialog({ type: 'quickOpen' }),
+      trash: () => setDialog({ type: 'trash' }),
+      split: () => actions.toggleSplit(),
+      'type-out': () => actions.typeOut(),
+      'disk-open': () => actions.openDiskFiles(),
+      'folder-open': () => actions.openFolder(),
+      'server-add': () => actions.editServer(),
+      'servers-ssh': () => actions.importSshConfig(),
+      terminal: () => actions.toggleTerminal(),
+      folders: () => actions.showFolders(),
+      'clipboard-history': () => actions.openClipboardHistory(),
+      captures: () => actions.takeCaptures(),
+      'screenshot-ocr': () => actions.screenshotToText(),
+      'image-ocr': () => actions.imageToText(),
+      snippets: () => actions.openSnippets(),
+      'ask-selection': () => actions.askSelection(),
+      outline: () => actions.toggleOutline(),
+      'filter-lines': () => actions.toggleFilter(),
+      'macro-record': () => actions.toggleRecording(),
+      'macro-play': () => actions.playMacro(),
+      'macro-run': () => actions.runMacro(),
+      find: () => actions.run('find'),
+      replace: () => actions.run('replace'),
+      'goto-line': () => actions.run('gotoLine'),
+      'find-in-files': () => setPanel('search'),
+      assistant: () => setPanel((p) => (p === 'assistant' ? null : 'assistant')),
+      sync: () => {
+        hostRef.current?.flushAll();
+        syncNow();
+      },
+      settings: () => setView('settings'),
+      'toggle-sidebar': () => setSidebar((s) => !s),
+      'toggle-wrap': () => actions.toggleWrap(),
+      'read-aloud': () => actions.readAloud(),
+      flush: async () => {
+        hostRef.current?.flushAll();
+        await flush();
+        if (store.pendingCount()) await Promise.race([syncNow(), new Promise((r) => setTimeout(r, 5000))]);
+        window.desktop.closeReady?.();
+      },
+      format: () => actions.formatDocument(),
+      preview: () => actions.togglePreview(),
+      help: () => setDialog((d) => (d?.type === 'help' ? null : { type: 'help' })),
+      'help-guide': () => setDialog({ type: 'help', tab: 'guide' }),
+      'compare-clipboard': () => actions.compareWithClipboard(),
+    };
+    if (run[command]) return run[command]();
+    // Editing commands (editor.js COMMANDS): upper case, sort lines, duplicate line…
+    actions.run(command);
+  };
+
   // Desktop menu commands.
   useEffect(() => {
     if (!window.desktop?.onCommand) return;
     return window.desktop.onCommand(async (command) => {
-      const run = {
-        new: () => actions.newFile(),
-        'open-disk': () => actions.openFromDisk(),
-        'save-copy': () => actions.saveCopy(),
-        'close-tab': () => store.session.active && actions.close(store.session.active),
-        'reopen-tab': () => actions.reopenClosed(),
-        'next-tab': () => actions.cycleTab(1),
-        'prev-tab': () => actions.cycleTab(-1),
-        'quick-open': () => setDialog({ type: 'quickOpen' }),
-        trash: () => setDialog({ type: 'trash' }),
-        split: () => actions.toggleSplit(),
-        'type-out': () => actions.typeOut(),
-        'disk-open': () => actions.openDiskFiles(),
-        'folder-open': () => actions.openFolder(),
-        'server-add': () => actions.editServer(),
-        'servers-ssh': () => actions.importSshConfig(),
-        terminal: () => actions.toggleTerminal(),
-        folders: () => actions.showFolders(),
-        'clipboard-history': () => actions.openClipboardHistory(),
-        captures: () => actions.takeCaptures(),
-        'screenshot-ocr': () => actions.screenshotToText(),
-        'image-ocr': () => actions.imageToText(),
-        snippets: () => actions.openSnippets(),
-        'ask-selection': () => actions.askSelection(),
-        outline: () => actions.toggleOutline(),
-        'filter-lines': () => actions.toggleFilter(),
-        'macro-record': () => actions.toggleRecording(),
-        'macro-play': () => actions.playMacro(),
-        'macro-run': () => actions.runMacro(),
-        find: () => actions.run('find'),
-        replace: () => actions.run('replace'),
-        'goto-line': () => actions.run('gotoLine'),
-        'find-in-files': () => setPanel('search'),
-        assistant: () => setPanel((p) => (p === 'assistant' ? null : 'assistant')),
-        sync: () => {
-          hostRef.current?.flushAll();
-          syncNow();
-        },
-        settings: () => setView('settings'),
-        'toggle-sidebar': () => setSidebar((s) => !s),
-        'toggle-wrap': () => actions.toggleWrap(),
-        'read-aloud': () => actions.readAloud(),
-        flush: async () => {
-          hostRef.current?.flushAll();
-          await flush();
-          if (store.pendingCount()) await Promise.race([syncNow(), new Promise((r) => setTimeout(r, 5000))]);
-          window.desktop.closeReady?.();
-        },
-      };
       if (command.startsWith('route:')) {
         location.hash = command.slice(6);
         return;
       }
-      run[command]?.();
+      actions.command(command);
     });
   }, []);
 
@@ -1711,6 +1762,7 @@ export function App() {
       <button type="button" class="icon-btn" aria-label="Find in files" title="Find in files (Ctrl+Shift+F)" aria-pressed=${panel === 'search'} onClick=${() => actions.togglePanel('search')}><${Icon} name="search" /></button>
       ${settings.llm.enabled && html`<button type="button" class="icon-btn" aria-label="Assistant" title="Local model (Ctrl+Shift+A)" aria-pressed=${panel === 'assistant'} onClick=${() => actions.togglePanel('assistant')}><${Icon} name="sparkle" /></button>`}
       <${SyncBadge} sync=${sync} compact=${narrow} />
+      <button type="button" class="icon-btn help-btn" aria-label="Help" title="Help: commands, shortcuts and the guide (F1)" onClick=${() => actions.command('help')}><${Icon} name="help" /></button>
       <button type="button" class="icon-btn" aria-label="Settings" title="Settings" aria-pressed=${view === 'settings'} onClick=${() => setView(view === 'settings' ? 'editor' : 'settings')}><${Icon} name="settings" /></button>
     </header>
 
@@ -1795,6 +1847,7 @@ export function App() {
     ${dialog?.type === 'clipboard' && html`<${ClipboardHistory} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'macro' && html`<${MacroDialog} steps=${dialog.steps} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'trash' && html`<${TrashDialog} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'help' && html`<${HelpDialog} tab=${dialog.tab} query=${dialog.query} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'checklist' && store.get(dialog.id) && html`<${ChecklistDialog} file=${store.get(dialog.id)} text=${dialog.text} firstLine=${dialog.firstLine} projects=${projects} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'snippets' && html`<${SnippetPicker} selection=${dialog.selection} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'file' && store.get(dialog.id) && html`<${FileDialog} file=${store.get(dialog.id)} projects=${projects} actions=${actions} onClose=${() => setDialog(null)} />`}

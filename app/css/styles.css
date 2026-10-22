@@ -5996,3 +5996,179 @@ svg.up {
     display: none;
   }
 }
+
+/* ---- Help (ui/help.js): the cheat sheet and the guide -------------------------- */
+.help-dialog.modal {
+  width: min(980px, calc(100vw - 32px));
+  height: min(760px, calc(100dvh - 48px));
+}
+
+.help-dialog .modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.help-commands,
+.help-guide {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.help-commands {
+  flex-direction: column;
+  gap: 10px;
+}
+
+.help-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.help-search {
+  flex: 1;
+}
+
+.help-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  columns: 2 360px;
+  column-gap: 28px;
+}
+
+.help-group {
+  break-inside: avoid-column;
+  margin-bottom: 14px;
+}
+
+.help-group h3 {
+  margin: 0 0 4px;
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.help-command {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 30px;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13.5px;
+  text-align: left;
+  break-inside: avoid;
+}
+
+button.help-command:hover,
+button.help-command:focus-visible {
+  background: var(--surface-2);
+  outline: none;
+}
+
+.help-command.static {
+  color: var(--text-2);
+}
+
+.help-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.help-keys {
+  flex: none;
+  color: var(--text-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.help-keys kbd {
+  font-size: 11.5px;
+}
+
+.help-guide {
+  gap: 16px;
+}
+
+.help-toc {
+  display: flex;
+  flex: 0 0 220px;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.help-toc .help-search {
+  flex: none;
+  margin-bottom: 6px;
+}
+
+.help-toc-item {
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 13px;
+  text-align: left;
+}
+
+.help-toc-item:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.help-guide-body {
+  flex: 1;
+  min-width: 0;
+  padding-right: 6px;
+  overflow-y: auto;
+}
+
+@media (max-width: 720px) {
+  .help-guide {
+    flex-direction: column;
+  }
+
+  .help-toc {
+    flex: none;
+    max-height: 140px;
+  }
+}
+
+/* Print: only the cheat sheet. */
+@media print {
+  body.printing-help * {
+    visibility: hidden;
+  }
+
+  body.printing-help .help-list,
+  body.printing-help .help-list * {
+    visibility: visible;
+  }
+
+  body.printing-help .help-list {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    overflow: visible;
+    columns: 2;
+  }
+
+  body.printing-help .app {
+    height: auto;
+  }
+}
