@@ -20,7 +20,7 @@ function useSettled(text) {
 function Problem({ message, line, column, onGoTo }) {
   return html`<div class="notice error preview-problem">
     <${Icon} name="alert" size=${16} /><span>${message}${line ? ` (line ${line}, column ${column})` : ''}</span>
-    ${line && html`<button type="button" class="btn sm" onClick=${() => onGoTo(line, column)}>Show in the text</button>`}
+    ${line && onGoTo && html`<button type="button" class="btn sm" onClick=${() => onGoTo(line, column)}>Show in the text</button>`}
   </div>`;
 }
 
@@ -31,6 +31,8 @@ function MarkdownPreview({ text, onToggle }) {
     const box = e.target.closest?.('input.md-check');
     if (!box) return;
     e.preventDefault();
+    // Read-only (a file in the folders view): the box stays as it is.
+    if (!onToggle) return;
     const index = [...e.currentTarget.querySelectorAll('input.md-check')].indexOf(box);
     const next = toggleChecklistItem(text, index);
     setShown(next);
@@ -177,15 +179,20 @@ function TablePreview({ text, delimiter }) {
  * The preview next to the text. `full` fills the editor's place (`onFull` switches);
  * Full screen shows only the preview; `onClose` hides it.
  */
+/** The reading view itself, without the pane around it (the folders view shows it too, read-only). */
+export function PreviewBody({ kind, text = '', name, onToggle, onGoTo }) {
+  if (kind === 'markdown') return html`<${MarkdownPreview} text=${text} onToggle=${onToggle} />`;
+  if (kind === 'html') return html`<${HtmlPreview} text=${text} name=${name} />`;
+  if (kind === 'svg') return html`<${SvgPreview} text=${text} name=${name} />`;
+  if (kind === 'json') return html`<${JsonPreview} text=${text} onGoTo=${onGoTo} />`;
+  if (kind === 'xml') return html`<${XmlPreview} text=${text} />`;
+  if (kind === 'csv' || kind === 'tsv') return html`<${TablePreview} text=${text} delimiter=${kind === 'tsv' ? '\t' : ','} />`;
+  return null;
+}
+
 export function Preview({ kind, text = '', name, onToggle, onGoTo, full = false, onFull, onClose }) {
   const pane = useRef(null);
-  let body;
-  if (kind === 'markdown') body = html`<${MarkdownPreview} text=${text} onToggle=${onToggle} />`;
-  else if (kind === 'html') body = html`<${HtmlPreview} text=${text} name=${name} />`;
-  else if (kind === 'svg') body = html`<${SvgPreview} text=${text} name=${name} />`;
-  else if (kind === 'json') body = html`<${JsonPreview} text=${text} onGoTo=${onGoTo} />`;
-  else if (kind === 'xml') body = html`<${XmlPreview} text=${text} />`;
-  else if (kind === 'csv' || kind === 'tsv') body = html`<${TablePreview} text=${text} delimiter=${kind === 'tsv' ? '\t' : ','} />`;
+  const body = html`<${PreviewBody} kind=${kind} text=${text} name=${name} onToggle=${onToggle} onGoTo=${onGoTo} />`;
   return html`<div class="preview-pane preview-${kind} ${full ? 'full' : ''}" ref=${pane}>
     <div class="preview-head">
       <${Icon} name="eye" size=${14} /><span class="preview-title">Preview</span><span class="spacer" />

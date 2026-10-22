@@ -3,7 +3,7 @@
 // with the OS keychain, opens and saves files on disk, forwards requests to a
 // local model server (no CORS setup needed), opens tracker-editor:// links
 // from the tracker, and lets the app save and sync before the window closes.
-const { app, BrowserWindow, Menu, Notification, Tray, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, nativeImage, net, protocol, safeStorage, screen, shell } = require('electron');
+const { app, BrowserWindow, ClipboardItem, Menu, Notification, Tray, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, nativeImage, net, protocol, safeStorage, screen, shell } = require('electron');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const http = require('node:http');
@@ -14,6 +14,7 @@ const disk = require('./diskFiles.cjs');
 const folders = require('./folders.cjs');
 const os = require('node:os');
 const clips = require('./clipHistory.cjs');
+const zipFiles = require('./zip.cjs');
 
 const APP_DIR = path.join(__dirname, '..', 'app');
 const APP_ORIGIN = 'app://editor';
@@ -682,8 +683,57 @@ async function copyAcross(paths, dir) {
   return [...(local.length ? folders.copyInto(local, dir) : []), ...(await remote.downloadInto(paths.filter(isRemote), dir, folders.freePath))];
 }
 const sameServer = (paths, dir) => isRemote(dir) && paths.every((p) => isRemote(p) && remoteFiles.parseUri(p).id === remoteFiles.parseUri(dir).id);
-ipcMain.handle('folder:move', guard(async (_e, paths, dir) => {
+// Names already in a folder: asked about before a copy or move ('folder:existing'), then
+// with `onExists` 'skip' those are left out and with 'replace' the ones there go first
+// (to the Recycle Bin here; deleted on a server). 'keep' (the default) keeps both ("name (2)").
+const nameOf = (p) => (isRemote(p) ? path.posix.basename(remoteFiles.parseUri(p).path) : path.basename(p));
+async function takenNames(dir) {
+  if (isRemote(dir)) return new Set((await remote.list(dir)).entries.map((e) => e.name));
+  checkDir(dir);
+  return { has: (name) => fs.existsSync(path.join(dir, name)) };
+}
+const inFolder = (p, dir) => {
+  if (isRemote(p) !== isRemote(dir)) return false;
+  if (!isRemote(p)) return path.resolve(path.dirname(p)) === path.resolve(dir);
+  const a = remoteFiles.parseUri(p);
+  const b = remoteFiles.parseUri(dir);
+  return a.id === b.id && path.posix.dirname(a.path) === b.path;
+};
+async function resolveExisting(paths, dir, onExists) {
+  if (onExists !== 'skip' && onExists !== 'replace') return paths;
+  const taken = await takenNames(dir);
+  const out = [];
+  for (const p of paths) {
+    const name = nameOf(p);
+    if (inFolder(p, dir) || !taken.has(name)) {
+      out.push(p);
+      continue;
+    }
+    if (onExists === 'skip') continue;
+    if (isRemote(dir)) {
+      const { id, path: d } = remoteFiles.parseUri(dir);
+      const target = remoteFiles.toUri(id, path.posix.join(d, name));
+      const from = isRemote(p) ? remoteFiles.parseUri(p) : null;
+      if (from?.id === id && (from.path === path.posix.join(d, name) || from.path.startsWith(`${path.posix.join(d, name)}/`))) throw new Error(`${name} cannot replace the folder it is in.`);
+      await remote.remove([target]);
+    } else {
+      const target = path.join(dir, name);
+      if (!isRemote(p) && (path.resolve(p) === path.resolve(target) || folders.isInside(path.resolve(target), path.resolve(p)))) throw new Error(`${name} cannot replace the folder it is in.`);
+      await shell.trashItem(checkEntry(target));
+    }
+    out.push(p);
+  }
+  return out;
+}
+ipcMain.handle('folder:existing', guard(async (_e, dir, names) => {
+  if (!Array.isArray(names) || names.length > 5000) throw new Error('Nothing to check.');
+  const taken = await takenNames(dir);
+  return names.filter((n) => typeof n === 'string' && n && !/[\\/]/.test(n) && taken.has(n));
+}));
+ipcMain.handle('folder:move', guard(async (_e, paths, dir, opts = {}) => {
   checkList(paths);
+  paths = await resolveExisting(paths, dir, opts?.onExists);
+  if (!paths.length) return [];
   if (!isRemote(dir) && !paths.some(isRemote)) return folders.moveInto(paths.map(checkEntry), checkDir(dir));
   if (sameServer(paths, dir)) return remote.moveWithin(paths, dir);
   // Between this computer and a server: copied, then the originals removed (from here, to the Recycle Bin).
@@ -692,20 +742,111 @@ ipcMain.handle('folder:move', guard(async (_e, paths, dir) => {
   for (const c of copies) await (isRemote(c.from) ? remote.remove([c.from]) : shell.trashItem(c.from));
   return copies;
 }));
-ipcMain.handle('folder:copy', guard((_e, paths, dir) => {
+ipcMain.handle('folder:copy', guard(async (_e, paths, dir, opts = {}) => {
   checkList(paths);
+  paths = await resolveExisting(paths, dir, opts?.onExists);
+  if (!paths.length) return [];
   if (!isRemote(dir) && !paths.some(isRemote)) return folders.copyInto(paths.map((p) => (checkFile(p), p)), checkDir(dir));
   return copyAcross(paths, dir);
 }));
 // Files pasted or dropped from another app: the preload takes their paths from the
 // File objects (webUtils), so the page cannot name other files. They are copied in;
 // they do not become reachable themselves.
-ipcMain.handle('folder:copy-in', guard((_e, paths, dir) => {
-  const sources = (Array.isArray(paths) ? paths : []).filter((p) => typeof p === 'string' && path.isAbsolute(p) && fs.existsSync(p));
+ipcMain.handle('folder:copy-in', guard(async (_e, paths, dir, opts = {}) => {
+  let sources = (Array.isArray(paths) ? paths : []).filter((p) => typeof p === 'string' && path.isAbsolute(p) && fs.existsSync(p));
   if (!sources.length) throw new Error('Those files are not on disk.');
+  sources = await resolveExisting(sources, dir, opts?.onExists);
+  if (!sources.length) return [];
   if (isRemote(dir)) return remote.copyInto(checkList(sources), dir);
   return folders.copyInto(checkList(sources), checkDir(dir));
 }));
+// Zip archives (folders on this computer): the selection compressed next to it, or an
+// archive extracted into a new folder beside it (zip.cjs: never outside it).
+ipcMain.handle('folder:zip', guard(async (_e, paths, dir) => {
+  checkList(paths);
+  if (isRemote(dir) || paths.some(isRemote)) throw new Error('Zip works with folders on this computer.');
+  checkDir(dir);
+  const sources = paths.map(checkEntry);
+  const first = path.basename(sources[0]);
+  const stem = sources.length > 1 ? 'Archive' : fs.statSync(sources[0]).isDirectory() ? first : first.replace(/\.[^.]+$/, '') || first;
+  const out = folders.freePath(dir, `${stem}.zip`);
+  checkFile(out);
+  await zipFiles.zipPaths(sources, out);
+  return out;
+}));
+ipcMain.handle('folder:unzip', guard(async (_e, file) => {
+  if (isRemote(file)) throw new Error('Extracting works with folders on this computer.');
+  checkEntry(file);
+  const dest = folders.freePath(path.dirname(file), path.basename(file).replace(/\.zip$/i, '') || 'Archive');
+  checkFile(dest);
+  return { ...(await zipFiles.unzipFile(file, dest)), folder: dest };
+}));
+// Copied or cut files on the system clipboard, so the file explorer (Explorer, Finder,
+// Files) can paste them, with their paths as text; `clipStamp` recognizes them when they
+// are pasted back here.
+let clipStamp = null;
+const rawFormat = (format) => `electron application/osclipboard;format="${format}"`;
+const fileClipboardScript = (files, cut, stamp) => `
+Add-Type -AssemblyName System.Windows.Forms
+$paths = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${Buffer.from(JSON.stringify(files)).toString('base64')}')) | ConvertFrom-Json
+$list = New-Object System.Collections.Specialized.StringCollection
+foreach ($p in $paths) { [void]$list.Add($p) }
+$data = New-Object System.Windows.Forms.DataObject
+$data.SetFileDropList($list)
+$data.SetText(($paths -join [Environment]::NewLine))
+$data.SetData('Preferred DropEffect', (New-Object System.IO.MemoryStream(,[byte[]](${cut ? 2 : 5},0,0,0))))
+$data.SetData('TrackerEditorClip', (New-Object System.IO.MemoryStream(,[System.Text.Encoding]::ASCII.GetBytes('${stamp}'))))
+[System.Windows.Forms.Clipboard]::SetDataObject($data, $true)
+`;
+const escapeXml = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+// The text of a raw format on the clipboard ('' when it is not there).
+async function clipboardFormat(format) {
+  try {
+    if (!(await clipboard.has(rawFormat(format)))) return '';
+    for (const item of await clipboard.read()) {
+      if (item.types.includes(rawFormat(format))) return Buffer.from(await (await item.getType(rawFormat(format))).arrayBuffer()).toString('latin1');
+    }
+  } catch {
+    // not readable: not ours
+  }
+  return '';
+}
+ipcMain.handle('folder:clip-files', guard(async (_e, paths, op) => {
+  checkList(paths);
+  if (paths.some(isRemote)) return false;
+  const files = paths.map(checkEntry);
+  const cut = op === 'cut';
+  const stamp = crypto.randomBytes(8).toString('hex');
+  clipStamp = null;
+  if (process.platform === 'win32') {
+    // Explorer reads CF_HDROP, which only the system's own data object writes.
+    const script = Buffer.from(fileClipboardScript(files, cut, stamp), 'utf16le').toString('base64');
+    await new Promise((resolve, reject) =>
+      require('node:child_process').execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-STA', '-EncodedCommand', script], { windowsHide: true, timeout: 15000 }, (err) => (err ? reject(err) : resolve())),
+    );
+  } else {
+    const urls = files.map((f) => pathToFileURL(f).href);
+    const formats = {
+      'text/plain': files.join('\n'),
+      [rawFormat('TrackerEditorClip')]: new Blob([stamp]),
+    };
+    if (process.platform === 'darwin') {
+      formats[rawFormat('NSFilenamesPboardType')] = new Blob([
+        `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><array>${files.map((f) => `<string>${escapeXml(f)}</string>`).join('')}</array></plist>`,
+      ]);
+      formats[rawFormat('public.file-url')] = new Blob([urls[0]]);
+    } else {
+      // GNOME Files and most others (the first line says copy or cut), KDE, and the rest by their URLs.
+      formats[rawFormat('x-special/gnome-copied-files')] = new Blob([`${cut ? 'cut' : 'copy'}\n${urls.join('\n')}`]);
+      formats[rawFormat('text/uri-list')] = new Blob([`${urls.join('\r\n')}\r\n`]);
+      if (cut) formats[rawFormat('application/x-kde-cutselection')] = new Blob(['1']);
+    }
+    await clipboard.write([new ClipboardItem(formats)]);
+  }
+  clipStamp = stamp;
+  return true;
+}));
+ipcMain.handle('folder:clip-ours', guard(async () => Boolean(clipStamp) && (await clipboardFormat('TrackerEditorClip')).includes(clipStamp)));
 // To the Recycle Bin (macOS: the Trash), from where they can be restored.
 // Files on a server are deleted for good (servers have no Recycle Bin; the page asks first and says so).
 ipcMain.handle('folder:trash', guard(async (_e, paths) => {

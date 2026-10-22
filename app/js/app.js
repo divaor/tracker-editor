@@ -551,6 +551,18 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
           return ipcMessage(err);
         }
       },
+      /** Two files on disk side by side: the second opens in a tab, compared with the first. */
+      async compareDiskFiles(a, b) {
+        let left;
+        try {
+          left = await window.desktop.disk.read(a);
+        } catch (err) {
+          return toast(`${a.split(/[\\/]/).pop()}: ${ipcMessage(err)}`, { kind: 'error' });
+        }
+        if (await actions.openDiskPath(b)) return;
+        const tab = store.diskTab(b);
+        setCompare({ key: diskKey(b), name: tab.name, language: '', left: { label: left.name, text: left.text }, right: { label: tab.name, text: tab.text }, actions: [] });
+      },
       /** Open tabs follow files and folders renamed or moved in the folders view ([{ from, to }]). */
       followDiskMoves(moves) {
         hostRef.current?.flushAll();

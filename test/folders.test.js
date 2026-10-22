@@ -231,6 +231,16 @@ test('the folder as a tree: expanded folders show their contents, a filter keeps
   assert.equal(show({ expanded: new Set(['/r/docs']) }), 'docs/|src|readme.md');
 });
 
+test('what the preview shows for a file', () => {
+  assert.equal(page.peekKind('photo.JPG'), 'image');
+  assert.equal(page.peekKind('icon.webp'), 'image');
+  assert.equal(page.peekKind('report.pdf'), 'pdf');
+  assert.equal(page.peekKind('notes.md'), 'text');
+  assert.equal(page.peekKind('Makefile'), 'text');
+  assert.equal(page.peekKind('song.mp3'), 'none');
+  assert.equal(page.peekKind('photo.heic'), 'none');
+});
+
 test('recent and favorite folders', () => {
   assert.deepEqual(page.pushRecent(['/a', '/b', '/c'], '/b'), ['/b', '/a', '/c']);
   assert.deepEqual(page.pushRecent(['/a', '/b'], '/c', 2), ['/c', '/a']);

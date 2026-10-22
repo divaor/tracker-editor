@@ -6,7 +6,7 @@ import { saveSettings } from '../settings.js';
 import { diskKey } from '../store.js';
 import { server, servers, serverStatus } from '../servers.js';
 import { isRemotePath, protocolName, remoteParts, remoteRoot } from '../where.js';
-import { ClearButton, Modal, toast } from './components.js';
+import { ClearButton, dismissToast, Modal, toast } from './components.js';
 import { mirrorOf } from '../mirrors.js';
 import { MirrorBar } from './mirrors.js';
 import { Icon } from './icons.js';
@@ -46,6 +46,21 @@ function DeleteDialog({ entries, onConfirm, onClose }) {
     <p>${onServer ? html`Delete ${what} from <strong>${onServer.name}</strong>?` : html`Move ${what} to ${binName()}?`}</p>
     ${entries.length > 1 && html`<ul class="delete-list">${names.map((n) => html`<li key=${n}>${n}</li>`)}${entries.length > names.length && html`<li class="muted">and ${entries.length - names.length} more</li>`}</ul>`}
     <p class="muted small">${onServer ? 'Files deleted on a server cannot be brought back from here.' : `You can restore ${entries.length === 1 ? 'it' : 'them'} from there.`}</p>
+  </${Modal}>`;
+}
+
+/** Names already where files are being copied or moved: Replace, Keep both or Skip, for all of them. */
+function ExistsDialog({ names, target, onChoose, onClose }) {
+  const onServer = isRemotePath(target);
+  const shown = names.slice(0, 8);
+  return html`<${Modal} title="Already there" onClose=${onClose} className="exists-dialog"
+    footer=${html`<button type="button" class="btn ghost" onClick=${onClose}>Cancel</button><span class="spacer" />
+      <button type="button" class="btn" onClick=${() => onChoose('skip')} title="Leave out the ones with these names">Skip</button>
+      <button type="button" class="btn" onClick=${() => onChoose('keep')} title="The new ones get a number: name (2)">Keep both</button>
+      <button type="button" class="btn primary" onClick=${() => onChoose('replace')}>Replace</button>`}>
+    <p>${names.length === 1 ? html`<strong>${names[0]}</strong> is` : `${names.length} items with these names are`} already in <strong>${baseName(onServer ? remoteParts(target).path || '/' : target)}</strong>.</p>
+    ${names.length > 1 && html`<ul class="delete-list">${shown.map((n) => html`<li key=${n}>${n}</li>`)}${names.length > shown.length && html`<li class="muted">and ${names.length - shown.length} more</li>`}</ul>`}
+    <p class="muted small">Replace: the ones there ${onServer ? 'are deleted from the server for good' : `go to ${binName()}`}. Keep both: the new ones get a number, as “name (2)”. Skip: those are left out.</p>
   </${Modal}>`;
 }
 
@@ -96,6 +111,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   const [dropTarget, setDropTarget] = useState(null);
   const [, setClipVersion] = useState(0);
   // The tree: folders opened in place (their chevron) and what they hold, as listed.
+  const [exists, setExists] = useState(null); // { names, target, run }: asked before a copy or move
   const [expanded, setExpanded] = useState(() => new Set());
   const [children, setChildren] = useState(() => new Map()); // folder → entries (or { error })
   const list = useRef(null);
@@ -229,10 +245,15 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       e.preventDefault();
       setClip(e.type === 'cut' ? 'cut' : 'copy', targets(), (text) => e.clipboardData.setData('text/plain', text));
     };
-    const onPaste = (e) => {
+    const onPaste = async (e) => {
       if (!inList()) return;
       e.preventDefault();
-      pasteInto(dir, { files: [...(e.clipboardData?.files ?? [])], text: e.clipboardData?.getData('text/plain') ?? '' });
+      const files = [...(e.clipboardData?.files ?? [])];
+      const text = e.clipboardData?.getData('text/plain') ?? '';
+      // What was cut or copied here, when the clipboard still holds it (as files, or as their paths).
+      const ours = Boolean(clip) && (clip.system ? await bridge.clipOurs().catch(() => false) : !files.length && (!text || text === clip.text));
+      if (clip && !ours) clip = null;
+      pasteInto(dir, { files, text, ours });
     };
     document.addEventListener('copy', onCopy);
     document.addEventListener('cut', onCopy);
@@ -349,10 +370,20 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       fail(err);
     }
   };
-  const moveTo = async (paths, target) => {
+  // Names already in `target` are asked about first (Replace / Keep both / Skip); `run(onExists)` does it.
+  const askExisting = async (names, target, run) => {
+    const taken = names.length ? await bridge.existing(target, names).catch(() => []) : [];
+    if (!taken.length) return run('keep');
+    setExists({ names: taken, target, run });
+  };
+  const elsewhere = (paths, target) => paths.filter((p) => dirOf(p) !== target).map(baseName);
+  const moveTo = (paths, target) => askExisting(elsewhere(paths, target), target, (onExists) => moveNow(paths, target, onExists));
+  const copyTo = (paths, target) => askExisting(elsewhere(paths, target), target, (onExists) => copyNow(paths, target, onExists));
+  const copyIn = (files, target) => askExisting([...files].map((f) => f.name).filter(Boolean), target, (onExists) => copyInNow(files, target, onExists));
+  const moveNow = async (paths, target, onExists) => {
     try {
-      const moves = await bridge.move(paths, target);
-      if (!moves.length) return;
+      const moves = await bridge.move(paths, target, { onExists });
+      if (!moves.length) return onExists === 'skip' && toast('Nothing was moved: those are there already.');
       await after({ moves }, `Moved ${count(moves.length, 'item')} to ${baseName(target)}`, async () => {
         const back = [];
         for (const m of moves) back.push(...(await bridge.move([m.to], dirOf(m.from)).catch((err) => (fail(err), []))));
@@ -362,9 +393,10 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       fail(err);
     }
   };
-  const copyTo = async (paths, target) => {
+  const copyNow = async (paths, target, onExists) => {
     try {
-      const copies = await bridge.copy(paths, target);
+      const copies = await bridge.copy(paths, target, { onExists });
+      if (!copies.length) return toast('Nothing was copied: those are there already.');
       await after({ made: copies.map((c) => c.to) }, `Copied ${count(copies.length, 'item')}${target === dir ? '' : ` to ${baseName(target)}`}`, () =>
         bridge.trash(copies.map((c) => c.to)).then(() => load(dir), fail),
       );
@@ -372,9 +404,10 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       fail(err);
     }
   };
-  const copyIn = async (files, target) => {
+  const copyInNow = async (files, target, onExists) => {
     try {
-      const copies = await bridge.copyIn(files, target);
+      const copies = await bridge.copyIn(files, target, { onExists });
+      if (!copies.length) return toast('Nothing was added: those are there already.');
       await after({ made: copies.map((c) => c.to) }, `Added ${count(copies.length, 'item')}${target === dir ? '' : ` to ${baseName(target)}`}`, () =>
         bridge.trash(copies.map((c) => c.to)).then(() => load(dir), fail),
       );
@@ -395,18 +428,24 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     }
     list.current?.focus();
   };
+  // `write(text)` puts the paths on the clipboard as text. Files here then go there as files too
+  // (with their paths as text), so the file explorer can paste them; that comes a moment later,
+  // after the copy event's own text.
   function setClip(op, items, write) {
     const paths = items.map((e) => e.path);
     clip = { op, paths, text: paths.join('\n') };
     write(clip.text);
+    if (!remote && bridge.clipFiles) {
+      const mine = clip;
+      setTimeout(() => bridge.clipFiles(paths, op).then((ok) => ok && clip === mine && (mine.system = true), () => {}), 30);
+    }
     setClipVersion((v) => v + 1);
     toast(`${op === 'cut' ? 'Cut' : 'Copied'} ${count(paths.length, 'item')}. Ctrl+V pastes ${paths.length === 1 ? 'it' : 'them'} in a folder.`, { timeout: 2500 });
   }
-  const clipFromMenu = (op) => targets().length && setClip(op, targets(), (text) => navigator.clipboard.writeText(text).catch(() => {}));
+  const clipFromMenu = (op) => targets().length && setClip(op, targets(), (text) => (remote || !bridge.clipFiles) && navigator.clipboard.writeText(text).catch(() => {}));
   /** Files from another app are copied in; what was cut or copied here is moved or copied; plain text becomes a new file. */
-  async function pasteInto(target, { files = [], text = '' }) {
-    if (files.length) return copyIn(files, target);
-    if (clip && (!text || text === clip.text)) {
+  async function pasteInto(target, { files = [], text = '', ours = Boolean(clip) && !files.length && (!text || text === clip.text) }) {
+    if (ours && clip) {
       const { op, paths } = clip;
       if (op === 'cut') {
         clip = null;
@@ -415,6 +454,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       }
       return copyTo(paths, target);
     }
+    if (files.length) return copyIn(files, target);
     if (text.trim()) {
       if (target !== dir) go(target);
       return setCreating({ kind: 'file', name: 'Pasted text.txt', text });
@@ -426,6 +466,33 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     list.current?.focus();
     claimSelection();
     bridge.paste().catch(fail);
+  };
+
+  // ---- Zip, compare ----
+
+  const zipSelected = async (items) => {
+    toast(`Compressing ${items.length === 1 ? items[0].name : count(items.length, 'item')}…`, { key: 'zip', timeout: 600000 });
+    try {
+      const made = await bridge.zip(items.map((e) => e.path), dir);
+      dismissToast('zip');
+      await after({ made: [made] }, `Made ${baseName(made)}`, () => bridge.trash([made]).then(() => load(dir), fail));
+    } catch (err) {
+      dismissToast('zip');
+      fail(err);
+    }
+  };
+  const extract = async (e) => {
+    toast(`Extracting ${e.name}…`, { key: 'zip', timeout: 600000 });
+    try {
+      const got = await bridge.unzip(e.path);
+      dismissToast('zip');
+      await after({ made: [got.folder] }, `Extracted ${count(got.files, 'file')} into ${baseName(got.folder)}${got.skipped.length ? ` (${count(got.skipped.length, 'unsafe name')} left out)` : ''}`, () =>
+        bridge.trash([got.folder]).then(() => load(dir), fail),
+      );
+    } catch (err) {
+      dismissToast('zip');
+      fail(err);
+    }
   };
 
   // ---- Dragging ----
@@ -584,6 +651,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       { label: one?.dir ? 'Open' : 'Open (Enter)', icon: one?.dir ? 'folderOpen' : 'file', run: openSelected },
       one && !one.dir && { label: 'Open with its program', icon: 'external', run: () => openOutside(one) },
       images.length && images.length === items.length && { label: `Text from ${images.length === 1 ? 'the image' : `${images.length} images`}…`, icon: 'scan', run: () => actions.readImageFiles(images.map((e) => e.path), dir) },
+      files.length === 2 && items.length === 2 && files.every((e) => opensInEditor(e.name)) && { label: 'Compare the two', icon: 'columns', run: () => actions.compareDiskFiles(files[0].path, files[1].path) },
       { separator: true },
       { label: 'Cut (Ctrl+X)', icon: 'scissors', run: () => clipFromMenu('cut') },
       { label: 'Copy (Ctrl+C)', icon: 'copy', run: () => clipFromMenu('copy') },
@@ -592,6 +660,8 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       one && { label: 'Rename (F2)', icon: 'edit', run: () => setRenaming(one.path) },
       { label: 'Delete (Del)', icon: 'trash', danger: true, run: () => setConfirm(items) },
       { separator: true },
+      !remote && { label: one ? `Compress to ${one.dir ? one.name : one.name.replace(/\.[^.]+$/, '') || one.name}.zip` : `Compress ${count(items.length, 'item')} to a zip`, icon: 'archive', run: () => zipSelected(items) },
+      !remote && one && !one.dir && /\.zip$/i.test(one.name) && { label: 'Extract into a new folder', icon: 'archive', run: () => extract(one) },
       { label: one ? 'Copy path' : 'Copy paths', icon: 'copy', run: () => (one ? actions.copyPath(one.path) : navigator.clipboard.writeText(items.map((e) => e.path).join('\n')).then(() => toast('Paths copied'))) },
       !remote && { label: one ? 'Copy for Claude (the path)' : 'Copy for Claude (the paths)', icon: 'claude', run: () => navigator.clipboard.writeText(items.map((e) => quotePath(e.path)).join(' ')).then(() => toast('On the clipboard: paste it into Claude')) },
       files.length && files.length === items.length && files.every((e) => opensInEditor(e.name)) && { label: 'Copy into my files (synced)', icon: 'filePlus', run: () => files.forEach((e) => actions.copyToFiles(e.path)) },
@@ -843,5 +913,6 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     html`<${Menu} items=${menu.favorite ? favoriteItems(menu.favorite) : menu.entry ? entryItems() : backgroundItems()} at=${menu.at}
       label=${menu.favorite ? placeName(menu.favorite) : (menu.entry?.name ?? (dir === root ? rootName(root) : baseName(dir)))} onClose=${() => setMenu(null)} />`}
     ${confirm && html`<${DeleteDialog} entries=${confirm} onConfirm=${() => remove(confirm)} onClose=${() => (setConfirm(null), list.current?.focus())} />`}
+    ${exists && html`<${ExistsDialog} names=${exists.names} target=${exists.target} onChoose=${(how) => (setExists(null), exists.run(how))} onClose=${() => (setExists(null), list.current?.focus())} />`}
   `;
 }

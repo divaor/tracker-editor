@@ -72,10 +72,19 @@ contextBridge.exposeInMainWorld('desktop', {
     newFile: (dir, name, opts) => ipcRenderer.invoke('folder:new-file', dir, name, opts),
     newFolder: (dir, name) => ipcRenderer.invoke('folder:new-folder', dir, name),
     rename: (from, name) => ipcRenderer.invoke('folder:rename', from, name),
-    move: (paths, dir) => ipcRenderer.invoke('folder:move', paths, dir),
-    copy: (paths, dir) => ipcRenderer.invoke('folder:copy', paths, dir),
+    // `opts.onExists`: 'keep' (both, "name (2)"), 'replace' or 'skip' for names already in `dir`.
+    move: (paths, dir, opts) => ipcRenderer.invoke('folder:move', paths, dir, opts),
+    copy: (paths, dir, opts) => ipcRenderer.invoke('folder:copy', paths, dir, opts),
+    // Which of these names are in `dir` already.
+    existing: (dir, names) => ipcRenderer.invoke('folder:existing', dir, names),
+    // Zip archives: the paths compressed into a .zip in `dir` (returns its path); one extracted into a new folder.
+    zip: (paths, dir) => ipcRenderer.invoke('folder:zip', paths, dir),
+    unzip: (file) => ipcRenderer.invoke('folder:unzip', file),
+    // Copied or cut files on the system clipboard for the file explorer; whether they are still there.
+    clipFiles: (paths, op) => ipcRenderer.invoke('folder:clip-files', paths, op),
+    clipOurs: () => ipcRenderer.invoke('folder:clip-ours'),
     // Files pasted or dropped from other apps (File objects): copied into `dir`.
-    copyIn(files, dir) {
+    copyIn(files, dir, opts) {
       const paths = [...files].map((file) => {
         try {
           return webUtils.getPathForFile(file);
@@ -83,7 +92,7 @@ contextBridge.exposeInMainWorld('desktop', {
           return '';
         }
       });
-      return ipcRenderer.invoke('folder:copy-in', paths.filter(Boolean), dir);
+      return ipcRenderer.invoke('folder:copy-in', paths.filter(Boolean), dir, opts);
     },
     trash: (paths) => ipcRenderer.invoke('folder:trash', paths),
     openExternal: (file) => ipcRenderer.invoke('folder:open-external', file),

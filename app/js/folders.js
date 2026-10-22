@@ -143,6 +143,10 @@ const BINARY = new Set(
 );
 const IMAGES = new Set('png jpg jpeg gif bmp webp tif tiff'.split(' '));
 
+const PEEK_IMAGES = new Set('png jpg jpeg gif bmp webp ico avif'.split(' '));
+/** What the folders view's preview shows for a file: 'image', 'pdf', 'text' (read as text) or 'none'. */
+export const peekKind = (name) => (PEEK_IMAGES.has(extOf(name)) ? 'image' : extOf(name) === 'pdf' ? 'pdf' : BINARY.has(extOf(name)) ? 'none' : 'text');
+
 /** Whether a file opens in the editor (text); the others open with their own program. Unknown types are tried as text. */
 export const opensInEditor = (name) => !BINARY.has(extOf(name));
 /** Images whose text can be read (OCR). */
