@@ -11,6 +11,7 @@ import {
   EditorView,
   HighlightStyle,
   LanguageDescription,
+  MatchDecorator,
   MergeView,
   StateEffect,
   StateField,
@@ -60,7 +61,9 @@ import {
   toggleComment,
   undo,
   unifiedMergeView,
+  ViewPlugin,
 } from '../vendor/cm/codemirror.js';
+import { parseLinks } from './outline.js';
 
 export { languages };
 
@@ -245,13 +248,34 @@ export function createCompareView(parent, { left, right, name = '', language = '
   };
 }
 
+// [[Links]] between notes: underlined; Ctrl/Cmd+click opens them (host option onOpenLink).
+const wikiLinkMatcher = new MatchDecorator({ regexp: /\[\[[^[\]\n]+?\]\]/g, decoration: Decoration.mark({ class: 'cm-wikilink', attributes: { title: 'Ctrl+click to open' } }) });
+const wikiLinks = ViewPlugin.fromClass(
+  class {
+    constructor(view) {
+      this.decorations = wikiLinkMatcher.createDeco(view);
+    }
+    update(update) {
+      this.decorations = wikiLinkMatcher.updateDeco(update, this.decorations);
+    }
+  },
+  { decorations: (v) => v.decorations },
+);
+
+/** The [[link]] at a position, if any. */
+function linkAt(state, pos) {
+  const line = state.doc.lineAt(pos);
+  return parseLinks(line.text).find((l) => pos - line.from >= l.from && pos - line.from <= l.to) ?? null;
+}
+
 /**
  * Creates the editor in `parent`. `onChange(key, text, { urgent })` gets the text of the
  * tab after you type (debounced); `onCursor(info)` the cursor position.
+ * `onOpenLink(target)` opens a [[link]]; `linkTargets()` lists names to complete after [[.
  * `openSide(key, el, …)` shows a second tab next to it (the split view); a tab's
  * state, with its undo history, moves between the panes.
  */
-export function createEditorHost(parent, { onChange, onCursor, onShortcut, settings }) {
+export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpenLink, linkTargets, settings }) {
   const states = new Map(); // key → EditorState
   const scroll = new Map(); // key → scroll position
   const pending = new Map(); // key → timer for onChange
@@ -285,6 +309,24 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, setti
     if (state) onChange(key, state.doc.toString(), { urgent });
   };
 
+  // After [[: the names of your files.
+  const linkCompletion = (ctx) => {
+    const m = ctx.matchBefore(/\[\[[^\]\n]*/);
+    if (!m || !linkTargets) return null;
+    return {
+      from: m.from + 2,
+      validFor: /^[^\]\n]*$/,
+      options: linkTargets().map((name) => ({
+        label: name,
+        type: 'text',
+        apply: (view, _completion, from, to) => {
+          const closed = view.state.sliceDoc(to, to + 2) === ']]';
+          view.dispatch({ changes: { from, to, insert: closed ? name : `${name}]]` }, selection: { anchor: from + name.length + 2 } });
+        },
+      })),
+    };
+  };
+
   const report = (state) => {
     const sel = state.selection.main;
     const line = state.doc.lineAt(sel.head);
@@ -305,7 +347,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, setti
       bracketMatching(),
       closeBrackets(),
       autocompletion({ activateOnTyping: true }),
-      EditorState.languageData.of(() => [{ autocomplete: completeAnyWord }]),
+      EditorState.languageData.of(() => [{ autocomplete: completeAnyWord }, { autocomplete: linkCompletion }]),
       rectangularSelection(),
       crosshairCursor(),
       highlightActiveLine(),
@@ -344,7 +386,19 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, setti
         if (update.docChanged || update.selectionSet) report(update.state);
       }),
       EditorView.contentAttributes.of({ spellcheck: 'false', autocorrect: 'off', autocapitalize: 'off' }),
-      EditorView.domEventHandlers({ scroll: (_e, v) => scroll.set(key, v.scrollDOM.scrollTop) }),
+      EditorView.domEventHandlers({
+        scroll: (_e, v) => scroll.set(key, v.scrollDOM.scrollTop),
+        mousedown(e, v) {
+          if (!(e.ctrlKey || e.metaKey) || !onOpenLink) return false;
+          const pos = v.posAtCoords({ x: e.clientX, y: e.clientY });
+          const link = pos === null ? null : linkAt(v.state, pos);
+          if (!link) return false;
+          e.preventDefault();
+          onOpenLink(link.target);
+          return true;
+        },
+      }),
+      wikiLinks,
       // The text itself is in the state's doc.
       [],
     ];

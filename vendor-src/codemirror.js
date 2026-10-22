@@ -15,8 +15,12 @@ export {
   crosshairCursor,
   placeholder,
   Decoration,
+  ViewPlugin,
+  MatchDecorator,
+  WidgetType,
+  runScopeHandlers,
 } from '@codemirror/view';
-export { EditorState, EditorSelection, Compartment, Prec, Annotation, Transaction, StateField, StateEffect } from '@codemirror/state';
+export { EditorState, EditorSelection, Compartment, Prec, Annotation, Transaction, StateField, StateEffect, RangeSetBuilder } from '@codemirror/state';
 export {
   defaultKeymap,
   history,

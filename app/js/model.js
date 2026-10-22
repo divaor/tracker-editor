@@ -200,5 +200,7 @@ export function parseRoute(hash) {
   const value = rest.join('/');
   if (kind === 'file' && value) return { kind: 'file', id: decodeURIComponent(value) };
   if (kind === 'repo' && value) return { kind: 'repo', path: value.split('/').map(decodeURIComponent).join('/') };
+  // [[links]] in the preview (editor only; the tracker never builds these).
+  if (kind === 'link' && value) return { kind: 'link', name: decodeURIComponent(value) };
   return { kind: 'none' };
 }

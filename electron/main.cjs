@@ -435,6 +435,7 @@ function buildMenu() {
         item('Read Aloud', 'Alt+R', 'read-aloud'),
         shown('Split View', 'CmdOrCtrl+\\', 'split'),
         item('Local Model', 'CmdOrCtrl+Shift+A', 'assistant'),
+        shown('Outline and Links', 'CmdOrCtrl+Shift+O', 'outline'),
         { type: 'separator' },
         item('Next Tab', 'Ctrl+Tab', 'next-tab'),
         item('Previous Tab', 'Ctrl+Shift+Tab', 'prev-tab'),

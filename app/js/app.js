@@ -25,7 +25,9 @@ import { LockedFile } from './ui/encryption.js';
 import { TypeOutPanel } from './ui/typeOut.js';
 import { SnippetPicker } from './ui/snippets.js';
 import { AskSelectionDialog } from './ui/askSelection.js';
+import { OutlinePanel } from './ui/outline.js';
 import { snippetNameFrom } from './snippets.js';
+import { linkName, resolveLink } from './outline.js';
 import { prepareTyping, typingDelay } from './typing.js';
 import { isSealed } from './crypto.js';
 import { decodeFor, encodeFor, lock, onVault, openText, setUpVault, unlock, vaultState } from './vault.js';
@@ -321,6 +323,17 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         const name = uniqueName(safeName(`${label} - ${context.name.replace(/\.[^.]+$/, '')}.md`), store.live().map((f) => f.name));
         actions.newFile({ name, text: `# ${label}: ${context.name}\n\n\`\`\`\n${quote}\n\`\`\`\n\n${answer}\n` });
       },
+
+      // ---- [[Links]] and the outline ----
+
+      /** Opens the file a [[link]] names, or offers to create it. */
+      openLink(target) {
+        const file = resolveLink(target, store.live());
+        if (file) return actions.openFile(file.id);
+        const name = safeName(/\.[a-z0-9]{1,8}$/i.test(target) ? target : `${target}.md`);
+        toast(`No file is called “${target}” yet.`, { action: { label: 'Create it', run: () => actions.newFile({ name, text: `# ${target}\n\n` }) } });
+      },
+      toggleOutline: () => setPanel((p) => (p === 'outline' ? null : 'outline')),
 
       // ---- Snippets ----
 
@@ -625,6 +638,8 @@ export function App() {
   useLayoutEffect(() => {
     hostRef.current = createEditorHost(editorEl.current, {
       settings: editorOptions(getSettings()),
+      onOpenLink: (target) => actions.openLink(target),
+      linkTargets: () => store.live().map((f) => linkName(f.name)),
       onChange(key, text, { urgent } = {}) {
         const k = parseKey(key);
         if (k?.kind === 'repo') return store.setRepoText(k.path, text, { urgent });
@@ -781,7 +796,8 @@ export function App() {
       if (route.kind === 'file') {
         if (store.get(route.id)) actions.openFile(route.id);
         else syncNow().then(() => actions.openFile(route.id));
-      } else actions.openRepoFile(route.path);
+      } else if (route.kind === 'link') actions.openLink(route.name);
+      else actions.openRepoFile(route.path);
     };
     take();
     window.addEventListener('hashchange', take);
@@ -882,6 +898,9 @@ export function App() {
       } else if (e.altKey && !mod && k === 'w') {
         e.preventDefault();
         if (store.session.active) actions.close(store.session.active);
+      } else if (mod && e.shiftKey && k === 'o') {
+        e.preventDefault();
+        actions.toggleOutline();
       } else if (mod && !e.shiftKey && !e.altKey && k === 'k') {
         e.preventDefault();
         actions.askSelection();
@@ -923,6 +942,7 @@ export function App() {
         'type-out': () => actions.typeOut(),
         snippets: () => actions.openSnippets(),
         'ask-selection': () => actions.askSelection(),
+        outline: () => actions.toggleOutline(),
         find: () => actions.run('find'),
         replace: () => actions.run('replace'),
         'goto-line': () => actions.run('gotoLine'),
@@ -1037,6 +1057,9 @@ export function App() {
     ${panel === 'history' && activeKey && (activeFile || activeRepo) && html`<${HistoryPanel} key=${activeKey} selected=${compare?.sha}
       target=${{ key: activeKey, kind: activeFile ? 'file' : 'repo', id: activeFile?.id, path: activeRepo?.path, name: activeName, dirty: activeFile?.dirty || activeRepo?.dirty }}
       actions=${actions} onClose=${() => setPanel(null)} />`}
+    ${panel === 'outline' && activeKey && (activeFile || activeRepo) && !activeSealed &&
+    html`<${OutlinePanel} name=${activeName} text=${activeFile ? store.text(activeFile.id) : activeRepo.text} language=${languageName} fileId=${activeFile?.id}
+      cursorLine=${cursor?.line} actions=${actions} onClose=${() => setPanel(null)} />`}
     ${panel === 'assistant' && html`<${AssistantPanel} files=${scoped} docs=${scopedDocs} activeFile=${activeFile} activeRepo=${activeRepo} settings=${settings} actions=${actions} onClose=${() => setPanel(null)} />`}
 
     ${dialog?.type === 'quickOpen' &&

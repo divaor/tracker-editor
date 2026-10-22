@@ -151,6 +151,7 @@ export function FileBar({ file, repo, sealed, projects, canPreview, preview, set
   const shareButton = html`<button type="button" class="btn ghost sm" title="Share: WhatsApp, Teams, email, copy…" onClick=${actions.share}><${Icon} name="share" size=${15} /><span class="label">Share</span></button>`;
   const moreItems = (id) => [
     id && { label: 'Details…', icon: 'tag', run: () => actions.openDialog({ type: 'file', id }) },
+    { label: 'Outline and links (Ctrl+Shift+O)', icon: 'list', run: actions.toggleOutline },
     { label: 'History', icon: 'history', run: actions.showHistory },
     { label: 'Compare with…', icon: 'columns', run: actions.compareWith },
     { label: 'Compare with clipboard', icon: 'copy', run: actions.compareWithClipboard },

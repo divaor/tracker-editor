@@ -4,8 +4,27 @@ import DOMPurify from '../vendor/purify.js';
 
 marked.setOptions({ gfm: true, breaks: true });
 
+const escapeHtml = (t) => t.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+// [[Note name]] and [[Note name|text]]: links to other files, opened in the app (#/link/…).
+marked.use({
+  extensions: [
+    {
+      name: 'wikilink',
+      level: 'inline',
+      start: (src) => src.indexOf('[['),
+      tokenizer(src) {
+        const m = /^\[\[([^[\]|\n]+?)(?:\|([^[\]\n]+?))?\]\]/.exec(src);
+        if (m && m[1].trim()) return { type: 'wikilink', raw: m[0], target: m[1].trim(), alias: (m[2] ?? '').trim() };
+        return undefined;
+      },
+      renderer: (t) => `<a href="#/link/${encodeURIComponent(t.target)}" class="wikilink">${escapeHtml(t.alias || t.target)}</a>`,
+    },
+  ],
+});
+
 DOMPurify.addHook('afterSanitizeAttributes', (node) => {
-  if (node.tagName === 'A' && node.getAttribute('href')) {
+  if (node.tagName === 'A' && node.getAttribute('href') && !node.getAttribute('href').startsWith('#/')) {
     node.setAttribute('target', '_blank');
     node.setAttribute('rel', 'noopener noreferrer');
   }
