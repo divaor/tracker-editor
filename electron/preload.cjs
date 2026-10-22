@@ -50,9 +50,35 @@ contextBridge.exposeInMainWorld('desktop', {
     forget: (folder) => ipcRenderer.invoke('folder:forget', folder),
     list: (dir) => ipcRenderer.invoke('folder:list', dir),
     places: () => ipcRenderer.invoke('folder:places'),
-    newFile: (dir, name) => ipcRenderer.invoke('folder:new-file', dir, name),
+    newFile: (dir, name, opts) => ipcRenderer.invoke('folder:new-file', dir, name, opts),
+    newFolder: (dir, name) => ipcRenderer.invoke('folder:new-folder', dir, name),
+    rename: (from, name) => ipcRenderer.invoke('folder:rename', from, name),
+    move: (paths, dir) => ipcRenderer.invoke('folder:move', paths, dir),
+    copy: (paths, dir) => ipcRenderer.invoke('folder:copy', paths, dir),
+    // Files pasted or dropped from other apps (File objects): copied into `dir`.
+    copyIn(files, dir) {
+      const paths = [...files].map((file) => {
+        try {
+          return webUtils.getPathForFile(file);
+        } catch {
+          return '';
+        }
+      });
+      return ipcRenderer.invoke('folder:copy-in', paths.filter(Boolean), dir);
+    },
+    trash: (paths) => ipcRenderer.invoke('folder:trash', paths),
+    openExternal: (file) => ipcRenderer.invoke('folder:open-external', file),
+    readImage: (file) => ipcRenderer.invoke('folder:read-image', file),
+    watch: (dir) => ipcRenderer.invoke('folder:watch', dir),
+    onChanged(callback) {
+      const listener = (_event, change) => callback(change);
+      ipcRenderer.on('folder:changed', listener);
+      return () => ipcRenderer.removeListener('folder:changed', listener);
+    },
+    // Ctrl+V in the page: a paste event with the files copied in other apps.
+    paste: () => ipcRenderer.invoke('edit:paste'),
   },
-  // Dragging a tab (or a file) out to other apps: { path } of a file on disk, or { name, text } for a copy.
+  // Dragging tabs or files out to other apps: { path } or { paths } on disk, or { name, text } for a copy.
   drag: {
     start: (item) => ipcRenderer.send('drag:start', item),
     onEnd(callback) {

@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 const require = createRequire(import.meta.url);
-const { allowedBy, cleanExports, exportName, isInside, listFolder, writeExport } = require('../electron/folders.cjs');
+const { allowedBy, canOpenExternally, checkName, cleanExports, copyInto, exportName, freePath, isImage, isInside, listFolder, moveInto, renameEntry, writeExport } = require('../electron/folders.cjs');
 const tmp = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'editor-folders-')));
 
 test('only paths inside a picked folder are allowed, links resolved', () => {
@@ -112,4 +112,118 @@ test('the copies a dragged tab leaves are recognized by their folder', () => {
 test('the main process writes drag copies to the folder the page recognizes', () => {
   const main = fs.readFileSync(new URL('../electron/main.cjs', import.meta.url), 'utf8');
   assert.match(main, new RegExp(`path\\.join\\(os\\.tmpdir\\(\\), '${page.DRAG_DIR_NAME}'\\)`));
+});
+
+// ---- Changing folders (electron/folders.cjs) ----
+
+test('names for new and renamed entries are checked for every system', () => {
+  assert.equal(checkName('  notes.md '), 'notes.md');
+  for (const bad of ['', '.', '..', 'a/b', 'a\\b', 'a:b', 'what?', 'x*', 'a<b', 'pipe|', 'dot.', 'CON', 'nul.txt', 'com1', 'LPT9.log']) assert.throws(() => checkName(bad), undefined, bad);
+  assert.equal(checkName('console.log'), 'console.log', 'only the reserved names themselves');
+  assert.equal(checkName('trailing space '), 'trailing space', 'spaces around a name are dropped');
+});
+
+test('free names: numbered for new files, "- Copy" for copies, as Explorer does', () => {
+  const dir = tmp();
+  fs.writeFileSync(path.join(dir, 'a.txt'), '');
+  assert.equal(path.basename(freePath(dir, 'b.txt')), 'b.txt');
+  assert.equal(path.basename(freePath(dir, 'a.txt')), 'a (2).txt');
+  assert.equal(path.basename(freePath(dir, 'a.txt', { copy: true })), 'a - Copy.txt');
+  fs.writeFileSync(path.join(dir, 'a - Copy.txt'), '');
+  assert.equal(path.basename(freePath(dir, 'a.txt', { copy: true })), 'a - Copy (2).txt');
+  assert.equal(path.basename(freePath(dir, 'README', { copy: true })), 'README - Copy');
+});
+
+test('copying and moving files and folders, with names kept free', () => {
+  const root = tmp();
+  const docs = path.join(root, 'docs');
+  const archive = path.join(root, 'archive');
+  fs.mkdirSync(path.join(docs, 'deep'), { recursive: true });
+  fs.mkdirSync(archive);
+  fs.writeFileSync(path.join(docs, 'plan.md'), 'plan');
+  fs.writeFileSync(path.join(docs, 'deep', 'x.txt'), 'x');
+  fs.writeFileSync(path.join(archive, 'plan.md'), 'old plan');
+
+  const copies = copyInto([path.join(docs, 'plan.md')], docs);
+  assert.equal(path.basename(copies[0].to), 'plan - Copy.md', 'a copy in the same folder');
+  const deepCopy = copyInto([path.join(docs, 'deep')], archive);
+  assert.equal(fs.readFileSync(path.join(deepCopy[0].to, 'x.txt'), 'utf8'), 'x', 'folders are copied with what is inside');
+
+  const moves = moveInto([path.join(docs, 'plan.md')], archive);
+  assert.equal(path.basename(moves[0].to), 'plan (2).md', 'a name already there is kept');
+  assert.equal(fs.readFileSync(path.join(archive, 'plan.md'), 'utf8'), 'old plan');
+  assert.equal(fs.existsSync(path.join(docs, 'plan.md')), false);
+  assert.deepEqual(moveInto([path.join(archive, 'plan.md')], archive), [], 'already there: nothing to do');
+  assert.throws(() => moveInto([docs], path.join(docs, 'deep')), /inside itself/);
+  assert.throws(() => copyInto([docs], path.join(docs, 'deep')), /inside itself/);
+});
+
+test('renaming: refused over another file, allowed when only the case changes', () => {
+  const dir = tmp();
+  const a = path.join(dir, 'a.txt');
+  fs.writeFileSync(a, 'a');
+  fs.writeFileSync(path.join(dir, 'b.txt'), 'b');
+  assert.throws(() => renameEntry(a, 'b.txt'), /already exists/);
+  assert.throws(() => renameEntry(a, 'x/y.txt'));
+  const c = renameEntry(a, 'c.txt');
+  assert.equal(fs.readFileSync(c, 'utf8'), 'a');
+  const upper = renameEntry(c, 'C.txt');
+  assert.equal(path.basename(upper), 'C.txt');
+  assert.equal(fs.readFileSync(upper, 'utf8'), 'a');
+});
+
+test('other programs open documents and media, never programs or scripts', () => {
+  for (const ok of ['report.pdf', 'photo.JPG', 'sheet.xlsx', 'slides.pptx', 'song.mp3', 'archive.zip', 'page.html']) assert.equal(canOpenExternally(ok), true, ok);
+  for (const no of ['setup.exe', 'run.bat', 'x.cmd', 'tool.ps1', 'a.vbs', 'b.js', 'c.msi', 'link.lnk', 'site.url', 'x.scr', 'y.hta', 'app.jar', 'go.sh', 'z.command', 'Makefile', 'macro.docm', 'evil.reg', 'query.iqy', 'start.jnlp', 'help.chm', 'x.theme', 'pkg.msix']) assert.equal(canOpenExternally(no), false, no);
+  assert.equal(isImage('scan.TIFF'), true);
+  assert.equal(isImage('doc.pdf'), false);
+});
+
+// ---- The explorer's helpers (app/js/folders.js) ----
+
+test('entries sorted with folders first, by name, date, size or type', () => {
+  const e = [
+    { name: 'b.txt', dir: false, size: 10, mtimeMs: 3 },
+    { name: 'Zeta', dir: true, size: 0, mtimeMs: 1 },
+    { name: 'a10.md', dir: false, size: 30, mtimeMs: 1 },
+    { name: 'a9.md', dir: false, size: 20, mtimeMs: 2 },
+    { name: 'alpha', dir: true, size: 0, mtimeMs: 9 },
+  ];
+  const names = (sort) => page.sortEntries(e, sort).map((x) => x.name).join(' ');
+  assert.equal(names('name'), 'alpha Zeta a9.md a10.md b.txt');
+  assert.equal(names('modified'), 'alpha Zeta b.txt a9.md a10.md');
+  assert.equal(names('size'), 'alpha Zeta a10.md a9.md b.txt');
+  assert.equal(names('type'), 'alpha Zeta a9.md a10.md b.txt');
+});
+
+test('selection ranges, rename ranges, what opens where', () => {
+  assert.deepEqual(page.rangeOf(['a', 'b', 'c', 'd'], 'c', 'a'), ['a', 'b', 'c']);
+  assert.deepEqual(page.rangeOf(['a', 'b'], null, 'b'), ['b']);
+  assert.deepEqual(page.renameRange('report.final.docx'), [0, 12]);
+  assert.deepEqual(page.renameRange('.gitignore'), [0, 10]);
+  assert.deepEqual(page.renameRange('v1.2', true), [0, 4]);
+  assert.equal(page.opensInEditor('notes.md'), true);
+  assert.equal(page.opensInEditor('Makefile'), true, 'unknown types are tried as text');
+  assert.equal(page.opensInEditor('photo.png'), false);
+  assert.equal(page.opensInEditor('budget.xlsx'), false);
+  assert.equal(page.isImageName('scan.jpeg'), true);
+  assert.equal(page.isImageName('logo.svg'), false, 'SVG is text');
+});
+
+test('open tabs follow what moved, inside folders too', () => {
+  assert.equal(page.remapPath('/a/docs/x.md', '/a/docs', '/a/old/docs'), '/a/old/docs/x.md');
+  assert.equal(page.remapPath('/a/docs', '/a/docs', '/b/docs'), '/b/docs');
+  assert.equal(page.remapPath('/a/docs2/x.md', '/a/docs', '/b/docs'), null);
+  assert.equal(page.remapPath('C:\\work\\a\\x.md', 'C:\\work\\a', 'C:\\work\\b'), 'C:\\work\\b\\x.md');
+});
+
+test('the status line counts the selection', () => {
+  const e = [
+    { path: '/a', name: 'a', dir: true, size: 0 },
+    { path: '/b', name: 'b', dir: false, size: 1000 },
+    { path: '/c', name: 'c', dir: false, size: 24 },
+  ];
+  assert.equal(page.selectionSummary(e, new Set()), '3 items');
+  assert.equal(page.selectionSummary(e, new Set(['/a', '/b', '/c'])), '3 of 3 items selected · 1024 B');
+  assert.equal(page.selectionSummary(e, new Set(['/a'])), '1 of 3 items selected');
 });

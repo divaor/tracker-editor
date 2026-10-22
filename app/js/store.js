@@ -518,6 +518,25 @@ export const store = {
     emit('disk', { path });
   },
 
+  /** A file on disk renamed or moved: its tab (and its place in the tab bar) follows. False when there is no tab or the new path has one. */
+  renameDiskTab(from, to) {
+    const tab = diskTabs.get(from);
+    if (!tab || diskTabs.has(to)) return false;
+    diskTabs.delete(from);
+    diskTabs.set(to, { ...tab, path: to, name: to.split(/[\\/]/).pop(), missing: false });
+    const swap = (k) => (k === diskKey(from) ? diskKey(to) : k);
+    session.open = session.open.map(swap);
+    session.pinned = session.pinned.map(swap);
+    session.closed = session.closed.map(swap);
+    session.active = session.active && swap(session.active);
+    session.side = session.side && swap(session.side);
+    persist.disk(0);
+    persist.session();
+    emit('session');
+    emit('disk', { path: to });
+    return true;
+  },
+
   /** Flags of a disk tab: follow, conflict (changed on disk while edited here), missing. */
   diskPatch(path, patch) {
     const tab = diskTabs.get(path);

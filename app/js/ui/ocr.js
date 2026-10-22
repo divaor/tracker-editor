@@ -21,11 +21,15 @@ const STEPS = {
   'recognizing text': 'Reading the text…',
 };
 
+// "photo.png" → "photo.txt"; several images → "Text from 3 images.txt".
+const textNameFor = (images) => (images.length > 1 ? `Text from ${images.length} images.txt` : `${images[0].name.replace(/\.[^.]+$/, '') || 'Image'}.txt`);
+
 /**
  * Text from one or more images (pasted, dropped, picked, or a screenshot):
  * read on this device, shown to correct, then inserted, kept as a new file or copied.
+ * `saveTo`: the folder of images opened from the folders view, where the text can be saved next to them.
  */
-export function OcrDialog({ images, actions, onClose }) {
+export function OcrDialog({ images, saveTo, actions, onClose }) {
   const [lang, setLang] = useState(() => getSettings().ocrLang || 'eng+spa');
   const [preview, setPreview] = useState('');
   const [step, setStep] = useState({ label: 'Starting…', progress: 0 });
@@ -84,7 +88,10 @@ export function OcrDialog({ images, actions, onClose }) {
       <span class="spacer" />
       <button type="button" class="btn" disabled=${empty} onClick=${() => navigator.clipboard.writeText(text).then(() => done(() => toast('Copied the text')))}><${Icon} name="copy" size=${15} />Copy</button>
       <button type="button" class="btn" disabled=${empty} onClick=${() => done(() => actions.newFile({ text: `${text.trim()}\n` }))}><${Icon} name="file" size=${15} />New file</button>
-      <button type="button" class="btn primary" disabled=${empty} onClick=${() => done(() => actions.insertText(text))}><${Icon} name="filePlus" size=${15} />Insert at the cursor</button>`}>
+      ${saveTo
+        ? html`<button type="button" class="btn" disabled=${empty} onClick=${() => done(() => actions.insertText(text))}><${Icon} name="filePlus" size=${15} />Insert at the cursor</button>
+          <button type="button" class="btn primary" disabled=${empty} title=${`A text file in ${saveTo}, not synced`} onClick=${() => done(() => actions.saveTextInFolder(saveTo, textNameFor(images), `${text.trim()}\n`))}><${Icon} name="save" size=${15} />Save as ${textNameFor(images)} here</button>`
+        : html`<button type="button" class="btn primary" disabled=${empty} onClick=${() => done(() => actions.insertText(text))}><${Icon} name="filePlus" size=${15} />Insert at the cursor</button>`}`}>
     <div class="ocr-body">
       <div class="ocr-image">${preview && html`<img src=${preview} alt=${images[0].name} />`}${images.length > 1 && html`<span class="muted small">+${images.length - 1} more</span>`}</div>
       <div class="ocr-text">

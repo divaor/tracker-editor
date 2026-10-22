@@ -36,7 +36,7 @@ It is the companion of [Tracker](https://github.com/divaor/tracking_app) and sha
   - Or a **model service that answers later** (submit a request, get the answer from a status call or a webhook), described by a connection profile; see [4. Model](#4-model-optional).
 - **Type into another window** (desktop): for remote desktops and consoles that do not take pasted text. `Alt+T` types the selection, or the whole file, as key presses into the window you click into before a short countdown ends.
 - **Files on disk** (desktop): **File → Open File (Edit in Place)** (`Ctrl+O`) edits a file where it is, keeping its line endings and encoding. It reloads when the file changes elsewhere, warns before saving over someone else's change, and **Follow** shows new lines as they are written, like `tail -f`. Huge logs open by their last part.
-- **Folders** (desktop): the sidebar's **Folders** view (`Ctrl+Shift+E`) browses folders on your computer like a file explorer. Their files open as files on disk: edited in place and not synced, unless you **Copy into my files**.
+- **Folders** (desktop): the sidebar's **Folders** view (`Ctrl+Shift+E`) works like a file explorer for folders on your computer: open, create, rename, copy, cut and paste (also files copied in Explorer or Finder), drag to move, delete to the Recycle Bin, sort, with Undo. Text files open as files on disk, edited in place and not synced unless you **Copy into my files**; other files open with their own program; pictures can have their text read into a file next to them.
 - **Drag a tab out** (desktop): to the desktop or a folder for a copy, to a terminal running Claude Code for its path, or to the Claude app to attach it. **Copy for Claude** in the tab menu copies the path of a file on disk, or the name and text of the others.
 - **Quick capture** (desktop): a shortcut that works in any app opens a small window to jot something down, kept as a new note or added to `Inbox.md`.
 - **Clipboard history** (desktop, off until you turn it on): what you copy in any app, to search and paste again (`Ctrl+Shift+V`). Kept on the computer, encrypted, and passwords from password managers are skipped.
@@ -200,10 +200,16 @@ It stops when another window takes the focus, when you hold `Escape` (Windows), 
 
 The sidebar has two views on the desktop: **My files** (synced) and **Folders** (on this computer). **View → Folders** (`Ctrl+Shift+E`) shows it; **File → Open Folder…** adds a folder.
 
-- Pick a folder in the system dialog (or start the dialog in Documents, Desktop or Downloads). Then move through its folders like in a file explorer: click a folder to go in, the path at the top or ↑ to go back, the filter to find a file by name. The app can reach files inside the folders you picked and nowhere above them; links that lead outside are refused.
-- Click a file to open it as a file on disk (as with `Ctrl+O`): saving, reloading and **Follow** work the same, and it is never synced. **Copy into my files** (right-click) makes a synced copy; the file on disk stays as it is.
-- Right-click also has **Copy path**, **Copy for Claude** and **Show in the file explorer**. ⋯ next to the folder's name switches folders, shows hidden files, makes a new file and forgets a folder.
-- The folders and the one you were in are remembered, along with the files you had open.
+- Pick a folder in the system dialog (or start the dialog in Documents, Desktop or Downloads). The app can reach what is inside the folders you picked and nowhere above them; links that lead outside are refused, and a picked folder itself is not renamed, moved or deleted from here.
+- **Selecting**: click, `Ctrl`+click, `Shift`+click, `Ctrl+A`, the arrow keys (`Shift` to extend), or type the start of a name. The line at the bottom counts the items and what is selected.
+- **Opening**: double-click or `Enter`. Folders open in the view (`Backspace` or ↑ goes back, the path at the top jumps). Text files open as files on disk (as with `Ctrl+O`): saving, reloading and **Follow** work the same, and they are not synced. PDFs, pictures, Office files and other formats open with their own program. Programs, scripts and shortcuts (`.exe`, `.bat`, `.ps1`, `.lnk`…) are never started: scripts open as text, the rest only with **Show in the file explorer**.
+- **Changing**: **New file**, **New folder** (`Ctrl+Shift+N`), **Rename** (`F2`), **Cut** / **Copy** / **Paste** (`Ctrl+X` / `Ctrl+C` / `Ctrl+V`), **Duplicate**, **Delete** (`Del`, to the Recycle Bin or the Trash after asking). A copy in the same folder is named "… - Copy"; a name already taken gets " (2)". Rename, move, copy and paste can be undone from their message.
+- **Pasting from other apps**: files copied in Explorer or Finder are pasted as copies (the originals stay). Text copied anywhere becomes a new file; you name it first.
+- **Dragging**: drag files and folders onto a folder (or a part of the path at the top) to move them there, with `Ctrl` to copy. Drop files from another app to copy them in, or a tab to save a copy of it there. Dragged out of the window they go to other apps as the files themselves.
+- **Open files follow**: renaming or moving a file, or the folder it is in, keeps its tab (with any unsaved edits). Deleting it closes the tab, unless it has unsaved edits.
+- **Pictures**: right-click → **Text from the image…** reads its text on this computer; **Save as photo.txt here** keeps it next to the picture (or insert it, copy it, or make a synced file).
+- **Also**: sort by name, date modified, size or type (⋯ or right-click on empty space); show hidden files; the list follows changes made in other apps; **Copy path**, **Copy for Claude** (paths, quoted as a terminal takes them), **Copy into my files**, **Show in the file explorer**; switch between your folders, add one or forget one from ⋯.
+- The folders, the one you were in, the order and the files you had open are remembered.
 
 ### Dragging tabs to other apps
 
@@ -244,6 +250,7 @@ All three are in **Settings → Desktop**, off until you turn them on.
 | `Ctrl+Shift+F` | Find in files |
 | `Ctrl+O` | Open a file from disk to edit in place (desktop) |
 | `Ctrl+Shift+E` | Folders on this computer (desktop) |
+| In the folders view | `Enter` open, `Backspace` up, `F2` rename, `Del` delete, `Ctrl+C` / `Ctrl+X` / `Ctrl+V`, `Ctrl+A`, `Ctrl+Shift+N` new folder, `F5` refresh |
 | `Ctrl+F` / `Ctrl+H` | Find / replace in this file |
 | `Ctrl+G` | Go to line |
 | `Ctrl+D` | Select the next occurrence |
@@ -326,7 +333,7 @@ app/                  the web app (also loaded by Electron)
   js/selectionAsk.js  what the model panel can do with the selection or a file
   js/snippets.js, outline.js, logtools.js, checklist.js   snippets, outline and [[links]], line filters, checklists
   js/diskTabs.js      files on disk edited in place, reloads and follow mode
-  js/folders.js, dragOut.js       the folders view (paths, breadcrumbs, Copy for Claude), dragging tabs out
+  js/folders.js, dragOut.js       the folders view (paths, order, selection, Copy for Claude), dragging tabs and files out
   js/capture.js, ocr.js, ocrEngine.js, dictation.js       quick capture, text from images, voice notes
   js/ui/              tabs, sidebar, panels, dialogs, model panel, settings, compare, history, trash
   capture.html, snip.html   the quick capture window and the screenshot overlay (desktop)
@@ -335,7 +342,7 @@ electron/             main process + preload (app:// protocol, keychain, model p
                       tray, global shortcuts, clipboard history, screen capture)
   typer.cjs           key presses into another window (Windows, macOS, Linux)
   diskFiles.cjs       reading and writing files on disk (encodings, line endings, the end of huge files)
-  folders.cjs         which paths the page may reach in picked folders, folder listings, copies for dragged tabs
+  folders.cjs         which paths the page may reach in picked folders, listings, rename/move/copy, what may open outside
   clipHistory.cjs     the clipboard history list
 scripts/              vendor bundling, icon rendering, local web server
 test/                 unit tests
@@ -349,7 +356,8 @@ test/                 unit tests
 - **Desktop app**: the window is sandboxed with context isolation; the model proxy only accepts `http(s)` requests, and outside links open in your default browser.
 - **Encrypted files**: AES-GCM with a 256-bit key derived from your passphrase (PBKDF2-SHA256, 600,000 rounds). The key is kept on unlocked devices as a non-extractable key; the passphrase is never stored.
 - **Model service secrets**: the API key and webhook secret are kept in the keychain (desktop) and never written to the settings or the data repo. The webhook receiver refuses events whose signature does not match when a secret is set.
-- **Files on disk**: the page can read and write only files you picked in the desktop app's open dialog, and files inside folders you picked there (symbolic links resolved, so they cannot lead outside). A forgotten folder is out of reach again.
+- **Files on disk**: the page can read and write only files you picked in the desktop app's open dialog, and files inside folders you picked there (symbolic links resolved, so they cannot lead outside). A forgotten folder is out of reach again. Renaming, moving, copying and deleting stay inside the picked folders, deleting goes to the Recycle Bin, and files pasted or dropped from other apps are copied in without becoming reachable themselves.
+- **Other programs**: files open with their default program only when they are not programs, scripts or shortcuts, so a page can never start one.
 - **Dragged tabs**: synced files dragged out are written as plain copies to a temporary folder, deleted after a week; encrypted files are never written out.
 - **Clipboard history** is off by default, kept only on the computer (encrypted with the keychain; in memory only when there is none), skips copies marked as secret by password managers, and is deleted when turned off.
 - **Text from images** runs in the page: images are never uploaded. **Voice notes** use the browser's speech service, which sends the audio to its provider.

@@ -221,15 +221,108 @@ ipcMain.handle('folder:forget', guard((_e, folder) => {
 ipcMain.handle('folder:list', guard((_e, dir) => folders.listFolder(checkFile(dir))));
 // Where the open dialog starts: the usual folders.
 ipcMain.handle('folder:places', guard(() => Object.fromEntries(['home', 'desktop', 'documents', 'downloads'].map((name) => [name, app.getPath(name)]))));
-ipcMain.handle('folder:new-file', guard((_e, dir, name) => {
-  const clean = String(name ?? '').trim();
-  if (!clean || /[\\/]/.test(clean) || clean === '.' || clean === '..') throw new Error('Use a file name without slashes.');
-  const file = path.join(checkFile(dir), clean);
+// New files and folders, renaming, moving, copying and deleting, like a file
+// explorer, always inside the picked folders. A picked folder itself is never
+// renamed, moved or deleted from here.
+const isRoot = (p) => allowedFolders.some((root) => path.resolve(root) === path.resolve(p));
+const checkEntry = (p) => {
+  checkFile(p);
+  if (isRoot(p)) throw new Error('A folder you picked cannot be changed here; use your file explorer.');
+  if (!fs.existsSync(p)) throw new Error(`${path.basename(p)} is not there any more.`);
+  return p;
+};
+const checkDir = (dir) => {
+  checkFile(dir);
+  if (!fs.statSync(dir).isDirectory()) throw new Error(`${path.basename(dir)} is not a folder.`);
+  return dir;
+};
+const checkList = (paths) => {
+  if (!Array.isArray(paths) || !paths.length || paths.length > 5000) throw new Error('Nothing to do.');
+  return paths;
+};
+// `text` fills the new file; `unique` picks a free name ("name (2).txt") instead of refusing one that exists.
+ipcMain.handle('folder:new-file', guard((_e, dir, name, { text = '', unique = false } = {}) => {
+  const clean = folders.checkName(name);
+  checkDir(dir);
+  const file = unique ? folders.freePath(dir, clean) : path.join(dir, clean);
   checkFile(file);
   if (fs.existsSync(file)) throw new Error(`${clean} already exists here.`);
-  fs.writeFileSync(file, '');
+  fs.writeFileSync(file, typeof text === 'string' ? text : '', { flag: 'wx' });
   return file;
 }));
+ipcMain.handle('folder:new-folder', guard((_e, dir, name) => {
+  const clean = folders.checkName(name);
+  const folder = path.join(checkDir(dir), clean);
+  checkFile(folder);
+  if (fs.existsSync(folder)) throw new Error(`${clean} already exists here.`);
+  fs.mkdirSync(folder);
+  return folder;
+}));
+ipcMain.handle('folder:rename', guard((_e, from, name) => {
+  const to = folders.renameEntry(checkEntry(from), name);
+  checkFile(to);
+  return to;
+}));
+ipcMain.handle('folder:move', guard((_e, paths, dir) => folders.moveInto(checkList(paths).map(checkEntry), checkDir(dir))));
+ipcMain.handle('folder:copy', guard((_e, paths, dir) => folders.copyInto(checkList(paths).map((p) => (checkFile(p), p)), checkDir(dir))));
+// Files pasted or dropped from another app: the preload takes their paths from the
+// File objects (webUtils), so the page cannot name other files. They are copied in;
+// they do not become reachable themselves.
+ipcMain.handle('folder:copy-in', guard((_e, paths, dir) => {
+  const sources = (Array.isArray(paths) ? paths : []).filter((p) => typeof p === 'string' && path.isAbsolute(p) && fs.existsSync(p));
+  if (!sources.length) throw new Error('Those files are not on disk.');
+  return folders.copyInto(checkList(sources), checkDir(dir));
+}));
+// To the Recycle Bin (macOS: the Trash), from where they can be restored.
+ipcMain.handle('folder:trash', guard(async (_e, paths) => {
+  const done = [];
+  for (const p of checkList(paths).map(checkEntry)) {
+    await shell.trashItem(p);
+    done.push(p);
+  }
+  return done;
+}));
+// A file the editor cannot show, with its default program; a folder in the file explorer.
+// Programs, scripts and shortcuts are never started (folders.canOpenExternally).
+ipcMain.handle('folder:open-external', guard(async (_e, file) => {
+  checkFile(file);
+  const isDir = fs.statSync(file).isDirectory();
+  if (!isDir && !folders.canOpenExternally(path.basename(file))) throw new Error(`${path.basename(file)} is a program or a script; the editor does not start those. Use Show in the file explorer.`);
+  const error = await shell.openPath(file);
+  if (error) throw new Error(error);
+  return true;
+}));
+// An image's bytes, for reading its text.
+ipcMain.handle('folder:read-image', guard((_e, file) => {
+  checkFile(file);
+  if (!folders.isImage(path.basename(file))) throw new Error(`${path.basename(file)} is not an image.`);
+  if (fs.statSync(file).size > 40 * 1024 * 1024) throw new Error(`${path.basename(file)} is larger than 40 MB.`);
+  return fs.readFileSync(file);
+}));
+// The folder shown is watched, so the list follows changes made elsewhere ('folder:changed').
+const folderWatches = new Map(); // webContents id → fs.FSWatcher
+ipcMain.handle('folder:watch', guard((event, dir) => {
+  const sender = event.sender;
+  folderWatches.get(sender.id)?.close();
+  folderWatches.delete(sender.id);
+  if (!dir) return false;
+  checkDir(dir);
+  let timer = null;
+  try {
+    const watcher = fs.watch(dir, { persistent: false }, () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => !sender.isDestroyed() && sender.send('folder:changed', { dir }), 250);
+    });
+    watcher.on('error', () => watcher.close());
+    folderWatches.set(sender.id, watcher);
+    sender.once('destroyed', () => watcher.close());
+  } catch {
+    return false; // some network folders cannot be watched; Refresh still works
+  }
+  return true;
+}));
+// Paste in the page as Ctrl+V does, so the Paste button gets the files copied in other apps.
+ipcMain.handle('edit:paste', guard((event) => event.sender.paste()));
 
 // ---- Dragging a tab out to other apps ------------------------------------------
 // A real file drag: a file on disk is dragged as itself, an editor file as a
@@ -243,16 +336,18 @@ const iconForDrag = () => (dragIcon ??= nativeImage.createFromPath(path.join(APP
 
 ipcMain.on('drag:start', (event, item = {}) => {
   if (!fromApp(event)) return;
-  let file;
+  let files;
   try {
-    file = item.path ? checkFile(item.path) : folders.writeExport(DRAG_DIR, item.name, String(item.text ?? ''));
+    // { paths } several files and folders on disk, { path } one, or { name, text } for a copy.
+    if (Array.isArray(item.paths) && item.paths.length) files = item.paths.slice(0, 1000).map(checkFile);
+    else files = [item.path ? checkFile(item.path) : folders.writeExport(DRAG_DIR, item.name, String(item.text ?? ''))];
   } catch (err) {
     event.sender.send('drag:end', { error: err.message });
     return;
   }
-  event.sender.startDrag({ file, icon: iconForDrag() });
+  event.sender.startDrag({ file: files[0], files, icon: iconForDrag() });
   // Windows and Linux return when the drop is done; the page also clears it on its own.
-  if (!event.sender.isDestroyed()) event.sender.send('drag:end', { file });
+  if (!event.sender.isDestroyed()) event.sender.send('drag:end', { files });
 });
 
 // ---- Typing into another window ----------------------------------------------

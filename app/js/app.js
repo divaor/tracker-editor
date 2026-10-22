@@ -11,8 +11,8 @@ import { getReaderState, onReaderState, setReaderHighlighter, startReading, stop
 import { getSettings, getToken, isSyncConfigured, onSettings, resolvedTheme, saveSettings } from './settings.js';
 import { diskKey, fileKey, flush, parseKey, repoKey, store } from './store.js';
 import { diskAvailable, openDiskFiles, reloadDiskTab, saveDiskTab, unwatchDisk, watchDiskTabs } from './diskTabs.js';
-import { claudeText } from './folders.js';
-import { draggedPath, draggedTab, dropped, isOwnDrop } from './dragOut.js';
+import { claudeText, opensInEditor, remapPath } from './folders.js';
+import { draggedPaths, draggedTab, dropped, isOwnDrop } from './dragOut.js';
 import { getSyncState, onSyncResult, onSyncState, syncClient, syncNow } from './syncManager.js';
 import { matchesScope, projectList } from './tracker-model.js';
 import { AssistantPanel } from './ui/assistant.js';
@@ -463,7 +463,8 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         }
       },
       /** A file in a folder of the folders view, opened as a tab on disk (the tab is activated when it is open already). */
-      async openDiskPath(path) {
+      /** Returns null when it opened, otherwise the reason (shown unless `report` is false). */
+      async openDiskPath(path, { report = true } = {}) {
         hostRef.current?.flushAll();
         try {
           if (!store.diskTab(path)) {
@@ -472,8 +473,51 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
           } else store.open(diskKey(path));
           setView('editor');
           if (isNarrow()) setSidebar(false);
+          return null;
         } catch (err) {
-          toast(`${path.split(/[\\/]/).pop()}: ${ipcMessage(err)}`, { kind: 'error' });
+          if (report) toast(`${path.split(/[\\/]/).pop()}: ${ipcMessage(err)}`, { kind: 'error' });
+          return ipcMessage(err);
+        }
+      },
+      /** Open tabs follow files and folders renamed or moved in the folders view ([{ from, to }]). */
+      followDiskMoves(moves) {
+        hostRef.current?.flushAll();
+        for (const tab of store.diskTabs()) {
+          const to = moves.map((m) => remapPath(tab.path, m.from, m.to)).find(Boolean);
+          if (!to || !store.renameDiskTab(tab.path, to)) continue;
+          // The tab's editor state is made again under its new path (its unsaved text is kept).
+          hostRef.current?.drop(diskKey(tab.path));
+          unwatchDisk(tab.path);
+          window.desktop.disk.watch(to).catch(() => {});
+        }
+      },
+      /** Files deleted in the folders view: their tabs close, unless they have unsaved edits (those stay, as not on disk). */
+      closeDiskPaths(paths) {
+        hostRef.current?.flushAll();
+        for (const tab of store.diskTabs()) {
+          if (!paths.some((p) => remapPath(tab.path, p, p) !== null)) continue;
+          if (tab.dirty) store.diskPatch(tab.path, { missing: true });
+          else actions.close(diskKey(tab.path), { discard: true });
+        }
+      },
+      /** Images in a folder: their text is read, to keep next to them or elsewhere. */
+      async readImageFiles(paths, dir) {
+        try {
+          const images = [];
+          for (const path of paths) images.push({ blob: new Blob([await window.desktop.folders.readImage(path)]), name: path.split(/[\\/]/).pop() });
+          if (images.length) setDialog({ type: 'ocr', images, saveTo: dir });
+        } catch (err) {
+          toast(ipcMessage(err), { kind: 'error' });
+        }
+      },
+      /** Text kept as a new file in a folder (a free name), opened as a file on disk. */
+      async saveTextInFolder(dir, name, text) {
+        try {
+          const file = await window.desktop.folders.newFile(dir, name, { text, unique: true });
+          await actions.openDiskPath(file);
+          toast(`Saved as ${file.split(/[\\/]/).pop()}`);
+        } catch (err) {
+          toast(ipcMessage(err), { kind: 'error' });
         }
       },
       /** Picks a folder in the system dialog (starting at `defaultPath`) and shows it in the folders view. */
@@ -1402,11 +1446,11 @@ export function App() {
     const drop = (e) => {
       if (!e.dataTransfer?.files?.length) return;
       e.preventDefault();
-      // A tab dragged out and dropped back here is not added again; a file from the folders view opens.
+      // A tab dragged out and dropped back here is not added again; files from the folders view open.
       if (isOwnDrop(e.dataTransfer)) {
-        const path = !draggedTab() && draggedPath();
+        const paths = draggedTab() ? [] : draggedPaths();
         dropped();
-        if (path) actions.openDiskPath(path);
+        for (const path of paths.filter((p) => opensInEditor(p))) actions.openDiskPath(path, { report: paths.length === 1 });
         return;
       }
       actions.importFiles([...e.dataTransfer.files]);
@@ -1507,7 +1551,7 @@ export function App() {
       ? html`<${QuickOpen} files=${store.live()} docs=${docs} actions=${actions} title=${`Compare ${activeName} with…`} exclude=${activeFile ? activeFile.id : activeRepo ? `r:${activeRepo.path}` : ''}
           onPick=${(entry) => actions.compareWithEntry(entry)} onClose=${() => setDialog(null)} />`
       : html`<${QuickOpen} files=${store.live()} docs=${docs} actions=${actions} onClose=${() => setDialog(null)} />`)}
-    ${dialog?.type === 'ocr' && html`<${OcrDialog} images=${dialog.images} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'ocr' && html`<${OcrDialog} images=${dialog.images} saveTo=${dialog.saveTo} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'clipboard' && html`<${ClipboardHistory} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'macro' && html`<${MacroDialog} steps=${dialog.steps} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'trash' && html`<${TrashDialog} actions=${actions} onClose=${() => setDialog(null)} />`}

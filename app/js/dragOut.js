@@ -9,7 +9,7 @@ import { isDragCopy } from './folders.js';
 const desktop = () => globalThis.window?.desktop;
 export const canDragOut = () => Boolean(desktop()?.drag);
 
-let current = null; // { key, path }
+let current = null; // { key, paths }
 let listening = false;
 const ended = new Set();
 
@@ -33,16 +33,19 @@ function listen() {
   window.addEventListener('pointerdown', pointer, true);
 }
 
-/** Starts dragging tab `key` out: `item` is { path } for a file on disk, { name, text } for a copy. */
+/**
+ * Starts dragging tab `key` out (null for files from the folders view): `item` is
+ * { path } or { paths } on disk, or { name, text } for a copy.
+ */
 export function startDragOut(key, item) {
   listen();
-  current = { key, path: item.path ?? '' };
+  current = { key, paths: item.paths ?? (item.path ? [item.path] : []) };
   desktop().drag.start(item);
 }
 
-/** The tab being dragged out (null for a file dragged from the folders view), and the file's path on disk ('' for a copy). */
+/** The tab being dragged out (null for files dragged from the folders view), and the paths on disk ([] for a copy). */
 export const draggedTab = () => current?.key ?? null;
-export const draggedPath = () => current?.path ?? '';
+export const draggedPaths = () => current?.paths ?? [];
 
 /** Called when the drag that was started here ends; returns the unsubscribe function. */
 export function onDragOutEnd(callback) {
@@ -58,7 +61,7 @@ export function isOwnDrop(dataTransfer) {
   if (!files.length || !pathOf) return false;
   return files.every((f) => {
     const p = pathOf(f);
-    return isDragCopy(p) || Boolean(current && p && p === current.path);
+    return isDragCopy(p) || Boolean(current && p && current.paths.includes(p));
   });
 }
 

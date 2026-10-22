@@ -101,4 +101,112 @@ function cleanExports(base, maxAgeMs = 7 * 24 * 3600 * 1000, now = Date.now()) {
   return removed;
 }
 
-module.exports = { isInside, realPath, allowedBy, listFolder, exportName, writeExport, cleanExports, MAX_ENTRIES };
+// ---- Changing folders: new, rename, move, copy --------------------------------
+
+const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
+
+/** A name for a new or renamed file or folder, checked for every system; throws with the reason. */
+function checkName(name) {
+  const clean = String(name ?? '').trim();
+  if (!clean || clean === '.' || clean === '..') throw new Error('Type a name.');
+  if (/[\\/:*?"<>|\u0000-\u001f]/.test(clean)) throw new Error('A name cannot have any of these: \\ / : * ? " < > |');
+  if (/[. ]$/.test(clean)) throw new Error('A name cannot end with a dot or a space.');
+  if (RESERVED.test(clean)) throw new Error(`${clean} is a name Windows reserves.`);
+  if (clean.length > 240) throw new Error('That name is too long.');
+  return clean;
+}
+
+const splitName = (name) => {
+  const dot = name.lastIndexOf('.');
+  return dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ''];
+};
+
+/**
+ * A free path for `name` in `dir`: the name itself, or "name (2).ext", "name (3).ext"…;
+ * with `copy`, "name - Copy.ext", "name - Copy (2).ext"… (as Explorer names copies).
+ */
+function freePath(dir, name, { copy = false } = {}) {
+  const [base, ext] = splitName(name);
+  const at = (n) => (copy ? `${base} - Copy${n > 1 ? ` (${n})` : ''}${ext}` : n > 1 ? `${base} (${n})${ext}` : name);
+  for (let n = 1; n < 10000; n++) {
+    const candidate = path.join(dir, at(n));
+    if (!fs.existsSync(candidate)) return candidate;
+  }
+  throw new Error(`No free name for ${name}.`);
+}
+
+/** Refuses putting a folder inside itself. */
+function checkNotInside(source, dir) {
+  if (isInside(realPath(source), realPath(dir))) throw new Error(`${path.basename(source)} cannot go inside itself.`);
+}
+
+/** Copies files and folders into `dir`; a copy in the same folder is named "… - Copy". Returns [{ from, to }]. */
+function copyInto(sources, dir) {
+  const done = [];
+  for (const source of sources) {
+    const stat = fs.statSync(source);
+    if (stat.isDirectory()) checkNotInside(source, dir);
+    const same = path.resolve(path.dirname(source)) === path.resolve(dir);
+    const to = freePath(dir, path.basename(source), { copy: same });
+    fs.cpSync(source, to, { recursive: true, errorOnExist: true, force: false, preserveTimestamps: true });
+    done.push({ from: source, to });
+  }
+  return done;
+}
+
+/** Moves files and folders into `dir` (a name already there gets " (2)"). Returns [{ from, to }]; ones already there are skipped. */
+function moveInto(sources, dir) {
+  const done = [];
+  for (const source of sources) {
+    if (path.resolve(path.dirname(source)) === path.resolve(dir)) continue;
+    if (fs.statSync(source).isDirectory()) checkNotInside(source, dir);
+    const to = freePath(dir, path.basename(source));
+    moveEntry(source, to);
+    done.push({ from: source, to });
+  }
+  return done;
+}
+
+/** Renames or moves one entry; across drives it is copied, then removed. */
+function moveEntry(from, to) {
+  try {
+    fs.renameSync(from, to);
+  } catch (err) {
+    if (err.code !== 'EXDEV') throw err;
+    fs.cpSync(from, to, { recursive: true, errorOnExist: true, force: false, preserveTimestamps: true });
+    fs.rmSync(from, { recursive: true, force: true });
+  }
+}
+
+/** Renames a file or folder in its folder. Returns the new path. */
+function renameEntry(from, name) {
+  const to = path.join(path.dirname(from), checkName(name));
+  if (to === from) return to;
+  // Only the case changes (the same file on Windows and macOS): allowed.
+  const sameFile = to.toLowerCase() === from.toLowerCase() && fs.existsSync(to) && fs.statSync(to).ino === fs.statSync(from).ino;
+  if (fs.existsSync(to) && !sameFile) throw new Error(`${path.basename(to)} already exists here.`);
+  moveEntry(from, to);
+  return to;
+}
+
+// ---- Opening with other programs ----------------------------------------------
+
+// Programs, scripts and shortcuts: the editor never starts these (a page could
+// otherwise write a script and run it). Scripts that are text open in the editor.
+const RUNNABLE = new Set(
+  'exe com bat cmd ps1 psm1 psd1 ps1xml vbs vbe js jse mjs cjs wsf wsh wsc msi msp mst scr hta cpl jar lnk url website reg inf pif application appref-ms gadget msc scf sct shb shs ws xbap vb vba sh bash zsh fish csh ksh command tool app pkg mpkg action workflow scpt applescript osx deb rpm appimage desktop run bin elf out py pyw pyc pyz pl rb php lua tcl ahk au3 xll xlam docm dotm xlsm xltm pptm potm ppam sldm library-ms settingcontent-ms diagcab chm jnlp appx appxbundle msix msixbundle ade adp mde accde mda search-ms searchconnector-ms theme themepack deskthemepack iqy slk mof ins isp'.split(' '),
+);
+
+/** Whether the editor will open a file with its default program (never programs, scripts, shortcuts, or files without an extension). */
+function canOpenExternally(name) {
+  const ext = /\.([^.\\/]+)$/.exec(name)?.[1]?.toLowerCase();
+  return Boolean(ext) && !RUNNABLE.has(ext);
+}
+
+const IMAGE = new Set('png jpg jpeg gif bmp webp tif tiff'.split(' '));
+const isImage = (name) => IMAGE.has(/\.([^.]+)$/.exec(name)?.[1]?.toLowerCase() ?? '');
+
+module.exports = {
+  isInside, realPath, allowedBy, listFolder, exportName, writeExport, cleanExports, MAX_ENTRIES,
+  checkName, freePath, copyInto, moveInto, moveEntry, renameEntry, canOpenExternally, isImage,
+};

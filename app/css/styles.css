@@ -1863,8 +1863,9 @@ button.project-chip:hover {
   background: var(--surface-2);
 }
 
-.folder-row.active {
-  background: var(--accent-soft);
+.folder-row.active .folder-name {
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .folder-row > .icon {
@@ -1903,7 +1904,103 @@ button.project-chip:hover {
 }
 
 .folders-foot {
-  justify-content: center;
+  align-items: center;
+  gap: 8px;
+}
+
+.folders-foot svg {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+
+.folders-status {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folders-tools {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  margin: -2px 0;
+}
+
+.tools-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--border);
+}
+
+.folder-list:focus {
+  outline: none;
+}
+
+.folder-list:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--accent-soft);
+}
+
+.folder-row {
+  cursor: default;
+  user-select: none;
+}
+
+.folder-row.selected {
+  background: var(--accent-soft);
+}
+
+.folder-list:focus .folder-row.selected {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.folder-list:focus .folder-row.cursor {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.folder-row.is-cut {
+  opacity: 0.5;
+}
+
+.folder-row.drop-target,
+.crumb.drop-target,
+.folders-root-name.drop-target {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.folder-list.drop-target {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.folder-row.creating {
+  background: var(--surface-2);
+}
+
+.folder-name-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 26px !important;
+  padding: 2px 6px !important;
+  font-size: 13.5px;
+}
+
+.delete-list {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+
+.btn.primary.danger {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #fff;
+}
+
+.btn.primary.danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 85%, #000);
 }
 
 /* ---- Tabs ------------------------------------------------------------------- */
