@@ -206,7 +206,90 @@ function canOpenExternally(name) {
 const IMAGE = new Set('png jpg jpeg gif bmp webp tif tiff'.split(' '));
 const isImage = (name) => IMAGE.has(/\.([^.]+)$/.exec(name)?.[1]?.toLowerCase() ?? '');
 
+/** A folder's permissions for a file's (`chmod` inside folders): every r also lets you in (x). */
+const dirMode = (mode) => mode | ((mode & 0o444) >> 2);
+/** A file's, inside a folder changed with all it holds: runnable only if it was (like chmod's X). */
+const fileMode = (mode, before) => (before & 0o111 ? mode : mode & ~0o111);
+
+/** Properties of a file or folder here: { name, path, dir, link, size, mtimeMs, birthtimeMs, mode, owner }. */
+function properties(p) {
+  const l = fs.lstatSync(p);
+  const st = l.isSymbolicLink() ? fs.statSync(p) : l;
+  let owner = '';
+  try {
+    if (process.getuid && st.uid === process.getuid()) owner = require('node:os').userInfo().username;
+  } catch {
+    // not known
+  }
+  return { name: path.basename(p), path: p, dir: st.isDirectory(), link: l.isSymbolicLink(), size: st.isFile() ? st.size : 0, mtimeMs: st.mtimeMs, birthtimeMs: st.birthtimeMs, mode: st.mode & 0o7777, owner: owner || (process.platform === 'win32' ? '' : String(st.uid)), group: process.platform === 'win32' ? '' : String(st.gid) };
+}
+
+/** A folder's size, counting what is inside (links not followed): { size, files, folders, truncated }. */
+function folderSize(dir, { maxEntries = 500000, until = Date.now() + 60000 } = {}) {
+  const out = { size: 0, files: 0, folders: 0, truncated: false };
+  const pending = [dir];
+  while (pending.length) {
+    if (out.files + out.folders > maxEntries || Date.now() > until) {
+      out.truncated = true;
+      break;
+    }
+    let entries = [];
+    try {
+      entries = fs.readdirSync(pending.shift(), { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      const full = path.join(e.parentPath ?? e.path, e.name);
+      if (e.isDirectory()) {
+        out.folders++;
+        pending.push(full);
+      } else if (e.isFile()) {
+        out.files++;
+        try {
+          out.size += fs.statSync(full).size;
+        } catch {
+          // gone meanwhile
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/** Sets permissions here; on Windows only "read-only" (no write bit) means something. */
+function chmodEntries(paths, mode, { recursive = false } = {}) {
+  let changed = 0;
+  const set = (p, m) => {
+    fs.chmodSync(p, m);
+    changed++;
+  };
+  for (const p of paths) {
+    const st = fs.lstatSync(p);
+    if (st.isSymbolicLink()) continue;
+    set(p, mode);
+    if (!recursive || !st.isDirectory()) continue;
+    // Inside: folders as dirMode, files as fileMode.
+    const pending = [p];
+    while (pending.length) {
+      for (const e of fs.readdirSync(pending.shift(), { withFileTypes: true })) {
+        const full = path.join(e.parentPath ?? e.path, e.name);
+        if (e.isDirectory()) {
+          set(full, dirMode(mode));
+          pending.push(full);
+        } else if (e.isFile()) set(full, fileMode(mode, fs.statSync(full).mode));
+      }
+    }
+  }
+  return changed;
+}
+
 module.exports = {
+  chmodEntries,
+  dirMode,
+  fileMode,
+  folderSize,
+  properties,
   isInside, realPath, allowedBy, listFolder, exportName, writeExport, cleanExports, MAX_ENTRIES,
   checkName, freePath, copyInto, moveInto, moveEntry, renameEntry, canOpenExternally, isImage,
 };

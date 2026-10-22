@@ -49,6 +49,10 @@ export const DEFAULT_SETTINGS = {
   folder: '',
   showHidden: false,
   folderSort: 'name',
+  // Servers: permissions (rwxr-xr-x) next to each file in the folders view.
+  showPermissions: false,
+  // The terminal panel's height (desktop), in pixels.
+  terminalHeight: 280,
   // Where links to files point (the tracker opens these).
   appUrl: PUBLIC_APP_URL,
   trackerUrl: TRACKER_APP_URL,

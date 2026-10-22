@@ -5,6 +5,8 @@
 // - CodeMirror is bundled with esbuild into app/vendor/cm/: codemirror.js plus
 //   one chunk per language, loaded the first time a file needs it. files.json
 //   lists them so the service worker can cache all of them for offline use.
+// - xterm.js (with its fit add-on) is bundled into app/vendor/xterm/xterm.js, next
+//   to its stylesheet: the terminal on servers in the desktop app.
 // - Text recognition (tesseract.js) goes to app/vendor/ocr/: the library, its
 //   worker, the WebAssembly core (SIMD, LSTM only) and the English and Spanish
 //   models. About 9 MB, so they are cached when first used, not precached.
@@ -52,6 +54,27 @@ await build({
 const chunks = (await readdir(path.join(cmDir, 'chunks'))).sort().map((name) => `chunks/${name}`);
 await writeFile(path.join(cmDir, 'files.json'), `${JSON.stringify(['codemirror.js', ...chunks], null, 2)}\n`);
 console.log(`app/vendor/cm/codemirror.js + ${chunks.length} chunks <- CodeMirror ${cmVersion}`);
+
+const xtermDir = path.join(outDir, 'xterm');
+await rm(xtermDir, { recursive: true, force: true });
+const { version: xtermVersion } = await pkgInfo('@xterm/xterm');
+const { version: fitVersion } = await pkgInfo('@xterm/addon-fit');
+await build({
+  entryPoints: { xterm: path.join(root, 'vendor-src', 'xterm.js') },
+  bundle: true,
+  format: 'esm',
+  minify: true,
+  target: 'es2022',
+  outdir: xtermDir,
+  banner: { js: `/* @xterm/xterm@${xtermVersion} and @xterm/addon-fit@${fitVersion} (MIT) - bundled by scripts/vendor.js */` },
+  legalComments: 'none',
+  logLevel: 'warning',
+});
+const xtermCss = await readFile(path.join(root, 'node_modules', '@xterm', 'xterm', 'css', 'xterm.css'), 'utf8');
+await writeFile(path.join(xtermDir, 'xterm.css'), `/* @xterm/xterm@${xtermVersion} (MIT) - vendored by scripts/vendor.js */\n${xtermCss}`);
+// Only the desktop app uses it: cached when first used, not precached on phones.
+await writeFile(path.join(xtermDir, 'files.json'), `${JSON.stringify(['xterm.js', 'xterm.css'], null, 2)}\n`);
+console.log(`app/vendor/xterm/ <- @xterm/xterm@${xtermVersion}, @xterm/addon-fit@${fitVersion}`);
 
 const ocrDir = path.join(outDir, 'ocr');
 await rm(ocrDir, { recursive: true, force: true });

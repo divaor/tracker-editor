@@ -13,13 +13,19 @@ import { diskKey, fileKey, flush, parseKey, repoKey, store } from './store.js';
 import { diskAvailable, openDiskFiles, recheckServerTabs, reloadDiskTab, saveDiskTab, unwatchDisk, watchDiskTabs } from './diskTabs.js';
 import { isRemotePath, kindOfKey, remoteAddress, remoteParts, remoteRoot } from './where.js';
 import { onServers, server, watchServers } from './servers.js';
-import { HostKeyDialog, ServerDialog } from './ui/servers.js';
+import { HostKeyDialog, PromptDialog, ServerDialog, SshImportDialog } from './ui/servers.js';
+import { activeTerminal, focusTerminal, openTerminal, retheme, setToggleHandler, terminals, terminalsAvailable } from './terminals.js';
+import { TerminalPanel } from './ui/terminal.js';
+import { FolderSearchPanel } from './ui/folderSearch.js';
+import { PropertiesDialog } from './ui/properties.js';
+import { lastSyncText, mirror as mirrorById, onMirrors, watchMirrors as watchMirrorStatus } from './mirrors.js';
+import { MirrorDeletesDialog, MirrorDialog, MirrorsDialog } from './ui/mirrors.js';
 import { claudeText, opensInEditor, remapPath } from './folders.js';
 import { draggedPaths, draggedTab, dropped, isOwnDrop } from './dragOut.js';
 import { getSyncState, onSyncResult, onSyncState, syncClient, syncNow } from './syncManager.js';
 import { matchesScope, projectList } from './tracker-model.js';
 import { AssistantPanel } from './ui/assistant.js';
-import { Toasts, toast } from './ui/components.js';
+import { dismissToast, Toasts, toast } from './ui/components.js';
 import { ChecklistDialog, FileDialog, SendDialog } from './ui/dialogs.js';
 import { Icon } from './ui/icons.js';
 import { QuickOpen, SearchPanel } from './ui/panels.js';
@@ -470,6 +476,40 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       },
       /** Adds a server ({}), or edits one. */
       editServer: (conn = {}) => setDialog({ type: 'server', conn }),
+      /** Servers from ~/.ssh/config. */
+      importSshConfig: () => setDialog({ type: 'sshImport' }),
+      /** Properties (and permissions) of a file or folder here or on a server. */
+      showProperties: (path) => setDialog({ type: 'properties', path }),
+
+      // ---- Mirrors: a server folder kept the same as one here ----
+      newMirror: (draft) => setDialog({ type: 'mirror', draft }),
+      editMirror: (m) => setDialog({ type: 'mirror', draft: m }),
+      showMirrors: () => setDialog({ type: 'mirrors' }),
+      reviewMirror: (id) => setDialog({ type: 'mirrorDeletes', id }),
+      /** Syncs a mirror now (connecting), and says what it did. */
+      async syncMirror(id, opts = {}) {
+        try {
+          const summary = await window.desktop.mirrors.sync(id, opts);
+          const done = lastSyncText({ uploaded: summary.uploaded, downloaded: summary.downloaded, deletedLocal: summary.deletedLocal, deletedRemote: summary.deletedRemote, conflicts: summary.conflicts.length });
+          if (summary.errors.length) toast(`Synced, but not everything: ${summary.errors[0]}${summary.errors.length > 1 ? ` (and ${summary.errors.length - 1} more)` : ''}`, { kind: 'error', timeout: 12000 });
+          else if (summary.waiting.length) setDialog({ type: 'mirrorDeletes', id });
+          else toast(done ? `Synced: ${done}.` : 'Synced: nothing to change.', { timeout: summary.conflicts.length ? 12000 : 4000 });
+          if (summary.conflicts.length) toast(`${summary.conflicts[0].rel.split('/').pop()} changed on both sides: yours kept its name, the server’s is next to it as “${summary.conflicts[0].copy.split('/').pop()}”.`, { timeout: 15000 });
+          window.dispatchEvent(new CustomEvent('folders:reload'));
+        } catch (err) {
+          toast(ipcMessage(err), { kind: 'error', timeout: 10000 });
+        }
+      },
+      /** A folder here or on a server in the folders view (connecting to the server first). */
+      async showFolder(path) {
+        try {
+          if (isRemotePath(path)) await window.desktop.remote.connect(remoteParts(path).id);
+          saveSettings({ sidebarMode: 'folders', folder: path });
+          setSidebar(true);
+        } catch (err) {
+          toast(ipcMessage(err), { kind: 'error', timeout: 8000 });
+        }
+      },
       /** Opens a server in the folders view. */
       async openServer(id) {
         try {
@@ -493,7 +533,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       },
       /** A file in a folder of the folders view, opened as a tab on disk (the tab is activated when it is open already). */
       /** Returns null when it opened, otherwise the reason (shown unless `report` is false). */
-      async openDiskPath(path, { report = true } = {}) {
+      async openDiskPath(path, { report = true, line, column, length } = {}) {
         hostRef.current?.flushAll();
         try {
           if (!store.diskTab(path)) {
@@ -502,6 +542,8 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
           } else store.open(diskKey(path));
           setView('editor');
           if (isNarrow()) setSidebar(false);
+          // At a line (Find in a folder).
+          if (line) setTimeout(() => hostRef.current?.reveal(line, column, length), 60);
           return null;
         } catch (err) {
           if (report) toast(`${path.split(/[\\/]/).pop()}: ${ipcMessage(err)}`, { kind: 'error' });
@@ -981,8 +1023,36 @@ export function App() {
     const offList = onServers(rerender);
     return () => (offStatus(), offList());
   }, []);
+  // Mirrors (desktop): their status; an automatic sync waiting on deletions says so once.
+  useEffect(() => {
+    const off = watchMirrorStatus();
+    const seen = new Map();
+    const offList = onMirrors((list) => {
+      for (const m of list) {
+        const key = `mirror-waiting:${m.id}`;
+        if (m.state === 'waiting' && seen.get(m.id) !== 'waiting') toast(`${m.waiting.length} file${m.waiting.length === 1 ? ' was' : 's were'} deleted in ${m.local.split(/[\\/]/).pop()}: delete on the server too?`, { key, timeout: 60000, action: { label: 'Review', run: () => actions.reviewMirror(m.id) } });
+        if (m.state !== 'waiting' && seen.get(m.id) === 'waiting') dismissToast(key);
+        seen.set(m.id, m.state);
+      }
+      rerender();
+    });
+    return () => (off(), offList());
+  }, []);
   const [hostKey, setHostKey] = useState(null);
   useEffect(() => window.desktop?.remote?.onHostKey(setHostKey), []);
+  // Questions while signing in (a password not saved, a one-time code), one at a time.
+  const [prompts, setPrompts] = useState([]);
+  useEffect(() => {
+    const remote = window.desktop?.remote;
+    if (!remote) return;
+    const offAsk = remote.onPrompt((info) => setPrompts((list) => [...list, info]));
+    const offGone = remote.onPromptGone?.(({ question }) => setPrompts((list) => list.filter((p) => p.question !== question)));
+    return () => (offAsk(), offGone?.());
+  }, []);
+  const answerPrompt = (info, answer) => {
+    window.desktop.remote.answerPrompt(info.question, answer);
+    setPrompts((list) => list.filter((p) => p.question !== info.question));
+  };
   // Files on servers set to save automatically: a moment after the last edit.
   useEffect(() => {
     const timers = new Map();
@@ -1149,6 +1219,53 @@ export function App() {
     const text = host && joinDictated(host.textBeforeCursor(4), phrase, lang);
     if (text) host.insertAtCursor(text, text.length, { focus: false });
   };
+
+  // Find in a folder (desktop): the folder searched, here or on a server.
+  const [folderSearchDir, setFolderSearchDir] = useState(null);
+  actions.findInFolder = (dir) => {
+    setFolderSearchDir(dir);
+    setPanel('folderSearch');
+  };
+
+  // Terminals on servers (desktop): the panel under the editor. Hiding it keeps the shells running.
+  const [terminalShown, setTerminalShown] = useState(false);
+  actions.openTerminal = async (connId, cwd = '') => {
+    if (!terminalsAvailable()) return toast('Terminals work in the desktop app.', { kind: 'error' });
+    const conn = server(connId);
+    if (conn && conn.protocol !== 'sftp') return toast(`${conn.name} is an FTP server; terminals need SSH (SFTP).`, { kind: 'error' });
+    setTerminalShown(true);
+    try {
+      await openTerminal(connId, { cwd });
+    } catch (err) {
+      toast(ipcMessage(err), { kind: 'error', timeout: 8000 });
+    }
+  };
+  /** Ctrl+`: shows or hides the terminal; the first time, one on the server you are looking at. */
+  actions.toggleTerminal = () => {
+    if (!terminalsAvailable()) return;
+    if (terminalShown) {
+      setTerminalShown(false);
+      hostRef.current?.focus();
+      return;
+    }
+    if (!terminals().length) {
+      const folder = getSettings().sidebarMode === 'folders' ? getSettings().folder : '';
+      const k = parseKey(store.session.active);
+      const near = isRemotePath(folder) ? folder : k?.kind === 'disk' && isRemotePath(k.path) ? k.path.slice(0, k.path.lastIndexOf('/')) : '';
+      if (near && server(remoteParts(near).id)?.protocol === 'sftp') return actions.openTerminal(remoteParts(near).id, remoteParts(near).path);
+    }
+    setTerminalShown(true);
+    requestAnimationFrame(() => focusTerminal(activeTerminal()));
+  };
+  /** A folder: on a server, a terminal here in the editor; on this computer, the system's terminal app. */
+  actions.terminalHere = (dir) => {
+    if (isRemotePath(dir)) return actions.openTerminal(remoteParts(dir).id, remoteParts(dir).path);
+    window.desktop?.folders?.terminal(dir).catch((err) => toast(ipcMessage(err), { kind: 'error' }));
+  };
+  useEffect(() => {
+    setToggleHandler(() => actions.toggleTerminal());
+  }, []);
+  useEffect(() => retheme(), [settings.theme]);
 
   // Filtering lines (Alt+L): the tabs whose filter bar is open.
   const [filterKeys, setFilterKeys] = useState(() => new Set());
@@ -1427,6 +1544,9 @@ export function App() {
       } else if (mod && e.shiftKey && k === 'v' && window.desktop?.clipboardHistory) {
         e.preventDefault();
         actions.openClipboardHistory();
+      } else if (e.ctrlKey && e.key === '`') {
+        e.preventDefault();
+        actions.toggleTerminal();
       } else if (mod && e.key === '\\') {
         e.preventDefault();
         actions.toggleSplit();
@@ -1459,6 +1579,8 @@ export function App() {
         'disk-open': () => actions.openDiskFiles(),
         'folder-open': () => actions.openFolder(),
         'server-add': () => actions.editServer(),
+        'servers-ssh': () => actions.importSshConfig(),
+        terminal: () => actions.toggleTerminal(),
         folders: () => actions.showFolders(),
         'clipboard-history': () => actions.openClipboardHistory(),
         captures: () => actions.takeCaptures(),
@@ -1591,11 +1713,13 @@ export function App() {
           ${activeSealed && html`<${LockedFile} file=${activeFile} actions=${actions} />`}
           ${!activeKey && html`<${Welcome} actions=${actions} desktop=${diskAvailable()} hasFiles=${store.live().length + docs.length > 0} configured=${isSyncConfigured(settings)} />`}
         </div>
+        ${terminalShown && html`<${TerminalPanel} settings=${settings} actions=${actions} onHide=${() => (setTerminalShown(false), hostRef.current?.focus())} />`}
         <${ReadAloudBar} />
         <${StatusBar} recording=${recording} big=${big && Boolean(activeKey)} cursor=${activeKey ? cursor : null} language=${languageName} file=${activeFile} repo=${activeRepo} disk=${activeDisk} settings=${settings} sync=${sync} actions=${actions} />
       </div>
     </main>
 
+    ${panel === 'folderSearch' && folderSearchDir && window.desktop?.folders && html`<${FolderSearchPanel} key=${folderSearchDir} dir=${folderSearchDir} actions=${actions} onClose=${() => setPanel(null)} />`}
     ${panel === 'search' && html`<${SearchPanel} files=${scoped} docs=${scopedDocs} allFiles=${store.live()} allDocs=${docs} openKeys=${store.session.open} settings=${settings} actions=${actions} onClose=${() => setPanel(null)} />`}
     ${panel === 'history' && activeKey && (activeFile || activeRepo) && html`<${HistoryPanel} key=${activeKey} selected=${compare?.sha}
       target=${{ key: activeKey, kind: activeFile ? 'file' : 'repo', id: activeFile?.id, path: activeRepo?.path, name: activeName, dirty: activeFile?.dirty || activeRepo?.dirty }}
@@ -1612,7 +1736,13 @@ export function App() {
       : html`<${QuickOpen} files=${store.live()} docs=${docs} actions=${actions} onClose=${() => setDialog(null)} />`)}
     ${dialog?.type === 'ocr' && html`<${OcrDialog} images=${dialog.images} saveTo=${dialog.saveTo} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'server' && html`<${ServerDialog} conn=${dialog.conn} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'sshImport' && html`<${SshImportDialog} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'mirror' && html`<${MirrorDialog} draft=${dialog.draft} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'mirrors' && html`<${MirrorsDialog} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'mirrorDeletes' && mirrorById(dialog.id) && html`<${MirrorDeletesDialog} mirror=${mirrorById(dialog.id)} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'properties' && html`<${PropertiesDialog} key=${dialog.path} path=${dialog.path} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${hostKey && html`<${HostKeyDialog} info=${hostKey} onAnswer=${(ok) => (window.desktop.remote.answerHostKey(hostKey.question, ok), setHostKey(null))} />`}
+    ${prompts[0] && !hostKey && html`<${PromptDialog} key=${prompts[0].question} info=${prompts[0]} onAnswer=${(answer) => answerPrompt(prompts[0], answer)} />`}
     ${dialog?.type === 'clipboard' && html`<${ClipboardHistory} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'macro' && html`<${MacroDialog} steps=${dialog.steps} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'trash' && html`<${TrashDialog} actions=${actions} onClose=${() => setDialog(null)} />`}

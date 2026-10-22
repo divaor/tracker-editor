@@ -29,9 +29,12 @@ test('service worker precaches every app file and its cache name tracks the vers
   const chunks = JSON.parse(await readFile(path.join(appDir, 'vendor/cm/files.json'), 'utf8')).map((f) => `vendor/cm/${f}`);
   // Text recognition (about 9 MB) is cached when first used instead; vendor/ocr/files.json lists it.
   const ocr = JSON.parse(await readFile(path.join(appDir, 'vendor/ocr/files.json'), 'utf8')).map((f) => `vendor/ocr/${f}`);
-  const files = (await listFiles(appDir)).map((f) => path.relative(appDir, f).split(path.sep).join('/')).filter((f) => !['sw.js', 'vendor/cm/files.json', 'vendor/ocr/files.json'].includes(f));
-  assert.deepEqual([...assets.filter((a) => a !== './'), ...chunks, ...ocr].sort(), files.sort());
+  // The terminal (desktop only) too; vendor/xterm/files.json.
+  const xterm = JSON.parse(await readFile(path.join(appDir, 'vendor/xterm/files.json'), 'utf8')).map((f) => `vendor/xterm/${f}`);
+  const files = (await listFiles(appDir)).map((f) => path.relative(appDir, f).split(path.sep).join('/')).filter((f) => !['sw.js', 'vendor/cm/files.json', 'vendor/ocr/files.json', 'vendor/xterm/files.json'].includes(f));
+  assert.deepEqual([...assets.filter((a) => a !== './'), ...chunks, ...ocr, ...xterm].sort(), files.sort());
   assert.ok(!assets.some((a) => a.startsWith('vendor/ocr/')), 'text recognition is not precached');
+  assert.ok(!assets.some((a) => a.startsWith('vendor/xterm/')), 'the terminal is not precached');
   assert.match(sw, new RegExp(`const CACHE = 'editor-v${APP_VERSION.replace(/\./g, '\\.')}'`));
 });
 

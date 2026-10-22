@@ -1,8 +1,9 @@
 // Offline support: precache the app shell and every CodeMirror language
 // chunk (listed in vendor/cm/files.json), then serve network-first so updates
 // show up immediately when online. GitHub and model requests are never intercepted.
-// Text recognition (vendor/ocr/, about 9 MB) is cached the first time it is used.
-const CACHE = 'editor-v0.9.0';
+// Text recognition (vendor/ocr/, about 9 MB) and the terminal (vendor/xterm/,
+// desktop only) are cached the first time they are used.
+const CACHE = 'editor-v0.10.0';
 const INBOX = 'editor-inbox'; // shared files waiting for the app (see js/inbox.js)
 const ASSETS = [
   './',
@@ -96,6 +97,12 @@ const ASSETS = [
   'vendor/marked.js',
   'vendor/preact-htm.js',
   'vendor/purify.js',
+  'js/terminals.js',
+  'js/ui/terminal.js',
+  'js/ui/folderSearch.js',
+  'js/ui/properties.js',
+  'js/ui/mirrors.js',
+  'js/mirrors.js',
 ];
 
 self.addEventListener('install', (event) => {

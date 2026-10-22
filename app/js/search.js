@@ -47,17 +47,17 @@ export function findInFiles(files, query, { maxLines = 2000, maxPerFile = 500, .
     let count = 0;
     let line = 1;
     let scanned = 0;
-    let lastLineStart = -1;
+    let lineEnd = -1; // where the line of the last match ends: more matches on it are only counted
     let m;
     while ((m = matcher.exec(text))) {
       if (m[0].length === 0) matcher.lastIndex++;
       count++;
+      if (m.index <= lineEnd) continue;
       const { start, end } = lineAt(text, m.index);
-      if (start === lastLineStart) continue;
+      lineEnd = end;
       // Count newlines incrementally from the previous match.
       for (let i = text.indexOf('\n', scanned); i !== -1 && i < m.index; i = text.indexOf('\n', i + 1)) line++;
       scanned = m.index;
-      lastLineStart = start;
       if (matches.length >= maxPerFile || lines >= maxLines) {
         truncated = true;
         continue;

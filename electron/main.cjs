@@ -154,23 +154,38 @@ const watched = new Map(); // path → listener
 const remoteFiles = require('./remote.cjs');
 const isRemote = remoteFiles.isRemote;
 const hostKeyQuestions = new Map(); // question id → answer(ok)
+const promptQuestions = new Map(); // question id → answer({ answers, remember } | null)
+// Asks the window and waits (at most `ms`) for the answer; no window, no answer.
+function askWindow(channel, questions, info, ms, fallback, noWindow = fallback) {
+  return new Promise((resolve) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return resolve(noWindow);
+    const question = crypto.randomBytes(6).toString('hex');
+    const timer = setTimeout(() => {
+      answer(fallback);
+      // Not answered in time: the window's question goes away too.
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(`${channel}-gone`, { question });
+    }, ms);
+    const answer = (value) => {
+      clearTimeout(timer);
+      questions.delete(question);
+      resolve(value);
+    };
+    questions.set(question, answer);
+    showWindow();
+    mainWindow.webContents.send(channel, { ...info, question });
+  });
+}
 const remote = remoteFiles.createRemote({
   store: { read: () => readJson('remote.json', {}), write: (data) => writeJson('remote.json', data) },
   secrets: { get: (id, kind) => getSecret(`remote:${id}:${kind}`), set: (id, kind, value) => setSecret(`remote:${id}:${kind}`, value) },
-  askHostKey: (info) =>
-    new Promise((resolve) => {
-      if (!mainWindow || mainWindow.isDestroyed()) return resolve(false);
-      const question = crypto.randomBytes(6).toString('hex');
-      const timer = setTimeout(() => answer(false), 180000);
-      const answer = (ok) => {
-        clearTimeout(timer);
-        hostKeyQuestions.delete(question);
-        resolve(Boolean(ok));
-      };
-      hostKeyQuestions.set(question, answer);
-      mainWindow.webContents.send('remote:host-key', { ...info, question });
-    }),
-  onStatus: (status) => mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.send('remote:status', status),
+  askHostKey: (info) => askWindow('remote:host-key', hostKeyQuestions, info, 180000, false).then(Boolean),
+  // A password that is not saved, a key passphrase, or the server's own questions (a one-time code).
+  // No window: undefined (no one to ask, the server's answer stands); no answer in time: null (cancelled).
+  askPrompt: (info) => askWindow('remote:prompt', promptQuestions, info, 180000, null, undefined),
+  onStatus: (status) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('remote:status', status);
+    mirrorsOnStatus(status);
+  },
 });
 
 ipcMain.handle('remote:connections', guard(() => remote.connections()));
@@ -181,8 +196,65 @@ ipcMain.handle('remote:connect', guard((_e, id) => remote.connect(id)));
 ipcMain.handle('remote:disconnect', guard((_e, id) => remote.disconnect(id)));
 ipcMain.handle('remote:forget-host-key', guard((_e, id) => remote.forgetHostKey(id)));
 ipcMain.handle('remote:host-key-answer', guard((_e, question, ok) => {
-  hostKeyQuestions.get(question)?.(ok);
+  hostKeyQuestions.get(question)?.(Boolean(ok));
   return true;
+}));
+ipcMain.handle('remote:prompt-answer', guard((_e, question, answer) => {
+  const ok = answer && Array.isArray(answer.answers) && answer.answers.every((a) => typeof a === 'string');
+  promptQuestions.get(question)?.(ok ? { answers: answer.answers.slice(0, 20), remember: Boolean(answer.remember) } : null);
+  return true;
+}));
+// Servers from the SSH config (~/.ssh/config): the page sees the hosts and picks
+// which to set up by name; the key files they name are found here, not by the page.
+const sshConfig = require('./sshConfig.cjs');
+function readSshConfig() {
+  const home = os.homedir();
+  const file = path.join(home, '.ssh', 'config');
+  if (!fs.existsSync(file)) return { file, hosts: [], missing: true };
+  const readInclude = (pattern) => {
+    const full = pattern.startsWith('~') ? path.join(home, pattern.slice(1)) : path.isAbsolute(pattern) ? pattern : path.join(home, '.ssh', pattern);
+    const dir = path.dirname(full);
+    const name = path.basename(full);
+    let names = [name];
+    try {
+      if (/[*?]/.test(name)) names = fs.readdirSync(dir).filter((n) => sshConfig.globToRegExp(name).test(n)).sort();
+    } catch {
+      return [];
+    }
+    return names.slice(0, 50).flatMap((n) => {
+      try {
+        const st = fs.statSync(path.join(dir, n));
+        return st.isFile() && st.size < 1024 * 1024 ? [fs.readFileSync(path.join(dir, n), 'utf8')] : [];
+      } catch {
+        return [];
+      }
+    });
+  };
+  const hosts = sshConfig.parseSshConfig(fs.readFileSync(file, 'utf8'), { readInclude, home, localUser: os.userInfo().username });
+  return { file, hosts };
+}
+ipcMain.handle('remote:ssh-config', guard(() => {
+  const { file, hosts, missing } = readSshConfig();
+  const known = remote.connections();
+  return {
+    file,
+    missing: Boolean(missing),
+    hosts: hosts.map((h) => ({
+      alias: h.alias,
+      host: h.host,
+      port: h.port,
+      user: h.user,
+      key: h.identityFiles.find((f) => fs.existsSync(f)) ? path.basename(h.identityFiles.find((f) => fs.existsSync(f))) : '',
+      proxyJump: h.proxyJump,
+      proxyCommand: h.proxyCommand,
+      known: known.some((c) => c.protocol === 'sftp' && c.host.toLowerCase() === h.host.toLowerCase() && c.port === h.port && c.user === h.user),
+    })),
+  };
+}));
+ipcMain.handle('remote:import-ssh', guard((_e, aliases) => {
+  if (!Array.isArray(aliases) || !aliases.length) throw new Error('Pick the hosts to set up.');
+  const { hosts } = readSshConfig();
+  return remote.importSsh(hosts, aliases.filter((a) => typeof a === 'string').slice(0, 200));
 }));
 // A private key file for SSH, picked in the dialog (only picked files can be used).
 ipcMain.handle('remote:pick-key', guard(async () => {
@@ -190,6 +262,255 @@ ipcMain.handle('remote:pick-key', guard(async () => {
   if (canceled || !filePaths[0]) return null;
   remote.allowKey(filePaths[0]);
   return filePaths[0];
+}));
+
+// ---- Mirrors: a folder on a server kept the same as one on this computer --------
+// mirror.cjs plans and runs a sync; here are the settings (mirrors.json), each
+// mirror's state (mirrors/<id>.json), and the automatic syncs: while its server is
+// connected, every minute and a few seconds after a change here. The folder here
+// is picked in the dialog (and so shown in Folders); deletions on the server wait
+// for the person (mirror:sync with confirmDeletes).
+const mirrorLib = require('./mirror.cjs');
+let mirrors = readJson('mirrors.json', []).filter((m) => m && typeof m.id === 'string');
+const saveMirrors = () => writeJson('mirrors.json', mirrors);
+const mirrorLive = new Map(); // id → { state, progress, error, last, waiting, running }
+const mirrorStatePath = (id) => path.join(app.getPath('userData'), 'mirrors', `${id}.json`);
+const publicMirror = (m) => {
+  const l = mirrorLive.get(m.id) ?? {};
+  return { ...m, state: l.state ?? 'idle', progress: l.progress ?? null, error: l.error ?? '', waiting: l.waiting ?? [], conflicts: l.conflicts ?? [] };
+};
+const sendMirror = (m) => mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.send('mirror:status', publicMirror(m));
+const setMirror = (m, patch) => {
+  mirrorLive.set(m.id, { ...mirrorLive.get(m.id), ...patch });
+  sendMirror(m);
+};
+
+const mirrorIo = (m) =>
+  mirrorLib.createMirrorIo(m, { remote, toUri: remoteFiles.toUri, statePath: mirrorStatePath(m.id), trash: (p) => shell.trashItem(p), connected: () => remote.isConnected(m.conn) });
+
+/** One sync of a mirror at a time; `auto` ones do not connect, and say nothing when there was nothing to do. */
+async function syncMirror(id, { confirmDeletes = false, restore = [], auto = false } = {}) {
+  const m = mirrors.find((x) => x.id === id);
+  if (!m) throw new Error('That mirror is not set up here any more.');
+  const asked = (Array.isArray(confirmDeletes) ? confirmDeletes.length : confirmDeletes) || restore.length;
+  const live = mirrorLive.get(id);
+  if (live?.running) {
+    // A sync is running: an answer about deletions waits for it, then runs its own.
+    if (!asked) return live.running;
+    await live.running.catch(() => {});
+    return syncMirror(id, { confirmDeletes, restore, auto });
+  }
+  if (auto && !remote.isConnected(m.conn)) return null;
+  const running = (async () => {
+    setMirror(m, { state: 'syncing', progress: { done: 0, total: 0, current: '' }, error: '' });
+    try {
+      const summary = await mirrorLib.runMirror(m, mirrorIo(m), { confirmDeletes, restore: Array.isArray(restore) ? restore : [], onProgress: (progress) => setMirror(m, { progress }) });
+      m.last = { at: Date.now(), uploaded: summary.uploaded, downloaded: summary.downloaded, deletedLocal: summary.deletedLocal, deletedRemote: summary.deletedRemote, conflicts: summary.conflicts.length, errors: summary.errors.length };
+      saveMirrors();
+      setMirror(m, { state: summary.waiting.length ? 'waiting' : summary.errors.length ? 'error' : 'idle', progress: null, waiting: summary.waiting, conflicts: summary.conflicts, error: summary.errors.join('\n') });
+      return summary;
+    } catch (err) {
+      const message = remoteFiles.friendlyError(err).message;
+      setMirror(m, { state: 'error', progress: null, error: message });
+      throw new Error(message);
+    } finally {
+      mirrorLive.set(id, { ...mirrorLive.get(id), running: null });
+      const watch = mirrorWatchers.get(id);
+      if (watch?.again) {
+        watch.again = false;
+        watch.soon();
+      }
+    }
+  })();
+  mirrorLive.set(id, { ...mirrorLive.get(id), running });
+  return running;
+}
+
+// Automatic syncs: every minute while connected, and soon after a change here.
+const mirrorWatchers = new Map(); // id → { watcher, timer }
+function unwatchMirror(id) {
+  const w = mirrorWatchers.get(id);
+  w?.watcher?.close();
+  clearTimeout(w?.timer);
+  mirrorWatchers.delete(id);
+}
+function watchMirrors() {
+  for (const [id, w] of mirrorWatchers) {
+    if (!mirrors.some((m) => m.id === id && m.auto)) {
+      w.watcher?.close();
+      clearTimeout(w.timer);
+      mirrorWatchers.delete(id);
+    }
+  }
+  for (const m of mirrors.filter((x) => x.auto && !mirrorWatchers.has(x.id))) {
+    const entry = { watcher: null, timer: null, again: false, soon: null };
+    const soon = () => {
+      clearTimeout(entry.timer);
+      entry.timer = setTimeout(() => syncMirror(m.id, { auto: true }).catch(() => {}), 3000);
+    };
+    entry.soon = soon;
+    try {
+      entry.watcher = fs.watch(m.local, { recursive: true, persistent: false }, (_type, name) => {
+        // Its own downloads (the .part files) are not changes to send.
+        if (name && /\.part-[0-9a-f]{6}$/.test(String(name))) return;
+        // During a sync: once more after it (a change may have come after its listing).
+        if (mirrorLive.get(m.id)?.running) entry.again = true;
+        else soon();
+      });
+      entry.watcher.on('error', () => entry.watcher?.close());
+    } catch {
+      // a folder that cannot be watched: the minute timer still syncs it
+    }
+    mirrorWatchers.set(m.id, entry);
+  }
+}
+setInterval(() => {
+  for (const m of mirrors.filter((x) => x.auto)) syncMirror(m.id, { auto: true }).catch(() => {});
+}, 60000).unref?.();
+// A server that connects: its automatic mirrors sync.
+function mirrorsOnStatus({ id, state }) {
+  if (state !== 'connected') return;
+  for (const m of mirrors.filter((x) => x.auto && x.conn === id)) syncMirror(m.id, { auto: true }).catch(() => {});
+}
+
+ipcMain.handle('mirror:list', guard(() => mirrors.map(publicMirror)));
+// The folder here: picked in the dialog (it becomes one of the folders in Folders).
+ipcMain.handle('mirror:pick-local', guard(async (_e, suggested) => {
+  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+    title: 'The folder on this computer to keep the same',
+    defaultPath: path.join(app.getPath('documents'), typeof suggested === 'string' ? folders.exportName(suggested).replace(/\.txt$/, '') : ''),
+    properties: ['openDirectory', 'createDirectory', 'promptToCreate'],
+  });
+  if (canceled || !filePaths[0]) return null;
+  const picked = filePaths[0];
+  fs.mkdirSync(picked, { recursive: true });
+  if (!allowedFolders.includes(picked)) {
+    allowedFolders.push(picked);
+    saveFolders();
+  }
+  return picked;
+}));
+const mirrorBusy = (id) => {
+  if (mirrorLive.get(id)?.running) throw new Error('That mirror is syncing. Try again when it is done.');
+};
+ipcMain.handle('mirror:save', guard((_e, input = {}) => {
+  if (input.id) mirrorBusy(input.id);
+  const existing = mirrors.find((m) => m.id === input.id);
+  const conn = remote.connections().find((c) => c.id === input.conn);
+  if (!conn) throw new Error('Choose the server.');
+  const remotePath = path.posix.normalize(String(input.remote ?? '').trim() || '/');
+  if (!remotePath.startsWith('/')) throw new Error('The folder on the server starts with /.');
+  const local = String(input.local ?? '');
+  if (!local || !folders.allowedBy(allowedFolders, local) || !fs.existsSync(local)) throw new Error('Choose the folder on this computer with “Choose…”.');
+  const inside = (a, b) => a === b || a.startsWith(b.endsWith(path.sep) ? b : b + path.sep);
+  const insideRemote = (a, b) => a === b || a.startsWith(b === '/' ? '/' : `${b}/`);
+  for (const other of mirrors.filter((m) => m.id !== input.id)) {
+    if (inside(path.resolve(local), path.resolve(other.local)) || inside(path.resolve(other.local), path.resolve(local))) throw new Error(`${other.local} is mirrored already; a mirror cannot be inside another.`);
+    if (other.conn === conn.id && (insideRemote(remotePath, other.remote) || insideRemote(other.remote, remotePath))) throw new Error(`${other.remote} on ${conn.name} is mirrored already; a mirror cannot be inside another.`);
+  }
+  const mirror = {
+    id: existing?.id ?? crypto.randomBytes(5).toString('hex'),
+    conn: conn.id,
+    remote: remotePath,
+    local,
+    mode: mirrorLib.MODES.includes(input.mode) ? input.mode : 'both',
+    auto: Boolean(input.auto),
+    exclude: String(input.exclude ?? mirrorLib.DEFAULT_EXCLUDE).slice(0, 1000),
+    last: existing && existing.local === local && existing.remote === remotePath && existing.conn === conn.id ? existing.last : null,
+  };
+  // Another pair of folders: the old state does not apply.
+  if (existing && !mirror.last) fs.rmSync(mirrorStatePath(mirror.id), { force: true });
+  mirrors = existing ? mirrors.map((m) => (m.id === mirror.id ? mirror : m)) : [...mirrors, mirror];
+  saveMirrors();
+  // Its folder here may have changed: watched again.
+  unwatchMirror(mirror.id);
+  watchMirrors();
+  return publicMirror(mirror);
+}));
+ipcMain.handle('mirror:delete', guard((_e, id) => {
+  mirrorBusy(id);
+  mirrors = mirrors.filter((m) => m.id !== id);
+  saveMirrors();
+  fs.rmSync(mirrorStatePath(id), { force: true });
+  mirrorLive.delete(id);
+  watchMirrors();
+  return true;
+}));
+// `confirmDeletes`: the files deleted here the person agreed to delete on the server too.
+ipcMain.handle('mirror:sync', guard((_e, id, opts = {}) =>
+  syncMirror(id, {
+    confirmDeletes: Array.isArray(opts.confirmDeletes) ? opts.confirmDeletes.filter((r) => typeof r === 'string') : false,
+    restore: Array.isArray(opts.restore) ? opts.restore.filter((r) => typeof r === 'string') : [],
+  }),
+));
+app.whenReady().then(watchMirrors);
+
+// ---- Terminals on servers (SSH) ------------------------------------------------
+// A shell on the server, over the same connection as its files. The output goes to
+// the page in small batches (term:data); keys come back with term:input.
+const { StringDecoder } = require('node:string_decoder');
+const terminals = new Map(); // id → { stream }
+const clampInt = (n, min, max, fallback) => (Number.isFinite(Number(n)) ? Math.min(max, Math.max(min, Math.round(Number(n)))) : fallback);
+ipcMain.handle('term:open', guard(async (event, connId, opts = {}) => {
+  const cols = clampInt(opts.cols, 20, 500, 100);
+  const rows = clampInt(opts.rows, 5, 200, 24);
+  const stream = await remote.openShell(String(connId), { cols, rows, cwd: typeof opts.cwd === 'string' ? opts.cwd : '' });
+  const id = crypto.randomBytes(6).toString('hex');
+  const sender = event.sender;
+  const decoder = new StringDecoder('utf8');
+  let pending = '';
+  let timer = null;
+  let code = null;
+  const flush = () => {
+    clearTimeout(timer);
+    timer = null;
+    if (pending && !sender.isDestroyed()) sender.send('term:data', { id, data: pending });
+    pending = '';
+  };
+  const push = (chunk) => {
+    pending += decoder.write(chunk);
+    if (pending.length > 65536) flush();
+    else timer ??= setTimeout(flush, 8);
+  };
+  stream.on('data', push);
+  stream.stderr?.on('data', push);
+  stream.on('exit', (exitCode) => (code = exitCode));
+  stream.on('close', () => {
+    pending += decoder.end();
+    flush();
+    terminals.delete(id);
+    if (!sender.isDestroyed()) sender.send('term:exit', { id, code });
+  });
+  terminals.set(id, { stream, sender });
+  watchTerminalPage(sender);
+  return { id };
+}));
+// A page reloaded or closed: its shells end (once per page, not once per shell).
+const terminalPages = new WeakSet();
+function watchTerminalPage(sender) {
+  if (terminalPages.has(sender)) return;
+  terminalPages.add(sender);
+  const closeAll = () => {
+    for (const t of terminals.values()) if (t.sender === sender) t.stream.close();
+  };
+  sender.on('did-navigate', closeAll);
+  sender.once('destroyed', closeAll);
+}
+ipcMain.on('term:input', (event, id, data) => {
+  if (fromApp(event) && typeof data === 'string') terminals.get(id)?.stream.write(data);
+});
+ipcMain.handle('term:resize', guard((_e, id, cols, rows) => {
+  terminals.get(id)?.stream.setWindow(clampInt(rows, 5, 200, 24), clampInt(cols, 20, 500, 100), 0, 0);
+  return true;
+}));
+ipcMain.handle('term:close', guard((_e, id) => {
+  terminals.get(id)?.stream.close();
+  return true;
+}));
+// While a terminal has the keys, the menu's shortcuts (Ctrl+W, Ctrl+N…) go to the shell.
+ipcMain.handle('term:keys', guard((event, own) => {
+  event.sender.setIgnoreMenuShortcuts(Boolean(own));
+  return true;
 }));
 
 // A file on a server is checked now and then while the server is connected (never
@@ -416,6 +737,17 @@ ipcMain.handle('folder:open-external', guard(async (_e, file) => {
   if (error) throw new Error(error);
   return true;
 }));
+// Properties: sizes, dates, owner and permissions; permissions can be changed
+// (on Windows only "read-only" means something here).
+ipcMain.handle('folder:properties', guard((_e, p) => (isRemote(p) ? remote.properties(p) : { ...folders.properties(checkFile(p)), platform: process.platform })));
+ipcMain.handle('folder:size', guard((_e, p) => (isRemote(p) ? remote.folderSize(p) : folders.folderSize(checkDir(p)))));
+ipcMain.handle('folder:chmod', guard((_e, paths, mode, opts = {}) => {
+  checkList(paths);
+  if (!Number.isInteger(mode) || mode < 0 || mode > 0o7777) throw new Error('Those permissions are not valid.');
+  const recursive = Boolean(opts.recursive);
+  if (paths.some(isRemote)) return remote.chmod(paths.filter(isRemote), mode, { recursive });
+  return folders.chmodEntries(paths.map(checkFile), mode, { recursive });
+}));
 // An image's bytes, for reading its text.
 ipcMain.handle('folder:read-image', guard((_e, file) => {
   if (isRemote(file)) {
@@ -470,6 +802,148 @@ ipcMain.handle('folder:watch', guard((event, dir) => {
     return false; // some network folders cannot be watched; Refresh still works
   }
   return true;
+}));
+// Find in a folder (and the folders inside it), here or on a server: each file
+// with matches goes to the page as soon as it is read ('folder:found').
+const { findInFolder } = require('./findInFolder.cjs');
+const folderSearches = new Map(); // search id → AbortController
+let appModules = null;
+const loadAppModules = async () =>
+  (appModules ??= {
+    search: await import(pathToFileURL(path.join(APP_DIR, 'js', 'search.js')).href),
+    folders: await import(pathToFileURL(path.join(APP_DIR, 'js', 'folders.js')).href),
+  });
+// The matching runs in a worker thread, so a pattern that takes very long (or a huge
+// minified file) never freezes the window; Stop, or 15 s on one file, ends the worker.
+const MATCH_WORKER = `
+const { parentPort, workerData } = require('node:worker_threads');
+const ready = import('data:text/javascript,' + encodeURIComponent(workerData.source));
+parentPort.on('message', async ({ id, name, text }) => {
+  try {
+    const { findInFiles } = await ready;
+    const hit = findInFiles([{ id: name, name, text }], workerData.query, { ...workerData.options, maxPerFile: 200, maxLines: 200 }).files[0] ?? null;
+    parentPort.postMessage({ id, hit });
+  } catch (err) {
+    parentPort.postMessage({ id, error: String(err && err.message || err) });
+  }
+});`;
+function matchWorker(query, options, signal) {
+  const { Worker } = require('node:worker_threads');
+  const source = fs.readFileSync(path.join(APP_DIR, 'js', 'search.js'), 'utf8');
+  const worker = new Worker(MATCH_WORKER, { eval: true, workerData: { source, query, options } });
+  const pending = new Map();
+  let n = 0;
+  let dead = null;
+  const end = (reason) => {
+    if (dead) return;
+    dead = reason;
+    worker.terminate();
+    for (const p of pending.values()) p.reject(reason);
+    pending.clear();
+  };
+  worker.on('message', ({ id, hit, error }) => {
+    const p = pending.get(id);
+    if (!p) return;
+    pending.delete(id);
+    clearTimeout(p.timer);
+    error ? p.reject(new Error(error)) : p.resolve(hit);
+  });
+  worker.on('error', (err) => end(err));
+  signal.addEventListener('abort', () => end(new Error('Stopped.')));
+  return {
+    match: (name, text) =>
+      new Promise((resolve, reject) => {
+        if (dead) return reject(dead);
+        const id = ++n;
+        const timer = setTimeout(() => end(Object.assign(new Error(`Searching ${name} takes too long with this pattern, so the search stopped.`), { fatal: true })), 15000);
+        pending.set(id, { resolve, reject, timer });
+        worker.postMessage({ id, name, text });
+      }),
+    close: () => end(new Error('Done.')),
+  };
+}
+ipcMain.handle('folder:find', guard(async (event, searchId, dir, query, opts = {}) => {
+  if (typeof query !== 'string' || !query) throw new Error('Type what to find.');
+  const { search, folders: names } = await loadAppModules();
+  const options = { caseSensitive: Boolean(opts.caseSensitive), wholeWord: Boolean(opts.wholeWord), regex: Boolean(opts.regex) };
+  search.buildMatcher(query, options); // a bad pattern says so before anything is read
+  const onServer = isRemote(dir);
+  if (!onServer) checkDir(dir);
+  const controller = new AbortController();
+  folderSearches.get(searchId)?.abort();
+  folderSearches.set(searchId, controller);
+  const sender = event.sender;
+  const send = (channel, data) => !sender.isDestroyed() && sender.send(channel, { searchId, ...data });
+  const root = onServer ? remoteFiles.parseUri(dir).path : dir;
+  const matcher = matchWorker(query, options, controller.signal);
+  try {
+    const stats = await findInFolder({
+      root: dir,
+      // Links are not followed on this computer, so the search stays inside the folder.
+      list: onServer
+        ? async (d) => (await remote.list(d)).entries
+        : async (d) =>
+            (await fs.promises.readdir(d, { withFileTypes: true }))
+              .filter((e) => !e.isSymbolicLink() && (e.isDirectory() || e.isFile()))
+              .map((e) => ({ name: e.name, path: path.join(d, e.name), dir: e.isDirectory(), size: e.isFile() ? fs.statSync(path.join(d, e.name)).size : 0 })),
+      read: onServer ? (p) => remote.readBytes(p, 2 * 1024 * 1024) : (p) => fs.promises.readFile(p),
+      decode: (bytes) => disk.decode(bytes).text,
+      match: matcher.match,
+      isText: names.opensInEditor,
+      relative: (p) => (onServer ? path.posix.relative(root, remoteFiles.parseUri(p).path) : path.relative(dir, p)),
+      onFound: (file) => send('folder:found', { file }),
+      onProgress: (stats) => send('folder:find-progress', { stats }),
+      signal: controller.signal,
+      hidden: Boolean(opts.hidden),
+      files: typeof opts.files === 'string' ? opts.files : '',
+      maxFiles: onServer ? 2000 : 20000,
+      maxSize: onServer ? 2 * 1024 * 1024 : 5 * 1024 * 1024,
+      concurrency: onServer ? (remote.isFtp(dir) ? 1 : 4) : 8,
+    });
+    if (stats.error) throw new Error(stats.error);
+    return stats;
+  } finally {
+    matcher.close();
+    if (folderSearches.get(searchId) === controller) folderSearches.delete(searchId);
+  }
+}));
+ipcMain.handle('folder:find-stop', guard((_e, searchId) => {
+  folderSearches.get(searchId)?.abort();
+  return true;
+}));
+
+// A folder on this computer in the system's terminal app (Windows Terminal or
+// PowerShell, Terminal on macOS, the desktop's terminal on Linux).
+function openSystemTerminal(dir) {
+  const { spawn } = require('node:child_process');
+  const candidates =
+    process.platform === 'win32'
+      ? // Windows Terminal reads ; in its arguments as a new command: the folder is its working folder, not an argument.
+        [['wt.exe', ['-d', '.']], [process.env.ComSpec || 'cmd.exe', ['/c', 'start', '', 'powershell.exe', '-NoExit']]]
+      : process.platform === 'darwin'
+        ? [['open', ['-a', 'Terminal', dir]]]
+        : [['x-terminal-emulator', []], ['gnome-terminal', [`--working-directory=${dir}`]], ['konsole', ['--workdir', dir]], ['xfce4-terminal', [`--working-directory=${dir}`]], ['kitty', ['--directory', dir]], ['alacritty', ['--working-directory', dir]], ['xterm', []]];
+  const tryOne = ([cmd, args]) =>
+    new Promise((resolve) => {
+      try {
+        const child = spawn(cmd, args, { cwd: dir, detached: true, stdio: 'ignore' });
+        child.once('error', () => resolve(false));
+        child.once('spawn', () => {
+          child.unref();
+          resolve(true);
+        });
+      } catch {
+        resolve(false);
+      }
+    });
+  return (async () => {
+    for (const candidate of candidates) if (await tryOne(candidate)) return true;
+    throw new Error('No terminal app was found on this computer.');
+  })();
+}
+ipcMain.handle('folder:terminal', guard((_e, dir) => {
+  if (isRemote(dir)) throw new Error('Terminals on servers open in the editor.');
+  return openSystemTerminal(checkDir(dir));
 }));
 // Paste in the page as Ctrl+V does, so the Paste button gets the files copied in other apps.
 ipcMain.handle('edit:paste', guard((event) => event.sender.paste()));
@@ -1177,6 +1651,7 @@ function buildMenu() {
         item('Open File (Edit in Place)…', 'CmdOrCtrl+O', 'disk-open'),
         item('Open Folder…', undefined, 'folder-open'),
         item('Connect to a Server…', undefined, 'server-add'),
+        item('Servers from the SSH Config…', undefined, 'servers-ssh'),
         item('Import Files…', undefined, 'open-disk'),
         item('Save a Copy to Disk…', 'CmdOrCtrl+Shift+S', 'save-copy'),
         item('Trash…', undefined, 'trash'),
@@ -1231,6 +1706,7 @@ function buildMenu() {
         shown('Split View', 'CmdOrCtrl+\\', 'split'),
         item('Local Model', 'CmdOrCtrl+Shift+A', 'assistant'),
         shown('Outline and Links', 'CmdOrCtrl+Shift+O', 'outline'),
+        shown('Terminal', 'Ctrl+`', 'terminal'),
         { type: 'separator' },
         item('Next Tab', 'Ctrl+Tab', 'next-tab'),
         item('Previous Tab', 'Ctrl+Shift+Tab', 'prev-tab'),

@@ -1974,6 +1974,89 @@ button.project-chip:hover {
   font-size: 13px;
 }
 
+/* Signing in: a password not saved, a passphrase, or the server's own questions. */
+.prompt-dialog .prompt-where {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+
+.prompt-dialog .prompt-where svg {
+  color: var(--kind-remote);
+}
+
+.prompt-dialog .prompt-instructions {
+  margin: 0 0 12px;
+  white-space: pre-wrap;
+}
+
+.prompt-dialog .field {
+  margin-bottom: 12px;
+}
+
+/* Servers from the SSH config. */
+.ssh-hosts {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 50vh;
+  margin: 8px 0 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.ssh-host {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 7px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.ssh-host:hover {
+  background: var(--surface-2);
+}
+
+.ssh-host.known .ssh-host-main {
+  color: var(--text-2);
+}
+
+.ssh-host-main {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ssh-host-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.ssh-host-tags .chip {
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.ssh-host-tags .chip.warn {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.ssh-import-dialog .modal-foot .muted {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .folders-foot svg {
   flex-shrink: 0;
   color: var(--text-3);
@@ -4768,4 +4851,417 @@ svg.up {
 
 .assist-input .icon-btn.primary:disabled {
   opacity: 0.45;
+}
+
+/* ---- Terminal (desktop): shells on servers, under the editor ------------------ */
+.terminal-panel {
+  position: relative;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  min-height: 120px;
+  max-height: 75vh;
+  border-top: 2px solid var(--kind-remote);
+  background: var(--surface);
+}
+
+.terminal-resize {
+  position: absolute;
+  top: -5px;
+  right: 0;
+  left: 0;
+  z-index: 2;
+  height: 8px;
+  cursor: ns-resize;
+}
+
+.terminal-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 6px 0 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.terminal-head > .icon {
+  flex: none;
+  color: var(--kind-remote);
+}
+
+.terminal-tabs {
+  display: flex;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.terminal-tab {
+  display: flex;
+  flex: none;
+  align-items: center;
+  max-width: 240px;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+}
+
+.terminal-tab.active {
+  background: var(--surface);
+  box-shadow: inset 0 -2px 0 var(--kc);
+  color: var(--text);
+}
+
+.terminal-tab.exited .terminal-tab-name {
+  color: var(--text-3);
+}
+
+.terminal-tab-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 5px 4px 5px 8px;
+  overflow: hidden;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.terminal-tab .conn-dot {
+  color: var(--kc);
+}
+
+.icon-btn.xs {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+}
+
+.terminal-screens {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  padding: 4px 0 0 8px;
+  background: #ffffff;
+}
+
+:root[data-theme='dark'] .terminal-screens {
+  background: #1b1a18;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .terminal-screens {
+    background: #1b1a18;
+  }
+}
+
+.terminal-screen {
+  position: absolute;
+  inset: 4px 0 0 8px;
+}
+
+.terminal-screen[hidden] {
+  display: none;
+}
+
+.terminal-screen .xterm {
+  height: 100%;
+}
+
+/* xterm.css paints the viewport black; the panel's own background shows instead. */
+.terminal-screen .xterm .xterm-viewport {
+  background-color: transparent;
+}
+
+.terminal-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 14px 10px;
+  color: var(--text-2);
+}
+
+.terminal-empty p {
+  margin: 0;
+}
+
+.terminal-empty-servers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* ---- Find in a folder ---------------------------------------------------------- */
+.folder-search-where {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin: 0 0 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-search-where .icon {
+  flex: none;
+  color: var(--kc);
+}
+
+.folder-search-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.folder-search-filters input[type='text'],
+.folder-search-filters input:not([type]) {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---- Properties and permissions ------------------------------------------------ */
+.properties {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 10px 16px;
+  margin: 0;
+}
+
+.properties dt {
+  color: var(--text-2);
+}
+
+.properties dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.properties-where {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.properties-where .icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--kc);
+}
+
+.perm-grid {
+  display: inline-grid;
+  grid-template-columns: max-content repeat(3, 56px);
+  align-items: center;
+  gap: 4px 0;
+  margin-bottom: 8px;
+}
+
+.perm-head {
+  color: var(--text-2);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.perm-who {
+  padding-right: 12px;
+}
+
+.perm-cell {
+  display: flex;
+  justify-content: center;
+  padding: 3px 0;
+  cursor: pointer;
+}
+
+.perm-octal {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.perm-octal label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.properties-dialog .perm-octal input {
+  width: 72px;
+  font-family: var(--mono);
+}
+
+.perm-string,
+.folder-perms {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.perm-string {
+  padding-bottom: 6px;
+  color: var(--text-2);
+}
+
+.folder-perms {
+  flex: none;
+  margin-left: 8px;
+  color: var(--text-3);
+}
+
+/* ---- Mirrors ---------------------------------------------------------------------- */
+.mirror-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 10px 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--kind-remote);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.mirror-bar.tone-warn {
+  border-left-color: var(--warn);
+}
+
+.mirror-bar.tone-error {
+  border-left-color: var(--danger);
+}
+
+.mirror-arrow {
+  flex: none;
+  color: var(--kind-remote);
+  font-size: 16px;
+  line-height: 1;
+}
+
+.mirror-bar-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.mirror-bar-text > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mirror-bar.tone-error .mirror-bar-text .muted {
+  color: var(--danger);
+}
+
+.mirror-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mirror-item {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.mirror-pair {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  overflow-wrap: anywhere;
+}
+
+.mirror-pair > span:not(.mirror-arrow) {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.mirror-pair .icon {
+  flex: none;
+  color: var(--kc);
+}
+
+.mirror-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin: 6px 0;
+  font-size: 13px;
+}
+
+.mirror-state.tone-ok {
+  color: var(--kind-synced);
+}
+
+.mirror-state.tone-warn {
+  color: var(--warn);
+}
+
+.mirror-state.tone-error {
+  color: var(--danger);
+  white-space: pre-line;
+}
+
+.mirror-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.mirror-dialog .row-input {
+  display: flex;
+  gap: 6px;
+}
+
+.mirror-dialog .row-input input {
+  flex: 1;
+  min-width: 0;
+}
+
+.mirror-badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px dashed var(--kind-remote);
+  border-radius: 999px;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.mirror-badge > span[aria-hidden] {
+  color: var(--kind-remote);
+}
+
+.mirror-badge:hover {
+  background: var(--surface-2);
+}
+
+@media (max-width: 860px) {
+  .mirror-badge .label {
+    display: none;
+  }
 }

@@ -1,12 +1,14 @@
 import { html, useEffect, useLayoutEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import { canDragOut, draggedPaths, draggedTab, dropped, isOwnDrop, onDragOutEnd, startDragOut } from '../dragOut.js';
-import { baseName, breadcrumbs, filterEntries, FOLDER_SORTS, isImageName, opensInEditor, parentOf, quotePath, rangeOf, renameRange, rootOf, selectionSummary, sortEntries } from '../folders.js';
+import { baseName, breadcrumbs, filterEntries, FOLDER_SORTS, isImageName, modeString, opensInEditor, parentOf, quotePath, rangeOf, renameRange, rootOf, selectionSummary, sortEntries } from '../folders.js';
 import { formatBytes, timeAgo } from '../format.js';
 import { saveSettings } from '../settings.js';
 import { diskKey } from '../store.js';
 import { server, servers, serverStatus } from '../servers.js';
 import { isRemotePath, protocolName, remoteParts, remoteRoot } from '../where.js';
 import { Modal, toast } from './components.js';
+import { mirrorOf } from '../mirrors.js';
+import { MirrorBar } from './mirrors.js';
 import { Icon } from './icons.js';
 import { Menu, MenuButton } from './menu.js';
 
@@ -100,6 +102,16 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   const connState = conn ? serverStatus(conn.id) : null;
   const rootName = (r) => (isRemotePath(r) ? (server(remoteParts(r).id)?.name ?? 'Server') : baseName(r));
   const internalDrag = useRef(null); // paths dragged within a folder on a server
+  // Terminals: in the editor on SSH servers, the system's terminal app for folders here (none on FTP).
+  const hasTerminal = remote ? conn?.protocol === 'sftp' : Boolean(bridge.terminal);
+  // Mirrors: a folder on a server kept on this computer; inside one, its bar and its settings.
+  const mirrored = mirrorOf(dir);
+  const mirrorItem = (path) => {
+    if (!window.desktop?.mirrors) return null;
+    const found = mirrorOf(path);
+    if (found) return { label: 'Mirror settings…', icon: 'sync', run: () => actions.editMirror(found.mirror) };
+    return remote ? { label: 'Keep on this computer (mirror)…', icon: 'sync', run: () => actions.newMirror({ conn: conn.id, remote: remoteParts(path).path }) } : null;
+  };
 
   const refreshRoots = () => bridge.roots().then(setRoots);
   useEffect(() => {
@@ -151,6 +163,12 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     };
   }, [dir, root]);
   useEffect(() => onDragOutEnd(() => setDropTarget(null)), []);
+  // Changed elsewhere in the app (permissions in Properties): read again.
+  useEffect(() => {
+    const reload = () => root && load(dir);
+    window.addEventListener('folders:reload', reload);
+    return () => window.removeEventListener('folders:reload', reload);
+  }, [dir, root]);
   // A server that connects again: its folder is read again.
   useEffect(() => {
     if (remote && connState?.state === 'connected' && listing?.error) load(dir);
@@ -438,6 +456,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       next.has(cursor) ? next.delete(cursor) : next.add(cursor);
       return setSelected(next);
     }
+    if (key === 'Enter' && ev.altKey) return handled(), targets().length === 1 && actions.showProperties(targets()[0].path);
     if (key === 'Enter') return handled(), openSelected();
     if (key === 'Backspace' || (key === 'ArrowUp' && ev.altKey)) {
       handled();
@@ -456,6 +475,8 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     // Ctrl+V goes on to the browser's paste, which brings the files copied in other apps.
     if (mod && key.toLowerCase() === 'v') return claimSelection();
     if (mod && ev.shiftKey && key.toLowerCase() === 'n') return handled(), setCreating({ kind: 'folder', name: 'New folder' });
+    // Find in the folder selected, or the one shown.
+    if (mod && ev.shiftKey && key.toLowerCase() === 'f') return handled(), actions.findInFolder(targets().length === 1 && targets()[0].dir ? targets()[0].path : dir);
     if (key === 'Escape') {
       if (clip?.op === 'cut') {
         clip = null;
@@ -481,12 +502,17 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     { label: 'New file', icon: 'filePlus', run: () => setCreating({ kind: 'file', name: 'New file.txt' }) },
     { label: 'New folder (Ctrl+Shift+N)', icon: 'folderPlus', run: () => setCreating({ kind: 'folder', name: 'New folder' }) },
     { label: 'Paste (Ctrl+V)', icon: 'clipboard', run: paste },
+    { label: 'Find in this folder… (Ctrl+Shift+F)', icon: 'search', run: () => actions.findInFolder(dir) },
     { separator: true },
     ...sortItems,
     { separator: true },
     { label: settings.showHidden ? 'Hide hidden files' : 'Show hidden files', icon: 'eye', run: () => saveSettings({ showHidden: !settings.showHidden }) },
+    remote && { label: settings.showPermissions ? 'Hide permissions' : 'Show permissions', icon: 'lock', run: () => saveSettings({ showPermissions: !settings.showPermissions }) },
     { label: 'Refresh (F5)', icon: 'rotate', run: () => load(dir) },
+    { label: 'Properties of this folder', icon: 'info', run: () => actions.showProperties(dir) },
     { label: 'Copy path', icon: 'copy', run: () => actions.copyPath(dir) },
+    hasTerminal && { label: 'Open a terminal here', icon: 'terminal', run: () => actions.terminalHere(dir) },
+    mirrorItem(dir),
     !remote && { label: 'Open in the file explorer', icon: 'external', run: () => bridge.openExternal(dir).catch(fail) },
   ];
   const entryItems = () => {
@@ -510,6 +536,10 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       !remote && { label: one ? 'Copy for Claude (the path)' : 'Copy for Claude (the paths)', icon: 'claude', run: () => navigator.clipboard.writeText(items.map((e) => quotePath(e.path)).join(' ')).then(() => toast('On the clipboard: paste it into Claude')) },
       files.length && files.length === items.length && files.every((e) => opensInEditor(e.name)) && { label: 'Copy into my files (synced)', icon: 'filePlus', run: () => files.forEach((e) => actions.copyToFiles(e.path)) },
       one && !remote && { label: 'Show in the file explorer', icon: 'external', run: () => actions.showOnDisk(one.path) },
+      one && { label: 'Properties (Alt+Enter)', icon: 'info', run: () => actions.showProperties(one.path) },
+      one?.dir && { label: 'Find in this folder…', icon: 'search', run: () => actions.findInFolder(one.path) },
+      one?.dir && hasTerminal && { label: 'Open a terminal here', icon: 'terminal', run: () => actions.terminalHere(one.path) },
+      one?.dir && mirrorItem(one.path),
     ];
   };
   const rootItems = () => [
@@ -518,13 +548,17 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     { separator: true },
     { label: 'Open another folder…', icon: 'folderOpen', run: () => pick(remote ? undefined : (parentOf(dir, root) ?? root)) },
     { label: 'Connect to a server…', icon: 'server', run: () => actions.editServer() },
+    { label: 'Servers from your SSH config…', icon: 'server', run: () => actions.importSshConfig() },
+    window.desktop?.mirrors && { label: 'Mirrors…', icon: 'sync', run: () => actions.showMirrors() },
     ...(remote ? [] : PLACES.filter((p) => places[p.id] && !roots.includes(places[p.id])).map((p) => ({ label: `Pick in ${p.label}…`, run: () => pick(places[p.id]) }))),
     { separator: true },
     ...sortItems,
     { separator: true },
     { label: settings.showHidden ? 'Hide hidden files' : `Show hidden files${hiddenCount ? ` (${hiddenCount} here)` : ''}`, icon: 'eye', run: () => saveSettings({ showHidden: !settings.showHidden }) },
+    remote && { label: settings.showPermissions ? 'Hide permissions' : 'Show permissions', icon: 'lock', run: () => saveSettings({ showPermissions: !settings.showPermissions }) },
     ...(remote
       ? [
+          conn?.protocol === 'sftp' && { label: 'Open a terminal', icon: 'terminal', run: () => actions.terminalHere(dir) },
           { label: `Edit ${conn?.name ?? 'this server'}…`, icon: 'edit', run: () => actions.editServer(conn) },
           connState?.state === 'connected'
             ? { label: 'Disconnect', icon: 'x', run: () => window.desktop.remote.disconnect(conn.id) }
@@ -574,7 +608,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     const isSelected = selected.has(e.path);
     return html`<div key=${e.path} data-path=${e.path} role="option" aria-selected=${isSelected} id=${`row-${order.indexOf(e.path)}`}
       class="folder-row ${e.dir ? 'is-dir' : ''} ${isSelected ? 'selected' : ''} ${cursor === e.path ? 'cursor' : ''} ${activeKey === key ? 'active' : ''} ${e.hidden ? 'hidden-entry' : ''} ${clip?.op === 'cut' && clip.paths.includes(e.path) ? 'is-cut' : ''} ${dropTarget === e.path ? 'drop-target' : ''}"
-      title=${remote ? remoteParts(e.path).path : e.path} draggable=${renaming !== e.path}
+      title=${remote ? `${remoteParts(e.path).path}${e.mode !== undefined ? `\n${modeString(e.mode, e.dir)}${e.owner ? ` ${e.owner}` : ''}${e.group ? ` ${e.group}` : ''}` : ''}` : e.path} draggable=${renaming !== e.path}
       onDragStart=${(ev) => onDragStart(ev, e)}
       onDragEnd=${() => (internalDrag.current = null)}
       ...${e.dir ? dropProps(e.path) : {}}
@@ -607,6 +641,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       ${openKeys.includes(key) && html`<span class="tab-dot open-dot" title="Open in a tab" />`}
       <span class="spacer" />
       ${!e.dir && renaming !== e.path && html`<span class="muted small folder-meta" title=${new Date(e.mtimeMs).toLocaleString()}>${formatBytes(e.size)} · ${timeAgo(new Date(e.mtimeMs).toISOString())}</span>`}
+      ${remote && settings.showPermissions && e.mode !== undefined && renaming !== e.path && html`<code class="folder-perms" title=${`${e.owner ?? ''} ${e.group ?? ''}`.trim()}>${modeString(e.mode, e.dir)}</code>`}
     </div>`;
   };
 
@@ -632,6 +667,8 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
         <span class="tools-sep" />
         ${tool('Rename (F2)', 'edit', () => setRenaming(targets()[0].path), targets().length !== 1)}
         ${tool('Delete (Del)', 'trash', () => setConfirm(targets()), !some)}
+        <span class="tools-sep" />
+        ${tool('Find in this folder (Ctrl+Shift+F)', 'search', () => actions.findInFolder(dir))}
       </div>
       ${crumbs.length > 1 &&
       html`<nav class="crumbs" aria-label="Folder path">
@@ -640,6 +677,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
             aria-current=${i === crumbs.length - 1 ? 'location' : undefined} title=${remote ? remoteParts(c.path).path : c.path} onClick=${() => go(c.path)} ...${i < crumbs.length - 1 ? dropProps(c.path) : {}}>${i === 0 ? rootName(root) : c.name}</button>`,
         )}
       </nav>`}
+      ${mirrored && html`<${MirrorBar} found=${mirrored} actions=${actions} />`}
       <div class="sidebar-filter">
         <${Icon} name="search" size=${15} />
         <input value=${filter} onInput=${(e) => setFilter(e.currentTarget.value)} placeholder=${`Filter ${dir === root ? rootName(root) : baseName(dir)}`} aria-label="Filter this folder"

@@ -37,11 +37,16 @@ It is the companion of [Tracker](https://github.com/divaor/tracking_app) and sha
   - Or a **model service that answers later** (submit a request, get the answer from a status call or a webhook), described by a connection profile; see [4. Model](#4-model-optional).
 - **Type into another window** (desktop): for remote desktops and consoles that do not take pasted text. `Alt+T` types the selection, or the whole file, as key presses into the window you click into before a short countdown ends.
 - **Files on disk** (desktop): **File → Open File (Edit in Place)** (`Ctrl+O`) edits a file where it is, keeping its line endings and encoding. It reloads when the file changes elsewhere, warns before saving over someone else's change, and **Follow** shows new lines as they are written, like `tail -f`. Huge logs open by their last part.
-- **Folders** (desktop): the sidebar's **Folders** view (`Ctrl+Shift+E`) works like a file explorer for folders on your computer: open, create, rename, copy, cut and paste (also files copied in Explorer or Finder), drag to move, delete to the Recycle Bin, sort, with Undo. Text files open as files on disk, edited in place and not synced unless you **Copy into my files**; other files open with their own program; pictures can have their text read into a file next to them.
+- **Folders** (desktop): the sidebar's **Folders** view (`Ctrl+Shift+E`) works like a file explorer for folders on your computer: open, create, rename, copy, cut and paste (also files copied in Explorer or Finder), drag to move, delete to the Recycle Bin, sort, with Undo; find in a folder, **Properties** (sizes, dates, permissions) and **Open a terminal here**. Text files open as files on disk, edited in place and not synced unless you **Copy into my files**; other files open with their own program; pictures can have their text read into a file next to them.
 - **Drag a tab out** (desktop): to the desktop or a folder for a copy, to a terminal running Claude Code for its path, or to the Claude app to attach it. **Copy for Claude** in the tab menu copies the path of a file on disk, or the name and text of the others.
 - **Quick capture** (desktop): a shortcut that works in any app opens a small window to jot something down, kept as a new note or added to `Inbox.md`.
 - **Clipboard history** (desktop, off until you turn it on): what you copy in any app, to search and paste again (`Ctrl+Shift+V`). Kept on the computer, encrypted, and passwords from password managers are skipped.
 - **Files on servers** (desktop): connect to servers over **SFTP**, **FTPS** or **FTP** and work on their files as on your own: browse them in Folders, open, edit and save back, follow logs, rename, move, copy, upload and delete. The editor shows when a file is not saved to the server yet, changed there meanwhile, or the server cannot be reached.
+  - Sign in with a password (asked when it is not saved), a key, your SSH agent and a **one-time code** when the server wants a second step; reach servers **through a jump host**; set them up from your **SSH config**.
+  - **Terminal** (`` Ctrl+` ``): a shell on the server in a panel under the editor, opened in the folder you are looking at, with a tab per shell.
+  - **Mirrors**: keep a folder on a server and one on this computer the same, both ways or one way, automatically while the server is connected. Files deleted here are deleted on the server only when you say so; a file changed on both sides is kept twice.
+  - **Permissions**: see them next to the files, and change them (owner, group, others, or as `644`) in **Properties**.
+- **Find in a folder** (desktop, `Ctrl+Shift+F` in Folders): text in a folder and the folders inside it, on this computer or on a server, with the same options as Find in files; the files found open at the line.
 - **Text from images and screenshots**: paste, drop or pick an image (on a phone, take a photo), or on the desktop drag around part of the screen, and its text is read on the device (English and Spanish), or by your model when it reads images, to insert, keep or copy.
 - **Voice notes** (phone and browsers with a speech service): the microphone button dictates into the open file or a new note, with spoken line breaks ("new line", "nuevo párrafo").
 - **Syntax highlighting** for 140+ languages, detected from the file name or the content of pasted text, or picked in the status bar.
@@ -210,6 +215,9 @@ The sidebar has two views on the desktop: **My files** (synced) and **Folders** 
 - **Dragging**: drag files and folders onto a folder (or a part of the path at the top) to move them there, with `Ctrl` to copy. Drop files from another app to copy them in, or a tab to save a copy of it there. Dragged out of the window they go to other apps as the files themselves.
 - **Open files follow**: renaming or moving a file, or the folder it is in, keeps its tab (with any unsaved edits). Deleting it closes the tab, unless it has unsaved edits.
 - **Pictures**: right-click → **Text from the image…** reads its text on this computer; **Save as photo.txt here** keeps it next to the picture (or insert it, copy it, or make a synced file).
+- **Find in this folder** (`Ctrl+Shift+F` in the list, the 🔍 button, or right-click a folder): finds text in the folder and the folders inside it, with match case, whole word and regular expressions, and **Files** to narrow it (`*.log, !debug*`). Press `Enter` to start; results come in as files are read, **Stop** stops it, and a line opens the file there. `.git`, `node_modules`, files that are not text and very large files are left out, and so are hidden files unless you tick **Hidden**.
+- **Properties** (`Alt+Enter`, or right-click): where it is, its size (a folder's when you ask), dates, owner and permissions. On macOS and Linux (and on servers) change who can read, write and run it, or type a number like `644`; for a folder, also everything inside it (folders inside stay open wherever they can be read, and files can run only if they could before). On Windows, **Read-only**.
+- **Open a terminal here** (right-click): your system's terminal app (Windows Terminal or PowerShell, Terminal on macOS, your desktop's on Linux) in that folder.
 - **Also**: sort by name, date modified, size or type (⋯ or right-click on empty space); show hidden files; the list follows changes made in other apps; **Copy path**, **Copy for Claude** (paths, quoted as a terminal takes them), **Copy into my files**, **Show in the file explorer**; switch between your folders, add one or forget one from ⋯.
 - The folders, the one you were in, the order and the files you had open are remembered.
 
@@ -239,6 +247,37 @@ Drag a tab out of the window and drop it on another app. The app gets a file, an
 - A file from a server opens in a **pink** tab, with the server's name in the file bar and the status bar (`SFTP · user@host:/path`, and a dot for the connection). It is not synced: **Ctrl+S** saves it to the server, and until then the tab says **Not saved to the server**. Turn on **Save to the server automatically** in the server's settings to save a moment after you stop typing.
 - Changes made on the server show up in tabs you have not edited; with your edits, the file bar offers **Compare**, **Reload** or **Keep mine and save over it**, so nothing is overwritten by surprise. **Follow** shows lines added to a log on the server.
 - If the server cannot be reached, your edits stay on this device (also across restarts), the tab says **Not connected · not saved**, and **Reconnect** brings it back.
+- **Find in this folder**, **Properties** and the rest of the folders view work on servers too; **Show permissions** (⋯) puts `rw-r--r--` next to each file.
+
+### Signing in
+
+- **A password that is not saved** is asked when you connect, with **Remember on this computer** to keep it in the keychain. One the server refuses is asked again.
+- **Two-step sign-in**: when the server asks more (a one-time code after the key or the password, or its own questions), they are shown as it asks them. Codes go to the server only and are never kept. A server that only asks for "Password:" this way gets the saved password without asking.
+- **Key files with a passphrase** that is not saved: the passphrase is asked (and can be remembered).
+- **Jump hosts** (bastions): in the server's settings, **Reach it through** another SFTP server set up here. It is connected first and opens the way, as `ssh -J` does; chains work too.
+- **From your SSH config**: **Servers from your SSH config…** (⋯ in Folders, **File** menu, or the server dialog) lists the `Host` entries of `~/.ssh/config` (including `Include`d files). Tick the ones to set up: their host names, users, ports, key files (`IdentityFile`) and jump hosts (`ProxyJump`) come along; servers set up already are reused. Passwords are not in the SSH config, so they are asked the first time. `ProxyCommand` is not run; set a jump host instead.
+- Reading a key fingerprint or typing a code can take as long as you need: the connection waits for you.
+
+### Terminal
+
+`` Ctrl+` ``, **View → Terminal**, **Open a terminal here** on a folder of an SFTP server (or **Open a terminal in its folder** for a file) opens a shell on the server in a panel under the editor, signed in like its files (same password, key, agent, code and jump host).
+
+- Each shell has its own tab; **+** opens another on any SSH server. Drag the top edge to resize the panel.
+- Keys go to the shell, not to the editor: `Ctrl+C` interrupts (or copies when text is selected), `Ctrl+V` pastes, `Ctrl+Shift+C` / `Ctrl+Shift+V` copy and paste too, and the editor's shortcuts are left alone. Right-click for copy, paste and clear.
+- Hiding the panel (`` Ctrl+` `` again, or ⌄) keeps the shells running. When a shell ends, `Enter` starts a new one; closing its tab ends it.
+- FTP servers have no shell. For a folder on this computer, **Open a terminal here** opens your system's terminal app.
+
+### Mirrors
+
+Keep a folder on a server and a folder on this computer the same, for working with your own tools on the files of a server.
+
+- On a server in Folders, right-click a folder (or empty space) → **Keep on this computer (mirror)…**. Choose or make the folder here, the direction and what to leave out (`.git`, `node_modules` and temporary files by default), and **Save and sync now**.
+- **Both ways**: what changes on one side goes to the other. **Server → here** brings the server's changes and sends none (the server wins); **Here → server** the other way round.
+- **Keep them the same automatically**: while the server is connected, every minute and a few seconds after you change something here. **Sync now** is always there: in the bar shown inside a mirrored folder, the ⇄ badge of a file from it, and **Mirrors…** (⋯ in Folders), which lists them all.
+- **Deleted on the server** → here it goes to the Recycle Bin. **Deleted here** → the editor asks before deleting on the server: **Delete on the server**, or **Bring them back here**. Until you answer, they stay on the server.
+- **Changed on both sides**: yours keeps its name, and the server's version is kept next to it as `name (server copy 2026-10-22 15.04).ext`, on both sides. Files that are the same on both sides are no conflict.
+- If one side suddenly looks empty (a drive not plugged in, the wrong server folder), nothing is changed and the bar says why.
+- Large files are copied whole, streamed. A mirror's folder here is one of your folders, so it is in Folders too.
 
 ## 10. Quick capture, clipboard history and screenshots (desktop)
 
@@ -264,7 +303,9 @@ All three are in **Settings → Desktop**, off until you turn them on.
 | `Ctrl+Shift+F` | Find in files |
 | `Ctrl+O` | Open a file from disk to edit in place (desktop) |
 | `Ctrl+Shift+E` | Folders on this computer and on servers (desktop) |
-| In the folders view | `Enter` open, `Backspace` up, `F2` rename, `Del` delete, `Ctrl+C` / `Ctrl+X` / `Ctrl+V`, `Ctrl+A`, `Ctrl+Shift+N` new folder, `F5` refresh |
+| In the folders view | `Enter` open, `Backspace` up, `F2` rename, `Del` delete, `Ctrl+C` / `Ctrl+X` / `Ctrl+V`, `Ctrl+A`, `Ctrl+Shift+N` new folder, `F5` refresh, `Alt+Enter` properties, `Ctrl+Shift+F` find in this folder |
+| `` Ctrl+` `` | Terminal: show or hide (desktop) |
+| In the terminal | `Ctrl+Shift+C` / `Ctrl+Shift+V` copy / paste (`Ctrl+C` copies when text is selected, `Ctrl+V` pastes) |
 | `Ctrl+F` / `Ctrl+H` | Find / replace in this file |
 | `Ctrl+G` | Go to line |
 | `Ctrl+D` | Select the next occurrence |
@@ -324,10 +365,10 @@ npm install
 npm test          # unit tests (node:test): sync engine, search, local model client
 npm run web       # serve the web app at http://localhost:8080
 npm start         # run the desktop app
-npm run vendor    # re-bundle CodeMirror and copy Preact/htm, marked, DOMPurify and tesseract.js into app/vendor/
+npm run vendor    # re-bundle CodeMirror and xterm.js, copy Preact/htm, marked, DOMPurify and tesseract.js into app/vendor/
 ```
 
-The web app is plain ES modules with no build step. CodeMirror 6 and its languages are bundled once by `npm run vendor` (esbuild, one chunk per language) into `app/vendor/cm/`; text recognition (tesseract.js, its WebAssembly core and the English and Spanish models) is copied into `app/vendor/ocr/`.
+The web app is plain ES modules with no build step. CodeMirror 6 and its languages are bundled once by `npm run vendor` (esbuild, one chunk per language) into `app/vendor/cm/`; [xterm.js](https://xtermjs.org/) with its fit add-on into `app/vendor/xterm/` (the terminal, loaded when one opens); text recognition (tesseract.js, its WebAssembly core and the English and Spanish models) is copied into `app/vendor/ocr/`.
 
 The desktop app's only runtime dependencies are [ssh2](https://github.com/mscdex/ssh2) (SFTP) and [basic-ftp](https://github.com/patrickjuchli/basic-ftp) (FTP, FTPS), both plain JavaScript. ssh2's optional native speed-ups are left out of the installers (`build.files` in package.json), so builds need no compiler; it uses its JavaScript and WebAssembly code instead.
 
@@ -351,6 +392,7 @@ app/                  the web app (also loaded by Electron)
   js/diskTabs.js      files on disk edited in place, reloads and follow mode
   js/folders.js, dragOut.js       the folders view (paths, order, selection, Copy for Claude), dragging tabs and files out
   js/where.js, servers.js         where a file lives (kinds, colors, states), the servers and their connections
+  js/terminals.js, mirrors.js     terminals on servers (xterm.js sessions), mirrors and their status
   js/capture.js, ocr.js, ocrEngine.js, dictation.js       quick capture, text from images, voice notes
   js/ui/              tabs, sidebar, panels, dialogs, model panel, settings, compare, history, trash
   capture.html, snip.html   the quick capture window and the screenshot overlay (desktop)
@@ -360,7 +402,10 @@ electron/             main process + preload (app:// protocol, keychain, model p
   typer.cjs           key presses into another window (Windows, macOS, Linux)
   diskFiles.cjs       reading and writing files on disk (encodings, line endings, the end of huge files)
   folders.cjs         which paths the page may reach in picked folders, listings, rename/move/copy, what may open outside
-  remote.cjs          servers: SFTP (ssh2) and FTP/FTPS (basic-ftp), connections, host keys, files and folders there
+  remote.cjs          servers: SFTP (ssh2) and FTP/FTPS (basic-ftp), signing in, jump hosts, host keys, files, folders, shells
+  sshConfig.cjs       the hosts of ~/.ssh/config
+  findInFolder.cjs    find in a folder, here or on a server
+  mirror.cjs          mirrors: what a sync does (pure) and doing it
   clipHistory.cjs     the clipboard history list
 scripts/              vendor bundling, icon rendering, local web server
 test/                 unit tests
@@ -376,7 +421,9 @@ test/                 unit tests
 - **Model service secrets**: the API key and webhook secret are kept in the keychain (desktop) and never written to the settings or the data repo. The webhook receiver refuses events whose signature does not match when a secret is set.
 - **Files on disk**: the page can read and write only files you picked in the desktop app's open dialog, and files inside folders you picked there (symbolic links resolved, so they cannot lead outside). A forgotten folder is out of reach again. Renaming, moving, copying and deleting stay inside the picked folders, deleting goes to the Recycle Bin, and files pasted or dropped from other apps are copied in without becoming reachable themselves.
 - **Other programs**: files open with their default program only when they are not programs, scripts or shortcuts, so a page can never start one.
-- **Servers**: passwords and key passphrases are kept by the main process in the keychain store and never sent to the page; key files can only be ones picked in the file dialog. SSH host keys are checked against the fingerprint you trusted, and a changed key stops the connection unless you accept it. FTPS checks the server's certificate unless you allow a self-signed one; FTP is marked as unencrypted.
+- **Servers**: passwords and key passphrases are kept by the main process in the keychain store and never sent to the page; key files can only be ones picked in the file dialog, or named by `IdentityFile` in your SSH config (read by the main process; the page only picks hosts by name). Answers to the server's questions go to the server only: one-time codes are never kept, passwords only when you tick **Remember**. SSH host keys are checked against the fingerprint you trusted (for each server, also those reached through a jump host), and a changed key stops the connection unless you accept it. FTPS checks the server's certificate unless you allow a self-signed one; FTP is marked as unencrypted.
+- **Terminal**: keys typed in it go only to the shell on the server; the editor's own shortcuts do not see them while it has the focus.
+- **Mirrors**: deleting on a server waits for your yes; deleting here goes to the Recycle Bin; a side that suddenly looks empty stops the sync without changing anything. Local mirror folders are picked in the dialog like other folders.
 - **Dragged tabs**: synced files dragged out are written as plain copies to a temporary folder, deleted after a week; encrypted files are never written out.
 - **Clipboard history** is off by default, kept only on the computer (encrypted with the keychain; in memory only when there is none), skips copies marked as secret by password managers, and is deleted when turned off.
 - **Text from images** runs in the page: images are never uploaded. **Voice notes** use the browser's speech service, which sends the audio to its provider.

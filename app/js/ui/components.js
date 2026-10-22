@@ -7,9 +7,12 @@ import { Icon } from './icons.js';
 let pushToast = () => {};
 
 /** Shows a short message; `action` adds a button (e.g. Undo). */
-export function toast(message, { kind = 'info', action, timeout = 5000 } = {}) {
-  pushToast({ message, kind, action, timeout });
+/** A message for a moment. With `key`, it replaces one with the same key, and dismissToast(key) removes it. */
+export function toast(message, { kind = 'info', action, timeout = 5000, key = '' } = {}) {
+  pushToast({ message, kind, action, timeout, key });
 }
+let dropToast = () => {};
+export const dismissToast = (key) => dropToast(key);
 
 export function Toasts() {
   const [list, setList] = useState([]);
@@ -17,11 +20,13 @@ export function Toasts() {
     let n = 0;
     pushToast = (t) => {
       const id = ++n;
-      setList((l) => [...l.slice(-3), { ...t, id }]);
+      setList((l) => [...l.filter((x) => !t.key || x.key !== t.key).slice(-3), { ...t, id }]);
       setTimeout(() => setList((l) => l.filter((x) => x.id !== id)), t.timeout);
     };
+    dropToast = (key) => setList((l) => l.filter((x) => x.key !== key));
     return () => {
       pushToast = () => {};
+      dropToast = () => {};
     };
   }, []);
   const dismiss = (id) => setList((l) => l.filter((x) => x.id !== id));
@@ -41,20 +46,28 @@ export function Toasts() {
 
 // ---- Modal ---------------------------------------------------------------------
 
+// Dialogs shown, the last on top: Escape closes only that one (a question over a dialog).
+const openModals = [];
+
 export function Modal({ title, onClose, children, footer, wide = false, className = '' }) {
   const ref = useRef(null);
+  const close = useRef(onClose);
+  close.current = onClose;
   // A layout effect, so Escape works from the moment the dialog shows.
   useLayoutEffect(() => {
     const previous = document.activeElement;
+    const self = {};
+    openModals.push(self);
     ref.current?.querySelector('input, textarea, select, button.primary')?.focus();
     const onKey = (e) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && openModals.at(-1) === self) {
         e.preventDefault();
-        onClose();
+        close.current();
       }
     };
     document.addEventListener('keydown', onKey);
     return () => {
+      openModals.splice(openModals.indexOf(self), 1);
       document.removeEventListener('keydown', onKey);
       previous?.focus?.();
     };

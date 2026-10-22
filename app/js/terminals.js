@@ -1,0 +1,231 @@
+// Terminals on servers (desktop): each one a shell over a server's SSH connection
+// (main.cjs term:*), shown with xterm.js, which is loaded the first time one opens.
+// The sessions live here, outside the panel, so hiding the panel keeps them; the
+// panel attaches their screens (attach) and fits them to its size.
+import { getSettings, resolvedTheme } from './settings.js';
+
+let lib = null; // { Terminal, FitAddon }
+const sessions = []; // { key, id, connId, cwd, label, title, term, fit, el, exited, code, starting }
+const listeners = new Set();
+let active = null;
+let wired = false;
+let lastSize = { cols: 100, rows: 24 };
+let onToggle = () => {};
+
+const bridge = () => window.desktop?.terminal;
+const changed = () => listeners.forEach((l) => l());
+const byId = (id) => sessions.find((s) => s.id === id);
+const message = (err) => String(err?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
+
+export const terminalsAvailable = () => Boolean(bridge());
+export const terminals = () => sessions;
+export const activeTerminal = () => active;
+export function onTerminals(callback) {
+  listeners.add(callback);
+  return () => listeners.delete(callback);
+}
+/** What Ctrl+` does from inside a terminal (the app shows or hides the panel). */
+export function setToggleHandler(fn) {
+  onToggle = fn;
+}
+
+const THEMES = {
+  light: { background: '#ffffff', foreground: '#1d1c19', cursor: '#4f46e5', cursorAccent: '#ffffff', selectionBackground: '#c7c4f7' },
+  dark: { background: '#1b1a18', foreground: '#ece9e2', cursor: '#8b85f5', cursorAccent: '#1b1a18', selectionBackground: '#4a4680' },
+};
+const themeNow = () => THEMES[resolvedTheme(getSettings().theme) === 'dark' ? 'dark' : 'light'];
+
+async function load() {
+  if (lib) return lib;
+  if (!document.querySelector('link[data-xterm]')) {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = 'vendor/xterm/xterm.css';
+    link.dataset.xterm = '1';
+    document.head.append(link);
+  }
+  lib = await import('../vendor/xterm/xterm.js');
+  return lib;
+}
+
+function wire() {
+  if (wired) return;
+  wired = true;
+  bridge().onData(({ id, data }) => byId(id)?.term.write(data));
+  bridge().onExit(({ id, code }) => {
+    const s = byId(id);
+    if (!s) return;
+    s.exited = true;
+    s.code = code;
+    s.term.write(`\r\n\x1b[2m[The session ended${code ? ` (exit code ${code})` : ''}. Press Enter to start a new one.]\x1b[0m\r\n`);
+    changed();
+  });
+}
+
+async function start(s) {
+  s.starting = true;
+  changed();
+  try {
+    const cols = s.term.cols || lastSize.cols;
+    const rows = s.term.rows || lastSize.rows;
+    const { id } = await bridge().open(s.connId, { cols, rows, cwd: s.cwd });
+    // Closed while it was starting: the shell ends right away.
+    if (s.closed) {
+      bridge().close(id);
+      return false;
+    }
+    s.id = id;
+    s.exited = false;
+    s.code = null;
+    // Fitted meanwhile, and typed meanwhile: both go to the shell now.
+    if (s.term.cols !== cols || s.term.rows !== rows) bridge().resize(id, s.term.cols, s.term.rows);
+    if (s.typed) bridge().input(id, s.typed);
+    s.typed = '';
+    return true;
+  } catch (err) {
+    s.exited = true;
+    s.term.write(`\r\n\x1b[31m${message(err)}\x1b[0m\r\n\x1b[2m[Press Enter to try again.]\x1b[0m\r\n`);
+    return false;
+  } finally {
+    s.starting = false;
+    changed();
+  }
+}
+
+const copySelection = (term) => {
+  const text = term.getSelection();
+  if (text) navigator.clipboard.writeText(text).catch(() => {});
+  return Boolean(text);
+};
+const pasteInto = (term) => navigator.clipboard.readText().then((text) => text && term.paste(text), () => {});
+
+/**
+ * Opens a terminal on a server (an SFTP connection), in `cwd` when given.
+ * Resolves with the session once its shell runs (or shows why it did not).
+ */
+export async function openTerminal(connId, { cwd = '', label = 'Terminal' } = {}) {
+  if (!bridge()) throw new Error('Terminals work in the desktop app.');
+  const { Terminal, FitAddon } = await load();
+  wire();
+  const term = new Terminal({
+    fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--mono').trim() || 'monospace',
+    fontSize: 13,
+    lineHeight: 1.15,
+    cursorBlink: true,
+    scrollback: 10000,
+    macOptionIsMeta: true,
+    theme: themeNow(),
+    cols: lastSize.cols,
+    rows: lastSize.rows,
+  });
+  const fit = new FitAddon();
+  term.loadAddon(fit);
+  const s = { key: `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, id: null, connId, cwd, label, title: '', term, fit, el: null, exited: false, code: null, starting: false, typed: '' };
+  term.onData((data) => {
+    if (s.exited) {
+      if (data === '\r' && !s.starting) {
+        term.write('\r\n');
+        start(s);
+      }
+      return;
+    }
+    if (s.id && !s.starting) bridge().input(s.id, data);
+    else s.typed += data;
+  });
+  term.onResize(({ cols, rows }) => {
+    lastSize = { cols, rows };
+    if (s.id && !s.exited) bridge().resize(s.id, cols, rows);
+  });
+  term.onTitleChange((title) => {
+    s.title = title;
+    changed();
+  });
+  // Copy and paste as in terminals: Ctrl+Shift+C / V; Ctrl+C copies when text is
+  // selected (else it interrupts), Ctrl+V pastes. Ctrl+` hides the panel.
+  term.attachCustomKeyEventHandler((e) => {
+    if (e.type !== 'keydown') return true;
+    const key = e.key.toLowerCase();
+    const mod = e.ctrlKey || e.metaKey;
+    if (e.ctrlKey && e.key === '`') {
+      e.preventDefault();
+      onToggle();
+      return false;
+    }
+    if (mod && e.shiftKey && key === 'c') return copySelection(term), false;
+    if (mod && e.shiftKey && key === 'v') return e.preventDefault(), pasteInto(term), false;
+    if (mod && !e.shiftKey && !e.altKey && key === 'c' && term.hasSelection()) {
+      copySelection(term);
+      term.clearSelection();
+      return false;
+    }
+    if (mod && !e.shiftKey && !e.altKey && key === 'v') return e.preventDefault(), pasteInto(term), false;
+    return true;
+  });
+  sessions.push(s);
+  active = s;
+  changed();
+  await start(s);
+  return s;
+}
+
+/** Puts a session's screen in the panel's container (opened there the first time) and fits it. */
+export function attach(s, container) {
+  if (!s.el) {
+    s.el = document.createElement('div');
+    s.el.className = 'terminal-screen';
+    s.el.dataset.key = s.key;
+    // While a terminal has the focus, the window's menu shortcuts go to the shell.
+    s.el.addEventListener('focusin', () => bridge()?.ownKeys(true));
+    s.el.addEventListener('focusout', () => bridge()?.ownKeys(false));
+    // Keys typed here are the shell's: the app's shortcuts (Ctrl+P, Escape…) do not see them.
+    for (const type of ['keydown', 'keypress', 'keyup']) s.el.addEventListener(type, (e) => e.stopPropagation());
+    container.append(s.el);
+    s.term.open(s.el);
+  } else if (s.el.parentNode !== container) container.append(s.el);
+  fitSoon(s);
+}
+
+/** Fits a session to its screen (after the layout settles). */
+export function fitSoon(s) {
+  requestAnimationFrame(() => {
+    if (!s.el?.isConnected || !s.el.offsetWidth) return;
+    try {
+      s.fit.fit();
+    } catch {
+      // not measurable yet
+    }
+  });
+}
+
+export function focusTerminal(s = active) {
+  s?.term.focus();
+}
+
+export function setActiveTerminal(s) {
+  active = s;
+  changed();
+}
+
+/** Ends a session's shell and removes it. */
+export function closeTerminal(s) {
+  const at = sessions.indexOf(s);
+  if (at === -1) return;
+  s.closed = true;
+  if (s.id && !s.exited) bridge().close(s.id);
+  s.term.dispose();
+  s.el?.remove();
+  sessions.splice(at, 1);
+  if (active === s) active = sessions[Math.min(at, sessions.length - 1)] ?? null;
+  bridge()?.ownKeys(false);
+  changed();
+}
+
+export const clearTerminal = (s = active) => s?.term.clear();
+export const copyFromTerminal = (s = active) => s && copySelection(s.term);
+export const pasteIntoTerminal = (s = active) => s && pasteInto(s.term);
+export const terminalHasSelection = (s = active) => Boolean(s?.term.hasSelection());
+
+/** The colors follow the app's theme. */
+export function retheme() {
+  for (const s of sessions) s.term.options.theme = themeNow();
+}

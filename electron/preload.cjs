@@ -49,6 +49,25 @@ contextBridge.exposeInMainWorld('desktop', {
     roots: () => ipcRenderer.invoke('folder:roots'),
     forget: (folder) => ipcRenderer.invoke('folder:forget', folder),
     list: (dir) => ipcRenderer.invoke('folder:list', dir),
+    // A folder on this computer in the system's terminal app.
+    terminal: (dir) => ipcRenderer.invoke('folder:terminal', dir),
+    // Properties: { name, path, dir, size, mtimeMs, mode, owner, group, … }; a folder's size; permissions.
+    properties: (p) => ipcRenderer.invoke('folder:properties', p),
+    size: (p) => ipcRenderer.invoke('folder:size', p),
+    chmod: (paths, mode, opts) => ipcRenderer.invoke('folder:chmod', paths, mode, opts),
+    // Find in a folder and the ones inside it: files with matches come through onFound.
+    find: (searchId, dir, query, opts) => ipcRenderer.invoke('folder:find', searchId, dir, query, opts),
+    stopFind: (searchId) => ipcRenderer.invoke('folder:find-stop', searchId),
+    onFound(callback) {
+      const found = (_event, data) => callback({ type: 'found', ...data });
+      const progress = (_event, data) => callback({ type: 'progress', ...data });
+      ipcRenderer.on('folder:found', found);
+      ipcRenderer.on('folder:find-progress', progress);
+      return () => {
+        ipcRenderer.removeListener('folder:found', found);
+        ipcRenderer.removeListener('folder:find-progress', progress);
+      };
+    },
     places: () => ipcRenderer.invoke('folder:places'),
     newFile: (dir, name, opts) => ipcRenderer.invoke('folder:new-file', dir, name, opts),
     newFolder: (dir, name) => ipcRenderer.invoke('folder:new-folder', dir, name),
@@ -89,7 +108,23 @@ contextBridge.exposeInMainWorld('desktop', {
     disconnect: (id) => ipcRenderer.invoke('remote:disconnect', id),
     forgetHostKey: (id) => ipcRenderer.invoke('remote:forget-host-key', id),
     pickKey: () => ipcRenderer.invoke('remote:pick-key'),
+    // The hosts in ~/.ssh/config, and setting some of them up (by their Host names).
+    sshConfig: () => ipcRenderer.invoke('remote:ssh-config'),
+    importSsh: (aliases) => ipcRenderer.invoke('remote:import-ssh', aliases),
     answerHostKey: (question, ok) => ipcRenderer.invoke('remote:host-key-answer', question, ok),
+    // `answer`: { answers: [text], remember } or null to cancel.
+    answerPrompt: (question, answer) => ipcRenderer.invoke('remote:prompt-answer', question, answer),
+    onPrompt(callback) {
+      const listener = (_event, info) => callback(info);
+      ipcRenderer.on('remote:prompt', listener);
+      return () => ipcRenderer.removeListener('remote:prompt', listener);
+    },
+    // A question not answered in time (the sign-in gave up): { question }.
+    onPromptGone(callback) {
+      const listener = (_event, info) => callback(info);
+      ipcRenderer.on('remote:prompt-gone', listener);
+      return () => ipcRenderer.removeListener('remote:prompt-gone', listener);
+    },
     onStatus(callback) {
       const listener = (_event, status) => callback(status);
       ipcRenderer.on('remote:status', listener);
@@ -99,6 +134,39 @@ contextBridge.exposeInMainWorld('desktop', {
       const listener = (_event, info) => callback(info);
       ipcRenderer.on('remote:host-key', listener);
       return () => ipcRenderer.removeListener('remote:host-key', listener);
+    },
+  },
+  // Mirrors: a folder on a server kept the same as one here.
+  mirrors: {
+    list: () => ipcRenderer.invoke('mirror:list'),
+    pickLocal: (suggested) => ipcRenderer.invoke('mirror:pick-local', suggested),
+    save: (mirror) => ipcRenderer.invoke('mirror:save', mirror),
+    delete: (id) => ipcRenderer.invoke('mirror:delete', id),
+    // { confirmDeletes: [rel] } deletes those (deleted here) on the server too; { restore: [rel] } brings them back instead.
+    sync: (id, opts) => ipcRenderer.invoke('mirror:sync', id, opts),
+    onStatus(callback) {
+      const listener = (_event, mirror) => callback(mirror);
+      ipcRenderer.on('mirror:status', listener);
+      return () => ipcRenderer.removeListener('mirror:status', listener);
+    },
+  },
+  // Terminals on servers (SSH): a shell over the server's connection.
+  terminal: {
+    open: (connId, opts) => ipcRenderer.invoke('term:open', connId, opts),
+    input: (id, data) => ipcRenderer.send('term:input', id, data),
+    resize: (id, cols, rows) => ipcRenderer.invoke('term:resize', id, cols, rows),
+    close: (id) => ipcRenderer.invoke('term:close', id),
+    // true while a terminal has the keys: the menu's shortcuts go to it.
+    ownKeys: (own) => ipcRenderer.invoke('term:keys', own),
+    onData(callback) {
+      const listener = (_event, chunk) => callback(chunk);
+      ipcRenderer.on('term:data', listener);
+      return () => ipcRenderer.removeListener('term:data', listener);
+    },
+    onExit(callback) {
+      const listener = (_event, info) => callback(info);
+      ipcRenderer.on('term:exit', listener);
+      return () => ipcRenderer.removeListener('term:exit', listener);
     },
   },
   // Dragging tabs or files out to other apps: { path } or { paths } on disk, or { name, text } for a copy.

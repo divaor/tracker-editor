@@ -11,7 +11,8 @@ const nodePath = require('node:path');
 const crypto = require('node:crypto');
 const { Readable, Writable } = require('node:stream');
 const disk = require('./diskFiles.cjs');
-const { checkName } = require('./folders.cjs');
+const { checkName, dirMode, fileMode } = require('./folders.cjs');
+const { parseHop } = require('./sshConfig.cjs');
 
 const posix = nodePath.posix;
 const SCHEME = 'remote://';
@@ -20,6 +21,16 @@ const DEFAULT_PORT = { sftp: 22, ftps: 21, ftp: 21 };
 const MAX_COPY_ENTRIES = 10000;
 
 const isRemote = (p) => typeof p === 'string' && p.startsWith(SCHEME);
+// A name a server lists that cannot be a file's own name (it would lead elsewhere): left out.
+const listable = (name) => Boolean(name) && name !== '.' && name !== '..' && !/[/\u0000]/.test(name);
+/** A path under `root` here for a relative path from a server, refused when it would lead outside. */
+function localUnder(root, rel) {
+  const parts = rel.split('/');
+  const full = nodePath.resolve(root, ...parts);
+  if (parts.some((p) => !p || p === '.' || p === '..') || !(full + nodePath.sep).startsWith(nodePath.resolve(root) + nodePath.sep)) throw new Error(`${rel}: that name from the server cannot be a file here.`);
+  return full;
+}
+const protocolLabel = (protocol) => ({ sftp: 'SFTP', ftps: 'FTPS', ftp: 'FTP' })[protocol] ?? protocol;
 
 /** remote://<id>/<path> → { id, path } (the path absolute, '/' at least). */
 function parseUri(uri) {
@@ -66,52 +77,250 @@ const collect = () => {
 
 // ---- SFTP ---------------------------------------------------------------------
 
+const agentSocket = () => process.env.SSH_AUTH_SOCK || (process.platform === 'win32' ? '\\\\.\\pipe\\openssh-ssh-agent' : undefined);
+// The order sign-in methods are tried in, for each way of signing in; the server
+// may ask for a second one after the first (a code after the key, for example).
+const AUTH_ORDER = {
+  password: ['password', 'keyboard-interactive'],
+  key: ['publickey', 'keyboard-interactive', 'password'],
+  agent: ['agent', 'keyboard-interactive', 'password'],
+};
+const PASSWORD_PROMPT = /password|contraseña|senha|kennwort|mot de passe/i;
+/** A path quoted for a POSIX shell. */
+const shellQuote = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+
+/**
+ * A timer that stops while the person is asked something (a host key, a code),
+ * so the 20 seconds are for the server, not for reading a fingerprint.
+ */
+function pausableTimeout(ms, onTimeout) {
+  let timer = null;
+  let waiting = 0;
+  let over = false; // cleared for good (signed in or failed): an answer coming later does not arm it again
+  const arm = () => {
+    clearTimeout(timer);
+    timer = waiting || over ? null : setTimeout(onTimeout, ms);
+  };
+  return {
+    arm,
+    clear: () => {
+      over = true;
+      clearTimeout(timer);
+    },
+    async whileAsking(fn) {
+      waiting++;
+      clearTimeout(timer);
+      try {
+        return await fn();
+      } finally {
+        waiting--;
+        arm();
+      }
+    },
+  };
+}
+
 class SftpSession {
-  constructor(conn, { secret, verifyHost, onClose }) {
+  /**
+   * `secret(kind)` gives a saved password or passphrase, `ask(question)` asks the
+   * person ({ answers, remember } or null), `remember(kind, value)` saves one,
+   * `through()` gives a stream through a jump host (or null).
+   */
+  constructor(conn, { secret, verifyHost, onClose, ask = async () => undefined, remember = () => {}, through = async () => null }) {
     this.conn = conn;
     this.secret = secret;
     this.verifyHost = verifyHost;
     this.onClose = onClose;
+    this.ask = ask;
+    this.remember = remember;
+    this.through = through;
   }
 
   async open() {
-    const { Client } = require('ssh2');
+    const { Client, utils } = require('ssh2');
     const { conn } = this;
     const client = new Client();
+    this.client = client;
+    const who = `${conn.user}@${conn.host}`;
+    let cancelled = false;
+    let offered = null; // the methods the server accepts
+    let passwordTries = 0;
+    let keyboardTries = 0;
+    let savedPasswordUsed = false;
+    let failure = null; // why it failed, when we know better than ssh2
+    const tried = new Set();
+    const timeout = pausableTimeout(20000, () => {
+      failure = Object.assign(new Error(`${conn.host}:${conn.port} did not answer in time.`), { code: 'ETIMEDOUT' });
+      client.destroy();
+    });
+
+    const asking = (question) =>
+      timeout.whileAsking(async () => {
+        const answer = await this.ask({ host: conn.host, port: conn.port, user: conn.user, ...question });
+        // null: the person cancelled; undefined: there was no one to ask (the server's refusal stands).
+        if (answer === null) cancelled = true;
+        return answer ?? null;
+      });
+    const password = async () => {
+      const saved = this.secret('password');
+      passwordTries++;
+      if (saved && passwordTries === 1) {
+        savedPasswordUsed = true;
+        return saved;
+      }
+      const answer = await asking({
+        kind: 'password',
+        title: 'Password',
+        instructions: passwordTries > 1 || saved ? 'The server did not accept the password. Type it again.' : '',
+        prompts: [{ prompt: `Password for ${who}`, echo: false }],
+      });
+      if (!answer) return null;
+      if (answer.remember) this.remember('password', answer.answers[0]);
+      return answer.answers[0];
+    };
+    const privateKey = async () => {
+      const bytes = fs.readFileSync(conn.keyPath);
+      let passphrase = this.secret('passphrase');
+      for (let round = 0; round < 3; round++) {
+        let key = utils.parseKey(bytes, passphrase || undefined);
+        if (Array.isArray(key)) [key] = key;
+        if (!(key instanceof Error)) return key;
+        if (!/passphrase|encrypted|decrypt/i.test(key.message)) throw new Error('The key file could not be read: check the file and its passphrase.');
+        const answer = await asking({
+          kind: 'passphrase',
+          title: 'Key passphrase',
+          instructions: passphrase ? 'That passphrase does not open the key. Type it again.' : '',
+          prompts: [{ prompt: `Passphrase for ${nodePath.basename(conn.keyPath)}`, echo: false }],
+        });
+        if (!answer) return null;
+        passphrase = answer.answers[0];
+        if (answer.remember) this.remember('passphrase', passphrase);
+      }
+      throw new Error('The key file could not be read: check the file and its passphrase.');
+    };
+    // Questions from the server (a password, a one-time code…); a lone password question is answered with the saved password once.
+    const keyboard = (name, instructions, _lang, prompts, finish) => {
+      if (!prompts.length) return finish([]);
+      const saved = this.secret('password');
+      const lonePassword = prompts.length === 1 && !prompts[0].echo && PASSWORD_PROMPT.test(prompts[0].prompt);
+      if (conn.auth === 'password' && saved && !savedPasswordUsed && lonePassword) {
+        savedPasswordUsed = true;
+        return finish([saved]);
+      }
+      const again = lonePassword && savedPasswordUsed ? 'The server did not accept the password. Type it again.' : '';
+      asking({
+        kind: 'interactive',
+        title: name || 'Sign in',
+        instructions: [instructions, again].filter(Boolean).join('\n'),
+        prompts: prompts.map((p) => ({ prompt: String(p.prompt ?? '').trim(), echo: Boolean(p.echo) })),
+        // A one-time code is never kept; a password asked this way may be.
+        canRemember: lonePassword && conn.auth === 'password',
+      }).then(
+        (answer) => {
+          if (answer?.remember && lonePassword) this.remember('password', answer.answers[0]);
+          finish(answer ? answer.answers : prompts.map(() => ''));
+        },
+        () => finish(prompts.map(() => '')),
+      );
+    };
+    const authHandler = (methodsLeft, _partial, next) => {
+      // First: no credentials, to learn what the server accepts.
+      if (methodsLeft === null) return next({ type: 'none', username: conn.user });
+      offered = methodsLeft;
+      (async () => {
+        for (const method of AUTH_ORDER[conn.auth] ?? AUTH_ORDER.password) {
+          if (cancelled) return false;
+          const name = method === 'agent' ? 'publickey' : method;
+          if (!methodsLeft.includes(name)) continue;
+          if (method === 'password' && passwordTries < 3) {
+            const pw = await password();
+            return pw === null ? false : { type: 'password', username: conn.user, password: pw };
+          }
+          if (method === 'keyboard-interactive' && keyboardTries < 3) {
+            keyboardTries++;
+            return { type: 'keyboard-interactive', username: conn.user, prompt: keyboard };
+          }
+          if (tried.has(method)) continue;
+          tried.add(method);
+          if (method === 'publickey') {
+            const key = await privateKey();
+            return key ? { type: 'publickey', username: conn.user, key } : false;
+          }
+          if (method === 'agent') {
+            if (agentSocket()) return { type: 'agent', username: conn.user, agent: agentSocket() };
+            failure = new Error('No SSH agent is running on this computer. Start it (on Windows: the OpenSSH Authentication Agent service) or sign in with a key file.');
+          }
+        }
+        return false;
+      })().then(next, (err) => {
+        failure = err;
+        next(false);
+      });
+    };
+    const sock = await this.through();
     const options = {
       host: conn.host,
       port: conn.port,
       username: conn.user,
-      readyTimeout: 20000,
+      readyTimeout: 0, // ours, which waits while the person is asked
       keepaliveInterval: 15000,
       keepaliveCountMax: 4,
-      tryKeyboard: true,
+      authHandler,
       hostVerifier: (key, verify) => {
-        this.verifyHost(fingerprintOf(key)).then(verify, () => verify(false));
+        timeout.whileAsking(() => this.verifyHost(fingerprintOf(key))).then(verify, () => verify(false));
       },
+      ...(sock ? { sock } : {}),
     };
-    if (conn.auth === 'password') options.password = this.secret('password');
-    if (conn.auth === 'key') {
-      options.privateKey = fs.readFileSync(conn.keyPath);
-      const passphrase = this.secret('passphrase');
-      if (passphrase) options.passphrase = passphrase;
+    try {
+      await new Promise((resolve, reject) => {
+        client.once('ready', resolve);
+        client.once('error', reject);
+        client.once('close', () => reject(failure ?? Object.assign(new Error('The server closed the connection.'), { code: 'ECONNRESET' })));
+        timeout.arm();
+        client.connect(options);
+      });
+    } catch (err) {
+      if (failure) throw failure;
+      if (cancelled) throw Object.assign(new Error('Sign-in cancelled.'), { cancelled: true });
+      if (/All configured authentication methods failed/i.test(err.message) && offered?.length && !(AUTH_ORDER[conn.auth] ?? []).some((m) => offered.includes(m === 'agent' ? 'publickey' : m))) {
+        throw new Error(`The server only accepts ${offered.join(', ')}. Edit the server and choose another way to sign in.`);
+      }
+      throw err;
+    } finally {
+      timeout.clear();
     }
-    if (conn.auth === 'agent') options.agent = process.env.SSH_AUTH_SOCK || (process.platform === 'win32' ? '\\\\.\\pipe\\openssh-ssh-agent' : undefined);
-    await new Promise((resolve, reject) => {
-      client.on('keyboard-interactive', (_name, _instructions, _lang, prompts, finish) => finish(prompts.map(() => this.secret('password'))));
-      client.once('ready', resolve);
-      client.once('error', reject);
-      client.connect(options);
-    });
-    this.client = client;
-    this.sftp = await new Promise((resolve, reject) => client.sftp((err, sftp) => (err ? reject(err) : resolve(sftp))));
+    client.removeAllListeners('error');
+    client.removeAllListeners('close');
     client.on('error', () => {});
+    this.sftp = await new Promise((resolve, reject) => client.sftp((err, sftp) => (err ? reject(err) : resolve(sftp))));
     client.on('close', () => this.onClose());
     return this;
   }
 
   close() {
     this.client?.end();
+  }
+
+  /** A connection to `host:port` made by the server (for a server reached through this one). */
+  forward(host, port) {
+    return new Promise((resolve, reject) => this.client.forwardOut('127.0.0.1', 0, host, port, (err, stream) => (err ? reject(err) : resolve(stream))));
+  }
+
+  /** Whether the server runs Windows (SFTP gives its paths as /C:/…). */
+  async windows() {
+    this.isWindows ??= /^\/[A-Za-z]:/.test(await this.home().catch(() => ''));
+    return this.isWindows;
+  }
+
+  /** A terminal on the server: a login shell, in `cwd` when given. Resolves with the channel (a duplex stream). */
+  async shell({ cols = 80, rows = 24, cwd = '' } = {}) {
+    const pty = { term: 'xterm-256color', cols, rows };
+    const windows = await this.windows();
+    return new Promise((resolve, reject) => {
+      const done = (err, stream) => (err ? reject(err) : resolve(stream));
+      if (cwd && !windows) this.client.exec(`cd -- ${shellQuote(cwd)} 2>/dev/null; exec "\${SHELL:-/bin/sh}" -l`, { pty }, done);
+      else this.client.shell(pty, done);
+    });
   }
 
   call(method, ...args) {
@@ -125,7 +334,7 @@ class SftpSession {
   async stat(p) {
     try {
       const s = await this.call('stat', p);
-      return { dir: s.isDirectory(), size: s.size, mtimeMs: s.mtime * 1000, mode: s.mode };
+      return { dir: s.isDirectory(), size: s.size, mtimeMs: s.mtime * 1000, mode: s.mode & 0o7777, uid: s.uid, gid: s.gid };
     } catch (err) {
       if (err.code === 2) return null;
       throw err;
@@ -133,15 +342,34 @@ class SftpSession {
   }
 
   async list(dir) {
-    const items = await this.call('readdir', dir);
+    const items = (await this.call('readdir', dir)).filter((item) => listable(item.filename));
     return Promise.all(
-      items.map(async ({ filename, attrs }) => {
+      items.map(async ({ filename, longname, attrs }) => {
         let isDir = attrs.isDirectory();
         // A link: what it points at.
         if (attrs.isSymbolicLink()) isDir = Boolean((await this.stat(posix.join(dir, filename)).catch(() => null))?.dir);
-        return { name: filename, path: posix.join(dir, filename), dir: isDir, size: isDir ? 0 : attrs.size, mtimeMs: attrs.mtime * 1000 };
+        // "-rw-r--r--  1 owner group …": the names of the owner and the group.
+        const [, , owner = '', group = ''] = String(longname ?? '').split(/\s+/);
+        return { name: filename, path: posix.join(dir, filename), dir: isDir, size: isDir ? 0 : attrs.size, mtimeMs: attrs.mtime * 1000, mode: attrs.mode & 0o7777, owner, group, link: attrs.isSymbolicLink() };
       }),
     );
+  }
+
+  async chmod(p, mode) {
+    await this.call('chmod', p, mode);
+  }
+
+  // Whole files to and from this computer, streamed (for mirrors).
+  async downloadTo(p, localPath) {
+    await this.call('fastGet', p, localPath, {});
+  }
+
+  async uploadFrom(localPath, p) {
+    await this.call('fastPut', localPath, p, {});
+  }
+
+  async rmdir(p) {
+    await this.call('rmdir', p);
   }
 
   async read(p) {
@@ -186,26 +414,60 @@ class SftpSession {
 
 // ---- FTP and FTPS ---------------------------------------------------------------
 
+// Unix permissions and owners from an FTP listing, when the server gives them.
+function ftpPermissions(f) {
+  const p = f.permissions;
+  return {
+    ...(p ? { mode: (p.user << 6) | (p.group << 3) | p.world } : {}),
+    ...(f.user ? { owner: f.user } : {}),
+    ...(f.group ? { group: f.group } : {}),
+  };
+}
+
 class FtpSession {
-  constructor(conn, { secret, onClose }) {
+  constructor(conn, { secret, onClose, ask = async () => undefined, remember = () => {} }) {
     this.conn = conn;
     this.secret = secret;
     this.onClose = onClose;
+    this.ask = ask;
+    this.remember = remember;
     this.queue = Promise.resolve();
   }
 
   async open() {
     const ftp = require('basic-ftp');
     const { conn } = this;
-    this.client = new ftp.Client(30000);
-    await this.client.access({
+    const user = conn.user || 'anonymous';
+    const options = (password) => ({
       host: conn.host,
       port: conn.port,
-      user: conn.user || 'anonymous',
-      password: this.secret('password'),
+      user,
+      password,
       secure: conn.protocol === 'ftps',
       secureOptions: { rejectUnauthorized: !conn.allowSelfSigned, servername: require('node:net').isIP(conn.host) ? undefined : conn.host },
     });
+    // No saved password (or not accepted): asked, twice at most. Anonymous FTP needs none.
+    // undefined when there is no one to ask.
+    const askPassword = async (retry) => {
+      const answer = await this.ask({ kind: 'password', title: 'Password', instructions: retry ? 'The server did not accept the password. Type it again.' : '', prompts: [{ prompt: `Password for ${user}@${conn.host}`, echo: false }] });
+      if (answer === null) throw Object.assign(new Error('Sign-in cancelled.'), { cancelled: true });
+      if (answer?.remember) this.remember('password', answer.answers[0]);
+      return answer?.answers[0];
+    };
+    let password = this.secret('password');
+    if (!password && user !== 'anonymous') password = (await askPassword(false)) ?? '';
+    for (let round = 0; ; round++) {
+      this.client = new ftp.Client(30000);
+      try {
+        await this.client.access(options(password));
+        break;
+      } catch (err) {
+        this.client.close();
+        if (!/^530/.test(err.message) || user === 'anonymous' || round >= 2) throw err;
+        password = await askPassword(true);
+        if (password === undefined) throw err;
+      }
+    }
     this.client.ftp.socket.on('close', () => this.onClose());
     return this;
   }
@@ -241,14 +503,41 @@ class FtpSession {
       const exact = await this.run((c) => c.lastMod(p)).catch(() => null);
       if (exact) mtimeMs = exact.getTime();
     }
-    return { dir: hit.isDirectory, size: hit.isDirectory ? 0 : hit.size, mtimeMs };
+    return { dir: hit.isDirectory, size: hit.isDirectory ? 0 : hit.size, mtimeMs, ...ftpPermissions(hit) };
   }
 
   async list(dir) {
     const listing = await this.run((c) => c.list(dir));
     return listing
-      .filter((f) => f.name !== '.' && f.name !== '..')
-      .map((f) => ({ name: f.name, path: posix.join(dir, f.name), dir: f.isDirectory, size: f.isDirectory ? 0 : f.size, mtimeMs: f.modifiedAt?.getTime?.() ?? 0 }));
+      .filter((f) => listable(f.name))
+      .map((f) => ({ name: f.name, path: posix.join(dir, f.name), dir: f.isDirectory, size: f.isDirectory ? 0 : f.size, mtimeMs: f.modifiedAt?.getTime?.() ?? 0, ...ftpPermissions(f), link: f.isSymbolicLink }));
+  }
+
+  async downloadTo(p, localPath) {
+    await this.run((c) => c.downloadTo(localPath, p));
+  }
+
+  /** A file's time by MDTM (for listings without MLSD), or 0. */
+  async lastMod(p) {
+    return (await this.run((c) => c.lastMod(p)).catch(() => null))?.getTime() ?? 0;
+  }
+
+  async uploadFrom(localPath, p) {
+    await this.run((c) => c.uploadFrom(localPath, p));
+  }
+
+  async rmdir(p) {
+    await this.run((c) => c.send(`RMD ${p}`));
+  }
+
+  // SITE CHMOD: most Unix FTP servers take it; others say they do not.
+  async chmod(p, mode) {
+    try {
+      await this.run((c) => c.send(`SITE CHMOD ${mode.toString(8).padStart(3, '0')} ${p}`));
+    } catch (err) {
+      if (/^5(00|02|04)/.test(err.message)) throw new Error('This FTP server does not change permissions.');
+      throw err;
+    }
   }
 
   async read(p, start = 0) {
@@ -288,7 +577,7 @@ class FtpSession {
  * asks the person about an unknown or changed host key, `onStatus` reports
  * connecting / connected / disconnected / error.
  */
-function createRemote({ store, secrets, askHostKey, onStatus = () => {} }) {
+function createRemote({ store, secrets, askHostKey, askPrompt = async () => undefined, onStatus = () => {} }) {
   let data = { connections: [], knownHosts: {}, keys: [], ...store.read() };
   const save = () => store.write(data);
   const live = new Map(); // id → { session, opening, state, error }
@@ -322,8 +611,21 @@ function createRemote({ store, secrets, askHostKey, onStatus = () => {} }) {
     // A key file only from the file picker (remote:pick-key), so the page cannot point at other files.
     if (auth === 'key' && !data.keys.includes(keyPath)) throw new Error('Choose the key file with "Choose…".');
     const start = String(input.path ?? '').trim();
+    const id = existing?.id ?? crypto.randomBytes(5).toString('hex');
+    const jump = protocol === 'sftp' && input.jump ? String(input.jump) : '';
+    if (jump) {
+      // Another SFTP server set up here, and no loop (a jump host reached through this one).
+      const seen = new Set([id]);
+      for (let at = jump; at; at = data.connections.find((c) => c.id === at)?.jump) {
+        const via = data.connections.find((c) => c.id === at);
+        if (!via) throw new Error('The jump host is not set up here any more.');
+        if (via.protocol !== 'sftp') throw new Error(`${via.name} is not an SFTP server, so it cannot be a jump host.`);
+        if (seen.has(at)) throw new Error(`${via.name} is reached through this server, so it cannot be its jump host.`);
+        seen.add(at);
+      }
+    }
     return {
-      id: existing?.id ?? crypto.randomBytes(5).toString('hex'),
+      id,
       name: String(input.name ?? '').trim().slice(0, 60) || host,
       protocol,
       host,
@@ -334,11 +636,28 @@ function createRemote({ store, secrets, askHostKey, onStatus = () => {} }) {
       path: start ? posix.normalize(start.startsWith('/') ? start : `/${start}`) : '',
       autoSave: Boolean(input.autoSave),
       allowSelfSigned: protocol === 'ftps' && Boolean(input.allowSelfSigned),
+      jump,
     };
   }
 
-  async function open(conn, { probe = false } = {}) {
+  async function open(conn, { probe = false, depth = 0 } = {}) {
     const secret = (kind) => (probe && conn.draftSecrets?.[kind] !== undefined ? conn.draftSecrets[kind] : secrets.get(conn.id, kind));
+    // Questions for the person (a password not saved, a one-time code); a test from the dialog does not save answers.
+    const ask = (question) => askPrompt({ id: conn.id, name: conn.name, ...question, canRemember: !probe && (question.canRemember ?? true) });
+    const remember = (kind, value) => {
+      if (!probe && typeof value === 'string' && value) secrets.set(conn.id, kind, value);
+    };
+    // Through a jump host: another SFTP server here, connected first, opens the way.
+    const through = async () => {
+      if (!conn.jump) return null;
+      if (depth > 4) throw new Error('Too many jump hosts in a row.');
+      const jump = find(conn.jump);
+      const via = await session(conn.jump, { depth: depth + 1 });
+      if (!(via instanceof SftpSession)) throw new Error(`${jump.name} is not an SFTP server, so it cannot be a jump host.`);
+      return via.forward(conn.host, conn.port).catch((err) => {
+        throw new Error(`${jump.name} could not reach ${conn.host}:${conn.port} (${err.message}).`);
+      });
+    };
     const hostKey = `[${conn.host}]:${conn.port}`;
     const verifyHost = async (fingerprint) => {
       const known = data.knownHosts[hostKey];
@@ -353,36 +672,44 @@ function createRemote({ store, secrets, askHostKey, onStatus = () => {} }) {
     const onClose = () => {
       if (probe) return;
       const l = live.get(conn.id);
-      if (l?.session) {
+      // Only when this is the session in use (one given up while connecting closes on its own).
+      if (l?.session && l.session === opened) {
         live.set(conn.id, { state: 'disconnected', error: '' });
         onStatus({ id: conn.id, state: 'disconnected', error: '' });
       }
     };
-    const session = conn.protocol === 'sftp' ? new SftpSession(conn, { secret, verifyHost, onClose }) : new FtpSession(conn, { secret, onClose });
+    const opened = conn.protocol === 'sftp' ? new SftpSession(conn, { secret, verifyHost, onClose, ask, remember, through }) : new FtpSession(conn, { secret, onClose, ask, remember });
     try {
-      return await session.open();
+      return await opened.open();
     } catch (err) {
-      session.close();
+      opened.close();
       throw friendlyError(err, conn);
     }
   }
 
   /** The open session of a server, connecting when needed (one attempt at a time). */
-  async function session(id) {
+  async function session(id, { depth = 0 } = {}) {
     const l = live.get(id);
     if (l?.session && l.state === 'connected') return l.session;
     if (l?.opening) return l.opening;
     const conn = find(id);
     setState(id, 'connecting');
-    const opening = open(conn).then(
+    const opening = open(conn, { depth }).then(
       (s) => {
+        // Disconnected (or changed) while it was connecting: this one is not used.
+        if (live.get(id)?.opening !== opening) {
+          s.close();
+          throw new Error('Disconnected.');
+        }
         live.set(id, { session: s, state: 'connected', error: '' });
         onStatus({ id, state: 'connected', error: '' });
         return s;
       },
       (err) => {
-        live.set(id, { state: 'error', error: err.message });
-        onStatus({ id, state: 'error', error: err.message });
+        if (live.get(id)?.opening === opening) {
+          live.set(id, { state: 'error', error: err.message });
+          onStatus({ id, state: 'error', error: err.message });
+        }
         throw err;
       },
     );
@@ -413,12 +740,39 @@ function createRemote({ store, secrets, askHostKey, onStatus = () => {} }) {
     throw new Error(`No free name for ${name}.`);
   }
 
+  // A folder and what is in it, links left out: [{ path, dir, mode }], the folder first.
+  async function walkNoLinks(s, p) {
+    const st = await s.stat(p);
+    if (!st) throw Object.assign(new Error('Not found on the server.'), { notFound: true });
+    const out = [{ path: p, dir: st.dir, mode: st.mode }];
+    const pending = st.dir ? [p] : [];
+    while (pending.length) {
+      for (const e of await s.list(pending.shift())) {
+        if (e.link) continue;
+        out.push({ path: e.path, dir: e.dir, mode: e.mode });
+        if (out.length > MAX_COPY_ENTRIES) throw new Error('Too many files at once (more than 10,000).');
+        if (e.dir) pending.push(e.path);
+      }
+    }
+    return out;
+  }
+
+  // A folder and the ones above it, where missing.
+  async function mkdirp(s, p) {
+    if (p === '/' || p === '.' || !p) return;
+    if (await s.stat(p)) return;
+    await mkdirp(s, posix.dirname(p));
+    await s.mkdir(p).catch(async (err) => {
+      if (!(await s.stat(p))) throw err;
+    });
+  }
+
   // Files and folders under `p` (for copying between places), at most MAX_COPY_ENTRIES.
   async function walk(s, p, out = []) {
     const st = await s.stat(p);
     if (!st) throw Object.assign(new Error('Not found on the server.'), { notFound: true });
-    out.push({ path: p, dir: st.dir });
-    if (out.length > MAX_COPY_ENTRIES) throw new Error('Too many files to copy at once.');
+    out.push({ path: p, dir: st.dir, mode: st.mode });
+    if (out.length > MAX_COPY_ENTRIES) throw new Error('Too many files at once (more than 10,000).');
     if (st.dir) for (const e of await s.list(p)) await walk(s, e.path, out);
     return out;
   }
@@ -442,6 +796,8 @@ function createRemote({ store, secrets, askHostKey, onStatus = () => {} }) {
       return publicConn(conn);
     },
     deleteConnection(id) {
+      const through = data.connections.filter((c) => c.jump === id);
+      if (through.length) throw new Error(`${through.map((c) => c.name).join(', ')} ${through.length === 1 ? 'is' : 'are'} reached through this server. Change ${through.length === 1 ? 'its' : 'their'} jump host first.`);
       api.disconnect(id);
       const conn = data.connections.find((c) => c.id === id);
       data.connections = data.connections.filter((c) => c.id !== id);
@@ -450,6 +806,57 @@ function createRemote({ store, secrets, askHostKey, onStatus = () => {} }) {
       secrets.set(id, 'password', '');
       secrets.set(id, 'passphrase', '');
       return true;
+    },
+    /**
+     * Sets up hosts from an SSH config (parseSshConfig) as servers: `aliases` the
+     * ones picked. Their jump hosts (ProxyJump) come too. A key named by
+     * IdentityFile (or a default key) is used when it exists, else the agent when
+     * one runs, else a password (asked when connecting). Servers already set up
+     * (same host, port and user) are reused. Returns { made, reused } (ids).
+     */
+    importSsh(hosts, aliases, { home = os.homedir(), exists = fs.existsSync, agent = Boolean(agentSocket()) } = {}) {
+      const byAlias = new Map(hosts.map((h) => [h.alias, h]));
+      const made = [];
+      const reused = [];
+      const authFor = (identityFiles) => {
+        const defaults = ['id_ed25519', 'id_ecdsa', 'id_rsa'].map((n) => nodePath.join(home, '.ssh', n));
+        const file = identityFiles.find((f) => exists(f)) ?? (identityFiles.length || agent ? undefined : defaults.find((f) => exists(f)));
+        if (file) {
+          api.allowKey(file);
+          return { auth: 'key', keyPath: file };
+        }
+        return { auth: agent ? 'agent' : 'password' };
+      };
+      const upsert = (entry) => {
+        const same = data.connections.find((c) => c.protocol === 'sftp' && c.host.toLowerCase() === entry.host.toLowerCase() && c.port === entry.port && c.user === entry.user);
+        if (same) {
+          if (!reused.includes(same.id) && !made.includes(same.id)) reused.push(same.id);
+          return same.id;
+        }
+        const conn = clean({ protocol: 'sftp', ...entry }, null);
+        data.connections = [...data.connections, conn];
+        save();
+        made.push(conn.id);
+        return conn.id;
+      };
+      const importAlias = (alias, seen) => {
+        if (seen.has(alias)) throw new Error(`${alias}: its jump hosts lead back to it.`);
+        const h = byAlias.get(alias);
+        if (!h) throw new Error(`${alias} is not in the SSH config any more.`);
+        let jump = '';
+        // "a,b": b is reached through a, and the host through b.
+        for (const hop of h.proxyJump ? h.proxyJump.split(',').map((x) => x.trim()) : []) {
+          if (byAlias.has(hop)) jump = importAlias(hop, new Set([...seen, alias]));
+          else {
+            const at = parseHop(hop);
+            if (!at) throw new Error(`${alias}: the jump host "${hop}" could not be read.`);
+            jump = upsert({ name: at.host, host: at.host, port: at.port, user: at.user || h.user, ...authFor([]), jump });
+          }
+        }
+        return upsert({ name: alias, host: h.host, port: h.port, user: h.user, ...authFor(h.identityFiles), jump });
+      };
+      for (const alias of aliases) importAlias(alias, new Set());
+      return { made, reused };
     },
     allowKey(keyPath) {
       if (!data.keys.includes(keyPath)) data.keys = [...data.keys, keyPath].slice(-50);
@@ -495,11 +902,25 @@ function createRemote({ store, secrets, askHostKey, onStatus = () => {} }) {
       for (const id of [...live.keys()]) api.disconnect(id);
     },
     isConnected: (id) => live.get(id)?.state === 'connected',
+    /** Whether a path is on an FTP or FTPS server (one command at a time there). */
+    isFtp: (uri) => data.connections.find((c) => c.id === parseUri(uri).id)?.protocol !== 'sftp',
     /** A readable name for a path: "name: /path". */
     label(uri) {
       const { id, path: p } = parseUri(uri);
       const conn = data.connections.find((c) => c.id === id);
       return `${conn?.name ?? 'Server'}: ${p}`;
+    },
+
+    /** A terminal on an SFTP (SSH) server, in `cwd`: resolves with its channel. */
+    async openShell(id, { cols, rows, cwd } = {}) {
+      const conn = find(id);
+      if (conn.protocol !== 'sftp') throw new Error(`${conn.name} is an ${protocolLabel(conn.protocol)} server; a terminal needs SSH (SFTP).`);
+      const s = await session(id);
+      try {
+        return await s.shell({ cols, rows, cwd });
+      } catch (err) {
+        throw friendlyError(err, conn);
+      }
     },
 
     // ---- Files (as diskFiles.cjs does for files on disk) ----
@@ -598,6 +1019,116 @@ function createRemote({ store, secrets, askHostKey, onStatus = () => {} }) {
       }
       return done;
     },
+    /** What Properties shows for a file or folder on a server. */
+    properties: (uri) =>
+      withPath(uri, async (s, p) => {
+        const st = await s.stat(p);
+        if (!st) throw Object.assign(new Error('Not found on the server.'), { notFound: true });
+        // The owner's and the group's names come with the listing of the folder above.
+        const entry = p === '/' ? null : ((await s.list(posix.dirname(p)).catch(() => [])).find((e) => e.name === posix.basename(p)) ?? null);
+        return {
+          name: posix.basename(p) || '/',
+          path: uri,
+          dir: st.dir,
+          link: Boolean(entry?.link),
+          size: st.size,
+          mtimeMs: st.mtimeMs,
+          mode: st.mode ?? entry?.mode ?? null,
+          owner: entry?.owner || (st.uid !== undefined ? String(st.uid) : ''),
+          group: entry?.group || (st.gid !== undefined ? String(st.gid) : ''),
+        };
+      }),
+    /** Sets permissions (`mode`, e.g. 0o644); `recursive` also inside folders, where folders keep their x for every r. */
+    async chmod(uris, mode, { recursive = false } = {}) {
+      let changed = 0;
+      for (const uri of uris) {
+        await withPath(uri, async (s, p) => {
+          // The one asked for gets `mode`; inside it, folders dirMode and files fileMode. Links are
+          // left alone (chmod on one changes what it points at, anywhere on the server).
+          const items = recursive ? await walkNoLinks(s, p) : [{ path: p }];
+          for (const [i, item] of items.entries()) {
+            await s.chmod(item.path, i === 0 ? mode : item.dir ? dirMode(mode) : fileMode(mode, item.mode ?? 0));
+            changed++;
+          }
+        });
+      }
+      return changed;
+    },
+    /** The size of a folder and what is in it: { size, files, folders, truncated }. */
+    folderSize: (uri) =>
+      withPath(uri, async (s, p) => {
+        const out = { size: 0, files: 0, folders: 0, truncated: false };
+        const pending = [p];
+        const until = Date.now() + 60000;
+        while (pending.length) {
+          if (out.files + out.folders > 200000 || Date.now() > until) {
+            out.truncated = true;
+            break;
+          }
+          for (const e of await s.list(pending.shift()).catch(() => [])) {
+            if (e.dir && !e.link) {
+              out.folders++;
+              pending.push(e.path);
+            } else if (!e.dir) {
+              out.files++;
+              out.size += e.size;
+            }
+          }
+        }
+        return out;
+      }),
+    // ---- Mirrors (mirror.cjs): whole folders and files ----
+    /** Everything under a folder: { 'rel/path': { dir, size, mtimeMs } }, without what `skip(rel)` leaves out. */
+    listTree: (uri, skip = () => false, max = 50000) =>
+      withPath(uri, async (s, root) => {
+        const out = {};
+        const pending = [''];
+        let count = 0;
+        while (pending.length) {
+          const rel = pending.shift();
+          for (const e of await s.list(rel ? posix.join(root, rel) : root)) {
+            const child = rel ? `${rel}/${e.name}` : e.name;
+            if (skip(child) || e.link) continue;
+            // FTP without MLSD lists no times: MDTM gives the one a transfer reports too.
+            const mtimeMs = !e.dir && !e.mtimeMs && s.lastMod ? await s.lastMod(e.path) : e.mtimeMs;
+            out[child] = { dir: e.dir, size: e.dir ? 0 : e.size, mtimeMs };
+            if (++count > max) throw new Error(`Too many files to mirror (more than ${max.toLocaleString()}).`);
+            if (e.dir) pending.push(child);
+          }
+        }
+        return out;
+      }),
+    /** A file from a server written to a path here; returns its { size, mtimeMs } on the server. */
+    downloadFile: (uri, localPath) =>
+      withPath(uri, async (s, p) => {
+        await s.downloadTo(p, localPath);
+        const st = await s.stat(p);
+        return { dir: false, size: st?.size ?? 0, mtimeMs: st?.mtimeMs ?? 0 };
+      }),
+    /**
+     * A file here written to a server (its folders made as needed); returns its
+     * { size, mtimeMs } there. `expected` ({ size, mtimeMs } or null for none): the
+     * file there as it was listed; when it changed since, nothing is written.
+     */
+    uploadFile: (localPath, uri, expected) =>
+      withPath(uri, async (s, p) => {
+        if (expected !== undefined) {
+          const now = await s.stat(p);
+          const changed = expected ? !now || now.size !== expected.size || Math.abs(now.mtimeMs - expected.mtimeMs) >= 1000 : Boolean(now);
+          if (changed) throw new Error('changed on the server during the sync; it is looked at again next time.');
+        }
+        await mkdirp(s, posix.dirname(p));
+        await s.uploadFrom(localPath, p);
+        const st = await s.stat(p);
+        return { dir: false, size: st?.size ?? 0, mtimeMs: st?.mtimeMs ?? 0 };
+      }),
+    /** A folder and the ones above it, where missing. */
+    mkdirp: (uri) => withPath(uri, (s, p) => mkdirp(s, p)),
+    /** A folder removed only when it is empty. */
+    removeEmptyDir: (uri) =>
+      withPath(uri, async (s, p) => {
+        if (p !== '/' && !(await s.list(p)).length) await s.rmdir(p);
+      }),
     /** Deletes for good (servers have no Recycle Bin). */
     async remove(uris) {
       const done = [];
@@ -645,7 +1176,7 @@ function createRemote({ store, secrets, askHostKey, onStatus = () => {} }) {
         const target = freePath(localDir, posix.basename(root));
         for (const item of await withPath(uri, (s, p) => walk(s, p))) {
           const rel = posix.relative(root, item.path);
-          const dest = rel ? nodePath.join(target, ...rel.split('/')) : target;
+          const dest = rel ? localUnder(target, rel) : target;
           if (item.dir) fs.mkdirSync(dest, { recursive: true });
           else fs.writeFileSync(dest, await withPath(uri, (s) => s.read(item.path)), { flag: 'wx' });
         }
@@ -661,7 +1192,7 @@ function createRemote({ store, secrets, askHostKey, onStatus = () => {} }) {
 function localWalk(p, out = []) {
   const st = fs.statSync(p);
   out.push({ path: p, dir: st.isDirectory() });
-  if (out.length > MAX_COPY_ENTRIES) throw new Error('Too many files to copy at once.');
+  if (out.length > MAX_COPY_ENTRIES) throw new Error('Too many files at once (more than 10,000).');
   if (st.isDirectory()) for (const name of fs.readdirSync(p)) localWalk(nodePath.join(p, name), out);
   return out;
 }
@@ -673,4 +1204,4 @@ function tempCopyPath(uri) {
   return nodePath.join(dir, posix.basename(parseUri(uri).path));
 }
 
-module.exports = { createRemote, isRemote, parseUri, toUri, fingerprintOf, friendlyError, tempCopyPath, SCHEME, PROTOCOLS, DEFAULT_PORT };
+module.exports = { createRemote, isRemote, parseUri, toUri, fingerprintOf, friendlyError, tempCopyPath, localUnder, SCHEME, PROTOCOLS, DEFAULT_PORT };

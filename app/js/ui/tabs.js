@@ -12,6 +12,8 @@ import { canDragOut, draggedTab, dropped, isOwnDrop, onDragOutEnd, startDragOut 
 import { Menu, MenuButton } from './menu.js';
 import { isRemotePath, KINDS, kindOfKey, protocolName, remoteAddress, remoteParts, whereState } from '../where.js';
 import { server, serverStatus } from '../servers.js';
+import { mirrorOf } from '../mirrors.js';
+import { mirrorState } from './mirrors.js';
 
 /** The server of a file on one ({ conn, status }), or null. */
 const serverOf = (path) => {
@@ -209,9 +211,16 @@ function DiskBar({ disk, buttons, moreItems, actions }) {
   const where = remote ? `${KINDS.remote.hint}\n${protocolName(srv.conn?.protocol)} · ${remoteAddress(path, srv.conn)}` : `${KINDS.disk.hint}\n${path}`;
   const encoding = `${disk.eol === 'crlf' ? 'Windows (CRLF)' : 'Unix (LF)'} line endings · ${disk.encoding === 'latin1' ? 'Windows-1252' : 'UTF-8'}${disk.bom ? ' with BOM' : ''}, kept when saving`;
   const elsewhere = remote ? 'on the server' : 'on disk';
+  // In a mirrored folder: also kept on the other side.
+  const mirrored = mirrorOf(path);
   return html`<div class="filebar-stack">
     <div class="filebar">
       <${WhereChip} kind=${remote ? 'remote' : 'disk'} label=${remote ? (srv.conn?.name ?? 'Server') : 'This computer'} state=${state} title=${where} onClick=${() => actions.showOnDisk(path)} />
+      ${mirrored &&
+      html`<button type="button" class="mirror-badge" onClick=${() => actions.syncMirror(mirrored.mirror.id)}
+        title=${`Mirrored: kept the same as ${mirrored.side === 'local' ? `${server(mirrored.mirror.conn)?.name ?? 'the server'}: ${mirrored.mirror.remote}` : mirrored.mirror.local}. ${mirrorState(mirrored.mirror).text}. Click to sync now.`}>
+        <span aria-hidden="true">⇄</span><span class="label">${mirrored.side === 'local' ? (server(mirrored.mirror.conn)?.name ?? 'Server') : 'This computer'}</span>
+      </button>`}
       <span class="filebar-note" title=${`${remote ? remoteAddress(path, srv.conn) : path}\n${encoding}`}><span class="filebar-title">${disk.name}</span><span class="muted small filebar-path">${folder}</span></span>
       <span class="spacer" />
       ${buttons}
@@ -259,6 +268,8 @@ export function FileBar({ file, repo, disk, sealed, projects, canPreview, previe
     disk && { label: 'Show in folder', icon: 'folder', run: () => actions.showOnDisk(disk.path) },
     disk && { label: 'Copy path', icon: 'copy', run: () => actions.copyPath(disk.path) },
     disk && { label: 'Copy into my files (synced)', icon: 'filePlus', run: () => actions.copyToFiles(disk.path) },
+    disk && { label: 'Properties', icon: 'info', run: () => actions.showProperties(disk.path) },
+    disk && (!isRemotePath(disk.path) || server(remoteParts(disk.path).id)?.protocol === 'sftp') && { label: 'Open a terminal in its folder', icon: 'terminal', run: () => actions.terminalHere(disk.path.slice(0, Math.max(disk.path.lastIndexOf('/'), disk.path.lastIndexOf('\\'))) || disk.path) },
     disk && { separator: true },
     id && { label: 'Details…', icon: 'tag', run: () => actions.openDialog({ type: 'file', id }) },
     { label: 'Outline and links (Ctrl+Shift+O)', icon: 'list', run: actions.toggleOutline },

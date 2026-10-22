@@ -140,3 +140,33 @@ export function selectionSummary(entries, selected, formatBytes = (n) => `${n} B
   const bytes = chosen.filter((e) => !e.dir).reduce((sum, e) => sum + e.size, 0);
   return `${chosen.length} of ${items} selected${bytes ? ` · ${formatBytes(bytes)}` : ''}`;
 }
+
+/** "drwxr-xr-x" for a mode (s and t for setuid, setgid and sticky; S and T without x); '' when not known. */
+export function modeString(mode, dir = false) {
+  if (mode === null || mode === undefined) return '';
+  const bit = (b, ch) => (mode & b ? ch : '-');
+  let out = dir ? 'd' : '-';
+  for (const [shift, special, mark] of [[6, 0o4000, 's'], [3, 0o2000, 's'], [0, 0o1000, 't']]) {
+    const x = mode & (1 << shift);
+    out += bit(4 << shift, 'r') + bit(2 << shift, 'w') + (mode & special ? (x ? mark : mark.toUpperCase()) : x ? 'x' : '-');
+  }
+  return out;
+}
+/** "644", or "4755" with special bits. */
+export const octalMode = (mode) => (mode & 0o7777).toString(8).padStart(3, '0');
+/** "755" or "0644" as a mode, or null when it is not one. */
+export function parseMode(text) {
+  const t = String(text ?? '').trim();
+  return /^[0-7]{3,4}$/.test(t) ? parseInt(t, 8) : null;
+}
+/** Who and what in the permissions grid: owner, group, others × read, write, run. */
+export const PERMISSION_WHO = [
+  { id: 'owner', label: 'Owner', shift: 6 },
+  { id: 'group', label: 'Group', shift: 3 },
+  { id: 'others', label: 'Others', shift: 0 },
+];
+export const PERMISSION_WHAT = [
+  { id: 'read', label: 'Read', bit: 4 },
+  { id: 'write', label: 'Write', bit: 2 },
+  { id: 'run', label: 'Run', bit: 1, folderLabel: 'Open' },
+];

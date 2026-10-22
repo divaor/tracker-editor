@@ -14,6 +14,8 @@ export function remoteParts(uri) {
 }
 /** The top folder of a server, as the folders view treats it. */
 export const remoteRoot = (id) => `${REMOTE_SCHEME}${id}/`;
+/** A path on a server as the folders view addresses it. */
+export const toRemoteUri = (id, path) => `${REMOTE_SCHEME}${id}${path.startsWith('/') ? path : `/${path}`}`;
 
 export const KINDS = {
   synced: { label: 'My files', icon: 'cloud', hint: 'In your files: saved on this device and synced to your data repo.' },
