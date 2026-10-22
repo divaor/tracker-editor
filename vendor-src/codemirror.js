@@ -47,8 +47,12 @@ export {
   selectNextOccurrence,
   SearchQuery,
   setSearchQuery,
+  getSearchQuery,
   findNext,
+  findPrevious,
+  replaceNext,
   replaceAll,
+  selectMatches,
 } from '@codemirror/search';
 export { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap, completeAnyWord } from '@codemirror/autocomplete';
 export {

@@ -56,6 +56,7 @@ import { ReadAloudBar } from './ui/readAloud.js';
 import { ShareDialog } from './ui/share.js';
 import { SettingsView } from './ui/settingsView.js';
 import { Sidebar } from './ui/sidebar.js';
+import { Splitter } from './ui/splitter.js';
 import { FileBar, StatusBar, SyncBadge, TabBar } from './ui/tabs.js';
 
 const isNarrow = () => matchMedia('(max-width: 860px)').matches;
@@ -987,6 +988,10 @@ export function App() {
   // The open tab is in the lighter editor for very large files.
   const [big, setBig] = useState(false);
   const [preview, setPreview] = useState(() => new Set());
+  // The preview in the editor's place (Full view) instead of next to the text.
+  const [previewFull, setPreviewFull] = useState(false);
+  const areaEl = useRef(null);
+  const splitDrag = useRef({ width: 1, start: 0, ratio: 0.5 });
   const [compare, setCompare] = useState(null);
   const hostRef = useRef(null);
   const editorEl = useRef(null);
@@ -1166,6 +1171,7 @@ export function App() {
     hostRef.current?.flushAll();
     // The preview takes the side view's place.
     if (!preview.has(activeKey)) store.setSide(null);
+    else setPreviewFull(false);
     setPreview((p) => {
       const next = new Set(p);
       next.has(activeKey) ? next.delete(activeKey) : next.add(activeKey);
@@ -1652,7 +1658,21 @@ export function App() {
   const narrow = isNarrow();
 
   // The editor view stays mounted (CodeMirror lives in it) and is only hidden while Settings is open.
-  return html`<div class="app ${sidebar ? 'with-sidebar' : ''} ${panel ? 'with-panel' : ''} view-${view}">
+  // The handle between the text and the preview or side view: the editor's share of the width.
+  const splitHandle = (label) => html`<${Splitter} className="pane-resize" label=${label}
+    onStart=${() => {
+      const area = areaEl.current;
+      splitDrag.current = { width: area.clientWidth || 1, start: area.querySelector(':scope > .editor-host').offsetWidth, ratio: settings.splitRatio };
+    }}
+    onMove=${(delta) => {
+      const { width, start } = splitDrag.current;
+      splitDrag.current.ratio = Math.max(0.15, Math.min(0.85, (start + delta) / width));
+      areaEl.current.style.setProperty('--split', `${(splitDrag.current.ratio * 100).toFixed(2)}%`);
+    }}
+    onEnd=${() => saveSettings({ splitRatio: Math.round(splitDrag.current.ratio * 1000) / 1000 })}
+    onReset=${() => saveSettings({ splitRatio: 0.5 })} />`;
+
+  return html`<div class="app ${sidebar ? 'with-sidebar' : ''} ${panel ? 'with-panel' : ''} view-${view}" style=${settings.sidebarWidth ? { '--sidebar': `${settings.sidebarWidth}px` } : {}}>
     <header class="topbar">
       <button type="button" class="icon-btn" aria-label="Files" title="Files (Ctrl+B)" aria-pressed=${sidebar} onClick=${() => setSidebar(!sidebar)}><${Icon} name="sidebar" /></button>
       <span class="brand"><span class="brand-mark"><${Icon} name="code" size=${16} /></span><span class="brand-name">Tracker Editor</span></span>
@@ -1682,10 +1702,12 @@ export function App() {
         html`<${FilterBar} key=${activeKey} tabKey=${activeKey} actions=${actions} onClose=${actions.toggleFilter} />`}
         ${dictating && dictating === activeKey && html`<${DictationBar} lang=${settings.dictationLang} onPhrase=${actions.dictate} onStop=${actions.stopDictation} />`}
         ${typingJob && html`<${TypeOutPanel} job=${typingJob} onStop=${() => window.desktop?.typing?.stop()} />`}
-        <div class="editor-area ${showPreview ? 'split' : ''} ${showSide ? 'side-split' : ''} ${compare ? 'comparing' : ''} ${settings.whereFrame && activeKey ? 'framed' : ''}" data-kind=${kindOfKey(activeKey) ?? undefined}>
+        <div class="editor-area ${showPreview ? 'split' : ''} ${showPreview && previewFull ? 'preview-full' : ''} ${showSide ? 'side-split' : ''} ${compare ? 'comparing' : ''} ${settings.whereFrame && activeKey ? 'framed' : ''}"
+          data-kind=${kindOfKey(activeKey) ?? undefined} ref=${areaEl} style=${{ '--split': `${((settings.splitRatio || 0.5) * 100).toFixed(2)}%` }}>
           <div class="editor-host" ref=${editorEl} />
           ${assist && activeKey && view === 'editor' && !compare && !activeSealed && html`<${AssistPanel} key=${activeKey} scope=${assistScope} actions=${actions} onClose=${() => (setAssist(false), hostRef.current?.focus())} />`}
           ${!assist && modelReady && settings.assistBubble && activeKey && !compare && !activeSealed && !typingJob && html`<${AssistBubble} onOpen=${() => setAssist(true)} />`}
+          ${showSide && splitHandle('Resize the side view')}
           ${showSide &&
           html`<div class="side-pane" aria-label=${`Side view: ${sideFile?.name ?? sideRepo.name}`}>
             <div class="side-head">
@@ -1699,7 +1721,9 @@ export function App() {
             <div class="side-host" ref=${sideEl} />
           </div>`}
           ${compare && html`<${CompareView} key=${compare.sha ?? compare.left.label} compare=${compare} settings=${settings} onClose=${() => setCompare(null)} />`}
+          ${showPreview && !previewFull && splitHandle('Resize the preview')}
           ${showPreview && html`<${Preview} key=${activeKey} kind=${previewType} name=${activeName} text=${activeText()}
+            full=${previewFull} onFull=${isNarrow() ? undefined : () => setPreviewFull(!previewFull)} onClose=${actions.togglePreview}
             onToggle=${(next) => {
               if (activeFile) store.setText(activeFile.id, next);
               else if (activeDisk) store.setDiskText(activeDisk.path, next, { urgent: true });

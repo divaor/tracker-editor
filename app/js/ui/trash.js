@@ -1,7 +1,7 @@
 import { html, useState } from '../../vendor/preact-htm.js';
 import { formatDateTime, timeAgo } from '../format.js';
 import { store } from '../store.js';
-import { Modal } from './components.js';
+import { ClearButton, Modal } from './components.js';
 import { Icon } from './icons.js';
 
 /**
@@ -22,7 +22,12 @@ export function TrashDialog({ actions, onClose }) {
   };
   return html`<${Modal} title="Trash" onClose=${onClose} className="trash-dialog">
     <p class="muted small">Deleted files stay here for 180 days, on all your devices. Restoring one brings it back where it was.</p>
-    ${all.length > 6 && html`<input class="trash-filter" value=${filter} onInput=${(e) => setFilter(e.currentTarget.value)} placeholder="Filter deleted files" aria-label="Filter deleted files" />`}
+    ${all.length > 6 &&
+    html`<div class="sidebar-filter trash-filter">
+      <${Icon} name="search" size=${15} />
+      <input value=${filter} onInput=${(e) => setFilter(e.currentTarget.value)} placeholder="Filter deleted files" aria-label="Filter deleted files" />
+      <${ClearButton} value=${filter} onClear=${() => setFilter('')} label="Clear the filter" />
+    </div>`}
     <div class="trash-list">
       ${files.map(
         (f) => html`<div class="trash-row" key=${f.id}>

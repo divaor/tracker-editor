@@ -1,11 +1,12 @@
-import { html, useState } from '../../vendor/preact-htm.js';
+import { html, useRef, useState } from '../../vendor/preact-htm.js';
 import { timeAgo } from '../format.js';
 import { saveSettings } from '../settings.js';
 import { fileKey, repoKey, store } from '../store.js';
 import { projectKey } from '../tracker-model.js';
 import { Icon } from './icons.js';
-import { ScopeBar, Segmented } from './components.js';
+import { ClearButton, ScopeBar, Segmented } from './components.js';
 import { FoldersView } from './folders.js';
+import { Splitter } from './splitter.js';
 
 const SORTS = [
   { id: 'recent', label: 'Recent' },
@@ -32,11 +33,31 @@ const MODES = [
 const ModeSwitch = ({ mode }) =>
   window.desktop?.folders && html`<${Segmented} small options=${MODES} value=${mode} onChange=${(id) => saveSettings({ sidebarMode: id })} label="Show" />`;
 
+const SIDEBAR_MIN = 200;
+const sidebarMax = () => Math.max(SIDEBAR_MIN, Math.min(960, innerWidth - 360));
+
+/** The handle on the sidebar's right edge (long names in folders): the width is kept in the settings. */
+function SidebarResize() {
+  const drag = useRef({ start: 0, width: 0 });
+  const app = () => document.querySelector('.app');
+  return html`<${Splitter} className="sidebar-resize" label="Resize the sidebar"
+    onStart=${() => {
+      drag.current.start = drag.current.width = document.querySelector('.sidebar')?.offsetWidth ?? 288;
+    }}
+    onMove=${(delta) => {
+      drag.current.width = Math.round(Math.max(SIDEBAR_MIN, Math.min(sidebarMax(), drag.current.start + delta)));
+      app()?.style.setProperty('--sidebar', `${drag.current.width}px`);
+    }}
+    onEnd=${() => saveSettings({ sidebarWidth: drag.current.width })}
+    onReset=${() => (app()?.style.removeProperty('--sidebar'), saveSettings({ sidebarWidth: 0 }))} />`;
+}
+
 export function Sidebar({ files, docs, projects, settings, activeKey, openKeys = [], actions }) {
   if (window.desktop?.folders && settings.sidebarMode === 'folders') {
     return html`<aside class="sidebar folders" aria-label="Folders">
       <div class="sidebar-top"><${ModeSwitch} mode="folders" /></div>
       <${FoldersView} settings=${settings} activeKey=${activeKey} openKeys=${openKeys} actions=${actions} />
+      <${SidebarResize} />
     </aside>`;
   }
   return html`<${FileSidebar} files=${files} docs=${docs} projects=${projects} settings=${settings} activeKey=${activeKey} actions=${actions} />`;
@@ -67,7 +88,9 @@ function FileSidebar({ files, docs, projects, settings, activeKey, actions }) {
       <${ScopeBar} scope=${settings.projectScope} projects=${projects} onChange=${(scope) => saveSettings({ projectScope: scope })} />
       <div class="sidebar-filter">
         <${Icon} name="search" size=${15} />
-        <input value=${filter} onInput=${(e) => setFilter(e.currentTarget.value)} placeholder=${`Filter ${rows.length} file${rows.length === 1 ? '' : 's'}`} aria-label="Filter files" />
+        <input value=${filter} onInput=${(e) => setFilter(e.currentTarget.value)} placeholder=${`Filter ${rows.length} file${rows.length === 1 ? '' : 's'}`} aria-label="Filter files"
+          onKeyDown=${(e) => e.key === 'Escape' && filter && (e.preventDefault(), e.stopPropagation(), setFilter(''))} />
+        <${ClearButton} value=${filter} onClear=${() => setFilter('')} label="Clear the filter" />
       </div>
       ${tags.length > 0 &&
       html`<div class="sidebar-tags">
@@ -112,5 +135,6 @@ function FileSidebar({ files, docs, projects, settings, activeKey, actions }) {
         <${Icon} name="trash" size=${15} />${trashCount > 0 && html`<span class="count">${trashCount}</span>`}
       </button>
     </div>
+    <${SidebarResize} />
   </aside>`;
 }

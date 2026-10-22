@@ -6,7 +6,7 @@ import { saveSettings } from '../settings.js';
 import { diskKey } from '../store.js';
 import { server, servers, serverStatus } from '../servers.js';
 import { isRemotePath, protocolName, remoteParts, remoteRoot } from '../where.js';
-import { Modal, toast } from './components.js';
+import { ClearButton, Modal, toast } from './components.js';
 import { mirrorOf } from '../mirrors.js';
 import { MirrorBar } from './mirrors.js';
 import { Icon } from './icons.js';
@@ -681,7 +681,11 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       <div class="sidebar-filter">
         <${Icon} name="search" size=${15} />
         <input value=${filter} onInput=${(e) => setFilter(e.currentTarget.value)} placeholder=${`Filter ${dir === root ? rootName(root) : baseName(dir)}`} aria-label="Filter this folder"
-          onKeyDown=${(e) => e.key === 'ArrowDown' && (e.preventDefault(), list.current?.focus(), order[0] && select([order[0]]))} />
+          onKeyDown=${(e) => {
+            if (e.key === 'ArrowDown') e.preventDefault(), list.current?.focus(), order[0] && select([order[0]]);
+            else if (e.key === 'Escape' && filter) e.preventDefault(), e.stopPropagation(), setFilter('');
+          }} />
+        <${ClearButton} value=${filter} onClear=${() => setFilter('')} label="Clear the filter" />
       </div>
     </div>
     <div class="file-list folder-list ${dropTarget === dir ? 'drop-target' : ''}" role="listbox" aria-multiselectable="true" tabindex="0" ref=${list}

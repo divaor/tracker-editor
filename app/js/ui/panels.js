@@ -3,7 +3,7 @@ import { findInFiles, quickOpen } from '../search.js';
 import { timeAgo } from '../format.js';
 import { fileKey, repoKey, store } from '../store.js';
 import { Icon } from './icons.js';
-import { Segmented } from './components.js';
+import { ClearButton, Segmented } from './components.js';
 
 const SCOPES = [
   { id: 'all', label: 'All files' },
@@ -69,6 +69,7 @@ export function SearchPanel({ files, docs, allFiles, allDocs, openKeys, actions,
       <div class="search-box">
         <input ref=${input} value=${query} onInput=${(e) => setQuery(e.currentTarget.value)} placeholder="Find in every file…" aria-label="Find in files"
           onKeyDown=${(e) => e.key === 'Escape' && onClose()} />
+        <${ClearButton} value=${query} onClear=${() => setQuery('')} label="Clear the search" />
         <div class="search-options" role="group" aria-label="Options">
           <button type="button" class="opt ${options.caseSensitive ? 'on' : ''}" aria-pressed=${options.caseSensitive} title="Match case" onClick=${() => toggle('caseSensitive')}>Aa</button>
           <button type="button" class="opt ${options.wholeWord ? 'on' : ''}" aria-pressed=${options.wholeWord} title="Whole word" onClick=${() => toggle('wholeWord')}><u>ab</u></button>

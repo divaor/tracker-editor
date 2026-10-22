@@ -53,6 +53,10 @@ export const DEFAULT_SETTINGS = {
   showPermissions: false,
   // The terminal panel's height (desktop), in pixels.
   terminalHeight: 280,
+  // Sizes dragged by hand: the sidebar's width in pixels (0 = the default), and the share of
+  // the editor next to a preview or the side view.
+  sidebarWidth: 0,
+  splitRatio: 0.5,
   // Where links to files point (the tracker opens these).
   appUrl: PUBLIC_APP_URL,
   trackerUrl: TRACKER_APP_URL,

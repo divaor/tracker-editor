@@ -87,6 +87,17 @@ export function Modal({ title, onClose, children, footer, wide = false, classNam
 
 // ---- Forms ---------------------------------------------------------------------
 
+/** The × that empties a search or filter field and puts the caret back in it (shown while it has text). */
+export function ClearButton({ value, onClear, label = 'Clear' }) {
+  if (!value) return null;
+  return html`<button type="button" class="clear-x" aria-label=${label} title=${label} onMouseDown=${(e) => e.preventDefault()}
+    onClick=${(e) => {
+      const field = e.currentTarget.parentElement.querySelector('input');
+      onClear();
+      field?.focus();
+    }}><${Icon} name="x" size=${13} /></button>`;
+}
+
 export function Card({ title, icon, children, id }) {
   return html`<section class="settings-card" id=${id}>
     <h2>${icon && html`<${Icon} name=${icon} size=${18} />`}${title}</h2>

@@ -2,6 +2,7 @@ import { html, useEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import { isRemotePath, remoteParts } from '../where.js';
 import { server } from '../servers.js';
 import { Icon } from './icons.js';
+import { ClearButton } from './components.js';
 
 const message = (err) => String(err?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
 const plural = (n, what, many = `${what}s`) => `${n.toLocaleString()} ${n === 1 ? what : many}`;
@@ -77,6 +78,7 @@ export function FolderSearchPanel({ dir, actions, onClose }) {
       <form class="search-box" onSubmit=${(e) => (e.preventDefault(), start())}>
         <input ref=${input} value=${query} onInput=${(e) => setQuery(e.currentTarget.value)} placeholder="Find in these files… (Enter)" aria-label="Find in this folder"
           onKeyDown=${(e) => e.key === 'Escape' && (run && !run.done ? stop() : onClose())} />
+        <${ClearButton} value=${query} onClear=${() => setQuery('')} label="Clear the search" />
         <div class="search-options" role="group" aria-label="Options">
           <button type="button" class="opt ${options.caseSensitive ? 'on' : ''}" aria-pressed=${options.caseSensitive} title="Match case" onClick=${() => toggle('caseSensitive')}>Aa</button>
           <button type="button" class="opt ${options.wholeWord ? 'on' : ''}" aria-pressed=${options.wholeWord} title="Whole word" onClick=${() => toggle('wholeWord')}><u>ab</u></button>

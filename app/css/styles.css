@@ -1576,10 +1576,12 @@ button.project-chip:hover {
 
 /* ---- Sidebar ------------------------------------------------------------------ */
 .sidebar {
+  position: relative;
   grid-area: side;
   display: flex;
   flex-direction: column;
   width: var(--sidebar);
+  max-width: max(200px, calc(100vw - 360px));
   min-height: 0;
   border-right: 1px solid var(--border);
   background: var(--bg);
@@ -1615,6 +1617,29 @@ button.project-chip:hover {
   border: 0 !important;
   box-shadow: none !important;
   background: transparent !important;
+}
+
+/* The × in search and filter fields (components.js ClearButton). */
+.clear-x {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-3);
+}
+
+.clear-x:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.filter-bar .clear-x {
+  margin-left: -30px;
 }
 
 .sidebar-tags {
@@ -2686,12 +2711,320 @@ button.where-chip:hover {
   display: none;
 }
 
-.preview-pane {
+/* Find and replace (searchPanel.js) */
+.find-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 6px 8px;
+  font-family: var(--font);
+  font-size: 13px;
+}
+
+.find-bar .sp-rows {
+  display: flex;
   flex: 1;
+  flex-direction: column;
+  gap: 6px;
   min-width: 0;
-  overflow: auto;
+}
+
+.find-bar .sp-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.find-bar .sp-row[hidden] {
+  display: none;
+}
+
+.find-bar .sp-field {
+  display: flex;
+  flex: 0 1 400px;
+  align-items: center;
+  gap: 2px;
+  min-width: 120px;
+  height: 30px;
+  padding: 0 3px 0 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+
+.find-bar .sp-field:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.find-bar .sp-field:has(.invalid) {
+  border-color: var(--danger);
+}
+
+.find-bar input.sp-input,
+.find-bar input.sp-input:focus {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  box-shadow: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+}
+
+.find-bar .sp-input::placeholder {
+  color: var(--text-3);
+}
+
+.find-bar .sp-toggles {
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+
+.find-bar .sp-toggle {
+  display: inline-grid;
+  place-items: center;
+  min-width: 26px;
+  height: 22px;
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-3);
+  font: 600 12px/1 var(--mono);
+}
+
+.find-bar .sp-toggle:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.find-bar .sp-toggle[aria-pressed='true'] {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.find-bar .sp-word {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.find-bar .sp-count {
+  flex: none;
+  min-width: 76px;
+  color: var(--text-3);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.find-bar .sp-count.none {
+  color: var(--danger);
+}
+
+.find-bar .sp-nav {
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+
+.find-bar .sp-icon,
+.find-bar .sp-expand {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+}
+
+.find-bar .sp-icon:hover,
+.find-bar .sp-expand:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.find-bar .sp-expand {
+  margin-top: 1px;
+}
+
+.find-bar .sp-expand[hidden] {
+  display: none;
+}
+
+.find-bar .sp-expand svg {
+  transition: transform 0.15s;
+}
+
+.find-bar .sp-expand.open svg {
+  transform: rotate(90deg);
+}
+
+.find-bar .sp-close {
+  margin-left: auto;
+}
+
+.find-bar .sp-btn {
+  flex: none;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: 500 13px var(--font);
+  white-space: nowrap;
+}
+
+.find-bar .sp-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+@media (max-width: 560px) {
+  .find-bar .sp-count {
+    min-width: 0;
+  }
+
+  .find-bar .sp-nav [name='select'] {
+    display: none;
+  }
+
+  .find-bar .sp-btn {
+    padding: 0 9px;
+  }
+}
+
+.preview-pane {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
   border-left: 1px solid var(--border);
   background: var(--surface);
+}
+
+.preview-head {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 4px 0 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.preview-title {
+  font-weight: 550;
+}
+
+.preview-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.preview-pane:fullscreen {
+  border: 0;
+}
+
+/* The text's share next to a preview or the side view (dragged: settings.splitRatio). */
+.editor-area.split > .editor-host,
+.editor-area.side-split > .editor-host {
+  flex: 0 0 var(--split, 50%);
+  min-width: 0;
+}
+
+.editor-area.preview-full > .editor-host {
+  display: none;
+}
+
+.editor-area.preview-full > .preview-pane {
+  border-left: 0;
+}
+
+/* Drag handles (ui/splitter.js): a line in the accent color while pointed at or dragged. */
+.splitter {
+  position: relative;
+  z-index: 6;
+  flex: none;
+  outline: none;
+  touch-action: none;
+}
+
+.splitter.vertical {
+  width: 9px;
+  margin: 0 -4px;
+  cursor: col-resize;
+}
+
+.splitter.horizontal {
+  height: 9px;
+  margin: -4px 0;
+  cursor: row-resize;
+}
+
+.splitter::after {
+  content: '';
+  position: absolute;
+  background: transparent;
+  transition: background 0.12s 0.08s;
+}
+
+.splitter.vertical::after {
+  inset: 0 3px;
+}
+
+.splitter.horizontal::after {
+  inset: 3px 0;
+}
+
+.splitter:hover::after,
+.splitter:focus-visible::after,
+body.resizing-x .splitter.vertical:active::after,
+body.resizing-y .splitter.horizontal:active::after {
+  background: var(--accent);
+}
+
+body.resizing-x,
+body.resizing-x * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+
+body.resizing-y,
+body.resizing-y * {
+  cursor: row-resize !important;
+  user-select: none;
+}
+
+body:is(.resizing-x, .resizing-y) iframe {
+  pointer-events: none;
+}
+
+.sidebar-resize.splitter.vertical {
+  position: absolute;
+  top: 0;
+  right: -5px;
+  bottom: 0;
+  margin: 0;
 }
 
 .preview-body {
@@ -2700,7 +3033,7 @@ button.where-chip:hover {
   padding: 18px 24px 40px;
 }
 
-.preview-pane:is(.preview-html, .preview-csv, .preview-tsv) {
+.preview-pane:is(.preview-html, .preview-csv, .preview-tsv) .preview-scroll {
   display: flex;
   flex-direction: column;
 }
@@ -4204,6 +4537,7 @@ svg.up {
   flex: 1 1 200px;
   min-width: 0;
   min-height: 30px;
+  padding-right: 30px;
   font-family: var(--mono);
   font-size: 13px;
 }
@@ -4301,6 +4635,7 @@ svg.up {
     left: 0;
     z-index: 40;
     width: min(88vw, 340px);
+    max-width: none;
     box-shadow: var(--shadow-lg);
   }
 
@@ -4321,6 +4656,11 @@ svg.up {
   }
 
   .editor-area.split .editor-host {
+    display: none;
+  }
+
+  .splitter,
+  .preview-full-btn {
     display: none;
   }
 

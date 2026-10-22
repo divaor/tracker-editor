@@ -69,6 +69,7 @@ import {
 import { compileFilter, hiddenRuns, isBigText } from './logtools.js';
 import { parseLinks } from './outline.js';
 import { isOwnDrop } from './dragOut.js';
+import { createSearchPanel, openReplacePanel } from './searchPanel.js';
 
 export { languages };
 
@@ -178,11 +179,7 @@ export const COMMANDS = {
   undo,
   redo,
   find: openSearchPanel,
-  replace: (view) => {
-    openSearchPanel(view);
-    setTimeout(() => view.dom.querySelector('.cm-search [name=replace]')?.focus(), 0);
-    return true;
-  },
+  replace: openReplacePanel,
   gotoLine,
   selectNext: selectNextOccurrence,
   toggleComment,
@@ -439,10 +436,11 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       highlightActiveLine(),
       big ? [] : highlightSelectionMatches(),
       readingField,
-      search({ top: true }),
+      search({ top: true, createPanel: createSearchPanel }),
       placeholder('Type or paste here. Everything is saved on this device as you type and synced to GitHub.'),
       keymap.of([
         { key: 'Mod-g', run: gotoLine, preventDefault: true },
+        { key: 'Mod-h', mac: 'Mod-Alt-f', run: openReplacePanel, preventDefault: true },
         { key: 'Alt-z', run: () => onShortcut?.('toggleWrap') ?? true },
         { key: 'Mod-s', run: () => onShortcut?.('sync') ?? true, preventDefault: true },
         { key: 'Mod-Shift-d', run: copyLineDown },

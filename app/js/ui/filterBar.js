@@ -1,5 +1,5 @@
 import { html, useEffect, useLayoutEffect, useRef, useState } from '../../vendor/preact-htm.js';
-import { Segmented, toast } from './components.js';
+import { ClearButton, Segmented, toast } from './components.js';
 import { Icon } from './icons.js';
 
 const MODES = [
@@ -42,6 +42,7 @@ export function FilterBar({ tabKey, actions, onClose }) {
     <${Segmented} small options=${MODES} value=${mode} onChange=${setMode} label="Filter mode" />
     <input ref=${input} value=${pattern} onInput=${(e) => setPattern(e.currentTarget.value)} placeholder=${regex ? 'Regular expression, e.g. ERROR|WARN' : 'Text in the lines, e.g. ERROR'} aria-label="Filter"
       class=${error ? 'invalid' : ''} spellcheck=${false} onKeyDown=${(e) => e.key === 'Escape' && (e.preventDefault(), close())} />
+    <${ClearButton} value=${pattern} onClear=${() => setPattern('')} label="Clear the filter" />
     <button type="button" class="icon-btn sm toggle ${caseSensitive ? 'on' : ''}" aria-pressed=${caseSensitive} title="Match case" aria-label="Match case" onClick=${() => setCaseSensitive(!caseSensitive)}>Aa</button>
     <button type="button" class="icon-btn sm toggle ${regex ? 'on' : ''}" aria-pressed=${regex} title="Regular expression" aria-label="Regular expression" onClick=${() => setRegex(!regex)}>.*</button>
     <span class="muted small filter-count">${error || (pattern ? `${stats.shown.toLocaleString()} of ${stats.total.toLocaleString()} lines` : `${stats.total.toLocaleString()} lines`)}</span>

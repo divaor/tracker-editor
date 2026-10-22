@@ -82,6 +82,9 @@ const PATHS = {
   save: () => html`<path d="M5 3h11l3 3v15H5z" /><path d="M8 3v5h7V3M8 21v-7h8v7" />`,
   scan: () => html`<path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3" /><path d="M8 9h8M8 12h8M8 15h5" />`,
   mic: () => html`<rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" />`,
+  widen: () => html`<path d="M8 7 3 12l5 5M16 7l5 5-5 5M3 12h18" />`,
+  narrow: () => html`<path d="M3 12h7M7 8l4 4-4 4M21 12h-7M17 8l-4 4 4 4" />`,
+  fullscreen: () => html`<path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" />`,
 };
 
 export function Icon({ name, size = 18, class: cls = '' }) {

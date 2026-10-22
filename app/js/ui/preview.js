@@ -1,4 +1,4 @@
-import { html, useEffect, useMemo, useState } from '../../vendor/preact-htm.js';
+import { html, useEffect, useMemo, useRef, useState } from '../../vendor/preact-htm.js';
 import { renderMarkdown } from '../markdown.js';
 import { jsonProblem, parseDelimited } from '../previews.js';
 import { toggleChecklistItem } from '../tracker-model.js';
@@ -173,7 +173,12 @@ function TablePreview({ text, delimiter }) {
  * kind comes from previewKind(); onToggle(text) edits the text (Markdown
  * checklists); onGoTo(line, column) shows a place in the text.
  */
-export function Preview({ kind, text = '', name, onToggle, onGoTo }) {
+/**
+ * The preview next to the text. `full` fills the editor's place (`onFull` switches);
+ * Full screen shows only the preview; `onClose` hides it.
+ */
+export function Preview({ kind, text = '', name, onToggle, onGoTo, full = false, onFull, onClose }) {
+  const pane = useRef(null);
   let body;
   if (kind === 'markdown') body = html`<${MarkdownPreview} text=${text} onToggle=${onToggle} />`;
   else if (kind === 'html') body = html`<${HtmlPreview} text=${text} name=${name} />`;
@@ -181,5 +186,15 @@ export function Preview({ kind, text = '', name, onToggle, onGoTo }) {
   else if (kind === 'json') body = html`<${JsonPreview} text=${text} onGoTo=${onGoTo} />`;
   else if (kind === 'xml') body = html`<${XmlPreview} text=${text} />`;
   else if (kind === 'csv' || kind === 'tsv') body = html`<${TablePreview} text=${text} delimiter=${kind === 'tsv' ? '\t' : ','} />`;
-  return html`<div class="preview-pane preview-${kind}">${body}</div>`;
+  return html`<div class="preview-pane preview-${kind} ${full ? 'full' : ''}" ref=${pane}>
+    <div class="preview-head">
+      <${Icon} name="eye" size=${14} /><span class="preview-title">Preview</span><span class="spacer" />
+      ${onFull && html`<button type="button" class="icon-btn sm preview-full-btn" aria-pressed=${full} aria-label=${full ? 'Back to the text and preview' : 'Full view'}
+        title=${full ? 'Back to the text and preview' : 'Full view: the preview in the editor’s place'} onClick=${onFull}><${Icon} name=${full ? 'narrow' : 'widen'} size=${15} /></button>`}
+      ${document.fullscreenEnabled && html`<button type="button" class="icon-btn sm" aria-label="Full screen" title="Full screen (Esc to leave)"
+        onClick=${() => (document.fullscreenElement ? document.exitFullscreen() : pane.current.requestFullscreen()).catch(() => {})}><${Icon} name="fullscreen" size=${15} /></button>`}
+      ${onClose && html`<button type="button" class="icon-btn sm" aria-label="Close the preview" title="Close the preview" onClick=${onClose}><${Icon} name="x" size=${15} /></button>`}
+    </div>
+    <div class="preview-scroll">${body}</div>
+  </div>`;
 }
