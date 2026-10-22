@@ -76,6 +76,8 @@ export function normalizeFile(raw) {
     updatedBy: text(r.updatedBy),
   };
   if (r.deleted) file.deleted = true;
+  // The text is stored encrypted in the repo (crypto.js); the metadata is not.
+  if (r.encrypted) file.encrypted = true;
   return file;
 }
 

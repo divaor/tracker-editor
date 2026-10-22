@@ -6,6 +6,7 @@ import { syncOnce } from './sync.js';
 import { getSettings, getToken, isSyncConfigured } from './settings.js';
 import { store } from './store.js';
 import { normalizeItem, nowIso, upsertProjectRecord } from './tracker-model.js';
+import { decodeFor, encodeFor, fetchVault, vaultState } from './vault.js';
 
 // Tracker documents larger than this are opened on demand instead of downloaded ahead.
 const MAX_DOC_BYTES = 2 * 1024 * 1024;
@@ -86,8 +87,12 @@ async function run() {
       repoEdits: snap.repo,
       trackerChange: trackerChange(store.trackerOps().filter((o) => snap.ops.includes(o.id)), device),
       device,
+      encode: encodeFor,
+      decode: decodeFor,
     });
     store.applySynced(result, snap);
+    // Encrypted files here and no vault yet: it is in the data repo.
+    if (!vaultState().exists && store.all().some((f) => f.encrypted && !f.deleted)) await fetchVault(client, settings.branch).catch((err) => console.warn('Could not read the vault', err));
     await downloadDocs(client).catch((err) => console.warn('Could not download tracker documents', err));
     set({ phase: 'idle', error: null, lastSyncAt: nowIso() });
     for (const fn of resultListeners) fn(result);

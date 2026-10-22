@@ -6,6 +6,7 @@ import { createGitHubClient } from '../app/js/github.js';
 import { syncOnce } from '../app/js/sync.js';
 import { INDEX_PATH, applyFilePatch, contentPath, createFile, gitBlobSha, parseIndex, tombstone } from '../app/js/model.js';
 import { createItem, serializeDocument, parseData } from '../app/js/tracker-model.js';
+import { createVault, isSealed, seal, unseal } from '../app/js/crypto.js';
 
 let clock = Date.parse('2026-10-21T10:00:00.000Z');
 const tick = () => new Date((clock += 1000)).toISOString();
@@ -263,4 +264,48 @@ test('a device with no files makes no commit, and tracker-only changes are descr
   assert.equal(github.read(INDEX_PATH), undefined);
   await pc.sync({ trackerChange: ({ items, projects }) => ({ items: [...items, createItem({ title: 'From the editor' })], projects }) });
   assert.equal(github.log.at(-1), 'Editor: sync from Work PC (tracker updated)');
+});
+
+test('encrypted files: ciphertext in the repo, plaintext on the devices', async () => {
+  const { github, client } = setup();
+  const { key } = await createVault('a passphrase', { iterations: 1000 });
+  const hooks = {
+    encode: async (file, text) => (file.encrypted ? seal(key, text) : text),
+    decode: async (_file, text) => (isSealed(text) ? unseal(key, text) : text),
+  };
+  const a = device('Work PC', client);
+  const b = device('Phone', client);
+  const id = a.create('secret.md', 'the secret plan\n', { encrypted: true });
+  a.create('plain.md', 'nothing to hide\n');
+  await a.sync(hooks);
+  const stored = github.read(contentPath(a.byName('secret.md')));
+  assert.ok(isSealed(stored) && !stored.includes('secret plan'));
+  assert.equal(github.read(contentPath(a.byName('plain.md'))), 'nothing to hide\n');
+  const record = parseIndex(github.read(INDEX_PATH)).files.find((f) => f.id === id);
+  assert.equal(record.encrypted, true);
+  assert.equal(record.sha, await gitBlobSha(stored));
+
+  await b.sync(hooks);
+  assert.equal(b.text(id), 'the secret plan\n');
+  // Without the key a device gets the ciphertext, to keep sealed.
+  const c = device('Old laptop', client);
+  await c.sync();
+  assert.ok(isSealed(c.text(id)));
+
+  // Both edit it: the copy of theirs is encrypted too.
+  a.edit(id, 'plan v2 from work\n');
+  b.edit(id, 'plan v2 from the phone\n');
+  await a.sync(hooks);
+  const result = await b.sync(hooks);
+  assert.equal(result.conflicts.length, 1);
+  const copy = b.state.files.find((f) => f.id === result.conflicts[0].id);
+  assert.equal(copy.encrypted, true);
+  assert.equal(b.text(copy.id), 'plan v2 from work\n');
+  assert.ok(isSealed(github.read(contentPath(copy))));
+
+  // Turning encryption off stores the text in the clear again.
+  b.patch(id, { encrypted: false });
+  b.edit(id, b.text(id));
+  await b.sync(hooks);
+  assert.equal(github.read(contentPath(b.byName('secret.md'))), 'plan v2 from the phone\n');
 });

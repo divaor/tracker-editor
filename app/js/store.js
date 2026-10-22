@@ -1,15 +1,17 @@
 // All files with their texts, this device's open tabs, files opened from the
 // tracker, and pending changes to tracker.json — kept in memory and saved to
 // IndexedDB as you type. Sync (syncManager.js) takes changes to GitHub.
+import { isSealed } from './crypto.js';
 import { kvDelete, kvGet, kvSet } from './kv.js';
 import { getSettings } from './settings.js';
 import { applyFilePatch, createFile, nowIso, tombstone, trackerDocs, untitledName } from './model.js';
 import { newId } from './tracker-model.js';
 
-const META_FIELDS = ['name', 'project', 'tags', 'language', 'deleted', 'updatedAt', 'updatedBy'];
+const META_FIELDS = ['name', 'project', 'tags', 'language', 'deleted', 'encrypted', 'updatedAt', 'updatedBy'];
 
 let files = new Map(); // id → record (+ baseSha, dirty)
 let texts = new Map(); // id → text
+let sealed = new Map(); // id → ciphertext of an encrypted file this device cannot read (locked)
 let projects = []; // project records from tracker.json (last sync)
 let trackerItems = []; // tracker items (last sync), to show which items link a file
 let trackerOps = []; // pending changes to tracker.json: { id, op: 'project' | 'item', ... }
@@ -50,12 +52,24 @@ function later(key, fn, ms = 250) {
 }
 const persist = {
   files: (ms) => later('files', () => kvSet('files', [...files.values()]), ms),
-  text: (id, ms) => later(`text:${id}`, () => (texts.has(id) ? kvSet(`text:${id}`, texts.get(id)) : kvDelete(`text:${id}`)), ms),
+  text: (id, ms) => later(`text:${id}`, () => (texts.has(id) ? kvSet(`text:${id}`, texts.get(id)) : sealed.has(id) ? kvSet(`text:${id}`, sealed.get(id)) : kvDelete(`text:${id}`)), ms),
   session: (ms) => later('session', () => kvSet('session', session), ms),
   repo: (ms) => later('repoTabs', () => kvSet('repoTabs', [...repoTabs.values()]), ms),
   rest: () => later('rest', () => Promise.all([kvSet('projects', projects), kvSet('trackerItems', trackerItems), kvSet('trackerOps', trackerOps), kvSet('meta', meta)])),
   docs: () => later('docTexts', () => kvSet('docTexts', [...docTexts])),
 };
+
+// A file's text from elsewhere (sync, the trash): ciphertext this device cannot
+// read stays sealed, apart from the texts the app shows and searches.
+function putText(id, text, encrypted = files.get(id)?.encrypted) {
+  if (isSealed(text) && encrypted) {
+    sealed.set(id, text);
+    texts.delete(id);
+  } else {
+    texts.set(id, text);
+    sealed.delete(id);
+  }
+}
 
 // The text of a deleted file stays on this device until its tombstone is pruned,
 // so the trash can bring it back offline.
@@ -135,7 +149,8 @@ export const store = {
     const saved = (await kvGet('files')) ?? [];
     files = new Map(saved.map((f) => [f.id, f]));
     const loaded = await Promise.all([...files.values()].filter((f) => !f.deleted).map(async (f) => [f.id, (await kvGet(`text:${f.id}`)) ?? '']));
-    texts = new Map(loaded);
+    texts = new Map(loaded.filter(([id, t]) => !(files.get(id).encrypted && isSealed(t))));
+    sealed = new Map(loaded.filter(([id, t]) => files.get(id).encrypted && isSealed(t)));
     session = { open: [], active: null, closed: [], pinned: [], side: null, collapsed: [], ...((await kvGet('session')) ?? {}) };
     repoTabs = new Map(((await kvGet('repoTabs')) ?? []).map((t) => [t.path, t]));
     projects = (await kvGet('projects')) ?? [];
@@ -218,10 +233,10 @@ export const store = {
 
   // ---- Files ----
 
-  create({ name, text = '', project = '', tags = [], language = '', open = true } = {}) {
+  create({ name, text = '', project = '', tags = [], language = '', encrypted = false, open = true } = {}) {
     const fileName = name || untitledName(store.live().map((f) => f.name));
     const now = nowIso();
-    const file = { ...createFile({ name: fileName, project, tags, language, updatedBy: author(), modifiedBy: author() }, now), baseSha: '', dirty: true };
+    const file = { ...createFile({ name: fileName, project, tags, language, encrypted, updatedBy: author(), modifiedBy: author() }, now), baseSha: '', dirty: true };
     files.set(file.id, file);
     texts.set(file.id, text);
     if (open) store.open(fileKey(file.id), { silent: true });
@@ -236,7 +251,7 @@ export const store = {
   /** New text for a file; `urgent` (pasted text) saves it at once instead of after a moment. */
   setText(id, text, { urgent = false } = {}) {
     const file = files.get(id);
-    if (!file || file.deleted || texts.get(id) === text) return;
+    if (!file || file.deleted || sealed.has(id) || texts.get(id) === text) return;
     texts.set(id, text);
     files.set(id, { ...file, dirty: true, modifiedAt: nowIso(), modifiedBy: author() });
     persist.text(id, urgent ? 0 : undefined);
@@ -255,10 +270,11 @@ export const store = {
   remove(id) {
     const file = files.get(id);
     if (!file || file.deleted) return null;
-    const previous = { file, text: texts.get(id) ?? '' };
+    const previous = { file, text: texts.get(id) ?? sealed.get(id) ?? '' };
     files.set(id, { ...tombstone(file, nowIso(), author()), baseSha: file.baseSha, dirty: false, pending: true });
     keepInTrash(id, previous.text);
     texts.delete(id);
+    sealed.delete(id);
     persist.files();
     persist.text(id);
     store.close(fileKey(id), { silent: true });
@@ -268,8 +284,8 @@ export const store = {
 
   /** Undo for remove(), and the trash: brings the file back with its text. */
   restore({ file, text }) {
-    files.set(file.id, { ...applyFilePatch(file, { deleted: false, updatedBy: author() }), baseSha: file.baseSha, dirty: true, sha: file.sha, size: file.size });
-    texts.set(file.id, text);
+    files.set(file.id, { ...applyFilePatch(file, { deleted: false, updatedBy: author() }), baseSha: file.baseSha, dirty: !isSealed(text), sha: file.sha, size: file.size });
+    putText(file.id, text);
     forgetTrash([file.id]);
     persist.files();
     persist.text(file.id);
@@ -284,6 +300,36 @@ export const store = {
     [...files.values()].filter((f) => f.deleted && (f.sha || trashed.has(f.id))).sort((a, b) => (b.updatedAt > a.updatedAt ? 1 : -1)),
   /** The text this device kept for a deleted file, or null. */
   trashText: async (id) => (trashed.has(id) ? ((await kvGet(`trash:${id}`)) ?? null) : null),
+
+  // ---- Encrypted files ----
+
+  /** True when the file is encrypted and this device has only its ciphertext (locked). */
+  isSealed: (id) => sealed.has(id),
+  sealedIds: () => [...sealed.keys()],
+  sealedText: (id) => sealed.get(id),
+  /** Keeps only the ciphertext of a file here (locking this device). */
+  seal(id, cipher) {
+    if (!texts.has(id)) return;
+    putText(id, cipher);
+    persist.text(id, 0);
+    changed('local', { id });
+  },
+  /** The decrypted text of a sealed file (after unlocking). */
+  unseal(id, text) {
+    if (!sealed.has(id)) return;
+    sealed.delete(id);
+    texts.set(id, text);
+    persist.text(id, 0);
+    changed('local', { id });
+  },
+  /** Uploads the file's text again at the next sync (after turning encryption on or off). */
+  markDirty(id) {
+    const file = files.get(id);
+    if (!file || file.deleted || sealed.has(id)) return;
+    files.set(id, { ...file, dirty: true });
+    persist.files();
+    changed('local', { id });
+  },
 
   // ---- Tabs ----
 
@@ -413,7 +459,7 @@ export const store = {
   snapshot() {
     return {
       counter: changeCounter,
-      texts: new Map([...files.values()].filter((f) => f.dirty && !f.deleted).map((f) => [f.id, texts.get(f.id) ?? ''])),
+      texts: new Map([...files.values()].filter((f) => f.dirty && !f.deleted).map((f) => [f.id, texts.get(f.id) ?? sealed.get(f.id) ?? ''])),
       repo: [...repoTabs.values()].filter((t) => t.dirty).map((t) => ({ path: t.path, text: t.text, baseSha: t.baseSha })),
       ops: trackerOps.map((o) => o.id),
       ids: new Set(files.keys()),
@@ -429,7 +475,7 @@ export const store = {
       let rec = r;
       // Metadata edited here while the sync ran is newer: keep it.
       if (local && local.updatedAt > r.updatedAt) rec = { ...r, ...Object.fromEntries(META_FIELDS.map((k) => [k, local[k]])), pending: true };
-      const current = texts.get(r.id);
+      const current = texts.get(r.id) ?? sealed.get(r.id);
       if (snap.texts.has(r.id)) {
         // Uploaded; typed more since? Then it is still unsynced.
         if (current !== snap.texts.get(r.id)) rec = { ...rec, dirty: true, modifiedAt: local.modifiedAt, modifiedBy: local.modifiedBy };
@@ -438,7 +484,7 @@ export const store = {
           // Edited here during the sync: keep ours; the next round keeps both.
           rec = { ...rec, dirty: true, baseSha: local.baseSha };
         } else {
-          texts.set(r.id, result.texts.get(r.id));
+          putText(r.id, result.texts.get(r.id), rec.encrypted);
           persist.text(r.id);
           remoteTexts.push(r.id);
         }
@@ -446,9 +492,10 @@ export const store = {
         rec = { ...rec, dirty: true };
       }
       if (rec.deleted) {
-        if (texts.has(r.id)) {
-          keepInTrash(r.id, texts.get(r.id));
+        if (texts.has(r.id) || sealed.has(r.id)) {
+          keepInTrash(r.id, texts.get(r.id) ?? sealed.get(r.id));
           texts.delete(r.id);
+          sealed.delete(r.id);
           persist.text(r.id);
         }
         if (session.open.includes(fileKey(r.id))) store.close(fileKey(r.id), { silent: true });
@@ -479,7 +526,8 @@ export const store = {
   },
 
   clear() {
-    for (const id of texts.keys()) kvDelete(`text:${id}`);
+    for (const id of [...texts.keys(), ...sealed.keys()]) kvDelete(`text:${id}`);
+    sealed = new Map();
     forgetTrash([...trashed]);
     files = new Map();
     texts = new Map();

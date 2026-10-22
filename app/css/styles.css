@@ -3212,6 +3212,46 @@ svg.up {
   display: none;
 }
 
+.passphrase-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.passphrase-form input {
+  flex: 1 1 200px;
+}
+
+.passphrase-form .notice {
+  flex-basis: 100%;
+}
+
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.locked-file h1 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-wrap: anywhere;
+}
+
+.tab .tab-lock {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+
+.file-name .icon {
+  margin-right: 4px;
+  color: var(--text-3);
+  vertical-align: -1px;
+}
+
 /* ---- Phone / narrow window --------------------------------------------------------- */
 .scrim {
   display: none;

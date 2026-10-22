@@ -11,6 +11,7 @@ import { parseData } from '../tracker-model.js';
 import { timeAgo } from '../format.js';
 import { APP_VERSION } from '../version.js';
 import { Card, Check, Field, Segmented } from './components.js';
+import { EncryptionCard } from './encryption.js';
 import { Icon } from './icons.js';
 
 const SYNC_FIELDS = ['owner', 'repo', 'branch', 'trackerPath', 'device'];
@@ -321,6 +322,7 @@ export function SettingsView({ settings, sync, actions }) {
     <${EditorCard} settings=${settings} />
     <${ModelCard} settings=${settings} actions=${actions} />
     <${ReadAloudCard} settings=${settings} actions=${actions} />
+    <${EncryptionCard} actions=${actions} />
     <${DataCard} actions=${actions} />
     <p class="muted small about">Tracker Editor ${APP_VERSION} · ${window.desktop ? `Desktop app (Electron ${window.desktop.versions?.electron ?? ''})` : 'Web app'} · <a href="https://github.com/divaor/tracker-editor" target="_blank" rel="noopener">Source</a></p>
   </div>`;

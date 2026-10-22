@@ -75,6 +75,8 @@ export function FileDialog({ file, projects, actions, onClose }) {
       <div><dt>Created</dt><dd>${formatDateTime(file.createdAt)}</dd></div>
       <div><dt>Size</dt><dd>${formatBytes(new TextEncoder().encode(store.text(file.id)).length)}</dd></div>
       <div><dt>In the repo</dt><dd><code>${file.sha ? contentPath(file) : 'Not synced yet'}</code></dd></div>
+      <div><dt>Encryption</dt><dd>${file.encrypted ? 'The text is encrypted in your data repo' : 'Not encrypted'}
+        <button type="button" class="btn link" onClick=${() => (onClose(), actions.setEncrypted(file.id, !file.encrypted))}>${file.encrypted ? 'Stop encrypting' : 'Encrypt'}</button></dd></div>
       <div class="span-2"><dt>Link</dt><dd class="copy-row"><code>${link}</code>
         <button type="button" class="btn sm" onClick=${async () => {
           try {

@@ -13,7 +13,7 @@ function tabInfo(key) {
   const k = parseKey(key);
   if (k?.kind === 'file') {
     const f = store.get(k.id);
-    return f && { name: f.name, project: f.project, unsynced: f.dirty || f.pending, title: [f.project, f.name].filter(Boolean).join(' / ') };
+    return f && { name: f.name, project: f.project, encrypted: f.encrypted, unsynced: f.dirty || f.pending, title: [f.project, f.name].filter(Boolean).join(' / ') + (f.encrypted ? ' · encrypted' : '') };
   }
   const t = k && store.repoTab(k.path);
   return t && { name: t.name, project: store.doc(k.path)?.project ?? '', unsynced: t.dirty, repo: true, title: `From the tracker: ${t.path}` };
@@ -108,6 +108,7 @@ export function TabBar({ session, projects, settings, actions }) {
       ${isPinned && html`<${Icon} name="pin" size=${12} class="tab-pin" />`}
       ${isSide && html`<${Icon} name="columns" size=${13} class="tab-side" />`}
       ${info.repo && html`<${Icon} name="paperclip" size=${13} />`}
+      ${info.encrypted && html`<${Icon} name="lock" size=${12} class="tab-lock" />`}
       <span class="tab-name">${info.name}</span>
       <span class="tab-dot" title="Not synced yet" />
       <button type="button" class="tab-close" aria-label=${`Close ${info.name}`} tabindex="-1"
@@ -140,7 +141,7 @@ export function TabBar({ session, projects, settings, actions }) {
 }
 
 /** Project, tags and actions for the file in the active tab. */
-export function FileBar({ file, repo, projects, canPreview, preview, settings, actions }) {
+export function FileBar({ file, repo, sealed, projects, canPreview, preview, settings, actions }) {
   const previewButton =
     canPreview &&
     html`<button type="button" class="btn ghost sm ${preview ? 'on' : ''}" aria-pressed=${preview} title="Show a reading view next to the text" onClick=${actions.togglePreview}><${Icon} name="eye" size=${15} /><span class="label">Preview</span></button>`;
@@ -151,6 +152,7 @@ export function FileBar({ file, repo, projects, canPreview, preview, settings, a
     { label: 'History', icon: 'history', run: actions.showHistory },
     { label: 'Compare with…', icon: 'columns', run: actions.compareWith },
     id && settings.llm.enabled && { label: 'Suggest project and tags', icon: 'sparkle', run: actions.suggestFiling },
+    id && { label: store.get(id)?.encrypted ? 'Stop encrypting' : 'Encrypt', icon: store.get(id)?.encrypted ? 'unlock' : 'lock', run: () => actions.setEncrypted(id, !store.get(id)?.encrypted) },
     id && { separator: true },
     id && { label: 'Move to trash', icon: 'trash', danger: true, run: () => actions.remove(id) },
   ];
@@ -173,6 +175,14 @@ export function FileBar({ file, repo, projects, canPreview, preview, settings, a
   }
   if (!file) return null;
   const project = projects.find((p) => p.key === projectKey(file.project));
+  if (sealed) {
+    return html`<div class="filebar">
+      ${file.project && html`<${ProjectChip} project=${project} name=${file.project} />`}
+      <span class="filebar-note"><${Icon} name="lock" size=${14} />Encrypted · locked on this device</span>
+      <span class="spacer" />
+      <${MenuButton} label="More" items=${() => [{ label: 'Move to trash', icon: 'trash', danger: true, run: () => actions.remove(file.id) }]} />
+    </div>`;
+  }
   const linked = store.trackerItems().filter((i) => !i.deleted && i.url?.includes(`#/file/${encodeURIComponent(file.id)}`));
   return html`<div class="filebar">
     ${file.project

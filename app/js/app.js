@@ -21,6 +21,9 @@ import { Preview } from './ui/preview.js';
 import { CompareView } from './ui/compare.js';
 import { HistoryPanel } from './ui/history.js';
 import { TrashDialog } from './ui/trash.js';
+import { LockedFile } from './ui/encryption.js';
+import { isSealed } from './crypto.js';
+import { decodeFor, encodeFor, lock, onVault, openText, setUpVault, unlock, vaultState } from './vault.js';
 import { ReadAloudBar } from './ui/readAloud.js';
 import { ShareDialog } from './ui/share.js';
 import { SettingsView } from './ui/settingsView.js';
@@ -266,6 +269,49 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         toast(`Filed under ${filedAs(next)}`, { action: { label: 'Undo', run: () => actions.patch(file.id, before) } });
       },
 
+      // ---- Encryption ----
+
+      /** Sets the passphrase for this data repo (the first device), or unlocks this one. */
+      async setUpEncryption(passphrase) {
+        const { client, branch } = await syncedClient();
+        await setUpVault(client, branch, passphrase, getSettings().device || 'unknown device');
+        toast('Encryption is ready. Choose Encrypt in a file’s menu to protect it.');
+      },
+      async unlockEncryption(passphrase) {
+        await unlock(passphrase);
+        // The files kept sealed here can be read now.
+        for (const id of store.sealedIds()) {
+          const text = await decodeFor(store.get(id), store.sealedText(id)).catch(() => null);
+          if (text !== null && !isSealed(text)) store.unseal(id, text);
+        }
+      },
+      /** Forgets the passphrase here and keeps only the ciphertext of encrypted files on this device. */
+      async lockDevice() {
+        hostRef.current?.flushAll();
+        const encrypted = () => store.live().filter((f) => f.encrypted && !store.isSealed(f.id));
+        if (encrypted().some((f) => f.dirty || f.pending)) await syncNow();
+        if (encrypted().some((f) => f.dirty)) throw new Error('Some encrypted files have changes not synced yet. Sync, then lock.');
+        for (const file of encrypted()) {
+          const cipher = await encodeFor(file, store.text(file.id));
+          hostRef.current?.drop(fileKey(file.id));
+          store.seal(file.id, cipher);
+        }
+        await lock();
+      },
+      /** Turns encryption on or off for a file; its text is uploaded again at the next sync. */
+      setEncrypted(id, on) {
+        const file = store.get(id);
+        if (!file) return;
+        const { exists, unlocked } = vaultState();
+        if (!unlocked) {
+          toast(exists ? 'Unlock encryption with your passphrase first.' : 'Set a passphrase first: Settings, Encryption.', { action: { label: 'Settings', run: () => setView('settings') } });
+          return;
+        }
+        store.patch(id, { encrypted: on });
+        store.markDirty(id);
+        toast(on ? `“${file.name}” is stored encrypted from the next sync. Earlier versions in your repo’s history stay readable.` : `“${file.name}” is stored as plain text from the next sync.`, { timeout: 9000 });
+      },
+
       /** Brings a file back from the trash, with the text kept here or the one in the data repo. */
       async restoreDeleted(file) {
         let text = await store.trashText(file.id);
@@ -282,6 +328,8 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
           toast('The text of that file is not on this device or in the data repo.', { kind: 'error' });
           return false;
         }
+        // Encrypted: readable when this device is unlocked, else it comes back locked.
+        if (isSealed(text) && vaultState().unlocked) text = await openText(text).catch(() => text);
         store.restore({ file, text });
         setView('editor');
         toast(`Restored “${file.name}”`);
@@ -306,6 +354,11 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
           return;
         }
         if (!loaded) return toast('The file was deleted in that version.');
+        try {
+          loaded = { ...loaded, text: await openText(loaded.text) };
+        } catch (err) {
+          return toast(err.message, { kind: 'error' });
+        }
         const now = activeInfo();
         if (!now || now.key !== target.key) return;
         const text = loaded.text;
@@ -327,7 +380,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
               icon: 'filePlus',
               run: () => {
                 setCompare(null);
-                actions.newFile({ name: versionName(loaded.name || now.name, version.date), text, project: now.project, tags: now.tags });
+                actions.newFile({ name: versionName(loaded.name || now.name, version.date), text, project: now.project, tags: now.tags, encrypted: Boolean(store.get(now.id)?.encrypted) });
               },
             },
           ],
@@ -433,6 +486,7 @@ export function App() {
     });
   }, []);
   useEffect(() => onSettings(setSettings), []);
+  useEffect(() => onVault(rerender), []);
   // Reading aloud highlights the passage in the editor; problems become a message.
   useEffect(() => {
     setReaderHighlighter((key, range) => hostRef.current?.highlightReading(key, range));
@@ -494,7 +548,9 @@ export function App() {
   const activeName = activeFile?.name ?? activeRepo?.name ?? '';
   const languageName = activeKey ? (findLanguage(activeName, activeFile?.language)?.name ?? PLAIN_TEXT) : '';
   const previewType = activeKey ? previewKind(activeName, languageName) : '';
-  const showPreview = Boolean(previewType) && preview.has(activeKey) && !compare;
+  // An encrypted file this device cannot read yet shows a lock instead of the editor.
+  const activeSealed = Boolean(activeFile && store.isSealed(activeFile.id));
+  const showPreview = Boolean(previewType) && preview.has(activeKey) && !compare && !activeSealed;
   // A comparison belongs to its tab.
   useEffect(() => {
     if (compare && compare.key !== activeKey) setCompare(null);
@@ -503,7 +559,7 @@ export function App() {
   useLayoutEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    if (!activeKey || view !== 'editor' || (!activeFile && !activeRepo)) {
+    if (!activeKey || view !== 'editor' || (!activeFile && !activeRepo) || activeSealed) {
       host.hide();
       return;
     }
@@ -513,7 +569,7 @@ export function App() {
       language: activeFile?.language ?? '',
     });
     if (!isNarrow()) host.focus();
-  }, [activeKey, view, Boolean(activeFile || activeRepo)]);
+  }, [activeKey, view, Boolean(activeFile || activeRepo), activeSealed]);
 
   actions.toggleWrap = () => saveSettings({ wordWrap: !getSettings().wordWrap });
   actions.togglePreview = () => {
@@ -547,7 +603,7 @@ export function App() {
   const sideParsed = parseKey(sideKey);
   const sideFile = sideParsed?.kind === 'file' ? store.get(sideParsed.id) : null;
   const sideRepo = sideParsed?.kind === 'repo' ? store.repoTab(sideParsed.path) : null;
-  const showSide = Boolean((sideFile || sideRepo) && view === 'editor' && !compare && !showPreview && !isNarrow());
+  const showSide = Boolean((sideFile || sideRepo) && !(sideFile && store.isSealed(sideFile.id)) && view === 'editor' && !compare && !showPreview && !isNarrow());
   useLayoutEffect(() => {
     const host = hostRef.current;
     if (!host) return;
@@ -782,7 +838,7 @@ export function App() {
       ${view === 'settings' && html`<${SettingsView} settings=${settings} sync=${sync} actions=${actions} />`}
       <div class="editor-view" hidden=${view === 'settings'}>
         <${TabBar} session=${store.session} projects=${projects} settings=${settings} actions=${actions} />
-        ${activeKey && html`<${FileBar} file=${activeFile} repo=${activeRepo} projects=${projects} language=${languageName}
+        ${activeKey && html`<${FileBar} file=${activeFile} repo=${activeRepo} sealed=${activeSealed} projects=${projects} language=${languageName}
           canPreview=${Boolean(previewType)} preview=${showPreview} settings=${settings} actions=${actions} />`}
         <div class="editor-area ${showPreview ? 'split' : ''} ${showSide ? 'side-split' : ''} ${compare ? 'comparing' : ''}">
           <div class="editor-host" ref=${editorEl} />
@@ -809,6 +865,7 @@ export function App() {
               actions.togglePreview();
               setTimeout(() => hostRef.current?.reveal(line, column, 1), 60);
             }} />`}
+          ${activeSealed && html`<${LockedFile} file=${activeFile} actions=${actions} />`}
           ${!activeKey && html`<${Welcome} actions=${actions} hasFiles=${store.live().length + docs.length > 0} configured=${isSyncConfigured(settings)} />`}
         </div>
         <${ReadAloudBar} />

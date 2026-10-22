@@ -73,6 +73,9 @@ function commitMessage(device, counts) {
  *                  [{ path, text, baseSha }]
  * @param trackerChange optional ({ items, projects }) => { items, projects }
  *                  applied to tracker.json in the same commit
+ * @param encode    optional async (file, text) => what to store in the repo for
+ *                  it (the ciphertext of an encrypted file); decode the reverse,
+ *                  for texts downloaded. Both get the merged record.
  */
 export async function syncOnce({
   client,
@@ -85,6 +88,8 @@ export async function syncOnce({
   device = 'unknown device',
   now = nowIso,
   maxAttempts = 4,
+  encode = async (_file, text) => text,
+  decode = async (_file, text) => text,
 }) {
   let lastError;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -122,8 +127,10 @@ export async function syncOnce({
         if (dirty && !l.deleted) {
           // Deleted elsewhere while edited here: keep the edits as a new file.
           const text = texts.get(m.id);
-          const copy = createFile({ ...m, deleted: false, id: '', sha: await gitBlobSha(text), size: byteLength(text), modifiedAt: l.modifiedAt, modifiedBy: device, updatedBy: device }, stamp);
-          put({ path: contentPath(copy), content: text });
+          const draft = createFile({ ...m, deleted: false, id: '', modifiedAt: l.modifiedAt, modifiedBy: device, updatedBy: device }, stamp);
+          const stored = await encode(draft, text);
+          const copy = { ...draft, sha: await gitBlobSha(stored), size: byteLength(stored) };
+          put({ path: contentPath(copy), content: stored });
           extra.push({ file: copy, text });
           conflicts.push({ id: copy.id, name: copy.name, reason: 'deleted' });
           counts.conflicts++;
@@ -133,12 +140,12 @@ export async function syncOnce({
 
       let content;
       if (dirty) {
-        const text = texts.get(m.id);
+        const text = await encode(m, texts.get(m.id));
         const sha = await gitBlobSha(text);
         if (live && r.sha !== l.baseSha && r.sha !== sha) {
           // Both sides changed the text: ours stays, theirs becomes a copy.
           const copy = createFile(
-            { name: conflictName(m.name, r.modifiedBy, stamp), project: m.project, tags: m.tags, language: m.language, sha: r.sha, size: r.size, modifiedAt: r.modifiedAt, modifiedBy: r.modifiedBy, updatedBy: device },
+            { name: conflictName(m.name, r.modifiedBy, stamp), project: m.project, tags: m.tags, language: m.language, encrypted: r.encrypted, sha: r.sha, size: r.size, modifiedAt: r.modifiedAt, modifiedBy: r.modifiedBy, updatedBy: device },
             stamp,
           );
           put({ path: contentPath(copy), sha: r.sha });
@@ -232,7 +239,8 @@ export async function syncOnce({
       }
     }
 
-    const downloaded = await mapLimit([...fetchShas], 6, async ([id, sha]) => [id, await client.getBlobText(sha)]);
+    const records = new Map([...merged, ...extra.map((e) => e.file)].map((f) => [f.id, f]));
+    const downloaded = await mapLimit([...fetchShas], 6, async ([id, sha]) => [id, await decode(records.get(id), await client.getBlobText(sha))]);
     const newTexts = new Map(downloaded);
     for (const { file, text } of extra) if (text !== undefined) newTexts.set(file.id, text);
     return {

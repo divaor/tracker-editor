@@ -5,6 +5,7 @@ import { applyTheme, getSettings, onSettings } from './settings.js';
 import { closeStore, flush, store } from './store.js';
 import { startSync, stopSync } from './syncManager.js';
 import { claimActiveTab } from './tabLock.js';
+import { loadVault } from './vault.js';
 
 const root = document.getElementById('root');
 const applyFont = (s) => document.documentElement.style.setProperty('--editor-font-size', `${s.fontSize}px`);
@@ -39,7 +40,7 @@ try {
     applyFont(s);
   });
   if (await claimActiveTab(stepDown)) {
-    await store.load();
+    await Promise.all([store.load(), loadVault()]);
     render(html`<${App} />`, root);
     startSync();
     requestPersistence();
