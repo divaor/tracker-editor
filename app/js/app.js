@@ -23,7 +23,7 @@ import { lastSyncText, mirror as mirrorById, onMirrors, watchMirrors as watchMir
 import { MirrorDeletesDialog, MirrorDialog, MirrorsDialog } from './ui/mirrors.js';
 import { onTransfers, watchTransfers } from './transfers.js';
 import { TransfersCard } from './ui/transfers.js';
-import { besideSettings, claudeText, opensInEditor, remapPath } from './folders.js';
+import { besideSettings, claudeText, inPlaceSettings, opensInEditor, remapPath } from './folders.js';
 import { draggedPaths, draggedTab, dropped, isOwnDrop } from './dragOut.js';
 import { getSyncState, onSyncResult, onSyncState, syncClient, syncNow } from './syncManager.js';
 import { matchesScope, projectList } from './tracker-model.js';
@@ -561,8 +561,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       /** Shows a file in the file explorer; one on a server, in the folders view at its folder. */
       showOnDisk(path) {
         if (!isRemotePath(path)) return window.desktop?.disk?.show(path);
-        saveSettings({ sidebarMode: 'folders', folder: path.slice(0, path.lastIndexOf('/')) || remoteRoot(remoteParts(path).id) });
-        setSidebar(true);
+        actions.showInFolders(path.slice(0, path.lastIndexOf('/')) || remoteRoot(remoteParts(path).id));
       },
       /** Connects to a server again (its tabs are looked at again when it is back). */
       async reconnectServer(id) {
@@ -602,8 +601,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       async showFolder(path) {
         try {
           if (isRemotePath(path)) await window.desktop.remote.connect(remoteParts(path).id);
-          saveSettings({ sidebarMode: 'folders', folder: path });
-          setSidebar(true);
+          actions.showInFolders(path);
         } catch (err) {
           toast(ipcMessage(err), { kind: 'error', timeout: 8000 });
         }
@@ -711,7 +709,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       },
       /** A folder in the folders view: in place of the one shown, or beside the others (`beside`). */
       showInFolders(path, { beside = false } = {}) {
-        const patch = beside ? besideSettings(getSettings(), path) : { folder: path };
+        const patch = beside ? besideSettings(getSettings(), path) : inPlaceSettings(getSettings(), path);
         if (patch.already) toast(`${path === patch.already ? 'That folder is' : 'It is inside a folder that is'} open in the tree already.`);
         delete patch.already;
         saveSettings({ sidebarMode: 'folders', ...patch });

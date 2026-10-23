@@ -132,9 +132,12 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   const prevFolder = useRef(settings.folder);
   const sections = withCurrent(settings.folderSections, settings.folder, prevFolder.current);
   const sectionsKey = sections.join('\n');
+  // (Kept from the settings as they are now: this render's may be older.)
   useEffect(() => {
-    prevFolder.current = settings.folder;
-    if (sectionsKey !== (settings.folderSections ?? []).join('\n')) saveSettings({ folderSections: sections });
+    const fresh = getSettings();
+    const now = withCurrent(fresh.folderSections, fresh.folder, prevFolder.current);
+    prevFolder.current = fresh.folder;
+    if (now.join('\n') !== (fresh.folderSections ?? []).join('\n')) saveSettings({ folderSections: now });
   }, [sectionsKey, settings.folder]);
   const live = roots ? sections.filter((s) => rootFor(s)) : [];
   const liveKey = live.join('\n');
@@ -184,9 +187,11 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     let stale = false;
     bridge.roots().then((fresh) => {
       if (stale) return;
-      const keep = sections.filter((s) => isRemotePath(s) || rootOf(s, fresh));
-      if (keep.length !== sections.length || !keep.includes(settings.folder)) {
-        const folder = keep.includes(settings.folder) ? settings.folder : (keep[0] ?? fresh[0] ?? '');
+      const now = getSettings();
+      const open = withCurrent(now.folderSections, now.folder);
+      const keep = open.filter((s) => isRemotePath(s) || rootOf(s, fresh));
+      if (keep.length !== open.length || !keep.includes(now.folder)) {
+        const folder = keep.includes(now.folder) ? now.folder : (keep[0] ?? fresh[0] ?? '');
         saveSettings({ folderSections: keep.length ? keep : folder ? [folder] : [], folder });
       }
       if (fresh.join('\n') !== roots.join('\n')) setRoots(fresh);

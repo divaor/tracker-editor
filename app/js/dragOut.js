@@ -23,9 +23,10 @@ function listen() {
   if (listening) return;
   listening = true;
   // Windows and Linux answer when the drop is done (macOS at once, so it waits for the pointer).
-  // The short delay lets the drop reach this page first.
+  // The short delay lets the drop reach this page first; it ends only that drag, not a next one.
   desktop().drag.onEnd((info) => {
-    if (info.error || desktop().platform !== 'darwin') setTimeout(finish, 300);
+    const drag = current;
+    if (drag && (info.error || desktop().platform !== 'darwin')) setTimeout(() => current === drag && finish(), 300);
   });
   // The page gets no pointer events during a drag: the first one means it is over.
   const pointer = (e) => (e.type === 'pointerdown' || e.buttons === 0) && finish();

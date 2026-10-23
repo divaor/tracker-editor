@@ -397,7 +397,7 @@ test('the reply is kept as the text, without fences or lead-ins', () => {
 });
 
 test('several folders side by side: replacing, adding, never one inside another', async () => {
-  const { replaceSection, withCurrent, besideSettings } = await import('../app/js/folders.js');
+  const { replaceSection, withCurrent, besideSettings, inPlaceSettings } = await import('../app/js/folders.js');
   // Going into a folder: it takes the place of the one shown.
   assert.deepEqual(replaceSection(['/a', '/b'], '/a', '/a/x'), ['/a/x', '/b']);
   assert.deepEqual(replaceSection(['/a', '/b'], '/b', '/c'), ['/a', '/c']);
@@ -415,6 +415,10 @@ test('several folders side by side: replacing, adding, never one inside another'
   assert.deepEqual(withCurrent(['/a', '/b'], '/b/sub', '/a'), ['/a', '/b/sub']);
   assert.deepEqual(withCurrent(['/a', '/a', ''], ''), ['/a']);
   assert.deepEqual(withCurrent(undefined, ''), []);
+  // Shown in place of the current one: the others stay as they are.
+  assert.deepEqual(inPlaceSettings({ folder: 'remote://s1/home', folderSections: ['remote://s1/home'] }, '/w'), { folder: '/w', folderSections: ['/w'] });
+  assert.deepEqual(inPlaceSettings({ folder: '/b', folderSections: ['/a', '/b'] }, '/c'), { folder: '/c', folderSections: ['/a', '/c'] });
+  assert.deepEqual(inPlaceSettings({ folder: '/b', folderSections: ['/a', '/b'] }, '/a/x'), { folder: '/a/x', folderSections: ['/a/x', '/b'] });
   // Opening one beside the others.
   const settings = { folder: '/a', folderSections: ['/a', 'remote://s1/srv'], folderCollapsed: ['/b'] };
   assert.deepEqual(besideSettings(settings, '/b'), { folder: '/b', folderSections: ['/a', 'remote://s1/srv', '/b'], folderCollapsed: [] });

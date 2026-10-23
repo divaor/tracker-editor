@@ -51,6 +51,11 @@ export function withCurrent(list = [], current = '', previous = '') {
   return replaceSection(open, holder ?? (open.includes(previous) ? previous : ''), current);
 }
 
+/** Settings that show `path` in place of the current folder: { folder, folderSections }. */
+export function inPlaceSettings(settings, path) {
+  return { folder: path, folderSections: withCurrent(settings.folderSections, path, settings.folder) };
+}
+
 /**
  * Settings that open `path` beside the folders open in the tree: { folder, folderSections,
  * folderCollapsed }. A folder inside one that is open shows that one (`already`); a folder
