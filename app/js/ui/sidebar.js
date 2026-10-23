@@ -4,6 +4,7 @@ import { isLocal, saveSettings } from '../settings.js';
 import { fileKey, repoKey, store } from '../store.js';
 import { projectKey } from '../tracker-model.js';
 import { Icon } from './icons.js';
+import { FileIcon } from './fileIcon.js';
 import { ClearButton, ScopeBar, Segmented } from './components.js';
 import { FoldersView } from './folders.js';
 import { Splitter } from './splitter.js';
@@ -21,7 +22,7 @@ function tagCounts(rows) {
 }
 
 // One list for the editor's files and the tracker's documents.
-const fileRow = (f) => ({ key: fileKey(f.id), name: f.name, project: f.project, tags: f.tags, modifiedAt: f.modifiedAt, updatedAt: f.updatedAt, unsynced: f.dirty || f.pending, id: f.id, encrypted: f.encrypted, snippet: f.snippet });
+const fileRow = (f) => ({ key: fileKey(f.id), name: f.name, project: f.project, tags: f.tags, modifiedAt: f.modifiedAt, updatedAt: f.updatedAt, unsynced: f.dirty || f.pending, id: f.id, encrypted: f.encrypted, snippet: f.snippet, language: f.language });
 const docRow = (d) => ({ key: repoKey(d.path), name: d.name, project: d.project, tags: d.tags, modifiedAt: d.modifiedAt, updatedAt: d.modifiedAt, unsynced: store.repoTab(d.path)?.dirty, id: `r:${d.path}`, item: d.item.title });
 
 const MODES = [
@@ -110,6 +111,7 @@ function FileSidebar({ files, docs, projects, settings, activeKey, actions }) {
           <button type="button" key=${f.key} class="file-row ${activeKey === f.key ? 'active' : ''}" onClick=${() => actions.openFile(f.id)}
             title=${f.item ? `${f.name} · from the tracker: ${f.item}` : f.name}>
             <span class="file-row-main">
+              <${FileIcon} name=${f.name} language=${f.language} size=${16} plain=${settings.fileIcons === false} />
               <span class="file-name">${f.encrypted && html`<${Icon} name="lock" size=${12} />`}${f.snippet && html`<${Icon} name="snippet" size=${12} />`}${f.name}</span>
               ${f.unsynced && !isLocal() && html`<span class="tab-dot" title="Not synced yet" />`}
             </span>

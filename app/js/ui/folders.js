@@ -10,6 +10,7 @@ import { ClearButton, dismissToast, Modal, toast } from './components.js';
 import { mirrorOf } from '../mirrors.js';
 import { MirrorBar } from './mirrors.js';
 import { Icon } from './icons.js';
+import { FileIcon } from './fileIcon.js';
 import { Menu, MenuButton } from './menu.js';
 import { FileViewer, PeekPane } from './folderPreview.js';
 import { Splitter } from './splitter.js';
@@ -1173,7 +1174,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       }}>
       <span class="folder-cell-name">
         ${twisty}
-        <${Icon} name=${e.dir ? (open ? 'folderOpen' : 'folder') : isImageName(e.name) ? 'image' : 'file'} size=${15} />
+        ${e.dir ? html`<${Icon} name=${open ? 'folderOpen' : 'folder'} size=${15} />` : html`<${FileIcon} name=${e.name} size=${16} plain=${settings.fileIcons === false} />`}
         ${name}
         ${openKeys.includes(key) && html`<span class="tab-dot open-dot" title="Open in a tab" />`}
         ${git && html`<span class="git-badge git-${git}" title=${git === 'dot' ? 'Changed files inside (Git)' : `${GIT_LABELS[git]} (Git)`}>${git === 'dot' ? '' : git}</span>`}
@@ -1199,7 +1200,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   };
   // What a folder shown holds: a new file being named, an error, its rows, or why there are none.
   const creatingRow = () => html`<div class="folder-row creating">
-    <${Icon} name=${creating.kind === 'folder' ? 'folder' : 'file'} size=${15} />
+    ${creating.kind === 'folder' ? html`<${Icon} name="folder" size=${15} />` : html`<${FileIcon} name=${creating.name} size=${16} plain=${settings.fileIcons === false} />`}
     ${creating.in && creating.in !== dir && html`<span class="creating-in muted small" title=${creating.in}>in ${baseName(creating.in)}/</span>`}
     <${NameField} key=${`${creating.kind}:${creating.name}`} initial=${creating.name} dir=${creating.kind === 'folder'} label=${`${creating.kind === 'folder' ? 'New folder name' : 'New file name'}${creating.in && creating.in !== dir ? ` in ${baseName(creating.in)}` : ''}`}
       onDone=${(name) => create({ ...creating, name })} onCancel=${() => (setCreating(null), list.current?.focus())} />

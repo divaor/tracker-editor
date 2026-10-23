@@ -60,6 +60,7 @@ export const DEFAULT_SETTINGS = {
   indentGuides: true,
   bracketColors: true,
   stickyScroll: true,
+  fileIcons: true,
   // Tabs gathered by group (project, folder, notes) in the tab bar, each group foldable.
   groupTabs: false,
   // Tab views (tabGroups.js): pinned tabs show in every view; a line in each tab's group color

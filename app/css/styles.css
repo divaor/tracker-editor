@@ -34,6 +34,19 @@
   --kind-doc: #2f6fd6;
   --kind-disk: #c47a0a;
   --kind-remote: #b5309a;
+  --ft-yellow: #b08300;
+  --ft-orange: #cf6512;
+  --ft-red: #d03b33;
+  --ft-pink: #c2408a;
+  --ft-purple: #7c4fd0;
+  --ft-indigo: #4b55c8;
+  --ft-navy: #3a5ba8;
+  --ft-blue: #2f6fd6;
+  --ft-cyan: #1388a0;
+  --ft-teal: #128074;
+  --ft-green: #2c8a45;
+  --ft-brown: #a0612e;
+  --ft-gray: #6b7280;
   --shadow-sm: 0 1px 2px rgba(25, 23, 18, 0.06);
   --shadow: 0 1px 2px rgba(25, 23, 18, 0.05), 0 4px 14px rgba(25, 23, 18, 0.06);
   --shadow-lg: 0 10px 40px rgba(25, 23, 18, 0.18);
@@ -77,6 +90,19 @@
     --kind-doc: #6ea2f2;
     --kind-disk: #eba94a;
     --kind-remote: #e27ad0;
+    --ft-yellow: #e8c14a;
+    --ft-orange: #f0924a;
+    --ft-red: #f2756d;
+    --ft-pink: #ee80bf;
+    --ft-purple: #b394f5;
+    --ft-indigo: #9198f2;
+    --ft-navy: #87a3e2;
+    --ft-blue: #6fa3f5;
+    --ft-cyan: #52c7dd;
+    --ft-teal: #4cc4b4;
+    --ft-green: #6acb7f;
+    --ft-brown: #d4996a;
+    --ft-gray: #9aa3b0;
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 14px rgba(0, 0, 0, 0.25);
     --shadow-lg: 0 10px 40px rgba(0, 0, 0, 0.5);
@@ -114,6 +140,19 @@
   --kind-doc: #6ea2f2;
   --kind-disk: #eba94a;
   --kind-remote: #e27ad0;
+  --ft-yellow: #e8c14a;
+  --ft-orange: #f0924a;
+  --ft-red: #f2756d;
+  --ft-pink: #ee80bf;
+  --ft-purple: #b394f5;
+  --ft-indigo: #9198f2;
+  --ft-navy: #87a3e2;
+  --ft-blue: #6fa3f5;
+  --ft-cyan: #52c7dd;
+  --ft-teal: #4cc4b4;
+  --ft-green: #6acb7f;
+  --ft-brown: #d4996a;
+  --ft-gray: #9aa3b0;
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 14px rgba(0, 0, 0, 0.25);
   --shadow-lg: 0 10px 40px rgba(0, 0, 0, 0.5);
@@ -7759,3 +7798,35 @@ button.help-command:focus-visible {
 .root-section.reorder-after::after {
   bottom: -4px;
 }
+
+/* File type icons (ui/fileIcon.js): a glyph or letters in the type's color. */
+.file-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  color: var(--ft-gray);
+}
+
+.file-icon svg {
+  display: block;
+  overflow: visible;
+}
+
+.file-icon text {
+  font-family: var(--font);
+}
+
+.ft-yellow { color: var(--ft-yellow); }
+.ft-orange { color: var(--ft-orange); }
+.ft-red { color: var(--ft-red); }
+.ft-pink { color: var(--ft-pink); }
+.ft-purple { color: var(--ft-purple); }
+.ft-indigo { color: var(--ft-indigo); }
+.ft-navy { color: var(--ft-navy); }
+.ft-blue { color: var(--ft-blue); }
+.ft-cyan { color: var(--ft-cyan); }
+.ft-teal { color: var(--ft-teal); }
+.ft-green { color: var(--ft-green); }
+.ft-brown { color: var(--ft-brown); }
+.ft-gray { color: var(--ft-gray); }

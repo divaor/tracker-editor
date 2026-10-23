@@ -2,7 +2,7 @@
 
 Tracker Editor is a Notepad++-style editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs. Everything is saved the moment you paste or type, on this computer with the tracker, or, once you turn on sync, in the same private GitHub data repo as the tracker, so your files are on your computers and your phone.
 
-Version 0.17.2 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.17.2 · Web app: https://divaor.github.io/tracker-editor/
+Version 0.18.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.18.0 · Web app: https://divaor.github.io/tracker-editor/
 
 ---
 
@@ -14,9 +14,9 @@ Download from **https://github.com/divaor/tracker-editor/releases/latest**:
 
 | System | File |
 | --- | --- |
-| Windows | `Tracker Editor Setup 0.17.2.exe` (installer) or `Tracker Editor-0.17.2-portable.exe` (no install, no admin rights) |
-| macOS | `Tracker Editor-0.17.2-arm64.dmg` |
-| Linux | `Tracker Editor-0.17.2.AppImage` |
+| Windows | `Tracker Editor Setup 0.18.0.exe` (installer) or `Tracker Editor-0.18.0-portable.exe` (no install, no admin rights) |
+| macOS | `Tracker Editor-0.18.0-arm64.dmg` |
+| Linux | `Tracker Editor-0.18.0.AppImage` |
 
 The builds are not code-signed, so the first launch warns you. On Windows, choose *More info → Run anyway*. On macOS, right-click the app → *Open*. Installing the desktop app also registers `tracker-editor://` links, so the tracker's **Open in editor** opens files straight in it.
 
@@ -59,6 +59,7 @@ On an iPhone, apps added to the home screen each keep their own storage: the edi
   | Pink | **A server** (SFTP, FTP): saved back to the server, not synced | Saved on the server · Not saved to the server · Saving… · Changed on the server · Not connected |
 
   Hover the chip for more. Turn the frame off in **Settings → Editor**.
+- **What kind of file**: in **My files** and **Folders** each file has an icon in the color of its kind, so you see it without reading the extension: letters for code (**JS**, **PY**, **C#**…), braces for JSON, `#` for CSS, `</>` for HTML, a table for CSV, a picture, a box for archives, a key for keys and `.env` files… Untitled files take theirs from their language. Hover an icon for the kind. Turn them off in **Settings → Editor → File type icons**.
 - **Names from the content**: an untitled tab you paste or write into gets a name that says what it is: from the model when one is connected (e.g. `Deploy runbook.md`), otherwise from a heading on its first line. The message has **Undo**.
 
 ### Finding things

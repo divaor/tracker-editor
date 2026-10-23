@@ -206,6 +206,8 @@ function EditorCard({ settings }) {
       <${Check} checked=${settings.bracketColors !== false} label="Color bracket pairs by depth" onChange=${(v) => saveSettings({ bracketColors: v })} />
       <${Check} checked=${settings.stickyScroll !== false} label="Sticky scroll" hint="The lines that start the function or section you are in stay at the top"
         onChange=${(v) => saveSettings({ stickyScroll: v })} />
+      <${Check} checked=${settings.fileIcons !== false} label="File type icons" hint="In My files and Folders, an icon in the color of each kind of file (JSON, Python, pictures…)"
+        onChange=${(v) => saveSettings({ fileIcons: v })} />
       <${Check} checked=${settings.wordWrap} label="Word wrap" hint="Alt+Z" onChange=${(v) => saveSettings({ wordWrap: v })} />
       <${Check} checked=${settings.lineNumbers} label="Line numbers and folding" onChange=${(v) => saveSettings({ lineNumbers: v })} />
       <${Check} checked=${settings.showWhitespace} label="Show spaces and trailing whitespace" onChange=${(v) => saveSettings({ showWhitespace: v })} />
