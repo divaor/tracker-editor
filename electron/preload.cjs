@@ -2,6 +2,13 @@
 // isolation, so the page never gets direct access to Node or Electron.
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
+// Alt held for the mouse (Alt+drag selects a column) must not show the menu bar when it is let go.
+if (process.platform !== 'darwin') {
+  for (const type of ['mousedown', 'wheel']) {
+    window.addEventListener(type, (e) => e.altKey && ipcRenderer.send('menu:alt-used'), { capture: true, passive: true });
+  }
+}
+
 contextBridge.exposeInMainWorld('desktop', {
   platform: process.platform,
   versions: { electron: process.versions.electron, chrome: process.versions.chrome },

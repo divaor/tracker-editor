@@ -1598,6 +1598,14 @@ ipcMain.handle('folder:terminal', guard((_e, dir) => {
 // Paste in the page as Ctrl+V does, so the Paste button gets the files copied in other apps.
 ipcMain.handle('edit:paste', guard((event) => event.sender.paste()));
 
+// Windows and Linux show the hidden menu bar when Alt is let go, even when Alt was held for
+// something else: a column selection with the mouse (Alt+drag) or a shortcut. The page says
+// when the mouse was used with Alt; `before-input-event` in createWindow sees the keys.
+let altUsed = false;
+ipcMain.on('menu:alt-used', (event) => {
+  if (fromApp(event)) altUsed = true;
+});
+
 // ---- Dragging a tab out to other apps ------------------------------------------
 // A real file drag: a file on disk is dragged as itself, an editor file as a
 // copy written to a temporary folder. The other app decides what a drop does:
@@ -2265,6 +2273,29 @@ function createWindow() {
   });
   if (maximized) mainWindow.maximize();
   mainWindow.once('ready-to-show', () => mainWindow.show());
+  // Only a plain Alt (pressed and let go alone) shows the menu bar: letting go of Alt after a
+  // drag or another key never reaches the window then.
+  if (process.platform !== 'darwin') {
+    let altDown = false;
+    mainWindow.webContents.on('before-input-event', (event, input) => {
+      if (input.key === 'Alt') {
+        if (input.type === 'keyDown') {
+          // Held down, Alt repeats: only the first press starts afresh.
+          if (!altDown) altUsed = false;
+          altDown = true;
+        } else if (input.type === 'keyUp') {
+          altDown = false;
+          if (altUsed) event.preventDefault();
+          altUsed = false;
+        }
+      } else if (input.type === 'keyDown' && input.alt) altUsed = true;
+    });
+    // Alt let go in another window (Alt+Tab) is never seen here.
+    mainWindow.on('blur', () => {
+      altDown = false;
+      altUsed = false;
+    });
+  }
   mainWindow.webContents.on('did-finish-load', () => {
     if (pendingRoute) {
       mainWindow.webContents.send('command', `route:${pendingRoute}`);
@@ -2367,6 +2398,8 @@ function buildMenu() {
             shown('Comment or Uncomment Lines', 'CmdOrCtrl+/', 'toggleComment'),
             shown('Duplicate Line', 'CmdOrCtrl+Shift+D', 'duplicateLine'),
             shown('Delete Line', 'CmdOrCtrl+Shift+K', 'deleteLine'),
+            shown('Add Cursor Above', 'CmdOrCtrl+Alt+Up', 'addCursorAbove'),
+            shown('Add Cursor Below', 'CmdOrCtrl+Alt+Down', 'addCursorBelow'),
             { type: 'separator' },
             item('UPPER CASE', undefined, 'upperCase'),
             item('lower case', undefined, 'lowerCase'),

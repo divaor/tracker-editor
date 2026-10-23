@@ -42,6 +42,7 @@ const ASSETS = [
   'js/naming.js',
   'js/outline.js',
   'js/codeNav.js',
+  'js/columnSelect.js',
   'js/problems.js',
   'js/indent.js',
   'js/ui/problems.js',

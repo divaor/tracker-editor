@@ -81,6 +81,7 @@ The editor uses the tracker's repo, token and projects. Its own files go to `edi
 - **Format document** (`Shift+Alt+F`, ⋯ menu, or **Edit → Format Document**): tidies the file, or only the selection (for example the JSON inside a log line). **JSON** on one line becomes one value per line (numbers and text exactly as written, comments kept); also **XML**, **SQL** (by dialect: pick PostgreSQL, MySQL, MS SQL… in the status bar), **JavaScript**, **TypeScript**, **CSS/SCSS/Less**, **HTML**, **Vue**, **Markdown**, **YAML** and **GraphQL**. It uses the file's name or the language picked in the status bar; text with no name is formatted when it looks like JSON or XML. Something it cannot read says what and where; `Ctrl+Z` takes a format back.
 - **Text tools** (⋯ → **Text tools**, **Edit → Text**, or Help): UPPER and lower case, sort lines, remove duplicate lines, trim trailing spaces, duplicate or delete a line, comment lines.
 - **Indentation**: each file keeps its own, tabs or spaces and how many: from its text, or from an `.editorconfig` next to a file on disk or on a server. The status bar shows it (**Spaces: 2**, **Tab size: 4**); click it to indent with tabs or spaces, pick the width, **convert** the whole file, or go back to what the text uses. What you pick is remembered for the file. Files that say nothing use **Settings → Editor → Indentation**.
+- **Edit several lines at once**: `Shift+Alt+↓` (or `↑`) puts a cursor on each line as you go (as in Notepad++; `Ctrl+Shift+Alt+arrows` as in VS Code; on a Mac `Cmd+Shift+Option+arrows`); `Shift+Alt+→` / `←` widen or narrow the column, so you select a rectangle. Type, paste or delete and every line changes. Shorter lines get their cursor at the end. `Ctrl+Alt+↑` / `↓` (Mac `Cmd+Option+↑` / `↓`) add one cursor above or below. With the mouse: `Alt+drag` draws the rectangle, `Ctrl+click` (Mac `Cmd+click`) adds a cursor. `Escape` goes back to one cursor.
 - Multiple cursors, `Ctrl+D` select the next occurrence, `Ctrl+/` comment lines, bracket matching, `Alt+Z` word wrap, visible whitespace. Syntax highlighting for 140+ languages, from the file name, from pasted text, or picked in the status bar.
 - **HTML, XML and JSX**: type an **Emmet** abbreviation and press `Tab`: `ul>li*3` makes a list of three items, `div.card#main` a div with that class and id, `a[href=#]{Home}` a link with its text, `table>tr*2>td*3` a table, `!` (in an empty HTML file) a whole page; `>` goes inside, `+` next to it, `^` back up, `$` numbers the copies. Words that aren't tag names are left alone, and `Tab` indents as usual. **Tags close themselves** when you type the `>` of an opening tag (or `</`), and **renaming a tag renames its other end** (`<div>` … `</div>` → `<section>` … `</section>`; one `Ctrl+Z` takes both back). Both can be turned off in **Settings → Editor**.
 - **Help** (`F1`, or the **?** at the top): every command with its shortcut, searchable (type "sort" or "Ctrl+K"); click one, or press `Enter`, to run it. **Print** gives a one-page cheat sheet. The **Guide** tab is this guide.
@@ -496,6 +497,8 @@ Turn them on in **Settings → Desktop**.
 | `Ctrl+T` (or `Ctrl+P`, then `#`) | Go to a function, class or section in any file (desktop: also the folders open in Folders) |
 | `Alt+0` / `Alt+Shift+0` | Fold everything / unfold everything (`Alt+1`, `Alt+2`, `Alt+3`: fold one level) |
 | `Ctrl+Shift+[` / `Ctrl+Shift+]` | Fold / unfold the block here |
+| `Shift+Alt+↑ ↓ ← →` (or `Ctrl+Shift+Alt+arrows`) | Select a column: a cursor on each line, then as wide as you go |
+| `Ctrl+Alt+↑` / `Ctrl+Alt+↓` | Add a cursor above / below |
 | `Ctrl+D` | Select the next occurrence |
 | `Ctrl+/` | Comment lines |
 | `Alt+Z` | Word wrap |
@@ -528,6 +531,7 @@ Turn them on in **Settings → Desktop**.
 - **Typing drops or changes characters**: choose *Slow*, or on Windows *Send characters instead of key presses*.
 - **The model service test fails with 403**: check the API key and that it has access to the knowledge base or agent named in *Model or agent name*.
 - **Android says "already installed" but doesn't open**: remove it from the home screen and install again from the web address.
+- **The menu bar appears (Windows, Linux)**: it shows when `Alt` is pressed and let go on its own, as in other Windows programs; press `Alt` again to hide it. Holding `Alt` for `Alt+drag` or a shortcut does not show it.
 - **"The file changed on disk since you opened it"**: another program saved it. Use **Compare**, then reload or keep yours.
 - **The capture shortcut "is used by another app"**: click the field and press another combination.
 - **The screenshot is black (macOS)**: allow Tracker Editor under System Settings → Privacy & Security → Screen Recording, then restart it.

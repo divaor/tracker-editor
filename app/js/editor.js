@@ -97,6 +97,7 @@ import { gitGutter, gitInfo, setGitBase } from './gitGutter.js';
 import { emmetOnTab, linkedTags } from './htmlTools.js';
 import { inlineSuggestions } from './inlineSuggest.js';
 import { findFileRefs } from './fileRefs.js';
+import { addCursorAbove, addCursorBelow, columnBox, columnKeymap } from './columnSelect.js';
 
 export { languages };
 
@@ -574,6 +575,8 @@ export const COMMANDS = {
   toggleComment,
   duplicateLine: copyLineDown,
   deleteLine,
+  addCursorAbove,
+  addCursorBelow,
   upperCase: transform((s) => s.toUpperCase()),
   lowerCase: transform((s) => s.toLowerCase()),
   sortLines: withLines((lines) => [...lines].sort((a, b) => a.localeCompare(b))),
@@ -863,6 +866,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       EditorState.languageData.of(() => [{ autocomplete: completeAnyWord }, { autocomplete: linkCompletion }]),
       rectangularSelection(),
       crosshairCursor(),
+      columnBox,
       highlightActiveLine(),
       // The selection's other occurrences, and the name under the cursor's.
       big ? [] : highlightSelectionMatches({ highlightWordAroundCursor: true, minSelectionLength: 2 }),
@@ -889,6 +893,8 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
         { key: 'Shift-F8', run: previousDiagnostic, preventDefault: true },
         { key: 'Mod-Shift-d', run: copyLineDown },
         { key: 'Mod-Shift-k', run: deleteLine },
+        // A column from the keyboard (Shift+Alt+arrows, as in Notepad++; before CodeMirror's copy line up/down).
+        ...columnKeymap,
         ...closeBracketsKeymap,
         ...defaultKeymap,
         ...searchKeymap,
