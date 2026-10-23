@@ -369,7 +369,7 @@ export function TabBar({ session, projects, settings, actions }) {
   const single = vs.view?.length === 1 ? groupById.get(vs.view[0]) : null;
   return html`<div class="tabbar-wrap">
     ${showSwitcher &&
-    html`<button type="button" class="tab-view-btn ${vs.view ? 'on' : ''}" ref=${viewButton} aria-haspopup="dialog" aria-expanded=${Boolean(views && !views.moving)}
+    html`<button type="button" class="tab-view-btn ${vs.view ? 'on' : 'all'}" aria-label=${`Which tabs show: ${vs.label}`} ref=${viewButton} aria-haspopup="dialog" aria-expanded=${Boolean(views && !views.moving)}
       title=${`Which tabs show: ${vs.label} (Alt+V)${vs.view ? ` · ${session.open.length - inBar.length} more open in other groups` : ''}`}
       onClick=${() => (views ? setViews(null) : openViews())}>
       ${single?.color ? html`<span class="view-dot" style=${{ '--gc': single.color }} />` : html`<${Icon} name=${vs.view ? 'eye' : 'list'} size=${14} />`}
@@ -669,7 +669,7 @@ export function StatusBar({ recording, big, cursor, language, file, repo, disk, 
       title=${`Its tab group: ${group.name}${group.kind === 'folder' ? ` (${group.path})` : ''}. Click to show only its tabs.`} onClick=${() => actions.setTabView([group.id])}>
       <span class="view-dot" /><span>${group.name}</span>
     </button>`}
-    <span class="status-item status-state" title=${file ? `${formatBytes(store.text(file.id).length)}` : ''}>${state}</span>
+    <span class="status-item status-state hide-narrow" title=${file ? `${formatBytes(store.text(file.id).length)}` : ''}>${state}</span>
     ${recording && html`<button type="button" class="status-item status-btn-text status-recording" title="Recording a macro: Ctrl+Shift+R stops" onClick=${actions.toggleRecording}>● Recording macro</button>`}
     ${big && html`<span class="status-item status-big" title="A very large file: highlighting, wrapping and completion are off to keep it fast">Large file</span>`}
     ${problems &&

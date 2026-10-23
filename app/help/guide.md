@@ -2,7 +2,7 @@
 
 Tracker Editor is a Notepad++-style editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs. Everything is saved the moment you paste or type, on this computer with the tracker, or, once you turn on sync, in the same private GitHub data repo as the tracker, so your files are on your computers and your phone.
 
-Version 0.16.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.16.0 · Web app: https://divaor.github.io/tracker-editor/
+Version 0.16.1 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.16.1 · Web app: https://divaor.github.io/tracker-editor/
 
 ---
 
@@ -14,9 +14,9 @@ Download from **https://github.com/divaor/tracker-editor/releases/latest**:
 
 | System | File |
 | --- | --- |
-| Windows | `Tracker Editor Setup 0.16.0.exe` (installer) or `Tracker Editor-0.16.0-portable.exe` (no install, no admin rights) |
-| macOS | `Tracker Editor-0.16.0-arm64.dmg` |
-| Linux | `Tracker Editor-0.16.0.AppImage` |
+| Windows | `Tracker Editor Setup 0.16.1.exe` (installer) or `Tracker Editor-0.16.1-portable.exe` (no install, no admin rights) |
+| macOS | `Tracker Editor-0.16.1-arm64.dmg` |
+| Linux | `Tracker Editor-0.16.1.AppImage` |
 
 The builds are not code-signed, so the first launch warns you. On Windows, choose *More info → Run anyway*. On macOS, right-click the app → *Open*. Installing the desktop app also registers `tracker-editor://` links, so the tracker's **Open in editor** opens files straight in it.
 
@@ -106,7 +106,7 @@ Not a full IDE, but enough to find your way in a code file (**Edit → Code** on
 - **Where you are**: the status bar names the class and function the cursor is in (`Store › save`), or the YAML key or Markdown section; click it to go to another.
 - The name under the cursor is highlighted wherever else it appears. `Ctrl+Shift+\` jumps to the matching bracket.
 - **Run it** (`F5`, desktop) in a terminal in its folder, and click the `file:line` an error prints to go there (see [A terminal, and running a file](#a-terminal-and-running-a-file)). **Suggestions as you type** from the model: see [6](#suggestions-as-you-type).
-- **Problems as you type**: mistakes are underlined, with a mark next to the line; hover one to read it. In JSON (comments are fine in `tsconfig.json`, `.jsonc` and other files that allow them), YAML (also a key written twice in the same place, tabs in the indentation, a quote left open), XML, HTML, CSS, and code: JavaScript, TypeScript, Python, Go, Java, PHP, C, C++, Rust. The status bar counts errors and warnings; click it (or `Ctrl+Shift+M`) for the **Problems** list, click one to go there. `F8` goes to the next one, `Shift+F8` to the one before. With a model connected, it can explain them or fix them for you: see [Help with errors](#help-with-errors).
+- **Problems as you type**: mistakes are underlined, with a mark next to the line; hover one to read it. In JSON (comments are fine in `tsconfig.json`, `.jsonc` and other files that allow them), YAML (also a key written twice in the same place, tabs in the indentation, a quote left open), XML, HTML, CSS, and code: JavaScript, TypeScript, Python, Go, Java, PHP, C, C++, Rust. The status bar counts errors and warnings (on a phone the count shows once there is one); click it (or `Ctrl+Shift+M`) for the **Problems** list, click one to go there. `F8` goes to the next one, `Shift+F8` to the one before. With a model connected, it can explain them or fix them for you: see [Help with errors](#help-with-errors).
 - **Easier to read**: thin **guides** at each indentation level, **brackets colored** by how deep they are (strings and comments aside), and **sticky scroll**: when you scroll inside a long function, the lines that start it (and its class) stay at the top; click one to go there. Each can be turned off in **Settings → Editor** (or the **View** menu).
 
 ### Language servers (desktop): code that knows its types
@@ -143,7 +143,7 @@ Every tab belongs to a **group**, worked out from where its file lives:
 | A tracker document | Its item's project, else Notes |
 | Any other file on this computer or a server | **Other files** |
 
-The **switcher at the left end of the tab bar** (it appears once there are two groups) says which tabs show: **All tabs**, **● Tracker Editor**, **Notes + 2**… Click it, or press `Alt+V`:
+The **switcher at the left end of the tab bar** (it appears once there are two groups) says which tabs show: **All tabs** (on a phone just its ☰ icon), **● Tracker Editor**, **Notes + 2**… Click it, or press `Alt+V`:
 
 - **Click a name** to show only that group. **Tick its box** to add it to the ones showing (two projects, Notes and Other files…). Type to find a group and press `Enter`.
 - `Ctrl+Alt+PageDown` / `Ctrl+Alt+PageUp` go to the next or previous group, and `Ctrl+Alt+Home` shows all tabs again.

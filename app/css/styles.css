@@ -285,6 +285,8 @@ kbd {
   background: none;
   color: var(--accent);
   font-weight: 600;
+  white-space: normal;
+  text-align: left;
 }
 
 .btn.link:hover {
@@ -3137,6 +3139,12 @@ button.where-chip:hover {
   background: conic-gradient(#2f6fd6 0 33%, #c2603c 0 66%, #23845f 0);
 }
 
+/* In a menu row a dot keeps its size (rows stretch their spans), in the icons' column. */
+.tab-views .menu-item > .view-dot {
+  flex: none;
+  margin: 0 2.5px;
+}
+
 .menu.tab-views {
   min-width: 270px;
   max-width: min(360px, calc(100vw - 16px));
@@ -3307,6 +3315,11 @@ button.where-chip:hover {
   .tab-view-btn {
     max-width: 130px;
     padding: 0 7px;
+  }
+
+  /* All tabs: the icon says it; a view keeps its name. */
+  .tab-view-btn.all .tab-view-label {
+    display: none;
   }
 }
 
@@ -4274,7 +4287,10 @@ body:is(.resizing-x, .resizing-y) iframe {
   align-items: center;
   height: 28px;
   padding: 0 6px;
-  overflow: hidden;
+  /* What does not fit scrolls sideways rather than being cut off. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
   border-top: 1px solid var(--border);
   background: var(--surface-2);
   color: var(--text-2);
@@ -4330,9 +4346,33 @@ body:is(.resizing-x, .resizing-y) iframe {
   box-shadow: none;
 }
 
+.statusbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* The editor column narrows when the side panels are open. */
 @container (max-width: 720px) {
   .statusbar .hide-narrow {
+    display: none;
+  }
+
+  .statusbar .status-group span:last-child {
+    max-width: 11ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .statusbar .status-select select {
+    max-width: 110px;
+    text-overflow: ellipsis;
+  }
+
+  .statusbar .status-item {
+    padding: 0 5px;
+  }
+
+  /* No problems: the counter comes back with the first one. */
+  .statusbar .status-problems:not(.has-errors, .has-warnings, [aria-pressed='true']) {
     display: none;
   }
 }
