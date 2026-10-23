@@ -124,6 +124,36 @@ For **TypeScript, JavaScript and Python** files opened from **Folders** on this 
 
 ## 3. Tabs, pinning, groups and the split view
 
+### Tab views: one project at a time, or several
+
+Every tab belongs to a **group**, worked out from where its file lives:
+
+| The tab | Its group |
+| --- | --- |
+| A file in a folder you opened in **Folders** (desktop) | That folder, e.g. **tracker-editor** (the folder you picked, even while you browse inside it; on a server, the server) |
+| A folder **linked to a project** | The project: its folder's files, its notes and its tracker documents together |
+| One of your files with a project | That project |
+| One of your files with no project | **Notes**: quick notes, `new 3`, snippets |
+| A tracker document | Its item's project, else Notes |
+| Any other file on this computer or a server | **Other files** |
+
+The **switcher at the left end of the tab bar** (it appears once there are two groups) says which tabs show: **All tabs**, **● Tracker Editor**, **Notes + 2**… Click it, or press `Alt+V`:
+
+- **Click a name** to show only that group. **Tick its box** to add it to the ones showing (two projects, Notes and Other files…). Type to find a group and press `Enter`.
+- `Ctrl+Alt+PageDown` / `Ctrl+Alt+PageUp` go to the next or previous group, and `Ctrl+Alt+Home` shows all tabs again.
+- Also: right-click a tab → **Only the … tabs** / **All tabs**; in Folders, a folder's header menu → **Only its tabs**; the group's name in the status bar shows only its tabs.
+- **Nothing is closed.** Hidden tabs keep their edits; `Ctrl+P` and the **▾** list find them (the ▾ list by group). Each view remembers the tab you were on.
+- A file opened from another group (with `Ctrl+P`, from Folders, a link) shows as a **guest**, dashed, until you go to another tab; right-click it to add its group to the view or move it into the one showing.
+- In a view, `Ctrl+Tab`, **Close others** and **Close all** work on the tabs showing; a **new file** is filed under the view's project.
+- **Pinned tabs show in every view** (turn it off in the switcher or Settings → Editor).
+- **Move a tab to another group**: right-click → **Move to group…** (for example a log while you work on a project).
+- **Colors**: each project has its color (as in the tracker) and each folder one of its own, which Folders uses on the folder's header. When tabs of two or more show, a line in their color runs under each tab (the top line still tells where the file lives). Change it in the switcher: *When 2+ groups show*, *Always* or *Off*.
+- **Link a folder to a project**: when a folder's name matches a project (`tracker-editor` and *Tracker Editor*), the editor offers it once. Any time: a folder's header menu in Folders → **Its tabs: link to a project, color…** (also in the switcher's **⋯** next to a folder).
+- The switcher's **Group headers in the tab bar** gathers each group's tabs behind a header that folds them.
+
+### The tab menu
+
+
 **Right-click a tab** for its menu (on a phone: the **⋯** on the open tab, or a long press on any tab):
 
 | Item | What it does |
@@ -133,8 +163,9 @@ For **TypeScript, JavaScript and Python** files opened from **Folders** on this 
 | History, Compare with… | See section 5. |
 | Copy for Claude | A file on disk: its path, which Claude Code reads where it is. Other files: the name and the text in a code block, to paste into a chat. |
 | Copy path, Show in folder | Files on disk and on servers (a server file's folder opens in Folders; its path is `user@host:/path`). |
-| Close, Close others, Close tabs to the right, Close the *Project* tabs, Close all | Pinned tabs are kept, except by Close. |
-| Group tabs by project | One header per project in the tab bar; click a header to fold its tabs. |
+| Close, Close others, Close tabs to the right, Close the *Project* tabs, Close all | Pinned tabs are kept, except by Close. In a view, they work on the tabs showing. |
+| Only the *…* tabs, All tabs, Move to group… | Tab views, above. |
+| Group headers in the tab bar | One header per group in the tab bar; click a header to fold its tabs. |
 
 - `Ctrl+W` closes a tab (desktop), and so does a **middle-click** on it; `Ctrl+Shift+T` reopens the last closed one, `Ctrl+Tab` goes to the next one. **Double-click a tab to pin it** (again to unpin). Drag tabs to reorder them.
 - **Many tabs open**: scroll the tab bar with the mouse wheel (or swipe sideways on a touchpad or a phone). At its ends, an arrow with a number says how many tabs are past it; click it to scroll that way.
@@ -147,7 +178,7 @@ For **TypeScript, JavaScript and Python** files opened from **Folders** on this 
   - Encrypted files are never written out; their tabs only move within the bar. Copies of synced files go to a temporary folder and are removed after a week.
   - In the web app, a dragged tab carries its text: drop it into a chat box to paste it.
 - **Split view** (`Ctrl+\`, or *View → Split View*): two files side by side, both editable. The side pane's header can **swap** the panes or close the split. A tab moves between panes with its undo history. Clicking the side tab in the tab bar takes you to the side pane.
-- Grouping can also be turned on in **Settings → Editor → Group tabs by project**.
+- Group headers, pinned tabs in every view and the tab colors are also in **Settings → Editor**.
 
 ---
 
@@ -475,6 +506,8 @@ Turn them on in **Settings → Desktop**.
 | --- | --- |
 | `Alt+N` (desktop `Ctrl+N`) | New file |
 | `Ctrl+P` | Open a file by name |
+| `Alt+V` | Which tabs show: a project, a folder, Notes, Other files, several, or all |
+| `Ctrl+Alt+PageDown` / `Ctrl+Alt+PageUp` / `Ctrl+Alt+Home` | The next / previous group of tabs / all tabs |
 | `Ctrl+Shift+F` | Find in files |
 | `Ctrl+O` | Open a file from disk to edit in place (desktop) |
 | `Ctrl+Shift+E` | Folders on this computer and on servers (desktop) |

@@ -4,8 +4,8 @@ import { Icon } from './icons.js';
 /**
  * A small menu at a point: { x, y }, or { x, y, right: true } to end at x
  * (under a button at the window's edge), `above: true` to end at y (over the status bar). Fixed, so bars that scroll sideways
- * do not clip it. Items: { label, icon?, run, disabled?, danger?, checked?, hint?, key? }
- * or { separator: true }. Closes on a choice, a click elsewhere or Escape.
+ * do not clip it. Items: { label, icon?, run, disabled?, danger?, checked?, hint?, key? },
+ * { separator: true } or { heading: true, label, color? }. Closes on a choice, a click elsewhere or Escape.
  */
 export function Menu({ items, at, onClose, label = 'Menu', owner }) {
   const ref = useRef(null);
@@ -43,7 +43,9 @@ export function Menu({ items, at, onClose, label = 'Menu', owner }) {
     ${items.filter(Boolean).map((item, i) =>
       item.separator
         ? html`<div class="menu-separator" key=${`s${i}`} role="separator" />`
-        : html`<button type="button" key=${item.key ?? item.label} role="menuitem" class="menu-item ${item.danger ? 'danger' : ''}" disabled=${item.disabled} title=${item.hint}
+        : item.heading
+          ? html`<div class="menu-heading" key=${item.key ?? `h${i}`} role="presentation">${item.color && html`<span class="view-dot" style=${{ '--gc': item.color }} />`}${item.label}</div>`
+          : html`<button type="button" key=${item.key ?? item.label} role="menuitem" class="menu-item ${item.danger ? 'danger' : ''}" disabled=${item.disabled} title=${item.hint}
             onClick=${() => {
               onClose();
               item.run();

@@ -25,7 +25,10 @@ let docs = { items: null, list: [] }; // trackerDocs(trackerItems), computed onc
 // Tab keys are "f:<id>" | "r:<path>". Pinned tabs come first in `open`; `side` is
 // the tab in the split view's second pane (never the active one); `collapsed`
 // lists project keys whose tab group is folded.
-let session = { open: [], active: null, closed: [], pinned: [], side: null, collapsed: [] };
+// view: the tab groups the bar shows (null: all); viewActive: each view's last tab; assigned: tabs
+// moved to a group by hand; groupFolders: folders that stay tab groups while their tabs are open.
+const EMPTY_SESSION = () => ({ open: [], active: null, closed: [], pinned: [], side: null, collapsed: [], view: null, viewActive: {}, assigned: {}, groupFolders: [] });
+let session = EMPTY_SESSION();
 let meta = { lastSyncAt: null };
 let trashed = new Set(); // deleted files whose text this device kept (kv "trash:<id>")
 let changeCounter = 0;
@@ -112,6 +115,9 @@ function tidySession() {
     session.active = session.side;
     session.side = null;
   }
+  const open = new Set(session.open);
+  session.assigned = Object.fromEntries(Object.entries(session.assigned ?? {}).filter(([k]) => open.has(k)));
+  session.viewActive = Object.fromEntries(Object.entries(session.viewActive ?? {}).filter(([, k]) => open.has(k)));
 }
 
 /** Writes everything still waiting for its debounce (before closing the app). */
@@ -166,7 +172,7 @@ export const store = {
     const loaded = await Promise.all([...files.values()].filter((f) => !f.deleted).map(async (f) => [f.id, (await kvGet(`text:${f.id}`)) ?? '']));
     texts = new Map(loaded.filter(([id, t]) => !(files.get(id).encrypted && isSealed(t))));
     sealed = new Map(loaded.filter(([id, t]) => files.get(id).encrypted && isSealed(t)));
-    session = { open: [], active: null, closed: [], pinned: [], side: null, collapsed: [], ...((await kvGet('session')) ?? {}) };
+    session = { ...EMPTY_SESSION(), ...((await kvGet('session')) ?? {}) };
     repoTabs = new Map(((await kvGet('repoTabs')) ?? []).map((t) => [t.path, t]));
     diskTabs = new Map(((await kvGet('diskTabs')) ?? []).map((t) => [t.path, t]));
     projects = (await kvGet('projects')) ?? [];
@@ -443,6 +449,39 @@ export const store = {
     emit('session');
   },
 
+  /**
+   * Shows other tab groups in the bar (`view`: their ids, null for all), remembering the
+   * open tab of the view left; `active` becomes the open tab (null: none).
+   */
+  setTabView(view, active, viewKey) {
+    if (session.active) session.viewActive = { ...session.viewActive, [viewKey(session.view)]: session.active };
+    session.view = view?.length ? view : null;
+    if (active !== undefined && (active === null || session.open.includes(active))) {
+      if (session.side === active) session.side = null;
+      session.active = active;
+    }
+    tidySession();
+    persist.session();
+    emit('session');
+  },
+
+  /** Puts a tab in a group by hand (null: back to its own). */
+  assignGroup(key, group) {
+    const { [key]: _, ...rest } = session.assigned;
+    session.assigned = group ? { ...rest, [key]: group } : rest;
+    persist.session();
+    emit('session');
+  },
+
+  /** The folders that are tab groups: those shown now, and earlier ones while `keep` says so. */
+  rememberFolders(shown, keep) {
+    const next = [...new Set([...shown, ...session.groupFolders.filter((f) => shown.includes(f) || keep(f))])];
+    if (next.join('\n') === session.groupFolders.join('\n')) return;
+    session.groupFolders = next;
+    persist.session();
+    emit('session');
+  },
+
   /** Folds or unfolds a project's tab group. */
   toggleGroup(group) {
     session.collapsed = session.collapsed.includes(group) ? session.collapsed.filter((g) => g !== group) : [...session.collapsed, group];
@@ -531,6 +570,8 @@ export const store = {
     session.closed = session.closed.map(swap);
     session.active = session.active && swap(session.active);
     session.side = session.side && swap(session.side);
+    session.assigned = Object.fromEntries(Object.entries(session.assigned).map(([k, g]) => [swap(k), g]));
+    session.viewActive = Object.fromEntries(Object.entries(session.viewActive).map(([v, k]) => [v, swap(k)]));
     persist.disk(0);
     persist.session();
     emit('session');
@@ -641,7 +682,7 @@ export const store = {
     trackerOps = [];
     docTexts = new Map();
     persist.docs();
-    session = { open: [], active: null, closed: [], pinned: [], side: null, collapsed: [] };
+    session = EMPTY_SESSION();
     meta = { lastSyncAt: null };
     persist.files();
     persist.repo();

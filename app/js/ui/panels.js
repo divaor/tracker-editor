@@ -134,7 +134,7 @@ export function SearchPanel({ files, docs, allFiles, allDocs, openKeys, actions,
  * folders open in Folders (`roots`: [{ dir, label, kind }]) by their path.
  * With onPick, it picks a file instead of opening it (e.g. "Compare with…").
  */
-export function QuickOpen({ files, docs, actions, onClose, onPick, title = 'Open a file', exclude = '', initial = '', symbols = null, onSymbol, roots = [], hidden = false }) {
+export function QuickOpen({ files, docs, actions, onClose, onPick, title = 'Open a file', exclude = '', initial = '', symbols = null, onSymbol, roots = [], hidden = false, openTabs = [] }) {
   const [query, setQuery] = useState(initial);
   const [index, setIndex] = useState(0);
   // Files in the folders: listed in the background, the list grows when they come.
@@ -151,7 +151,10 @@ export function QuickOpen({ files, docs, actions, onClose, onPick, title = 'Open
         .sort((a, b) => (b.modifiedAt > a.modifiedAt ? 1 : -1)),
     [files, docs],
   );
-  const list = quickOpen(query.trim() ? [...recent, ...inFolders.files] : recent, query, 60);
+  // Tabs open on disk or a server come first (the tab bar's view may hide them); folder files once each.
+  const tabPaths = new Set(openTabs.map((t) => t.path));
+  const all = [...openTabs.filter((t) => t.id !== exclude), ...recent];
+  const list = quickOpen(query.trim() ? [...all, ...inFolders.files.filter((f) => !tabPaths.has(f.path))] : all, query, 60);
   const input = useRef(null);
   const choose = (file) => {
     onClose();

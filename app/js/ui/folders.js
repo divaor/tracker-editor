@@ -16,6 +16,7 @@ import { Splitter } from './splitter.js';
 import { onTransfers, running } from '../transfers.js';
 import { gitCodeOf, gitOf, onGitState, refreshGit } from '../gitState.js';
 import { GIT_LABELS } from '../gitStatus.js';
+import { folderGroupOf } from '../tabViews.js';
 
 // "Git: branch main, 2 ahead … · 3 changed files" for a folder's branch chip.
 const branchTitle = (g) => {
@@ -1025,6 +1026,9 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       { label: 'Properties', icon: 'info', run: () => actions.showProperties(s) },
       { label: 'Copy path', icon: 'copy', run: () => actions.copyPath(s) },
       { separator: true },
+      { label: 'Only its tabs', icon: 'eye', hint: 'The tab bar shows the tabs of this folder', run: () => actions.showFolderTabs(s) },
+      { label: 'Its tabs: link to a project, color…', icon: 'tag', run: () => actions.folderGroup(folderGroupOf(s).folder) },
+      { separator: true },
       at > 0 && { label: 'Move up', icon: 'arrowUp', run: () => moveSection(s, -1) },
       at < live.length - 1 && { label: 'Move down', icon: 'arrowUp', run: () => moveSection(s, 1) },
       { label: 'Close here (it stays where it is)', icon: 'x', run: () => closeSection(s) },
@@ -1199,11 +1203,16 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
         onClick=${(ev) => (ev.stopPropagation(), closeSection(d))}><${Icon} name="x" size=${13} /></button>
     </div>`;
   };
-  const sectionView = (x) => html`<div key=${x.dir} class="root-section kind-${isRemotePath(x.dir) ? 'remote' : 'disk'} ${x.dir === dir ? 'current' : ''} ${collapsed.has(x.dir) ? 'collapsed' : ''}"
-      role="group" aria-label=${placeName(x.dir)} ...${dropProps(x.dir)}>
-    ${sectionHead(x.dir, x.matches)}
-    ${!collapsed.has(x.dir) && sectionBody(x)}
-  </div>`;
+  // Each folder's header in the color of its tab group, as the tabs from it (unless turned off).
+  const groupColor = (d) => (settings.tabColors !== 'off' ? folderGroupOf(d, settings).color : null);
+  const sectionView = (x) => {
+    const gc = groupColor(x.dir);
+    return html`<div key=${x.dir} class="root-section kind-${isRemotePath(x.dir) ? 'remote' : 'disk'} ${x.dir === dir ? 'current' : ''} ${collapsed.has(x.dir) ? 'collapsed' : ''} ${gc ? 'grouped' : ''}"
+        style=${gc ? { '--gc': gc } : undefined} role="group" aria-label=${placeName(x.dir)} ...${dropProps(x.dir)}>
+      ${sectionHead(x.dir, x.matches)}
+      ${!collapsed.has(x.dir) && sectionBody(x)}
+    </div>`;
+  };
   const columns = details && html`<div class="folder-columns" role="presentation" onClick=${(ev) => ev.stopPropagation()} onContextMenu=${(ev) => ev.stopPropagation()}>
     ${header('name', 'Name', 'name')}${header('size', 'Size', 'size')}${header('modified', 'Modified', 'date')}${perms && html`<span class="folder-col perms">Permissions</span>`}
   </div>`;

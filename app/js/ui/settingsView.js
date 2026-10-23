@@ -20,6 +20,7 @@ import { DICTATION_LANGUAGES } from '../dictation.js';
 import { dictationSupported } from './dictation.js';
 import { Icon } from './icons.js';
 import { KINDS } from '../where.js';
+import { COLOR_MODES } from './tabViews.js';
 import { looksLikeVisionModel } from '../ocr.js';
 
 const SYNC_FIELDS = ['owner', 'repo', 'branch', 'trackerPath', 'device'];
@@ -143,8 +144,15 @@ function EditorCard({ settings }) {
       <${Check} checked=${settings.wordWrap} label="Word wrap" hint="Alt+Z" onChange=${(v) => saveSettings({ wordWrap: v })} />
       <${Check} checked=${settings.lineNumbers} label="Line numbers and folding" onChange=${(v) => saveSettings({ lineNumbers: v })} />
       <${Check} checked=${settings.showWhitespace} label="Show spaces and trailing whitespace" onChange=${(v) => saveSettings({ showWhitespace: v })} />
-      <${Check} checked=${settings.groupTabs} label="Group tabs by project" hint="Each project's tabs together, with a header that folds them"
+      <${Check} checked=${settings.groupTabs} label="Group headers in the tab bar" hint="Each project's or folder's tabs together, with a header that folds them"
         onChange=${(v) => saveSettings({ groupTabs: v })} />
+      <${Check} checked=${settings.pinnedEverywhere !== false} label="Pinned tabs in every view" hint="When the tab bar shows one project or folder (Alt+V)"
+        onChange=${(v) => saveSettings({ pinnedEverywhere: v })} />
+      <${Field} label="Color tabs by project or folder" hint="A line in the group's color under each tab">
+        <select value=${settings.tabColors ?? 'auto'} onChange=${(e) => saveSettings({ tabColors: e.currentTarget.value })}>
+          ${COLOR_MODES.map(([value, label]) => html`<option key=${value} value=${value}>${label}</option>`)}
+        </select>
+      </${Field}>
       <${Check} checked=${settings.whereFrame} label="Frame the editor in the color of where the file lives" hint="Tabs, the file bar and the status bar always show it"
         onChange=${(v) => saveSettings({ whereFrame: v })} />
       <div class="where-legend span-2" aria-label="Where files live">

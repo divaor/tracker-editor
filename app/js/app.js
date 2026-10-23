@@ -75,6 +75,9 @@ import { SettingsView } from './ui/settingsView.js';
 import { Sidebar } from './ui/sidebar.js';
 import { Splitter } from './ui/splitter.js';
 import { FileBar, StatusBar, SyncBadge, TabBar } from './ui/tabs.js';
+import { FolderGroupDialog } from './ui/tabViews.js';
+import { activeFor, folderGroupOf, loadRoots, rememberFolders, sectionFolders, tabViewState } from './tabViews.js';
+import { stepView, suggestedProject, viewKey } from './tabGroups.js';
 
 const isNarrow = () => matchMedia('(max-width: 860px)').matches;
 
@@ -154,8 +157,13 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       /** A new tab (its id). `focus: false` leaves the keyboard closed on phones (dictation). */
       newFile({ focus = true, ...fields } = {}) {
         const scope = getSettings().projectScope;
-        const project = fields.project ?? (scope.length === 1 && scope[0].startsWith('project:') ? (projectList(store.live(), store.projects()).find((p) => `project:${p.key}` === scope[0])?.name ?? '') : '');
+        // In the view of one group, the new file belongs to it: filed under its project, or put in it.
+        const vs = tabViewState();
+        const only = vs.view?.length === 1 && vs.view[0] !== 'pinned' ? vs.view[0] : null;
+        const viewProject = only?.startsWith('p:') ? vs.nameOf(only) : '';
+        const project = fields.project ?? (viewProject || (scope.length === 1 && scope[0].startsWith('project:') ? (projectList(store.live(), store.projects()).find((p) => `project:${p.key}` === scope[0])?.name ?? '') : ''));
         const id = store.create({ ...fields, project });
+        if (only && !only.startsWith('p:') && only !== 'notes') store.assignGroup(fileKey(id), only);
         setView('editor');
         if (isNarrow()) setSidebar(false);
         if (focus) setTimeout(() => hostRef.current?.focus(), 30);
@@ -236,6 +244,9 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       },
       close(key, { discard = false } = {}) {
         const k = parseKey(key);
+        // The open tab closed in a view: its neighbor in the view comes next, not one from elsewhere.
+        const vs = store.session.active === key && store.session.view ? tabViewState() : null;
+        const shown = vs ? [...vs.keys, ...vs.guests].filter((x) => x !== store.session.side) : [];
         const file = k?.kind === 'file' ? store.get(k.id) : null;
         if (k?.kind === 'disk') {
           hostRef.current?.flushAll();
@@ -246,16 +257,51 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         hostRef.current?.drop(key);
         if (getReaderState().key === key) stopReading();
         store.close(key);
+        if (vs) {
+          const rest = shown.filter((x) => x !== key && store.session.open.includes(x));
+          const next = rest[Math.min(Math.max(shown.indexOf(key), 0), rest.length - 1)] ?? null;
+          if (store.session.active !== next) store.setTabView(store.session.view, next, viewKey);
+        }
         // Empty untitled tabs are not worth keeping.
         if (file && /^new \d+$/.test(file.name) && !store.text(file.id).trim() && !file.sha) store.remove(file.id);
       },
       reopenClosed: () => store.reopenClosed() || toast('No closed tabs to reopen'),
+      // Ctrl+Tab: through the tabs the bar shows.
       cycleTab(step) {
         const { active, side } = store.session;
-        const open = store.session.open.filter((k) => k !== side);
-        if (open.length < 2) return;
-        store.open(open[(open.indexOf(active) + step + open.length) % open.length]);
+        const vs = tabViewState();
+        const open = [...vs.keys, ...vs.guests].filter((k) => k !== side);
+        if (!open.length || (open.length === 1 && open[0] === active)) return;
+        const at = open.indexOf(active);
+        store.open(open[at === -1 ? 0 : (at + step + open.length) % open.length]);
       },
+      // ---- Tab views: which groups of tabs the bar shows ----
+      /** Shows these groups (null: all tabs), with the tab last open in that view. */
+      setTabView(view) {
+        const vs = tabViewState();
+        store.setTabView(view, activeFor(view, vs), viewKey);
+        setView('editor');
+      },
+      stepTabView(step) {
+        const vs = tabViewState();
+        actions.setTabView(stepView(vs.view, vs.groups, step));
+      },
+      /** Only the open tab's group. */
+      onlyActiveGroup() {
+        const key = store.session.active;
+        if (key) actions.setTabView([tabViewState().groupOfKey(key)]);
+      },
+      moveToGroup(key, group) {
+        store.assignGroup(key, group);
+        const name = group ? tabViewState().nameOf(group) : '';
+        toast(group ? `Moved to ${name}` : 'Back in its own group', { timeout: 2500 });
+      },
+      tabViews: () => window.dispatchEvent(new CustomEvent('tabs:views')),
+      moveActiveToGroup: () => store.session.active && window.dispatchEvent(new CustomEvent('tabs:move', { detail: { key: store.session.active } })),
+      /** A folder as a tab group: linked to a project, its color. */
+      folderGroup: (path) => setDialog({ type: 'folderGroup', path }),
+      /** Folders: only the tabs of a folder shown there (its picked folder's group). */
+      showFolderTabs: (section) => actions.setTabView([folderGroupOf(section).id]),
       remove(id) {
         const previous = store.remove(id);
         hostRef.current?.drop(fileKey(id));
@@ -1246,6 +1292,34 @@ export function App() {
     const offList = onServers(rerender);
     return () => (offStatus(), offList());
   }, []);
+  // Tab views (desktop): the folders that make tab groups follow Folders (the picked folder
+  // behind each one shown); a folder named like a project is offered to link to it, once.
+  const sectionsKey = withCurrent(settings.folderSections, settings.folder).join('\n');
+  useEffect(() => {
+    if (!window.desktop?.folders) return;
+    let live = true;
+    loadRoots().then((changed) => {
+      if (!live) return;
+      rememberFolders();
+      if (changed) rerender();
+      const s = getSettings();
+      const projects = projectList(store.live(), store.projects());
+      for (const folder of sectionFolders(s)) {
+        if (folder in (s.folderProjects ?? {})) continue;
+        const project = suggestedProject(folder, projects);
+        if (!project) continue;
+        saveSettings({ folderProjects: { ...s.folderProjects, [folder]: '' } });
+        toast(`Show the tabs of the folder “${baseName(folder)}” together with the project ${project.name} (its notes and tracker documents)?`, {
+          timeout: 15000,
+          action: { label: 'Link them', run: () => saveSettings({ folderProjects: { ...getSettings().folderProjects, [folder]: project.name } }) },
+        });
+        break;
+      }
+    });
+    return () => {
+      live = false;
+    };
+  }, [sectionsKey]);
   // Mirrors (desktop): their status; an automatic sync waiting on deletions says so once.
   useEffect(() => {
     const off = watchMirrorStatus();
@@ -1395,6 +1469,19 @@ export function App() {
   }, []);
 
   const activeKey = store.session.active;
+  // The open tab's group (a project or a folder), for the status bar.
+  const viewNow = tabViewState(settings);
+  const activeGroup = activeKey && viewNow.groups.length > 1 ? (viewNow.groups.find((g) => g.id === viewNow.groupOfKey(activeKey) && (g.kind === 'project' || g.kind === 'folder')) ?? null) : null;
+  // Tabs on disk and on servers, for Ctrl+P (their folders may not be open in Folders).
+  const openDiskTabs = () =>
+    store.session.open
+      .filter((k) => k.startsWith('d:'))
+      .map((key) => {
+        const d = store.diskTab(key.slice(2));
+        const g = viewNow.groups.find((x) => x.id === viewNow.groupOfKey(key));
+        return d && { id: key, name: d.name, path: d.path, rel: d.name, kind: kindOfKey(key), where: g?.name ?? '' };
+      })
+      .filter(Boolean);
   const active = parseKey(activeKey);
   const activeFile = active?.kind === 'file' ? store.get(active.id) : null;
   const activeRepo = active?.kind === 'repo' ? store.repoTab(active.path) : null;
@@ -2206,6 +2293,15 @@ export function App() {
       } else if (e.altKey && !mod && !e.shiftKey && k === 'l') {
         e.preventDefault();
         actions.toggleFilter();
+      } else if (e.altKey && !mod && !e.shiftKey && (k === 'v' || e.code === 'KeyV')) {
+        e.preventDefault();
+        actions.tabViews();
+      } else if (mod && e.altKey && (e.key === 'PageDown' || e.key === 'PageUp')) {
+        e.preventDefault();
+        actions.stepTabView(e.key === 'PageDown' ? 1 : -1);
+      } else if (mod && e.altKey && e.key === 'Home') {
+        e.preventDefault();
+        actions.setTabView(null);
       } else if (e.altKey && !mod && !e.shiftKey && k === 'i') {
         e.preventDefault();
         actions.openSnippets();
@@ -2247,6 +2343,12 @@ export function App() {
       'quick-open': () => setDialog({ type: 'quickOpen' }),
       'reveal-tab': () => window.dispatchEvent(new CustomEvent('tabs:reveal')),
       'tab-list': () => window.dispatchEvent(new CustomEvent('tabs:list')),
+      'tab-view': () => actions.tabViews(),
+      'tab-group-next': () => actions.stepTabView(1),
+      'tab-group-prev': () => actions.stepTabView(-1),
+      'tab-view-all': () => actions.setTabView(null),
+      'tab-view-only': () => actions.onlyActiveGroup(),
+      'tab-move-group': () => actions.moveActiveToGroup(),
       trash: () => setDialog({ type: 'trash' }),
       split: () => actions.toggleSplit(),
       'type-out': () => actions.typeOut(),
@@ -2447,7 +2549,7 @@ export function App() {
         </div>
         ${terminalShown && html`<${TerminalPanel} settings=${settings} actions=${actions} onHide=${() => (setTerminalShown(false), hostRef.current?.focus())} />`}
         <${ReadAloudBar} />
-        <${StatusBar} recording=${recording} big=${big && Boolean(activeKey)} cursor=${activeKey ? cursor : null} language=${languageName} file=${activeFile} repo=${activeRepo} disk=${activeDisk} settings=${settings} sync=${sync} actions=${actions}
+        <${StatusBar} recording=${recording} big=${big && Boolean(activeKey)} cursor=${activeKey ? cursor : null} language=${languageName} file=${activeFile} repo=${activeRepo} disk=${activeDisk} settings=${settings} sync=${sync} actions=${actions} group=${activeGroup}
           problems=${settings.problems !== false && activeKey ? problems[activeKey] : null} problemsOpen=${panel === 'problems'}
           lsp=${activeKey && settings.languageServers !== false ? lspRef.current?.statusOf(activeKey) : null} lspOpen=${panel === 'servers'}
           git=${activeKey && gitHeads[activeKey] ? { ...gitHeads[activeKey], changes: hostRef.current?.gitChanges(activeKey)?.changes ?? null } : null} />
@@ -2472,10 +2574,11 @@ export function App() {
     (dialog.pick === 'compare'
       ? html`<${QuickOpen} files=${store.live()} docs=${docs} actions=${actions} title=${`Compare ${activeName} with…`} exclude=${activeFile ? activeFile.id : activeRepo ? `r:${activeRepo.path}` : ''}
           onPick=${(entry) => actions.compareWithEntry(entry)} onClose=${() => setDialog(null)} />`
-      : html`<${QuickOpen} files=${store.live()} docs=${docs} actions=${actions} initial=${dialog.query ?? ''} symbols=${() => (activeKey ? (hostRef.current?.codeContext()?.symbols ?? []) : [])}
+      : html`<${QuickOpen} files=${store.live()} docs=${docs} openTabs=${openDiskTabs()} actions=${actions} initial=${dialog.query ?? ''} symbols=${() => (activeKey ? (hostRef.current?.codeContext()?.symbols ?? []) : [])}
           roots=${folderRoots(settings)} hidden=${Boolean(settings.showHidden)} onSymbol=${(entry) => actions.revealSymbol(entry)} onClose=${() => setDialog(null)} />`)}
     ${dialog?.type === 'palette' && html`<${CommandPalette} initial=${dialog.query ?? ''} onRun=${(c) => setTimeout(() => actions.command(c.id), 0)} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'symbols' && html`<${SymbolSearch} files=${store.live()} roots=${folderRoots(settings)} initial=${dialog.query ?? ''} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'folderGroup' && html`<${FolderGroupDialog} path=${dialog.path} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'lspSetup' && html`<${SetupServerDialog} missing=${dialog.missing} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'renameSymbol' && html`<${RenameSymbolDialog} word=${dialog.word} onClose=${() => (setDialog(null), hostRef.current?.focus())} onRename=${(name) => (setDialog(null), actions.renameWithServer(dialog, name), hostRef.current?.focus())} />`}
     ${dialog?.type === 'declarations' && html`<${DeclarationPicker} word=${dialog.word} places=${dialog.places} roots=${folderRoots(settings)} actions=${actions} onClose=${() => setDialog(null)} />`}

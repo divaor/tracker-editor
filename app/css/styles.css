@@ -3088,6 +3088,228 @@ button.where-chip:hover {
   min-width: 0;
 }
 
+/* Tab views: the switcher at the bar's left end (which groups of tabs show). */
+.tab-view-btn {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  height: 37px;
+  padding: 0 9px 0 10px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tab-view-btn:hover,
+.tab-view-btn[aria-expanded='true'] {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.tab-view-btn.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.tab-view-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.view-dot {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--gc, var(--text-3));
+}
+
+.view-dot.sample {
+  background: conic-gradient(#2f6fd6 0 33%, #c2603c 0 66%, #23845f 0);
+}
+
+.menu.tab-views {
+  min-width: 270px;
+  max-width: min(360px, calc(100vw - 16px));
+  overflow-x: hidden;
+}
+
+.view-filter {
+  min-width: 0;
+  margin: 2px 2px 6px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+}
+
+.view-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 7px;
+}
+
+.view-row.on {
+  background: var(--accent-soft);
+}
+
+.view-check,
+.view-check-space {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-left: 6px;
+}
+
+.view-check {
+  padding: 0;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.view-check[aria-checked='true'] {
+  border-color: var(--accent);
+}
+
+.view-pick {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.view-pick:hover,
+.view-pick:focus-visible {
+  background: var(--surface-3);
+}
+
+.view-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.view-hint {
+  color: var(--text-3);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.view-count {
+  margin-left: auto;
+  padding-left: 8px;
+  color: var(--text-3);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.view-more {
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+.view-row:hover .view-more,
+.view-more:focus-visible {
+  opacity: 1;
+}
+
+.menu-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px 3px;
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* A tab from another group than the view's, while it is open: dashed, until you go elsewhere. */
+.tab.guest {
+  outline: 1px dashed var(--border-strong);
+  outline-offset: -4px;
+}
+
+.tab.guest .tab-name {
+  font-style: italic;
+}
+
+/* Its group's color along the bottom edge (the top line is where the file lives). */
+.tab.grouped[class*='kind-'] {
+  box-shadow: inset 0 2px 0 color-mix(in srgb, var(--kc) 55%, transparent), inset 0 -3px 0 color-mix(in srgb, var(--gc) 85%, transparent);
+}
+
+.tab.grouped.active[class*='kind-'] {
+  box-shadow: inset 0 3px 0 var(--kc), inset 0 -3px 0 var(--gc);
+}
+
+.tab-empty {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  color: var(--text-3);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.link-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.status-group .view-dot {
+  width: 8px;
+  height: 8px;
+}
+
+.root-section.grouped > .root-head {
+  box-shadow: inset 0 -2px 0 var(--gc);
+}
+
+@media (max-width: 860px) {
+  .tab-view-btn {
+    max-width: 130px;
+    padding: 0 7px;
+  }
+}
+
 /* All open tabs, in a list (when they do not all fit). */
 .tab-list-btn {
   display: inline-flex;

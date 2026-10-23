@@ -17,6 +17,8 @@ import { mirrorOf } from '../mirrors.js';
 import { mirrorState } from './mirrors.js';
 import { indentLabel } from '../indent.js';
 import { problemsSummary } from './problems.js';
+import { tabViewState } from '../tabViews.js';
+import { TabViewMenu } from './tabViews.js';
 
 /** The server of a file on one ({ conn, status }), or null. */
 const serverOf = (path) => {
@@ -57,19 +59,9 @@ export function WhereChip({ kind, label, state, title, onClick }) {
 
 const syncInfo = (sync) => ({ configured: isSyncConfigured(), phase: sync?.phase });
 
-// Unpinned tabs by project, in the order each project first appears; tabs
-// without one last.
-function groupTabs(keys) {
-  const groups = new Map();
-  for (const key of keys) {
-    const project = tabInfo(key)?.project ?? '';
-    const id = project ? projectKey(project) : '';
-    if (!groups.has(id)) groups.set(id, { id, name: project, keys: [] });
-    groups.get(id).keys.push(key);
-  }
-  const list = [...groups.values()];
-  return [...list.filter((g) => g.id), ...list.filter((g) => !g.id)];
-}
+// The tabs of the bar by group, in the groups' order (vs: tabViewState).
+const barGroups = (keys, vs) =>
+  vs.groups.map((g) => ({ ...g, keys: keys.filter((k) => vs.groupOfKey(k) === g.id) })).filter((g) => g.keys.length);
 
 const narrowScreen = () => matchMedia('(max-width: 860px)').matches;
 // A finger rather than a mouse: tabs get a ⋯ button and a long press for their menu.
@@ -112,6 +104,8 @@ export function TabBar({ session, projects, settings, actions }) {
   const [edges, setEdges] = useState({ left: 0, right: 0, moreLeft: false, moreRight: false, activeSide: null });
   const [list, setList] = useState(null); // the menu of all the open tabs: { at }
   const listButton = useRef(null);
+  const [views, setViews] = useState(null); // the view switcher: { at, moving? }
+  const viewButton = useRef(null);
   const press = useRef(null); // a finger held on a tab: { timer, x, y, fired }
   const touch = touchScreen();
   useEffect(() => {
@@ -162,32 +156,51 @@ export function TabBar({ session, projects, settings, actions }) {
     const r = (listButton.current ?? strip.current)?.getBoundingClientRect();
     if (r) setList({ at: { x: r.right, y: r.bottom + 4, right: true } });
   };
-  // From Help and the View menu (actions.command): 'tabs:reveal', 'tabs:list'.
+  // The switcher under its button (or the bar's left end when it is hidden); `moving`: a tab to move to a group.
+  const openViews = (moving = null) => {
+    const r = (viewButton.current ?? strip.current)?.getBoundingClientRect();
+    if (r) setViews({ at: { x: r.left, y: r.bottom + 4 }, moving });
+  };
+  // From Help and the View menu (actions.command): 'tabs:reveal', 'tabs:list', 'tabs:views', 'tabs:move'.
   useEffect(() => {
     const onReveal = () => reveal();
     const onList = () => openList();
-    window.addEventListener('tabs:reveal', onReveal);
-    window.addEventListener('tabs:list', onList);
-    return () => (window.removeEventListener('tabs:reveal', onReveal), window.removeEventListener('tabs:list', onList));
+    const onViews = () => openViews();
+    const onMove = (e) => e.detail?.key && openViews({ key: e.detail.key, name: tabInfo(e.detail.key)?.name ?? '' });
+    const events = [['tabs:reveal', onReveal], ['tabs:list', onList], ['tabs:views', onViews], ['tabs:move', onMove]];
+    for (const [name, fn] of events) window.addEventListener(name, fn);
+    return () => events.forEach(([name, fn]) => window.removeEventListener(name, fn));
   }, []);
   const openMenu = (key, at) => setMenu({ key, at });
   const endPress = () => {
     clearTimeout(press.current?.timer);
     if (press.current && !press.current.fired) press.current = null;
   };
-  const pinned = session.pinned ?? [];
-  const unpinned = session.open.filter((k) => !pinned.includes(k));
-  const groups = settings.groupTabs ? groupTabs(unpinned) : [{ id: null, keys: unpinned }];
-  const showHeaders = settings.groupTabs && groups.some((g) => g.id);
-  const byKey = new Map(projects.map((p) => [p.key, p]));
+  // What the view shows: its groups' tabs (the pinned ones too, unless turned off) and the
+  // open tab from another group, as a guest.
+  const vs = tabViewState(settings);
+  const pinned = (session.pinned ?? []).filter((k) => vs.keys.includes(k));
+  const unpinned = vs.keys.filter((k) => !pinned.includes(k));
+  const inBar = [...vs.keys, ...vs.guests];
+  const groups = settings.groupTabs ? barGroups(unpinned, vs) : [{ id: null, keys: unpinned }];
+  const showHeaders = settings.groupTabs && (groups.length > 1 || groups.some((g) => g.kind === 'project' || g.kind === 'folder'));
+  const groupById = new Map(vs.groups.map((g) => [g.id, g]));
+  // A line in the group's color under each tab: always, or when two or more colored groups show.
+  const colorMode = settings.tabColors ?? 'auto';
+  const colored = new Set(inBar.map(vs.groupOfKey).filter((id) => groupById.get(id)?.color));
+  const showColors = colorMode === 'always' ? colored.size > 0 : colorMode === 'auto' && colored.size >= 2;
+  const showSwitcher = vs.groups.length > 1 || Boolean(vs.view);
 
   const menuItems = (key) => {
-    const isPinned = pinned.includes(key);
-    const at = session.open.indexOf(key);
-    const group = settings.groupTabs ? groups.find((g) => g.keys.includes(key)) : null;
-    const closable = (keys) => keys.filter((k) => !pinned.includes(k));
-    const others = closable(session.open.filter((k) => k !== key));
-    const right = closable(session.open.slice(at + 1));
+    const isPinned = session.pinned.includes(key);
+    const at = inBar.indexOf(key);
+    const group = groupById.get(vs.groupOfKey(key));
+    const guest = vs.guests.includes(key);
+    const only = vs.view?.length === 1 ? vs.view[0] : null;
+    // Closing works on the tabs the bar shows; pinned ones stay.
+    const closable = (keys) => keys.filter((k) => !session.pinned.includes(k));
+    const others = closable(inBar.filter((k) => k !== key));
+    const right = closable(inBar.slice(at + 1));
     return [
       { label: isPinned ? 'Unpin' : 'Pin', icon: 'pin', run: () => store.pin(key, !isPinned) },
       !narrowScreen() &&
@@ -205,10 +218,15 @@ export function TabBar({ session, projects, settings, actions }) {
       { label: 'Close', icon: 'x', run: () => actions.close(key) },
       { label: 'Close others', disabled: !others.length, run: () => actions.closeMany(others) },
       { label: 'Close tabs to the right', disabled: !right.length, run: () => actions.closeMany(right) },
-      group?.id && { label: `Close the ${group.name} tabs`, run: () => actions.closeMany(closable(group.keys)) },
-      { label: 'Close all', disabled: !closable(session.open).length, run: () => actions.closeMany(closable(session.open)) },
+      group && vs.groups.length > 1 && { label: `Close the ${group.name} tabs`, run: () => actions.closeMany(closable(group.keys)) },
+      { label: vs.view ? 'Close all shown' : 'Close all', disabled: !closable(inBar).length, run: () => actions.closeMany(closable(inBar)) },
       { separator: true },
-      { label: 'Group tabs by project', checked: settings.groupTabs, run: () => saveSettings({ groupTabs: !getSettings().groupTabs }) },
+      group && only !== group.id && { label: `Only the ${group.name} tabs`, icon: 'eye', run: () => actions.setTabView([group.id]) },
+      guest && group && { label: `Also show ${group.name}`, run: () => actions.setTabView([...vs.view, group.id]) },
+      guest && only && only !== 'pinned' && { label: `Move it to ${vs.nameOf(only)}`, run: () => actions.moveToGroup(key, only) },
+      vs.view && { label: 'All tabs', icon: 'list', run: () => actions.setTabView(null) },
+      { label: 'Move to group…', run: () => openViews({ key, name: tabInfo(key)?.name ?? '' }) },
+      { label: 'Group headers in the tab bar', checked: settings.groupTabs, run: () => saveSettings({ groupTabs: !getSettings().groupTabs }) },
     ];
   };
 
@@ -217,10 +235,15 @@ export function TabBar({ session, projects, settings, actions }) {
     if (!info) return null;
     const isActive = key === session.active;
     const isSide = key === session.side;
-    const isPinned = pinned.includes(key);
+    const isPinned = session.pinned.includes(key);
+    const isGuest = vs.guests.includes(key);
+    const group = groupById.get(vs.groupOfKey(key));
+    const gc = showColors ? group?.color : null;
+    const groupLine = group && (vs.groups.length > 1 || isGuest) ? `\n${isGuest ? `From ${group.name}: not in this view` : group.name}` : '';
     return html`<div key=${key} role="tab" aria-selected=${isActive} tabindex=${isActive ? 0 : -1}
-        class="tab kind-${info.kind} ${isActive ? 'active' : ''} ${isSide ? 'side' : ''} ${isPinned ? 'pinned' : ''} ${info.unsynced ? 'unsynced' : ''} ${info.offline ? 'offline' : ''} ${dragging === key ? 'dragging' : ''}"
-        title=${`${isSide ? `${info.title} · in the side view` : info.title}${touch ? '' : `\n${isPinned ? 'Double-click to unpin' : 'Double-click to pin'} · middle-click to close`}`}
+        class="tab kind-${info.kind} ${isActive ? 'active' : ''} ${isSide ? 'side' : ''} ${isPinned ? 'pinned' : ''} ${info.unsynced ? 'unsynced' : ''} ${info.offline ? 'offline' : ''} ${dragging === key ? 'dragging' : ''} ${isGuest ? 'guest' : ''} ${gc ? 'grouped' : ''}"
+        style=${gc ? { '--gc': gc } : undefined}
+        title=${`${isSide ? `${info.title} · in the side view` : info.title}${groupLine}${touch ? '' : `\n${isPinned ? 'Double-click to unpin' : 'Double-click to pin'} · middle-click to close`}`}
         draggable=${!touch}
         onDragStart=${(e) => {
           setDragging(key);
@@ -326,32 +349,48 @@ export function TabBar({ session, projects, settings, actions }) {
     </button>`;
   };
   // Every open tab in a list, the open one checked; with tabs out of sight.
-  const listItems = () => [
-    { label: 'Show the open tab', icon: 'eye', disabled: !session.active, run: reveal },
-    { separator: true },
-    ...session.open.map((key) => {
-      const info = tabInfo(key);
-      return info && { key, label: info.name, icon: pinned.includes(key) ? 'pin' : KINDS[info.kind].icon, hint: info.project || KINDS[info.kind].label, checked: key === session.active, run: () => actions.activate(key) };
-    }),
-  ];
+  const listItem = (key) => {
+    const info = tabInfo(key);
+    const hidden = !inBar.includes(key);
+    return info && { key, label: info.name, icon: session.pinned.includes(key) ? 'pin' : KINDS[info.kind].icon, hint: hidden ? 'not in this view' : KINDS[info.kind].label, checked: key === session.active, run: () => actions.activate(key) };
+  };
+  // Every open tab, by group when there are several (the view's groups first).
+  const listItems = () => {
+    const shownFirst = [...vs.groups].sort((a, b) => Number(!vs.view || vs.view.includes(b.id)) - Number(!vs.view || vs.view.includes(a.id)));
+    return [
+      { label: 'Show the open tab', icon: 'eye', disabled: !session.active, run: reveal },
+      { separator: true },
+      ...(vs.groups.length > 1 ? shownFirst.flatMap((g) => [{ heading: true, key: `h:${g.id}`, label: g.name, color: g.color }, ...g.keys.map(listItem)]) : session.open.map(listItem)),
+    ];
+  };
   const overflowing = edges.moreLeft || edges.moreRight;
 
-  return html`<div class="tabbar-wrap"><div class="tabbar-strip">${hint('left')}<div class="tabbar" role="tablist" aria-label="Open files" ref=${strip}
+  const single = vs.view?.length === 1 ? groupById.get(vs.view[0]) : null;
+  return html`<div class="tabbar-wrap">
+    ${showSwitcher &&
+    html`<button type="button" class="tab-view-btn ${vs.view ? 'on' : ''}" ref=${viewButton} aria-haspopup="dialog" aria-expanded=${Boolean(views && !views.moving)}
+      title=${`Which tabs show: ${vs.label} (Alt+V)${vs.view ? ` · ${session.open.length - inBar.length} more open in other groups` : ''}`}
+      onClick=${() => (views ? setViews(null) : openViews())}>
+      ${single?.color ? html`<span class="view-dot" style=${{ '--gc': single.color }} />` : html`<${Icon} name=${vs.view ? 'eye' : 'list'} size=${14} />`}
+      <span class="tab-view-label">${vs.label}</span><${Icon} name="chevronDown" size=${13} />
+    </button>`}
+    <div class="tabbar-strip">${hint('left')}<div class="tabbar" role="tablist" aria-label="Open files" ref=${strip}
       onDblClick=${(e) => e.target === e.currentTarget && actions.newFile()}>
     ${pinned.map(tab)}
     ${groups.map((g) => {
-      const collapsed = showHeaders && session.collapsed?.includes(g.id || 'none');
+      const collapsed = showHeaders && session.collapsed?.includes(g.id);
       const shown = collapsed ? g.keys.filter((k) => k === session.active || k === session.side) : g.keys;
-      const color = g.id ? byKey.get(g.id)?.color : null;
       return html`
         ${showHeaders &&
-        html`<button type="button" key=${`group:${g.id}`} class="tab-group ${collapsed ? 'collapsed' : ''}" style=${color ? { '--pc': color } : undefined}
-          aria-expanded=${!collapsed} title=${collapsed ? `Show the ${g.name || 'other'} tabs` : `Fold the ${g.name || 'other'} tabs`}
-          onClick=${() => store.toggleGroup(g.id || 'none')}>
-          ${g.id ? html`<span class="project-dot" />` : ''}<span>${g.name || 'Other'}</span>${collapsed && html`<span class="count">${g.keys.length}</span>`}
+        html`<button type="button" key=${`group:${g.id}`} class="tab-group ${collapsed ? 'collapsed' : ''}" style=${g.color ? { '--pc': g.color } : undefined}
+          aria-expanded=${!collapsed} title=${collapsed ? `Show the ${g.name} tabs` : `Fold the ${g.name} tabs`}
+          onClick=${() => store.toggleGroup(g.id)}>
+          ${g.color ? html`<span class="project-dot" />` : ''}<span>${g.name}</span>${collapsed && html`<span class="count">${g.keys.length}</span>`}
         </button>`}
         ${shown.map(tab)}`;
     })}
+    ${vs.guests.map(tab)}
+    ${vs.view && !inBar.length && html`<span class="tab-empty">No tabs open in ${vs.label}. <button type="button" class="link-btn" onClick=${() => actions.setTabView(null)}>All tabs</button></span>`}
     <button type="button" class="tab-new" aria-label="New file" title="New file (Alt+N)" onClick=${() => actions.newFile()}><${Icon} name="plus" size=${16} /></button>
     ${menu && session.open.includes(menu.key) && html`<${Menu} items=${menuItems(menu.key)} at=${menu.at} label="Tab" onClose=${() => setMenu(null)} />`}
   </div>${hint('right')}</div>
@@ -361,6 +400,7 @@ export function TabBar({ session, projects, settings, actions }) {
       <${Icon} name="chevronDown" size=${15} /><span class="tab-list-count">${session.open.length}</span>
     </button>`}
     ${list && html`<${Menu} items=${listItems()} at=${list.at} label="Open tabs" owner=${listButton} onClose=${() => setList(null)} />`}
+    ${views && html`<${TabViewMenu} state=${vs} at=${views.at} moving=${views.moving} owner=${viewButton} actions=${actions} onClose=${() => setViews(null)} />`}
   </div>`;
 }
 
@@ -604,7 +644,7 @@ function ServerStatus({ lsp, open, actions }) {
   </button>`;
 }
 
-export function StatusBar({ recording, big, cursor, language, file, repo, disk, settings, actions, problems, problemsOpen, git, lsp, lspOpen }) {
+export function StatusBar({ recording, big, cursor, language, file, repo, disk, settings, actions, problems, problemsOpen, git, lsp, lspOpen, group }) {
   const setLanguage = (value) => file && actions.patch(file.id, { language: value === 'auto' ? '' : value });
   let state = '';
   const kind = file ? 'synced' : repo ? 'doc' : disk ? (isRemotePath(disk.path) ? 'remote' : 'disk') : null;
@@ -620,6 +660,11 @@ export function StatusBar({ recording, big, cursor, language, file, repo, disk, 
     html`<span class="status-where kind-${kind}" title=${connection ? `${KINDS[kind].hint}\n${connection}` : KINDS[kind].hint}>
       <${Icon} name=${KINDS[kind].icon} size=${13} /><span>${label}</span>${srv && html`<span class="conn-dot state-${srv.status.state}" aria-label=${connection} />`}
     </span>`}
+    ${group &&
+    html`<button type="button" class="status-item status-btn-text status-group" style=${group.color ? { '--gc': group.color } : undefined}
+      title=${`Its tab group: ${group.name}${group.kind === 'folder' ? ` (${group.path})` : ''}. Click to show only its tabs.`} onClick=${() => actions.setTabView([group.id])}>
+      <span class="view-dot" /><span>${group.name}</span>
+    </button>`}
     <span class="status-item status-state" title=${file ? `${formatBytes(store.text(file.id).length)}` : ''}>${state}</span>
     ${recording && html`<button type="button" class="status-item status-btn-text status-recording" title="Recording a macro: Ctrl+Shift+R stops" onClick=${actions.toggleRecording}>● Recording macro</button>`}
     ${big && html`<span class="status-item status-big" title="A very large file: highlighting, wrapping and completion are off to keep it fast">Large file</span>`}

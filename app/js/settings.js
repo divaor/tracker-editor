@@ -57,8 +57,16 @@ export const DEFAULT_SETTINGS = {
   indentGuides: true,
   bracketColors: true,
   stickyScroll: true,
-  // Tabs gathered by project in the tab bar, each group foldable.
+  // Tabs gathered by group (project, folder, notes) in the tab bar, each group foldable.
   groupTabs: false,
+  // Tab views (tabGroups.js): pinned tabs show in every view; a line in each tab's group color
+  // ('auto': when tabs of two or more colored groups show, 'always', 'off').
+  pinnedEverywhere: true,
+  tabColors: 'auto',
+  // Folders as tab groups: linked to a tracker project ({ path: name }; '' = not linked, already
+  // offered) and their colors ({ path: '#rrggbb' }).
+  folderProjects: {},
+  folderColors: {},
   // A frame around the editor in the color of where the file lives (my files, tracker, this computer, a server).
   whereFrame: true,
   // Project filter for the file list (see matchesScope in tracker-model.js).
