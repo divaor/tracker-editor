@@ -2395,7 +2395,7 @@ function buildMenu() {
         item('Open a File…', 'CmdOrCtrl+P', 'quick-open'),
         item('Open File (Edit in Place)…', 'CmdOrCtrl+O', 'disk-open'),
         item('Open Folder…', undefined, 'folder-open'),
-        item('Open Folder Beside the Others…', undefined, 'folder-beside'),
+        item('Folders Side by Side…', undefined, 'folder-beside'),
         item('Connect to a Server…', undefined, 'server-add'),
         item('Servers from the SSH Config…', undefined, 'servers-ssh'),
         item('Import Files…', undefined, 'open-disk'),

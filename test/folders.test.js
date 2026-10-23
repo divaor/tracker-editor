@@ -429,3 +429,20 @@ test('several folders side by side: replacing, adding, never one inside another'
   assert.deepEqual(besideSettings({ folder: '/w/a', folderSections: ['/w/a', '/z'] }, '/w'), { folder: '/w', folderSections: ['/w', '/z'], folderCollapsed: [] });
   assert.deepEqual(besideSettings({ folder: 'C:\\Work', folderSections: [] }, 'c:\\work\\Proj').already, 'C:\\Work');
 });
+
+test('folders side by side: added from the list, and put in another order', async () => {
+  const { addSection, moveSectionTo } = await import('../app/js/folders.js');
+  assert.deepEqual(addSection(['/a'], '/b'), ['/a', '/b']);
+  assert.deepEqual(addSection(['/a', 'remote://s1/home/me'], 'remote://s1/srv'), ['/a', 'remote://s1/home/me', 'remote://s1/srv']);
+  // Inside an open one: nothing to add. Holding open ones: it takes the place of the first.
+  assert.deepEqual(addSection(['/a', '/b'], '/a/x'), ['/a', '/b']);
+  assert.deepEqual(addSection(['/w/a', '/z', '/w/b'], '/w'), ['/w', '/z']);
+  // A server's start folder and a folder on it are different places.
+  assert.deepEqual(addSection(['remote://s1/'], 'remote://s2/'), ['remote://s1/', 'remote://s2/']);
+  // Dragged before or after another one.
+  assert.deepEqual(moveSectionTo(['/a', '/b', '/c'], '/c', '/a'), ['/c', '/a', '/b']);
+  assert.deepEqual(moveSectionTo(['/a', '/b', '/c'], '/a', '/c', true), ['/b', '/c', '/a']);
+  assert.deepEqual(moveSectionTo(['/a', '/b', '/c'], '/a', '/b', true), ['/b', '/a', '/c']);
+  assert.deepEqual(moveSectionTo(['/a', '/b', '/c'], '/b', '/b'), ['/a', '/b', '/c']);
+  assert.deepEqual(moveSectionTo(['/a', '/b'], '/x', '/a'), ['/a', '/b']);
+});

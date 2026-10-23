@@ -1,6 +1,6 @@
 import { html, useEffect, useLayoutEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import { canDragOut, draggedPaths, draggedTab, dropped, isOwnDrop, onDragOutEnd, startDragOut } from '../dragOut.js';
-import { baseName, breadcrumbs, FOLDER_SORTS, isImageName, isWithin, modeString, nameMatcher, opensInEditor, parentOf, peekKind, pushRecent, quotePath, rangeOf, renameRange, replaceSection, rootOf, selectionSummary, sortsUp, toggleFavorite, topmost, treeRows, withCurrent } from '../folders.js';
+import { baseName, breadcrumbs, FOLDER_SORTS, isImageName, modeString, moveSectionTo, nameMatcher, opensInEditor, parentOf, peekKind, pushRecent, quotePath, rangeOf, renameRange, replaceSection, rootOf, selectionSummary, sortsUp, toggleFavorite, topmost, treeRows, withCurrent } from '../folders.js';
 import { formatBytes, timeAgo } from '../format.js';
 import { getSettings, isLocal, saveSettings } from '../settings.js';
 import { diskKey } from '../store.js';
@@ -24,6 +24,9 @@ const branchTitle = (g) => {
   const sync = [g.ahead && `${g.ahead} to push`, g.behind && `${g.behind} to pull`].filter(Boolean).join(', ');
   return `Git: branch ${g.branch}${g.upstream ? ` (${g.upstream}${sync ? `: ${sync}` : ''})` : ''} · ${changed ? `${changed} changed file${changed === 1 ? '' : 's'}` : 'nothing changed'} since the last commit`;
 };
+
+// What a folder's header carries when it is dragged to another place in the order.
+const SECTION_DRAG = 'text/x-folder-section';
 
 const PLACES = [
   { id: 'documents', label: 'Documents' },
@@ -458,6 +461,56 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     if (cursor && !rootOf(cursor, [s])) setCursor(null);
     if (settings.folder !== s) saveSettings({ folder: s });
     list.current?.focus();
+  };
+  // A header dragged to another place in the order (a drag of its own: files are never in it).
+  const [reorder, setReorder] = useState(null); // { path, over, after }
+  const reorderAt = useRef(null);
+  const isSectionDrag = (ev) => (ev.dataTransfer?.types ?? []).includes(SECTION_DRAG);
+  const startSectionDrag = (ev, d) => {
+    ev.stopPropagation();
+    ev.dataTransfer.setData(SECTION_DRAG, d);
+    ev.dataTransfer.effectAllowed = 'move';
+    reorderAt.current = { path: d, over: null, after: false };
+    setReorder(reorderAt.current);
+  };
+  const endSectionDrag = () => ((reorderAt.current = null), setReorder(null));
+  // Ended anywhere (dropped elsewhere, Escape): no line left behind.
+  useEffect(() => {
+    const end = () => reorderAt.current && endSectionDrag();
+    window.addEventListener('dragend', end);
+    window.addEventListener('drop', end);
+    return () => {
+      window.removeEventListener('dragend', end);
+      window.removeEventListener('drop', end);
+    };
+  }, []);
+  /** Over a folder shown (or the space after the last one, `d` null): before or after it, by the pointer. */
+  const overSection = (ev, d) => {
+    const at = reorderAt.current;
+    if (!at) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    ev.dataTransfer.dropEffect = 'move';
+    let over = d;
+    let after = true;
+    if (d) {
+      // Over a header: its halves; over a folder's files: the halves of the whole folder.
+      const r = (ev.target.closest?.('.root-head') ?? ev.currentTarget.closest('.root-section') ?? ev.currentTarget).getBoundingClientRect();
+      after = ev.clientY > r.top + r.height / 2;
+    } else over = live.at(-1);
+    if (at.over === over && at.after === after) return;
+    reorderAt.current = { ...at, over, after };
+    setReorder(reorderAt.current);
+  };
+  const dropSection = (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const at = reorderAt.current;
+    endSectionDrag();
+    if (!at?.over || at.over === at.path) return;
+    const now = getSettings();
+    const next = moveSectionTo(withCurrent(now.folderSections, now.folder), at.path, at.over, at.after);
+    saveSettings({ folderSections: next });
   };
   const moveSection = (s, by) => {
     const at = sections.indexOf(s);
@@ -966,8 +1019,8 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     ...roots.map((r) => ({ label: r, icon: 'folder', checked: r === root, run: () => go(r) })),
     ...servers().map((c) => ({ label: `${c.name} (${protocolName(c.protocol)} · ${c.host})`, icon: 'server', checked: remoteRoot(c.id) === root, run: () => actions.openServer(c.id) })),
     { separator: true },
+    { label: 'Folders side by side…', icon: 'columns', hint: 'Several of these next to each other, here or on servers', run: () => actions.sideBySide() },
     { label: 'Open another folder…', icon: 'folderOpen', run: () => pick(remote ? undefined : (parentOf(dir, root) ?? root)) },
-    { label: 'Open another folder beside this one…', icon: 'columns', run: () => actions.openFolder(remote ? undefined : (parentOf(dir, root) ?? root), { beside: true }) },
     { label: 'Connect to a server…', icon: 'server', run: () => actions.editServer() },
     { label: 'Servers from your SSH config…', icon: 'server', run: () => actions.importSshConfig() },
     window.desktop?.mirrors && { label: 'Mirrors…', icon: 'sync', run: () => actions.showMirrors() },
@@ -991,20 +1044,6 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
         ]),
   ];
 
-  // Another folder (or server) beside the ones shown, each a root of the tree.
-  const besideItems = () => {
-    const open = (p) => live.some((s) => isWithin(p, s) || isWithin(s, p));
-    return [
-      { label: 'Pick a folder…', icon: 'folderOpen', run: () => actions.openFolder(remote ? undefined : (parentOf(dir, root) ?? root), { beside: true }) },
-      ...roots.filter((r) => !open(r)).map((r) => ({ key: r, label: baseName(r), hint: r, icon: 'folder', run: () => openBeside(r) })),
-      ...servers()
-        .filter((c) => !live.some((s) => isRemotePath(s) && remoteParts(s).id === c.id))
-        .map((c) => ({ key: c.id, label: c.name, hint: `${protocolName(c.protocol)} · ${c.host}`, icon: 'server', run: () => actions.openServer(c.id, { beside: true }) })),
-      ...(settings.folderFavorites ?? []).filter((p) => !open(p)).map((p) => ({ key: `fav:${p}`, label: placeName(p), hint: placeHint(p), icon: 'star', run: () => openBeside(p) })),
-      { separator: true },
-      { label: 'Connect to a server…', icon: 'server', run: () => actions.editServer() },
-    ];
-  };
   // A folder shown beside others: its header's menu.
   const sectionItems = (s) => {
     const up = parentOf(s, rootFor(s));
@@ -1078,6 +1117,17 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     onDragLeave: (ev) => !ev.currentTarget.contains(ev.relatedTarget) && setDropTarget((t) => (t === target ? null : t)),
     onDrop: (ev) => onDrop(ev, target),
   });
+  // A folder shown takes files (moved into it) and other folders' headers (put before or after it).
+  const sectionDropProps = (target) => ({
+    ...dropProps(target),
+    onDragOver: (ev) => (isSectionDrag(ev) ? overSection(ev, target) : acceptDrag(ev, target)),
+    onDrop: (ev) => (isSectionDrag(ev) ? dropSection(ev) : onDrop(ev, target)),
+  });
+  const listDropProps = {
+    ...dropProps(dir),
+    onDragOver: (ev) => (isSectionDrag(ev) ? overSection(ev, null) : acceptDrag(ev, dir)),
+    onDrop: (ev) => (isSectionDrag(ev) ? dropSection(ev) : onDrop(ev, dir)),
+  };
   const details = settings.folderView === 'details';
   const perms = live.some(isRemotePath) && settings.showPermissions;
   const row = ({ entry: e, depth, expanded: open }) => {
@@ -1182,7 +1232,8 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     const inside = rem ? remoteParts(d).path.replace(/\/+$/, '') : '';
     const where = rem ? (inside ? `${c?.name ?? 'Server'} · ${inside.slice(0, inside.lastIndexOf('/')) || '/'}` : `${protocolName(c?.protocol)} · ${c?.host ?? ''}`) : dirOf(d);
     return html`<div class="root-head kind-${rem ? 'remote' : 'disk'} ${d === dir ? 'current' : ''} ${dropTarget === d ? 'drop-target' : ''}" data-section=${d}
-      title=${`${rem ? `On ${c?.name ?? 'a server'}: ${remoteParts(d).path || '/'}` : `On this computer: ${d}`}\nClick to work here · right-click for more`}
+      title=${`${rem ? `On ${c?.name ?? 'a server'}: ${remoteParts(d).path || '/'}` : `On this computer: ${d}`}\nClick to work here · drag to change the order · right-click for more`}
+      draggable="true" onDragStart=${(ev) => startSectionDrag(ev, d)} onDragEnd=${endSectionDrag}
       onClick=${(ev) => {
         ev.stopPropagation();
         if (shut_) toggleCollapsed(d);
@@ -1190,7 +1241,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       }}
       onDblClick=${(ev) => ev.stopPropagation()}
       onContextMenu=${(ev) => (ev.preventDefault(), ev.stopPropagation(), setMenu({ section: d, at: { x: ev.clientX, y: ev.clientY } }))}
-      ...${dropProps(d)}>
+      ...${sectionDropProps(d)}>
       <button type="button" class="tree-twisty ${shut_ ? '' : 'open'}" tabindex="-1" aria-expanded=${!shut_} aria-label=${shut_ ? `Expand ${name}` : `Collapse ${name}`}
         onClick=${(ev) => (ev.stopPropagation(), toggleCollapsed(d))}><${Icon} name="chevronRight" size=${13} /></button>
       <${Icon} name=${rem ? 'server' : 'folder'} size=${15} class="root-head-icon" />
@@ -1207,8 +1258,10 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   const groupColor = (d) => (settings.tabColors !== 'off' ? folderGroupOf(d, settings).color : null);
   const sectionView = (x) => {
     const gc = groupColor(x.dir);
-    return html`<div key=${x.dir} class="root-section kind-${isRemotePath(x.dir) ? 'remote' : 'disk'} ${x.dir === dir ? 'current' : ''} ${collapsed.has(x.dir) ? 'collapsed' : ''} ${gc ? 'grouped' : ''}"
-        style=${gc ? { '--gc': gc } : undefined} role="group" aria-label=${placeName(x.dir)} ...${dropProps(x.dir)}>
+    const moving = reorder?.path === x.dir;
+    const mark = reorder?.over === x.dir && !moving ? (reorder.after ? 'reorder-after' : 'reorder-before') : '';
+    return html`<div key=${x.dir} class="root-section kind-${isRemotePath(x.dir) ? 'remote' : 'disk'} ${x.dir === dir ? 'current' : ''} ${collapsed.has(x.dir) ? 'collapsed' : ''} ${gc ? 'grouped' : ''} ${moving ? 'reordering' : ''} ${mark}"
+        style=${gc ? { '--gc': gc } : undefined} role="group" aria-label=${placeName(x.dir)} ...${sectionDropProps(x.dir)}>
       ${sectionHead(x.dir, x.matches)}
       ${!collapsed.has(x.dir) && sectionBody(x)}
     </div>`;
@@ -1231,7 +1284,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
         <button type="button" class="icon-btn sm fav-toggle ${favorite ? 'on' : ''}" aria-pressed=${favorite} aria-label=${favorite ? 'Remove this folder from favorites' : 'Add this folder to favorites'}
           title=${favorite ? 'Remove this folder from favorites' : 'Add this folder to favorites'} onClick=${() => toggleFav(dir)}><${Icon} name="star" size=${16} /></button>
         ${recent.length > 0 && html`<${MenuButton} label="Recent folders" icon="clock" items=${() => recent.map((p) => ({ key: p, label: placeName(p), hint: placeHint(p), icon: isRemotePath(p) ? 'server' : 'folder', run: () => go(p) }))} />`}
-        <${MenuButton} label="Open another folder beside this one (side by side in the tree)" icon="columns" items=${besideItems} />
+        ${tool('Folders side by side: add some beside this one (here or on servers), reorder, close', 'columns', () => actions.sideBySide())}
         <${MenuButton} label="Folders" items=${rootItems} />
       </div>
       ${favorites.length > 0 &&
@@ -1294,7 +1347,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       }}
       onDragOverCapture=${onListDragOver}
       onDragLeave=${(ev) => !list.current?.contains(ev.relatedTarget) && setTimeout(() => autoScroll.current.last < performance.now() - 150 && stopAutoScroll(), 200)}
-      ...${dropProps(dir)}>
+      ...${listDropProps}>
       ${dragZones?.up && html`<div class="drag-zone up ${dragZones.active < 0 ? 'active' : ''}" aria-hidden="true"><div><${Icon} name="arrowUp" size=${15} />Scroll up</div></div>`}
       ${columns}
       ${multi ? sectionRows.map(sectionView) : sectionBody(sectionRows[0])}

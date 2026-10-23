@@ -7535,3 +7535,227 @@ button.help-command:focus-visible {
   font-size: 14px;
   font-weight: 650;
 }
+
+/* Folders side by side (ui/sideBySide.js): the ones shown, in order, and what can be added. */
+.side-by-side-dialog .modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sbs-heading {
+  margin: 4px 0 2px;
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+.sbs-heading .muted {
+  font-weight: 500;
+}
+
+.sbs-shown,
+.sbs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sbs-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 3px 4px 3px 6px;
+  border-left: 3px solid var(--kc);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: color-mix(in srgb, var(--kc) 9%, var(--surface));
+  cursor: grab;
+}
+
+.sbs-row.dragging {
+  opacity: 0.45;
+}
+
+.sbs-row.drop-before::before,
+.sbs-row.drop-after::after {
+  position: absolute;
+  right: 0;
+  left: -3px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  content: '';
+  pointer-events: none;
+}
+
+.sbs-row.drop-before::before {
+  top: -3px;
+}
+
+.sbs-row.drop-after::after {
+  bottom: -3px;
+}
+
+.sbs-grip {
+  color: var(--text-3);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.sbs-kind {
+  flex: none;
+  color: var(--kc);
+}
+
+.sbs-name {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sbs-where {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sbs-new {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.sbs-down svg {
+  transform: rotate(180deg);
+}
+
+.sbs-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 2px;
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.sbs-group .muted {
+  font-weight: 500;
+}
+
+.sbs-group .conn-dot {
+  color: var(--kind-remote);
+}
+
+.sbs-remote .field-label {
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.sbs-add {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: 13.5px;
+  text-align: left;
+}
+
+.sbs-add:hover:not(:disabled),
+.sbs-add:focus-visible {
+  background: var(--accent-soft);
+}
+
+.sbs-add:disabled {
+  opacity: 0.55;
+}
+
+.sbs-add > svg:first-child {
+  flex: none;
+  color: var(--text-2);
+}
+
+.sbs-why {
+  flex: none;
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+
+.sbs-plus {
+  flex: none;
+  color: var(--accent);
+}
+
+.sbs-remote {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.sbs-remote-row {
+  display: flex;
+  gap: 6px;
+}
+
+.sbs-remote-row select {
+  flex: 0 1 160px;
+  min-width: 0;
+}
+
+.sbs-remote-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* A folder's header dragged to another place in the order: a line where it goes. */
+.root-section {
+  position: relative;
+}
+
+.root-section.reordering {
+  opacity: 0.5;
+}
+
+.root-section.reorder-before::before,
+.root-section.reorder-after::after {
+  position: absolute;
+  z-index: 3;
+  right: 0;
+  left: -3px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  content: '';
+  pointer-events: none;
+}
+
+.root-section.reorder-before::before {
+  top: -4px;
+}
+
+.root-section.reorder-after::after {
+  bottom: -4px;
+}

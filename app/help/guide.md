@@ -2,7 +2,7 @@
 
 Tracker Editor is a Notepad++-style editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs. Everything is saved the moment you paste or type, on this computer with the tracker, or, once you turn on sync, in the same private GitHub data repo as the tracker, so your files are on your computers and your phone.
 
-Version 0.16.1 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.16.1 · Web app: https://divaor.github.io/tracker-editor/
+Version 0.17.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.17.0 · Web app: https://divaor.github.io/tracker-editor/
 
 ---
 
@@ -14,9 +14,9 @@ Download from **https://github.com/divaor/tracker-editor/releases/latest**:
 
 | System | File |
 | --- | --- |
-| Windows | `Tracker Editor Setup 0.16.1.exe` (installer) or `Tracker Editor-0.16.1-portable.exe` (no install, no admin rights) |
-| macOS | `Tracker Editor-0.16.1-arm64.dmg` |
-| Linux | `Tracker Editor-0.16.1.AppImage` |
+| Windows | `Tracker Editor Setup 0.17.0.exe` (installer) or `Tracker Editor-0.17.0-portable.exe` (no install, no admin rights) |
+| macOS | `Tracker Editor-0.17.0-arm64.dmg` |
+| Linux | `Tracker Editor-0.17.0.AppImage` |
 
 The builds are not code-signed, so the first launch warns you. On Windows, choose *More info → Run anyway*. On macOS, right-click the app → *Open*. Installing the desktop app also registers `tracker-editor://` links, so the tracker's **Open in editor** opens files straight in it.
 
@@ -400,7 +400,7 @@ The sidebar has two views on the desktop: **My files** (synced) and **Folders** 
 | With your file explorer | Files you copy (`Ctrl+C`) or cut (`Ctrl+X`) here can be pasted in Explorer, Finder or your Linux file manager (cut moves them there). Copy files in Explorer or Finder, then `Ctrl+V` here: they are copied in. Drop files from another app: copied in. Drop a tab on a folder: a copy of it is saved there. Text copied anywhere and pasted becomes a new file (name it first). |
 | Delete | `Del` or the bin button: after asking, to the Recycle Bin (macOS: the Trash), where you can restore it. |
 | Undo | Rename, move, copy and paste show **Undo** in their message. |
-| Side by side | Several folders at once, each a root of the tree: the **⫼** button in the folder's bar (**Open another folder beside this one**) picks a folder or a server, and right-clicking a folder offers **Open beside**. Each one has a header in the color of where it is (amber: this computer, pink: a server, with its connection dot) that stays at the top while you scroll through it; the one you are working in is stronger, and the path above and the toolbar are its own. Click a header's arrow to **collapse** it to one line, click the header to open it and work there; right-click it for **Show only this one** (the others collapse), **Expand all**, **Collapse all**, **Up one folder**, **New file here**, **Paste here**, **Move up/down** and **Close here**. The × on a header closes it in the view (nothing is deleted). Drag, cut, copy and paste between them as between any folders (to and from servers in the background). The filter looks in all of them. They are remembered, collapsed or not. |
+| Side by side | Several folders at once, each a root of the tree. The **⫼** button in the folder's bar (also ⋯ → **Folders side by side…**, **File → Folders Side by Side…**) lists the ones shown, in order, and what you can add: the folders you picked before, favorites and recent folders (here and on servers), each server's start folder (it connects first), any folder on a server by its path (its folders are suggested as you type: `/var/www/`…), or **Pick a folder…**. Click several to add them all at once; drag them (or ↑ ↓) into the order you want, × takes one out; **Show** puts them in the tree. Right-clicking a folder offers **Open beside** too. **Drag a header** above or below another to change the order in the tree. Each one has a header in the color of where it is (amber: this computer, pink: a server, with its connection dot) that stays at the top while you scroll through it; the one you are working in is stronger, and the path above and the toolbar are its own. Click a header's arrow to **collapse** it to one line, click the header to open it and work there; right-click it for **Show only this one** (the others collapse), **Expand all**, **Collapse all**, **Up one folder**, **New file here**, **Paste here**, **Move up/down** and **Close here**. The × on a header closes it in the view (nothing is deleted). Drag, cut, copy and paste between them as between any folders (to and from servers in the background). The filter looks in all of them. They are remembered, collapsed or not. |
 | Tree | The chevron next to a folder opens it in place, with what is inside under it (`→` opens, `←` closes or goes to the folder above). Select, copy and move across the folders you opened. **New file**, **Paste**, **Duplicate**, **Compress** and **Text from the image** work in the folder of what you picked: an opened folder that is picked, or the folder something picked is in, not the top of the tree. |
 | Filter | The field under the path: what matches shows as you type, here and **in the folders inside, closed ones too** (on servers as well), under its folders opened for it; the line under the field says how many were found inside. `*.yml` or `test?.js` work as patterns. `.git` and `node_modules` are skipped; hidden files only when shown. |
 | Details | The columns button (right of the toolbar): **Name**, **Size** and **Modified** in columns (**Permissions** on servers when shown). Click a header to sort by it, click again to turn the order around. Folders stay first. |

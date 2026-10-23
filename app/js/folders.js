@@ -70,6 +70,24 @@ export function besideSettings(settings, path) {
   return { folder: path, folderSections: inside ? replaceSection(open, inside, path) : [...open, path], folderCollapsed: collapsedWithout(path) };
 }
 
+/**
+ * The open folders with `path` added after them: a folder holding open ones takes the place
+ * of the first (the others close); one inside an open folder leaves the list as it is.
+ */
+export function addSection(list, path) {
+  if (list.some((s) => isWithin(path, s))) return list;
+  const held = list.find((s) => isWithin(s, path));
+  return held ? replaceSection(list, held, path) : [...list, path];
+}
+
+/** The open folders with `path` moved just before `target` (or after it, `after`). */
+export function moveSectionTo(list, path, target, after = false) {
+  if (path === target || !list.includes(path) || !list.includes(target)) return list;
+  const out = list.filter((s) => s !== path);
+  out.splice(out.indexOf(target) + (after ? 1 : 0), 0, path);
+  return out;
+}
+
 /** The picked folder that holds `dir` (the deepest when they nest), or null. */
 export function rootOf(dir, roots) {
   return roots.filter((r) => isWithin(dir, r)).sort((a, b) => b.length - a.length)[0] ?? null;

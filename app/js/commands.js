@@ -14,7 +14,7 @@ export const COMMAND_LIST = [
   { id: 'quick-open', group: 'Files and tabs', label: 'Open a file by name', keys: 'Mod+P' },
   { id: 'disk-open', group: 'Files and tabs', label: 'Open a file from this computer (edit in place)', keys: 'Mod+O', only: 'desktop' },
   { id: 'folder-open', group: 'Files and tabs', label: 'Open a folder', only: 'desktop' },
-  { id: 'folder-beside', group: 'Folders view', label: 'Open a folder beside the ones shown (side by side in the tree)', only: 'desktop', hint: 'Each one under its own header: collapse it, or Show only this one' },
+  { id: 'folder-beside', group: 'Folders view', label: 'Folders side by side: add some (here or on servers), reorder, close', only: 'desktop', hint: 'Each one under its own header: drag the headers to change the order' },
   { id: 'server-add', group: 'Files and tabs', label: 'Connect to a server', only: 'desktop' },
   { id: 'open-disk', group: 'Files and tabs', label: 'Import files' },
   { id: 'save-copy', group: 'Files and tabs', label: 'Save a copy to disk', desktop: 'Mod+Shift+S' },

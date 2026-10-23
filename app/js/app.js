@@ -76,6 +76,7 @@ import { Sidebar } from './ui/sidebar.js';
 import { Splitter } from './ui/splitter.js';
 import { FileBar, StatusBar, SyncBadge, TabBar } from './ui/tabs.js';
 import { FolderGroupDialog } from './ui/tabViews.js';
+import { SideBySideDialog } from './ui/sideBySide.js';
 import { activeFor, folderGroupOf, loadRoots, rememberFolders, sectionFolders, tabViewState } from './tabViews.js';
 import { stepView, suggestedProject, viewKey } from './tabGroups.js';
 
@@ -813,6 +814,18 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         if (patch.already) toast(`${path === patch.already ? 'That folder is' : 'It is inside a folder that is'} open in the tree already.`);
         delete patch.already;
         saveSettings({ sidebarMode: 'folders', ...patch });
+        setSidebar(true);
+      },
+      /** The folders shown side by side: their order, and adding or closing some (a dialog). */
+      sideBySide() {
+        if (!window.desktop?.folders) return toast('Folders work in the desktop app.', { kind: 'error' });
+        setDialog({ type: 'sideBySide' });
+      },
+      /** Shows `list` side by side in the folders view, `current` (else the current one, if still shown) worked in. */
+      showSections(list, current) {
+        const s = getSettings();
+        const folder = current ?? (list.includes(s.folder) ? s.folder : list[0]);
+        saveSettings({ sidebarMode: 'folders', folderSections: list, folder, folderCollapsed: (s.folderCollapsed ?? []).filter((p) => list.includes(p)) });
         setSidebar(true);
       },
       /** Ctrl+Shift+E: the folders view (a folder is picked first when there is none yet). */
@@ -2366,7 +2379,7 @@ export function App() {
       'type-out': () => actions.typeOut(),
       'disk-open': () => actions.openDiskFiles(),
       'folder-open': () => actions.openFolder(),
-      'folder-beside': () => actions.openFolder(undefined, { beside: true }),
+      'folder-beside': () => actions.sideBySide(),
       'server-add': () => actions.editServer(),
       'servers-ssh': () => actions.importSshConfig(),
       terminal: () => actions.toggleTerminal(),
@@ -2591,6 +2604,7 @@ export function App() {
     ${dialog?.type === 'palette' && html`<${CommandPalette} initial=${dialog.query ?? ''} onRun=${(c) => setTimeout(() => actions.command(c.id), 0)} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'symbols' && html`<${SymbolSearch} files=${store.live()} roots=${folderRoots(settings)} initial=${dialog.query ?? ''} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'folderGroup' && html`<${FolderGroupDialog} path=${dialog.path} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'sideBySide' && html`<${SideBySideDialog} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'lspSetup' && html`<${SetupServerDialog} missing=${dialog.missing} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'renameSymbol' && html`<${RenameSymbolDialog} word=${dialog.word} onClose=${() => (setDialog(null), hostRef.current?.focus())} onRename=${(name) => (setDialog(null), actions.renameWithServer(dialog, name), hostRef.current?.focus())} />`}
     ${dialog?.type === 'declarations' && html`<${DeclarationPicker} word=${dialog.word} places=${dialog.places} roots=${folderRoots(settings)} actions=${actions} onClose=${() => setDialog(null)} />`}
@@ -2632,7 +2646,7 @@ function Welcome({ actions, hasFiles, configured, desktop }) {
   return html`<div class="welcome">
     <div class="welcome-card">
       <h1>No file open</h1>
-      <p class="muted">Every tab is saved on this device as you type and synced to your GitHub data repo, so you can read it on your phone and other computers.</p>
+      <p class="muted">${isLocal() ? 'Every tab is saved on this computer as you type, next to your tracker.' : 'Every tab is saved on this device as you type and synced to your GitHub data repo, so you can read it on your phone and other computers.'}</p>
       <div class="welcome-actions">
         <button type="button" class="btn primary" onClick=${() => actions.newFile()}><${Icon} name="plus" size=${16} />New file</button>
         ${hasFiles && html`<button type="button" class="btn" onClick=${() => actions.openDialog({ type: 'quickOpen' })}><${Icon} name="search" size=${16} />Open a file</button>`}
