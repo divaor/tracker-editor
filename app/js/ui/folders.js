@@ -1184,7 +1184,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
             <span class="folder-cell date" title=${e.mtimeMs ? new Date(e.mtimeMs).toLocaleString() : ''}>${e.mtimeMs ? shortDate(e.mtimeMs) : ''}</span>
             ${perms && html`<code class="folder-cell perms" title=${`${e.owner ?? ''} ${e.group ?? ''}`.trim()}>${e.mode !== undefined ? modeString(e.mode, e.dir) : ''}</code>`}`
         : html`<span class="spacer" />
-            ${!e.dir && renaming !== e.path && html`<span class="muted small folder-meta" title=${new Date(e.mtimeMs).toLocaleString()}>${formatBytes(e.size)} · ${timeAgo(new Date(e.mtimeMs).toISOString())}</span>`}
+            ${!e.dir && renaming !== e.path && html`<span class="muted small folder-meta" title=${e.mtimeMs ? new Date(e.mtimeMs).toLocaleString() : ''}>${formatBytes(e.size)}${e.mtimeMs ? ` · ${timeAgo(new Date(e.mtimeMs).toISOString())}` : ''}</span>`}
             ${perms && e.mode !== undefined && renaming !== e.path && html`<code class="folder-perms" title=${`${e.owner ?? ''} ${e.group ?? ''}`.trim()}>${modeString(e.mode, e.dir)}</code>`}`}
     </div>`;
   };

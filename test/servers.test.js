@@ -144,3 +144,25 @@ test('names from a server never lead outside the folder they are copied into', a
   assert.equal(localUnder(root, 'a/b.txt'), path.join(root, 'a', 'b.txt'));
   for (const bad of ['../x', 'a/../../x', '', 'a//b', './x']) assert.throws(() => localUnder(root, bad), /cannot be a file here/, bad);
 });
+
+test('FTP without MLSD: the time a plain listing shows, to the minute', () => {
+  const { listedTime } = require('../electron/remote.cjs');
+  const now = new Date(2026, 9, 23, 18, 0);
+  const at = (raw) => listedTime(raw, now);
+  assert.equal(at('Oct 23 14:05'), new Date(2026, 9, 23, 14, 5).getTime());
+  assert.equal(at('Oct  3 09:07'), new Date(2026, 9, 3, 9, 7).getTime());
+  // No year: a date ahead is last year's (listings show the last 6 months that way).
+  assert.equal(at('Dec 30 10:00'), new Date(2025, 11, 30, 10, 0).getTime());
+  assert.equal(at('Oct 23 2024'), new Date(2024, 9, 23).getTime());
+  assert.equal(at('23 Oct 14:05'), new Date(2026, 9, 23, 14, 5).getTime());
+  assert.equal(at('2024-10-23 14:05'), new Date(2024, 9, 23, 14, 5).getTime());
+  // Windows / IIS.
+  assert.equal(at('10-23-26 02:05PM'), new Date(2026, 9, 23, 14, 5).getTime());
+  assert.equal(at('10-23-26 12:15AM'), new Date(2026, 9, 23, 0, 15).getTime());
+  assert.equal(at('10-23-2026 14:05'), new Date(2026, 9, 23, 14, 5).getTime());
+  // Other languages.
+  assert.equal(at('10月 23日 14:05'), new Date(2026, 9, 23, 14, 5).getTime());
+  assert.equal(at('okt 23 14:05'), new Date(2026, 9, 23, 14, 5).getTime());
+  assert.equal(at('Dez 1 2023'), new Date(2023, 11, 1).getTime());
+  for (const bad of ['xyz 1 10:00', '', undefined, 'Oct 23 25:00', 'yesterday']) assert.equal(at(bad), 0, String(bad));
+});

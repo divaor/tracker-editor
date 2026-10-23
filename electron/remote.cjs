@@ -527,6 +527,15 @@ class SftpSession {
 
 // ---- FTP and FTPS ---------------------------------------------------------------
 
+// A listed file's time: MLSD's exact one, else the one a plain listing shows (`approxTime`:
+// to the minute or the day, in the server's local time; what needs it exact asks MDTM).
+function ftpTime(f) {
+  const exact = f.modifiedAt?.getTime?.();
+  if (exact) return { mtimeMs: exact };
+  const shown = listedTime(f.rawModifiedAt);
+  return shown ? { mtimeMs: shown, approxTime: true } : { mtimeMs: 0 };
+}
+
 // Unix permissions and owners from an FTP listing, when the server gives them.
 function ftpPermissions(f) {
   const p = f.permissions;
@@ -535,6 +544,56 @@ function ftpPermissions(f) {
     ...(f.user ? { owner: f.user } : {}),
     ...(f.group ? { group: f.group } : {}),
   };
+}
+
+// Month abbreviations in `ls`-style listings: English, Spanish, German, Portuguese.
+const MONTHS = { jan: 0, ene: 0, feb: 1, fev: 1, mar: 2, mär: 2, mrz: 2, apr: 3, abr: 3, may: 4, mai: 4, jun: 5, jul: 6, aug: 7, ago: 7, sep: 8, set: 8, oct: 9, okt: 9, out: 9, nov: 10, dec: 11, dic: 11, dez: 11 };
+
+/**
+ * The time a plain FTP listing (LIST, without MLSD) shows for a file, read as this computer's
+ * local time: "Oct 23 14:05" (this year, or the last if that is ahead), "Oct 23 2024",
+ * "23 Oct 14:05", "2024-10-23 14:05", "10月 23日 14:05" or Windows/IIS "10-23-26 02:05PM".
+ * To the minute at best; 0 when it cannot be read.
+ */
+function listedTime(raw, now = new Date()) {
+  const text = String(raw ?? '').trim().replace(/\s+/g, ' ');
+  let y;
+  let mo;
+  let d;
+  let h = 0;
+  let mi = 0;
+  let thisYear = false;
+  let m;
+  const clock = (t) => {
+    const c = /^(\d{1,2}):(\d{2})$/.exec(t);
+    if (c) [h, mi] = [+c[1], +c[2]];
+    else if (/^\d{4}年?$/.test(t)) y = parseInt(t, 10);
+    else return false;
+    thisYear = Boolean(c);
+    return true;
+  };
+  if ((m = /^(\d{1,2})-(\d{1,2})-(\d{2}|\d{4}) (\d{1,2}):(\d{2}) ?([AP]M)?$/i.exec(text))) {
+    // Windows / IIS: MM-DD-YY hh:mmAM, or 24-hour.
+    [mo, d, y, h, mi] = [+m[1] - 1, +m[2], +m[3], +m[4], +m[5]];
+    if (y < 100) y += y < 70 ? 2000 : 1900;
+    if (m[6]) h = (h % 12) + (/p/i.test(m[6]) ? 12 : 0);
+  } else if ((m = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2}) (\d{1,2}):(\d{2})$/.exec(text))) {
+    [y, mo, d, h, mi] = [+m[1], +m[2] - 1, +m[3], +m[4], +m[5]];
+  } else if ((m = /^(\p{L}{3})\.? (\d{1,2}) (\S+)$/u.exec(text)) || (m = /^(\d{1,2}) (\p{L}{3})\.? (\S+)$/u.exec(text))) {
+    const [name, day] = /^\d/.test(m[1]) ? [m[2], m[1]] : [m[1], m[2]];
+    mo = MONTHS[name.toLowerCase()];
+    d = +day;
+    if (mo === undefined || !clock(m[3])) return 0;
+  } else if ((m = /^(\d{1,2})月 (\d{1,2})日 (\S+)$/.exec(text))) {
+    [mo, d] = [+m[1] - 1, +m[2]];
+    if (!clock(m[3])) return 0;
+  } else return 0;
+  if (thisYear) y = now.getFullYear();
+  if (!(mo >= 0 && mo <= 11 && d >= 1 && d <= 31 && h <= 23 && mi <= 59 && y > 1900)) return 0;
+  let date = new Date(y, mo, d, h, mi);
+  // Without a year, listings show the last 6 months: a date ahead is last year's.
+  if (thisYear && date.getTime() > now.getTime() + 86400000) date = new Date(y - 1, mo, d, h, mi);
+  return date.getTime();
 }
 
 class FtpSession {
@@ -638,7 +697,7 @@ class FtpSession {
     if (!hit.isDirectory) {
       const exact = await this.run((c) => c.lastMod(p)).catch(() => null);
       if (exact) mtimeMs = exact.getTime();
-    }
+    } else if (!mtimeMs) mtimeMs = listedTime(hit.rawModifiedAt);
     return { dir: hit.isDirectory, size: hit.isDirectory ? 0 : hit.size, mtimeMs, ...ftpPermissions(hit) };
   }
 
@@ -646,7 +705,7 @@ class FtpSession {
     const listing = await this.run((c) => c.list(dir));
     return listing
       .filter((f) => listable(f.name))
-      .map((f) => ({ name: f.name, path: posix.join(dir, f.name), dir: f.isDirectory, size: f.isDirectory ? 0 : f.size, mtimeMs: f.modifiedAt?.getTime?.() ?? 0, ...ftpPermissions(f), link: f.isSymbolicLink }));
+      .map((f) => ({ name: f.name, path: posix.join(dir, f.name), dir: f.isDirectory, size: f.isDirectory ? 0 : f.size, ...ftpTime(f), ...ftpPermissions(f), link: f.isSymbolicLink }));
   }
 
   async downloadTo(p, localPath) {
@@ -1292,8 +1351,9 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
           for (const e of await s.list(rel ? posix.join(root, rel) : root)) {
             const child = rel ? `${rel}/${e.name}` : e.name;
             if (skip(child) || e.link) continue;
-            // FTP without MLSD lists no times: MDTM gives the one a transfer reports too.
-            const mtimeMs = !e.dir && !e.mtimeMs && s.lastMod ? await s.lastMod(e.path) : e.mtimeMs;
+            // FTP without MLSD lists times only to the minute: MDTM gives the one a transfer reports too.
+            const listed = e.approxTime ? 0 : e.mtimeMs;
+            const mtimeMs = !e.dir && !listed && s.lastMod ? await s.lastMod(e.path) : listed;
             out[child] = { dir: e.dir, size: e.dir ? 0 : e.size, mtimeMs };
             if (++count > max) throw new Error(`Too many files to mirror (more than ${max.toLocaleString()}).`);
             if (e.dir) pending.push(child);
@@ -1476,4 +1536,4 @@ function tempCopyPath(uri) {
   return nodePath.join(dir, posix.basename(parseUri(uri).path));
 }
 
-module.exports = { createRemote, isRemote, parseUri, toUri, fingerprintOf, friendlyError, tempCopyPath, localUnder, SCHEME, PROTOCOLS, DEFAULT_PORT };
+module.exports = { createRemote, isRemote, parseUri, toUri, fingerprintOf, friendlyError, tempCopyPath, localUnder, listedTime, SCHEME, PROTOCOLS, DEFAULT_PORT };
