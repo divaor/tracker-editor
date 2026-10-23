@@ -111,6 +111,14 @@ export function createGitHubClient({
       return commit.tree.sha;
     },
 
+    /** Every file at a ref (a branch, a commit, or nothing: the default branch): [{ path, sha }]; empty for an empty repo. */
+    async listTree(ref) {
+      const commit = (await client.getBranchHead(ref || (await client.getRepo()).default_branch)) ?? (ref || null);
+      if (!commit) return [];
+      const tree = await request('GET', `${repoPath}/git/trees/${await client.getCommitTree(commit)}`, { query: { recursive: '1' } });
+      return (tree?.tree ?? []).filter((e) => e.type === 'blob').map((e) => ({ path: e.path, sha: e.sha }));
+    },
+
     /** { sha, text } of a file at a ref (branch or commit), or null when it does not exist. */
     /** Commits that touched `path` (a file or a folder), newest first: [{ sha, message, date }]. */
     async listCommits({ path: filePath, branch, perPage = 50 }) {

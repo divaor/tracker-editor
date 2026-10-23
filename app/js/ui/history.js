@@ -1,6 +1,7 @@
 import { html, useEffect, useState } from '../../vendor/preact-htm.js';
 import { formatDateTime, timeAgo } from '../format.js';
 import { Icon } from './icons.js';
+import { isLocal } from '../settings.js';
 
 /**
  * The versions of the open file, from the data repo's history. Choosing one
@@ -27,10 +28,10 @@ export function HistoryPanel({ target, selected, actions, onClose }) {
       <button type="button" class="icon-btn sm" aria-label="Close" onClick=${onClose}><${Icon} name="x" size=${16} /></button>
     </div>
     <div class="panel-body">
-      <p class="muted small">Every version of <strong>${target.name}</strong> synced to your data repo. Pick one to compare it with the text now${target.dirty ? ', including changes not synced yet' : ''}.</p>
+      <p class="muted small">${isLocal() ? html`Every version of <strong>${target.name}</strong> kept on this computer (for 180 days). Pick one to compare it with the text now.` : html`Every version of <strong>${target.name}</strong> synced to your data repo. Pick one to compare it with the text now${target.dirty ? ', including changes not synced yet' : ''}.`}</p>
       ${state.status === 'loading' && html`<p class="muted small">Loading the history…</p>`}
       ${state.status === 'error' && html`<p class="notice error"><${Icon} name="alert" size=${15} />${state.error}</p>`}
-      ${state.status === 'ready' && !state.versions.length && html`<p class="muted small">No versions yet: they appear once the file has synced.</p>`}
+      ${state.status === 'ready' && !state.versions.length && html`<p class="muted small">No versions yet: they appear a moment after you change the file.</p>`}
       <div class="version-list">
         ${state.status === 'ready' &&
         state.versions.map(

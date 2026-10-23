@@ -1,6 +1,6 @@
 # Tracker Editor guide
 
-Tracker Editor is a Notepad++-style editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs. Everything is saved the moment you paste or type, and synced to the same private GitHub data repo as the tracker, so your files are on your computers and your phone.
+Tracker Editor is a Notepad++-style editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs. Everything is saved the moment you paste or type, on this computer with the tracker, or, once you turn on sync, in the same private GitHub data repo as the tracker, so your files are on your computers and your phone.
 
 Version 0.15.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.15.0 · Web app: https://divaor.github.io/tracker-editor/
 
@@ -28,12 +28,18 @@ The builds are not code-signed, so the first launch warns you. On Windows, choos
 2. Install it: Android ⋮ → **Install app**; iPhone Share → **Add to Home Screen**.
 3. To send text or files from other apps to the editor (Android), use their **Share** button and pick **Tracker Editor**. If it isn't listed, remove the app from the home screen and install it again.
 
-### Connect to your data repo
+### Your data: on this computer, or synced with GitHub
 
-1. In the **tracker**, open **Settings → Sync with GitHub → Copy setup code** (with the token).
-2. In the **editor**, open **Settings** (the sliders icon, top right), paste it into **Setup code**, press **Apply**, name the device (e.g. *Work PC*) and press **Save**.
+**A new install keeps everything on this computer**, with nothing about syncing shown. On the desktop that is a data folder, `Documents/Tracker data`, which **Tracker** on the same computer shares: its projects and tags are yours, its documents open here, and **Send to tracker** lands there at once. In the browser it is the browser's storage, shared with the tracker opened in the same browser. **Settings → Where your data is** says where (on the desktop, **Show the folder**; copying it is a backup). History is kept there too, for 180 days.
 
-The editor uses the tracker's repo, token and projects. Its own files go to `editor/` in that repo.
+**To sync across your devices** (phone, other computers, the Claude connector): **Settings → Where your data is → Sync across your devices with GitHub…**:
+
+1. In the **tracker**, open **Settings → Sync with GitHub → Copy setup code** (with the token), or create a token (see the tracker's guide).
+2. Paste it into **Setup code**, press **Apply**, name the device (e.g. *Work PC*) and press **Copy my data to GitHub and sync**.
+
+Everything on this computer is copied to the repo first, so nothing is lost; a repo that already has data from other devices is merged (the newest edit of each item wins; files from both stay). The tracker on this computer then offers to follow. The editor uses the tracker's repo, token and projects; its own files go to `editor/` in that repo. **Stop syncing with GitHub and keep everything on this computer…** goes back (the repo keeps its copy).
+
+On an iPhone, apps added to the home screen each keep their own storage: the editor and the tracker work together there in Safari, or through GitHub.
 
 ---
 
@@ -598,6 +604,7 @@ Turn them on in **Settings → Desktop**.
 
 ## 17. Where your data lives
 
+- On this computer only (the default): the same files as below, in the data folder (`Documents/Tracker data`) or the browser's storage, kept as versions (not readable files); old versions go after 180 days.
 - `editor/index.json` in your data repo lists the files (name, project, tags, language, who changed them when).
 - `editor/files/<id>/<name>` holds each file's text, readable on github.com, except encrypted files, which start with `TRACKER-EDITOR-ENCRYPTED v1`.
 - `editor/vault.json` holds the encryption salt and a check value, never the passphrase.

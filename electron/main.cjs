@@ -548,6 +548,43 @@ ipcMain.handle('term:keys', guard((event, own) => {
 // lsp.cjs picks the server from its catalog (found on PATH or in the project). A page
 // reloaded or closed stops its servers.
 const lsp = require('./lsp.cjs');
+const localStore = require('./localStore.cjs');
+
+// ---- The data on this computer ("on this computer" mode, localStore.cjs) ----
+// A folder Tracker uses too (Documents/Tracker data unless both were told
+// another), made only once the page uses it (GitHub users never get one).
+let dataStoreCache = null;
+const dataStore = () => (dataStoreCache ??= localStore.createLocalStore(localStore.dataDir({ appData: app.getPath('appData'), documents: app.getPath('documents') })));
+const dataSeen = new Map(); // branch head → its value this app wrote, or last told the page about
+let stopDataWatch = null;
+ipcMain.handle('data:get', guard((_e, key) => dataStore().get(key)));
+ipcMain.handle('data:put', guard((_e, key, value) => dataStore().put(key, value)));
+ipcMain.handle('data:cas', guard(async (_e, key, expected, value) => {
+  const done = await dataStore().cas(key, expected, value);
+  if (done && key.startsWith('ref/')) dataSeen.set(key, value);
+  return done;
+}));
+ipcMain.handle('data:del', guard((_e, key) => dataStore().del(key)));
+ipcMain.handle('data:list', guard((_e, prefix) => dataStore().list(prefix)));
+ipcMain.handle('data:info', guard(() => ({ dir: dataStore().dir })));
+ipcMain.handle('data:show', guard(() => shell.openPath(dataStore().dir)));
+// The page in local mode: tell it when Tracker changed the data (it syncs at once).
+ipcMain.on('data:watch', (event) => {
+  if (!fromApp(event) || stopDataWatch) return;
+  try {
+    stopDataWatch = localStore.watchRefs(
+      dataStore().dir,
+      () => mainWindow?.webContents.send('data:changed'),
+      (key, value) => {
+        if (dataSeen.get(key) === value) return true;
+        dataSeen.set(key, value);
+        return false;
+      },
+    );
+  } catch (err) {
+    console.warn('Cannot watch the data folder', err);
+  }
+});
 const lspHost = lsp.createLspHost({
   send: (sender, channel, payload) => {
     if (!sender.isDestroyed()) sender.send(channel, payload);

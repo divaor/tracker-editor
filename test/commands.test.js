@@ -39,3 +39,8 @@ test('while searching, label matches come first, and their group with them', () 
   assert.equal(findCommands('format')[0].id, 'format');
   assert.deepEqual(groupsOf(findCommands('', { desktop: true }), false), COMMAND_GROUPS);
 });
+
+test('local mode (no GitHub): nothing about syncing in Help', () => {
+  assert.equal(findCommands('save a file', { local: true }).find((c) => c.id === 'sync')?.label, 'Save a file from disk or a server');
+  assert.ok(!findCommands('', { local: true }).some((c) => /sync/i.test(c.label)), 'no word about syncing');
+});

@@ -1,6 +1,6 @@
 import { html, useRef, useState } from '../../vendor/preact-htm.js';
 import { timeAgo } from '../format.js';
-import { saveSettings } from '../settings.js';
+import { isLocal, saveSettings } from '../settings.js';
 import { fileKey, repoKey, store } from '../store.js';
 import { projectKey } from '../tracker-model.js';
 import { Icon } from './icons.js';
@@ -111,7 +111,7 @@ function FileSidebar({ files, docs, projects, settings, activeKey, actions }) {
             title=${f.item ? `${f.name} · from the tracker: ${f.item}` : f.name}>
             <span class="file-row-main">
               <span class="file-name">${f.encrypted && html`<${Icon} name="lock" size=${12} />`}${f.snippet && html`<${Icon} name="snippet" size=${12} />`}${f.name}</span>
-              ${f.unsynced && html`<span class="tab-dot" title="Not synced yet" />`}
+              ${f.unsynced && !isLocal() && html`<span class="tab-dot" title="Not synced yet" />`}
             </span>
             ${f.item && html`<span class="file-item"><${Icon} name="doc" size=${13} /><span>${f.item}</span></span>`}
             <span class="file-meta">

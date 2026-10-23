@@ -1,3 +1,4 @@
+import { isLocal } from '../settings.js';
 import { html, useEffect, useMemo, useRef, useState } from '../../vendor/preact-htm.js';
 import { findCommands, groupsOf, keysFor } from '../commands.js';
 import { renderMarkdown } from '../markdown.js';
@@ -24,7 +25,7 @@ function CommandsTab({ query, setQuery, onRun }) {
   const input = useRef(null);
   const list = useRef(null);
   useEffect(() => input.current?.focus(), []);
-  const found = findCommands(query, { desktop, mac });
+  const found = findCommands(query, { desktop, mac, local: isLocal() });
   const runnable = found.filter((c) => c.run !== false);
   const move = (e, step) => {
     const buttons = [...(list.current?.querySelectorAll('button.help-command') ?? [])];

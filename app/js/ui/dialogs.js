@@ -2,7 +2,7 @@ import { html, useState } from '../../vendor/preact-htm.js';
 import { languageNames } from '../editor.js';
 import { formatBytes, formatDateTime } from '../format.js';
 import { contentPath, fileLink } from '../model.js';
-import { getSettings } from '../settings.js';
+import { getSettings, isLocal } from '../settings.js';
 import { store } from '../store.js';
 import { syncNow } from '../syncManager.js';
 import { checklistItems } from '../checklist.js';
@@ -75,8 +75,8 @@ export function FileDialog({ file, projects, actions, onClose }) {
       <div><dt>Edited</dt><dd>${formatDateTime(file.modifiedAt)}${file.modifiedBy ? ` on ${file.modifiedBy}` : ''}</dd></div>
       <div><dt>Created</dt><dd>${formatDateTime(file.createdAt)}</dd></div>
       <div><dt>Size</dt><dd>${formatBytes(new TextEncoder().encode(store.text(file.id)).length)}</dd></div>
-      <div><dt>In the repo</dt><dd><code>${file.sha ? contentPath(file) : 'Not synced yet'}</code></dd></div>
-      <div><dt>Encryption</dt><dd>${file.encrypted ? 'The text is encrypted in your data repo' : 'Not encrypted'}
+      <div><dt>${isLocal() ? 'Stored as' : 'In the repo'}</dt><dd><code>${file.sha ? contentPath(file) : isLocal() ? 'Saving…' : 'Not synced yet'}</code></dd></div>
+      <div><dt>Encryption</dt><dd>${file.encrypted ? (isLocal() ? 'The text is stored encrypted' : 'The text is encrypted in your data repo') : 'Not encrypted'}
         <button type="button" class="btn link" onClick=${() => (onClose(), actions.setEncrypted(file.id, !file.encrypted))}>${file.encrypted ? 'Stop encrypting' : 'Encrypt'}</button></dd></div>
       <div class="span-2"><dt>Link</dt><dd class="copy-row"><code>${link}</code>
         <button type="button" class="btn sm" onClick=${async () => {

@@ -1,6 +1,7 @@
 import { html, useMemo } from '../../vendor/preact-htm.js';
 import { Modal, toast } from './components.js';
 import { Icon } from './icons.js';
+import { isLocal } from '../settings.js';
 
 // Text up to this length goes into an email or WhatsApp link; longer text is
 // put on the clipboard to paste, because links that long get cut off.
@@ -83,6 +84,6 @@ export function ShareDialog({ name, text, link, actions, onClose }) {
         </button>`,
       )}
     </div>
-    <p class="muted small share-note">Sending it to yourself? It is already on your other devices: everything syncs through GitHub.</p>
+    ${!isLocal() && html`<p class="muted small share-note">Sending it to yourself? It is already on your other devices: everything syncs through GitHub.</p>`}
   </${Modal}>`;
 }

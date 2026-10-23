@@ -10,7 +10,7 @@ import { formatDateTime } from './format.js';
 import { previewKind } from './previews.js';
 import { FORMATTABLE, formatText, formatterFor, guessFormatter } from './formatter.js';
 import { getReaderState, onReaderState, setReaderHighlighter, startReading, stopReading, toggleReading } from './reader.js';
-import { getSettings, getToken, isSyncConfigured, onSettings, resolvedTheme, saveSettings } from './settings.js';
+import { getSettings, isLocal, isSyncConfigured, onSettings, resolvedTheme, saveSettings } from './settings.js';
 import { diskKey, fileKey, flush, parseKey, repoKey, store } from './store.js';
 import { diskAvailable, openDiskFiles, recheckServerTabs, reloadDiskTab, saveDiskTab, unwatchDisk, watchDiskTabs } from './diskTabs.js';
 import { isRemotePath, kindOfKey, remoteAddress, remoteParts, remoteRoot, toRemoteUri } from './where.js';
@@ -32,7 +32,7 @@ import { onTransfers, watchTransfers } from './transfers.js';
 import { TransfersCard } from './ui/transfers.js';
 import { baseName, besideSettings, claudeText, inPlaceSettings, opensInEditor, remapPath, withCurrent } from './folders.js';
 import { draggedPaths, draggedTab, dropped, isOwnDrop } from './dragOut.js';
-import { getSyncState, onSyncResult, onSyncState, syncClient, syncNow } from './syncManager.js';
+import { dataClient, getSyncState, movedTo, onSyncResult, onSyncState, syncNow } from './syncManager.js';
 import { matchesScope, projectList } from './tracker-model.js';
 import { AssistantPanel } from './ui/assistant.js';
 import { dismissToast, Toasts, toast } from './ui/components.js';
@@ -146,11 +146,10 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       const tab = store.repoTab(k.path);
       return tab && { key, kind: 'repo', path: k.path, name: tab.name, language: '', project: store.doc(k.path)?.project ?? '', tags: store.doc(k.path)?.tags ?? [], dirty: tab.dirty, text: tab.text };
     };
+    // Where the data is: on this device (local mode) or GitHub's repo.
     const syncedClient = async () => {
-      const settings = getSettings();
-      const token = await getToken();
-      if (!isSyncConfigured(settings) || !token) throw new Error('Set up sync in Settings first: this comes from your GitHub data repo.');
-      return { client: syncClient(settings, token), branch: settings.branch || undefined };
+      const { client, branch } = await dataClient();
+      return { client, branch: branch || undefined };
     };
     const actions = {
       toast,
@@ -206,15 +205,10 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
           // The downloaded copy when there is one (works offline), else from GitHub.
           let file = doc && store.hasDocText(doc.sha) ? { text: store.cachedDocText(doc.sha), sha: doc.sha } : null;
           if (!file) {
-            const settings = getSettings();
-            const token = await getToken();
-            if (!isSyncConfigured(settings) || !token) {
-              toast('Set up sync in Settings to open files from the tracker.', { kind: 'error' });
-              return;
-            }
             try {
-              file = await syncClient(settings, token).getFile(path, settings.branch || undefined);
-              if (!file) throw new Error(`${path} is not in ${settings.owner}/${settings.repo}.`);
+              const { client, branch, local } = await dataClient();
+              file = await client.getFile(path, branch || undefined);
+              if (!file) throw new Error(local ? `${path} is not in the tracker's files on this computer.` : `${path} is not in ${getSettings().owner}/${getSettings().repo}.`);
             } catch (err) {
               toast(err.message, { kind: 'error' });
               return;
@@ -1286,6 +1280,24 @@ export function App() {
     return onReaderState((s) => s.status === 'idle' && s.error && toast(s.error, { kind: 'error' }));
   }, []);
   useEffect(() => onSyncState(setSync), []);
+  // Local mode, and the tracker moved the data on this device to GitHub: offer to follow it.
+  useEffect(() => {
+    movedTo().then(
+      (to) =>
+        to &&
+        toast(`Your data moved to GitHub (${to.owner}/${to.repo}). Connect here too, with the same token, to keep working on it.`, {
+          timeout: 30000,
+          key: 'moved',
+          action: {
+            label: 'Connect',
+            run: () => {
+              saveSettings({ owner: to.owner, repo: to.repo, branch: to.branch ?? '' });
+              actions.showSettings();
+            },
+          },
+        }),
+    );
+  }, []);
   // Servers (desktop): their status shows on tabs; when one connects again, its tabs are looked at again.
   useEffect(() => {
     const offStatus = watchServers({ onConnected: recheckServerTabs });
@@ -2545,7 +2557,7 @@ export function App() {
               setTimeout(() => hostRef.current?.reveal(line, column, 1), 60);
             }} />`}
           ${activeSealed && html`<${LockedFile} file=${activeFile} actions=${actions} />`}
-          ${!activeKey && html`<${Welcome} actions=${actions} desktop=${diskAvailable()} hasFiles=${store.live().length + docs.length > 0} configured=${isSyncConfigured(settings)} />`}
+          ${!activeKey && html`<${Welcome} actions=${actions} desktop=${diskAvailable()} hasFiles=${store.live().length + docs.length > 0} configured=${isLocal(settings) || isSyncConfigured(settings)} />`}
         </div>
         ${terminalShown && html`<${TerminalPanel} settings=${settings} actions=${actions} onHide=${() => (setTerminalShown(false), hostRef.current?.focus())} />`}
         <${ReadAloudBar} />

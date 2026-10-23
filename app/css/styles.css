@@ -7488,3 +7488,10 @@ button.help-command:focus-visible {
 .cm-editor.cm-signature-hidden .cm-lsp-signature-tooltip {
   display: none;
 }
+
+/* Settings → Your data: the GitHub part of the card. */
+.card-subtitle {
+  margin: 16px 0 4px;
+  font-size: 14px;
+  font-weight: 650;
+}

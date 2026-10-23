@@ -5,7 +5,10 @@
 
 export const COMMAND_GROUPS = ['Files and tabs', 'Find', 'Edit and text', 'Code', 'View', 'Tools', 'Folders view', 'Terminal'];
 
-/** [{ id, group, label, keys?, desktop?, only?, hint?, run? }]; `run: false` for keys that only work in place. */
+/**
+ * [{ id, group, label, keys?, desktop?, only?, hint?, run?, local? }]; `run: false` for keys that only work in place;
+ * `local`: the label in local mode (no GitHub), or false to leave it out there.
+ */
 export const COMMAND_LIST = [
   { id: 'new', group: 'Files and tabs', label: 'New file', keys: 'Alt+N', desktop: 'Mod+N' },
   { id: 'quick-open', group: 'Files and tabs', label: 'Open a file by name', keys: 'Mod+P' },
@@ -31,7 +34,7 @@ export const COMMAND_LIST = [
   { id: 'tab-view-all', group: 'Files and tabs', label: 'Show all tabs', keys: 'Mod+Alt+Home' },
   { id: 'tab-view-only', group: 'Files and tabs', label: 'Only the tabs of the open tab’s group (its project or folder)' },
   { id: 'tab-move-group', group: 'Files and tabs', label: 'Move the open tab to another group…' },
-  { id: 'sync', group: 'Files and tabs', label: 'Sync now (or save a file from disk or a server)', keys: 'Mod+S' },
+  { id: 'sync', group: 'Files and tabs', label: 'Sync now (or save a file from disk or a server)', local: 'Save a file from disk or a server', keys: 'Mod+S' },
   { id: 'trash', group: 'Files and tabs', label: 'Deleted files (trash)' },
   { id: 'settings', group: 'Files and tabs', label: 'Settings', desktop: 'Mod+,' },
 
@@ -144,8 +147,10 @@ export function keysFor(command, { mac = false, desktop = false } = {}) {
  * The commands for this place (desktop-only ones left out in the browser), matching every
  * word of `query`; while searching, the ones whose label matches come first.
  */
-export function findCommands(query = '', { desktop = false, list = COMMAND_LIST, mac = false } = {}) {
+export function findCommands(query = '', { desktop = false, list = COMMAND_LIST, mac = false, local = false } = {}) {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  // Local mode: nothing about syncing.
+  if (local) list = list.filter((c) => c.local !== false).map((c) => (typeof c.local === 'string' ? { ...c, label: c.local } : c));
   const found = list.filter(
     (c) => (desktop || c.only !== 'desktop') && words.every((w) => `${c.label} ${c.group} ${keysFor(c, { mac, desktop })} ${c.hint ?? ''}`.toLowerCase().includes(w)),
   );

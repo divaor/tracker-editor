@@ -24,6 +24,15 @@ export const KINDS = {
   remote: { label: 'Server', icon: 'server', hint: 'A file on a server, saved back to it: not synced.' },
 };
 
+// In local mode (no GitHub) my files and tracker documents stay on this computer.
+const LOCAL_HINTS = {
+  synced: 'In your files: kept on this computer, with your tracker.',
+  doc: 'A document attached to a tracker item, kept on this computer.',
+};
+
+/** What a kind means, for tooltips (`local`: the data stays on this computer). */
+export const kindHint = (kind, local = false) => (local && LOCAL_HINTS[kind]) || KINDS[kind]?.hint || '';
+
 /** The kind of a tab: 'synced' (f:), 'doc' (r:), 'disk' or 'remote' (d:). */
 export function kindOfKey(key) {
   if (typeof key !== 'string') return null;
@@ -55,9 +64,11 @@ export function remoteAddress(uri, conn) {
  * The state shown with where a file lives: { text, tone, detail? }, tone one of
  * 'ok', 'pending', 'busy', 'warn', 'error'. `file` (my files), `repo` (a tracker
  * document) or `disk` (this computer or a server) is the tab's record; `sync` is
- * { configured, phase }; `server` is { state } of its connection.
+ * { configured, phase, local }; `server` is { state } of its connection. In local
+ * mode (`local`: the data stays on this computer) nothing is said about syncing.
  */
 export function whereState({ kind, file, repo, disk, sync = {}, server }) {
+  if ((kind === 'synced' || kind === 'doc') && sync.local) return { text: 'Saved', tone: 'ok', detail: 'Kept on this computer.' };
   if (kind === 'synced') {
     if (!sync.configured) return { text: 'On this device only', tone: 'pending', detail: 'Sync is not set up: Settings → Sync keeps your files in your data repo.' };
     if (file?.dirty || file?.pending) {

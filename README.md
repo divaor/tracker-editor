@@ -1,6 +1,6 @@
 # Tracker Editor
 
-A Notepad++-style text editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs; everything is saved as you type and synced to your **private GitHub data repository**, so you can read it on your phone and your other computers.
+A Notepad++-style text editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs; everything is saved as you type, **on this computer** together with Tracker (no account needed; nothing about syncing shows), or, once you turn it on, synced to your **private GitHub data repository**, so you can read it on your phone and your other computers. Turning sync on copies everything there first, so nothing is lost.
 
 It is the companion of [Tracker](https://github.com/divaor/tracking_app) and shares its data repository: the same **projects** (Work / Personal) and **tags**, items sent from the editor show up on the tracker, and the tracker opens files in the editor.
 

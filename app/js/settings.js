@@ -20,6 +20,9 @@ export const TRACKER_APP_URL = 'https://divaor.github.io/tracking_app/';
 
 export const DEFAULT_SETTINGS = {
   // Data repo (the same one the tracker syncs to) and the tracker's data file.
+  // Where the data is kept: 'local' (this computer: a data folder the tracker shares on desktop,
+  // the browser's storage on the web; no GitHub) or 'github' (the data repo, synced across devices).
+  storage: 'local',
   owner: '',
   repo: '',
   branch: '',
@@ -159,6 +162,8 @@ try {
     tts: { ...DEFAULT_SETTINGS.tts, ...saved.tts, server: { ...DEFAULT_SETTINGS.tts.server, ...saved.tts?.server } },
     typing: { ...DEFAULT_SETTINGS.typing, ...saved.typing },
   };
+  // Installs from before local mode that sync with GitHub stay on it.
+  if (!saved.storage) settings = { ...settings, storage: saved.owner && saved.repo ? 'github' : 'local' };
   // Version 2: phones wrap long lines by default (earlier versions stored `false` for everyone).
   if ((saved.version ?? 1) < 2) settings = { ...settings, wordWrap: DEFAULT_SETTINGS.wordWrap || settings.wordWrap, version: 2 };
 } catch {
@@ -191,6 +196,8 @@ export function onSettings(fn) {
 }
 
 export const isSyncConfigured = (s = settings) => Boolean(s.owner && s.repo);
+/** The data stays on this device (no GitHub, nothing about syncing shown). */
+export const isLocal = (s = settings) => s.storage !== 'github';
 
 export function resolvedTheme(theme = settings.theme) {
   if (theme === 'light' || theme === 'dark') return theme;

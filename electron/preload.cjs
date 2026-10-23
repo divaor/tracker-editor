@@ -141,6 +141,22 @@ contextBridge.exposeInMainWorld('desktop', {
     // Ctrl+V in the page: a paste event with the files copied in other apps.
     paste: () => ipcRenderer.invoke('edit:paste'),
   },
+  // The data on this computer in local mode: the folder Tracker shares (localStore.cjs), for localRepo.js.
+  data: {
+    get: (key) => ipcRenderer.invoke('data:get', key),
+    put: (key, value) => ipcRenderer.invoke('data:put', key, value),
+    cas: (key, expected, value) => ipcRenderer.invoke('data:cas', key, expected, value),
+    del: (key) => ipcRenderer.invoke('data:del', key),
+    list: (prefix) => ipcRenderer.invoke('data:list', prefix),
+    info: () => ipcRenderer.invoke('data:info'),
+    show: () => ipcRenderer.invoke('data:show'),
+    onChanged(callback) {
+      const listener = () => callback();
+      ipcRenderer.on('data:changed', listener);
+      ipcRenderer.send('data:watch');
+      return () => ipcRenderer.removeListener('data:changed', listener);
+    },
+  },
   // Servers (SFTP, FTP, FTPS): files there are remote://<id>/<path> and go through disk and folders above.
   // Code across the folders shown: where a name is declared, symbols by name (Ctrl+T).
   code: {

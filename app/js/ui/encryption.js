@@ -1,7 +1,7 @@
 import { html, useEffect, useState } from '../../vendor/preact-htm.js';
-import { getSettings, getToken, isSyncConfigured } from '../settings.js';
+import { getSettings, isLocal, isSyncConfigured } from '../settings.js';
 import { store } from '../store.js';
-import { syncClient } from '../syncManager.js';
+import { dataClient } from '../syncManager.js';
 import { fetchVault, onVault, vaultState } from '../vault.js';
 import { Card } from './components.js';
 import { Icon } from './icons.js';
@@ -52,7 +52,7 @@ export function LockedFile({ file, actions }) {
       ${vault.exists
         ? html`<p class="muted">Enter your passphrase to read and edit it on this device. It is the one you chose when you set up encryption.</p>
             <${PassphraseForm} label="Unlock" run=${actions.unlockEncryption} autoFocus />`
-        : html`<p class="muted">Sync this device to get your encryption settings, then unlock it with your passphrase.</p>`}
+        : html`<p class="muted">${isLocal() ? 'The encryption settings are not on this computer.' : 'Sync this device to get your encryption settings, then unlock it with your passphrase.'}</p>`}
     </div>
   </div>`;
 }
@@ -62,15 +62,15 @@ export function EncryptionCard({ actions }) {
   const vault = useVault();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const configured = isSyncConfigured(getSettings());
+  // Local mode: the vault is in the data on this computer.
+  const configured = isLocal() || isSyncConfigured(getSettings());
   const count = store.live().filter((f) => f.encrypted).length;
   // Whether another device already set a passphrase.
   useEffect(() => {
     if (!configured) return;
     (async () => {
-      const settings = getSettings();
-      const token = await getToken();
-      if (token) await fetchVault(syncClient(settings, token), settings.branch);
+      const { client, branch } = await dataClient();
+      await fetchVault(client, branch);
     })().catch((err) => setError(err.message));
   }, [configured]);
   const lockNow = async () => {
@@ -84,7 +84,9 @@ export function EncryptionCard({ actions }) {
     setBusy(false);
   };
   return html`<${Card} title="Encryption" icon="lock">
-    <p class="muted small">Files you choose to encrypt are stored in your data repo as ciphertext: GitHub, the Claude connector and anyone with access to the repo see only their names, projects and tags. Every device needs your passphrase to read them.</p>
+    <p class="muted small">${isLocal()
+      ? 'Files you choose to encrypt are stored as ciphertext: anyone who gets the data folder sees only their names, projects and tags. Your passphrase reads them.'
+      : 'Files you choose to encrypt are stored in your data repo as ciphertext: GitHub, the Claude connector and anyone with access to the repo see only their names, projects and tags. Every device needs your passphrase to read them.'}</p>
     ${!configured && html`<p class="muted small">Set up sync first: the encryption settings are kept in your data repo.</p>`}
     ${configured && !vault.exists &&
     html`<p class="notice"><${Icon} name="alert" size=${15} />There is no way to recover the files if you forget the passphrase. Write it down somewhere safe.</p>

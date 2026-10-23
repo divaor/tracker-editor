@@ -78,6 +78,10 @@ export function createFakeGitHub({ owner = 'me', repo = 'data', defaultBranch = 
       const text = blobs.get(m[1]);
       return text === undefined ? reply(404, { message: 'Not Found' }) : reply(200, { sha: m[1], encoding: 'base64', content: Buffer.from(text).toString('base64') });
     }
+    if ((m = rest.match(/^\/git\/trees\/(\w+)$/)) && method === 'GET') {
+      const files = trees.get(m[1]);
+      return files ? reply(200, { sha: m[1], tree: [...files].map(([path, sha]) => ({ path, sha, type: 'blob', mode: '100644' })), truncated: false }) : reply(404, { message: 'Not Found' });
+    }
     if (rest === '/git/trees' && method === 'POST') {
       const files = new Map(body.base_tree ? trees.get(body.base_tree) : []);
       if (body.base_tree && !trees.has(body.base_tree)) return reply(422, { message: 'Invalid base tree' });

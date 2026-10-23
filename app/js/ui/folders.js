@@ -2,7 +2,7 @@ import { html, useEffect, useLayoutEffect, useRef, useState } from '../../vendor
 import { canDragOut, draggedPaths, draggedTab, dropped, isOwnDrop, onDragOutEnd, startDragOut } from '../dragOut.js';
 import { baseName, breadcrumbs, FOLDER_SORTS, isImageName, isWithin, modeString, nameMatcher, opensInEditor, parentOf, peekKind, pushRecent, quotePath, rangeOf, renameRange, replaceSection, rootOf, selectionSummary, sortsUp, toggleFavorite, topmost, treeRows, withCurrent } from '../folders.js';
 import { formatBytes, timeAgo } from '../format.js';
-import { getSettings, saveSettings } from '../settings.js';
+import { getSettings, isLocal, saveSettings } from '../settings.js';
 import { diskKey } from '../store.js';
 import { server, servers, serverStatus } from '../servers.js';
 import { isRemotePath, protocolName, remoteParts, remoteRoot } from '../where.js';
@@ -945,7 +945,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       !remote && one && !one.dir && /\.zip$/i.test(one.name) && { label: 'Extract into a new folder', icon: 'archive', run: () => extract(one) },
       { label: one ? 'Copy path' : 'Copy paths', icon: 'copy', run: () => (one ? actions.copyPath(one.path) : navigator.clipboard.writeText(items.map((e) => e.path).join('\n')).then(() => toast('Paths copied'))) },
       !remote && { label: one ? 'Copy for Claude (the path)' : 'Copy for Claude (the paths)', icon: 'claude', run: () => navigator.clipboard.writeText(items.map((e) => quotePath(e.path)).join(' ')).then(() => toast('On the clipboard: paste it into Claude')) },
-      files.length && files.length === items.length && files.every((e) => opensInEditor(e.name)) && { label: 'Copy into my files (synced)', icon: 'filePlus', run: () => files.forEach((e) => actions.copyToFiles(e.path)) },
+      files.length && files.length === items.length && files.every((e) => opensInEditor(e.name)) && { label: isLocal() ? 'Copy into my files' : 'Copy into my files (synced)', icon: 'filePlus', run: () => files.forEach((e) => actions.copyToFiles(e.path)) },
       one && !remote && { label: 'Show in the file explorer', icon: 'external', run: () => actions.showOnDisk(one.path) },
       one && { label: 'Properties (Alt+Enter)', icon: 'info', run: () => actions.showProperties(one.path) },
       one?.dir && { label: 'Find in this folder…', icon: 'search', run: () => actions.findInFolder(one.path) },
@@ -1041,7 +1041,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   if (!root) {
     return html`<div class="folders-empty">
       <p>Browse a folder on this computer, or one on a server, and open its files here, like in a file explorer.</p>
-      <p class="muted small">They are edited in place and are not synced. "Copy into my files" makes a copy that syncs.</p>
+      <p class="muted small">${isLocal() ? 'They are edited where they are. "Copy into my files" puts a copy with your notes.' : 'They are edited in place and are not synced. "Copy into my files" makes a copy that syncs.'}</p>
       <button type="button" class="btn primary" onClick=${() => pick()}><${Icon} name="folderOpen" size=${16} />Open a folder…</button>
       <div class="folder-places">
         <span class="muted small">Start in</span>
@@ -1319,7 +1319,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       onClose=${() => (setViewing(null), list.current?.focus())} />`}
     <div class="sidebar-foot folders-foot">
       <span class="muted small folders-status" aria-live="polite">${selectionSummary(entries, selected, formatBytes)}</span>
-      <span class="folders-where ${remote ? 'kind-remote' : 'kind-disk'}" title=${remote ? `On ${conn?.name}: files are saved back to the server, not synced. Copy into my files makes a synced copy.` : 'Files on this computer: edited in place, not synced. Copy into my files makes a synced copy.'}>
+      <span class="folders-where ${remote ? 'kind-remote' : 'kind-disk'}" title=${remote ? `On ${conn?.name}: files are saved back to the server${isLocal() ? '' : ', not synced. Copy into my files makes a synced copy'}.` : isLocal() ? 'Files on this computer: edited where they are.' : 'Files on this computer: edited in place, not synced. Copy into my files makes a synced copy.'}>
         <${Icon} name=${remote ? 'server' : 'disk'} size=${14} />
       </span>
     </div>

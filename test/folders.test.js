@@ -330,6 +330,9 @@ test('the state shown with where a file lives', () => {
   assert.equal(text({ kind: 'remote', disk: { offline: true }, server: { state: 'connecting' } }), 'Connecting…');
   assert.equal(text({ kind: 'remote', disk: { missing: true } }), 'Not on the server');
   assert.equal(where.whereState({ kind: 'remote', disk: { conflict: true } }).tone, 'error');
+  // Local mode: no word about syncing.
+  assert.deepEqual(text({ kind: 'synced', file: { dirty: true }, sync: { local: true } }), 'Saved');
+  assert.deepEqual(text({ kind: 'doc', repo: { dirty: true }, sync: { local: true } }), 'Saved');
 });
 
 // ---- Files on servers (electron/remote.cjs), without a server ----

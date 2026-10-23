@@ -5,11 +5,12 @@ import { RUN_COMMANDS } from '../runFile.js';
 import { startReading, stopReading } from '../reader.js';
 import { isNaturalVoice, rankVoices } from '../speech.js';
 import { useVoices } from './readAloud.js';
-import { getSecret, getSettings, getToken, isSyncConfigured, parseSetupCode, saveSettings, setSecret, setToken } from '../settings.js';
+import { getSecret, getSettings, getToken, isLocal, isSyncConfigured, parseSetupCode, saveSettings, setSecret, setToken } from '../settings.js';
 import { createAsyncLlmClient, parseProfile, PLACEHOLDERS, PROFILE_EXAMPLE } from '../asyncLlm.js';
 import { localFetch } from '../localFetch.js';
 import { store } from '../store.js';
-import { syncClient, syncNow } from '../syncManager.js';
+import { switchStorage, syncClient, syncNow } from '../syncManager.js';
+import { localDataInfo } from '../localData.js';
 import { parseData } from '../tracker-model.js';
 import { timeAgo } from '../format.js';
 import { APP_VERSION } from '../version.js';
@@ -27,13 +28,22 @@ const SYNC_FIELDS = ['owner', 'repo', 'branch', 'trackerPath', 'device'];
 const pick = (obj, keys) => Object.fromEntries(keys.map((k) => [k, obj[k] ?? '']));
 
 function SyncCard({ sync, actions }) {
+  const local = isLocal();
   const [form, setForm] = useState(() => pick(getSettings(), SYNC_FIELDS));
   const [token, setTokenValue] = useState('');
   const [hasToken, setHasToken] = useState(null);
   const [check, setCheck] = useState(null);
   const [setupCode, setSetupCode] = useState('');
+  // Local mode: the GitHub form opens on request; where the data is kept.
+  const [githubOpen, setGithubOpen] = useState(!local || Boolean(getSettings().owner));
+  const [where, setWhere] = useState(null);
+  const [moving, setMoving] = useState('');
   if (hasToken === null) getToken().then((t) => setHasToken(Boolean(t)));
+  useEffect(() => {
+    localDataInfo().then(setWhere, () => setWhere({ browser: true }));
+  }, []);
   const set = (key) => (e) => setForm({ ...form, [key]: e.currentTarget.value });
+  const cleaned = () => ({ ...form, owner: form.owner.trim(), repo: form.repo.trim(), branch: form.branch.trim(), trackerPath: form.trackerPath.trim() || 'tracker.json' });
 
   const test = async () => {
     setCheck({ state: 'busy', text: 'Checking…' });
@@ -56,14 +66,44 @@ function SyncCard({ sync, actions }) {
 
   const save = async (e) => {
     e.preventDefault();
-    saveSettings({ ...form, owner: form.owner.trim(), repo: form.repo.trim(), branch: form.branch.trim(), trackerPath: form.trackerPath.trim() || 'tracker.json' });
+    const patch = cleaned();
     if (token.trim()) {
       await setToken(token);
       setTokenValue('');
       setHasToken(true);
     }
+    if (isLocal()) {
+      // From this computer to GitHub: everything here is copied there first, nothing is lost.
+      if (!isSyncConfigured(patch) || !(await getToken())) return actions.toast('Fill in the owner, the repository and a token first', { kind: 'error' });
+      setMoving('Copying your data to GitHub…');
+      try {
+        const moved = await switchStorage('github', patch);
+        actions.toast(`Your data is on GitHub now (${patch.owner}/${patch.repo}${moved.copied ? `, ${moved.copied} files copied` : ''}). Connect the tracker too, with the same token.`, { timeout: 10000 });
+      } catch (err) {
+        actions.toast(`Your data stays on this computer: ${err.message}`, { kind: 'error', timeout: 10000 });
+      } finally {
+        setMoving('');
+      }
+      return;
+    }
+    saveSettings(patch);
     actions.toast('Sync settings saved');
     syncNow();
+  };
+
+  // Back to this computer: GitHub's copy comes here first; the repo keeps everything.
+  const keepHere = async () => {
+    if (!confirm('Stop syncing with GitHub? Everything is kept on this computer (what is only on GitHub is copied here first), and the repository keeps its copy.')) return;
+    setMoving('Copying your data to this computer…');
+    try {
+      await switchStorage('local');
+      setGithubOpen(false);
+      actions.toast('Your data is kept on this computer now. The tracker here uses it too once it stops syncing with GitHub.', { timeout: 10000 });
+    } catch (err) {
+      actions.toast(`Still syncing with GitHub: ${err.message}`, { kind: 'error', timeout: 10000 });
+    } finally {
+      setMoving('');
+    }
   };
 
   const applySetup = () => {
@@ -78,11 +118,7 @@ function SyncCard({ sync, actions }) {
     }
   };
 
-  return html`<${Card} title="Sync with GitHub" icon="cloud" id="sync">
-    <p class="muted">Use the same private data repository and token as the tracker. Files go to <code>editor/</code> in that repository; projects come from the tracker.</p>
-    <div class="sync-status muted small">
-      ${isSyncConfigured() ? html`${getSettings().owner}/${getSettings().repo} · last sync ${timeAgo(sync.lastSyncAt)}${sync.error ? html` · <span class="field-error">${sync.error}</span>` : ''}` : 'Not set up yet.'}
-    </div>
+  const githubForm = html`
     <div class="field-row setup-row">
       <input value=${setupCode} onInput=${(e) => setSetupCode(e.currentTarget.value)} placeholder="Paste the tracker's setup code (Tracker → Settings → Copy setup code)" aria-label="Setup code" autocomplete="off" />
       <button type="button" class="btn sm" disabled=${!setupCode.trim()} onClick=${applySetup}>Apply</button>
@@ -96,14 +132,43 @@ function SyncCard({ sync, actions }) {
         <input type="password" value=${token} onInput=${(e) => setTokenValue(e.currentTarget.value)} placeholder=${hasToken ? '•••••••• (saved)' : 'github_pat_…'} autocomplete="off" />
       </${Field}>
       <${Field} label="This device's name" hint="Shown in commits and on files edited here"><input value=${form.device} onInput=${set('device')} placeholder="Work PC" /></${Field}>
-      <div class="field"><span> </span><${Check} checked=${getSettings().autoSync} label="Sync automatically" hint="A few seconds after you stop typing, every few minutes and when you come back" onChange=${(v) => saveSettings({ autoSync: v })} /></div>
+      ${!local && html`<div class="field"><span> </span><${Check} checked=${getSettings().autoSync} label="Sync automatically" hint="A few seconds after you stop typing, every few minutes and when you come back" onChange=${(v) => saveSettings({ autoSync: v })} /></div>`}
       <div class="form-actions span-2">
-        <button type="submit" class="btn primary">Save</button>
+        <button type="submit" class="btn primary" disabled=${Boolean(moving)}>${local ? 'Copy my data to GitHub and sync' : 'Save'}</button>
         <button type="button" class="btn" onClick=${test}>Test connection</button>
-        <button type="button" class="btn ghost" disabled=${!isSyncConfigured()} onClick=${() => syncNow()}><${Icon} name="sync" size=${15} />Sync now</button>
+        ${!local && html`<button type="button" class="btn ghost" disabled=${!isSyncConfigured()} onClick=${() => syncNow()}><${Icon} name="sync" size=${15} />Sync now</button>`}
       </div>
       ${check && html`<p class="notice span-2 ${check.state === 'error' ? 'error' : ''}"><${Icon} name=${check.state === 'error' ? 'alert' : check.state === 'ok' ? 'check' : 'sync'} size=${15} />${check.text}</p>`}
-    </form>
+    </form>`;
+
+  if (local) {
+    return html`<${Card} title="Where your data is" icon="disk" id="sync">
+      <p class="muted">
+        ${where?.dir
+          ? html`Kept on this computer, in <code>${where.dir}</code>. Tracker on this computer uses the same folder: your projects, tags and tracker documents show in both, and Send to tracker reaches it.`
+          : 'Kept in this browser, on this device. The tracker opened in this browser (or installed from it) shares it.'}
+      </p>
+      ${where?.dir && html`<div class="form-actions"><button type="button" class="btn sm" onClick=${() => window.desktop.data.show()}><${Icon} name="folderOpen" size=${15} />Show the folder</button></div>`}
+      ${moving && html`<p class="notice"><${Icon} name="sync" size=${15} />${moving}</p>`}
+      ${githubOpen
+        ? html`<h3 class="card-subtitle">Sync across your devices with GitHub</h3>
+            <p class="muted small">Everything here is copied to your private data repository first, so nothing is lost; then this app syncs with it (and so can your other devices and the tracker). Use the same repository and token as the tracker.</p>
+            ${githubForm}`
+        : html`<div class="field-grid">
+              <${Field} label="This device's name" hint="Shown on files and items changed here"><input value=${form.device} onInput=${set('device')} onChange=${() => saveSettings({ device: form.device })} placeholder="Work PC" /></${Field}>
+            </div>
+            <button type="button" class="btn link" onClick=${() => setGithubOpen(true)}>Sync across your devices with GitHub…</button>`}
+    </${Card}>`;
+  }
+
+  return html`<${Card} title="Sync with GitHub" icon="cloud" id="sync">
+    <p class="muted">Use the same private data repository and token as the tracker. Files go to <code>editor/</code> in that repository; projects come from the tracker.</p>
+    <div class="sync-status muted small">
+      ${isSyncConfigured() ? html`${getSettings().owner}/${getSettings().repo} · last sync ${timeAgo(sync.lastSyncAt)}${sync.error ? html` · <span class="field-error">${sync.error}</span>` : ''}` : 'Not set up yet.'}
+    </div>
+    ${moving && html`<p class="notice"><${Icon} name="sync" size=${15} />${moving}</p>`}
+    ${githubForm}
+    <button type="button" class="btn link" disabled=${Boolean(moving)} onClick=${keepHere}>Stop syncing with GitHub and keep everything on this computer…</button>
   </${Card}>`;
 }
 

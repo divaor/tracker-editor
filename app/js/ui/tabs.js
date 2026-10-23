@@ -1,7 +1,7 @@
 import { html, useEffect, useLayoutEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import { languageNames, PLAIN_TEXT } from '../editor.js';
 import { formatBytes, timeAgo } from '../format.js';
-import { getSettings, isSyncConfigured, saveSettings } from '../settings.js';
+import { getSettings, isLocal, isSyncConfigured, saveSettings } from '../settings.js';
 import { fileKey, parseKey, store } from '../store.js';
 import { syncNow } from '../syncManager.js';
 import { projectKey } from '../tracker-model.js';
@@ -11,7 +11,7 @@ import { serverLabel } from '../lspTools.js';
 import { dictationSupported } from './dictation.js';
 import { canDragOut, draggedTab, dropped, isOwnDrop, onDragOutEnd, startDragOut } from '../dragOut.js';
 import { Menu, MenuButton } from './menu.js';
-import { isRemotePath, KINDS, kindOfKey, protocolName, remoteAddress, remoteParts, whereState } from '../where.js';
+import { isRemotePath, kindHint, KINDS, kindOfKey, protocolName, remoteAddress, remoteParts, whereState } from '../where.js';
 import { server, serverStatus } from '../servers.js';
 import { mirrorOf } from '../mirrors.js';
 import { mirrorState } from './mirrors.js';
@@ -31,7 +31,8 @@ function tabInfo(key) {
   const kind = kindOfKey(key);
   if (k?.kind === 'file') {
     const f = store.get(k.id);
-    return f && { kind, name: f.name, project: f.project, encrypted: f.encrypted, snippet: f.snippet, unsynced: f.dirty || f.pending, dotTitle: 'Not synced yet', title: `My files (synced): ${[f.project, f.name].filter(Boolean).join(' / ')}${f.encrypted ? ' · encrypted' : ''}` };
+    // In local mode there is nothing to wait for: no dot.
+    return f && { kind, name: f.name, project: f.project, encrypted: f.encrypted, snippet: f.snippet, unsynced: !isLocal() && (f.dirty || f.pending), dotTitle: 'Not synced yet', title: `${isLocal() ? 'My files' : 'My files (synced)'}: ${[f.project, f.name].filter(Boolean).join(' / ')}${f.encrypted ? ' · encrypted' : ''}` };
   }
   if (k?.kind === 'disk') {
     const d = store.diskTab(k.path);
@@ -43,7 +44,7 @@ function tabInfo(key) {
     return { kind, name: d.name, project: '', unsynced: d.dirty, follow: d.follow, dotTitle: 'Not saved', title: `On this computer: ${d.path}${d.dirty ? ' · not saved' : ''}` };
   }
   const t = k && store.repoTab(k.path);
-  return t && { kind, name: t.name, project: store.doc(k.path)?.project ?? '', unsynced: t.dirty, dotTitle: 'Not synced yet', title: `Tracker document: ${t.path}` };
+  return t && { kind, name: t.name, project: store.doc(k.path)?.project ?? '', unsynced: !isLocal() && t.dirty, dotTitle: 'Not synced yet', title: `Tracker document: ${t.path}` };
 }
 
 /**
@@ -51,13 +52,13 @@ function tabInfo(key) {
  * Synced", "This computer · Not saved", "db1 · Saved on the server"…
  */
 export function WhereChip({ kind, label, state, title, onClick }) {
-  const tip = [title ?? KINDS[kind].hint, state.detail].filter(Boolean).join('\n');
+  const tip = [title ?? kindHint(kind, isLocal()), state.detail].filter(Boolean).join('\n');
   return html`<button type="button" class="where-chip kind-${kind} tone-${state.tone}" title=${tip} onClick=${onClick} aria-label=${`${label}: ${state.text}`}>
     <${Icon} name=${KINDS[kind].icon} size=${14} /><span class="where-label">${label}</span><span class="where-state">${state.text}</span>
   </button>`;
 }
 
-const syncInfo = (sync) => ({ configured: isSyncConfigured(), phase: sync?.phase });
+const syncInfo = (sync) => ({ configured: isSyncConfigured(), phase: sync?.phase, local: isLocal() });
 
 // The tabs of the bar by group, in the groups' order (vs: tabViewState).
 const barGroups = (keys, vs) =>
@@ -476,7 +477,7 @@ export function FileBar({ file, repo, disk, sealed, projects, canPreview, previe
   const moreItems = (id) => [
     disk && { label: 'Show in folder', icon: 'folder', run: () => actions.showOnDisk(disk.path) },
     disk && { label: 'Copy path', icon: 'copy', run: () => actions.copyPath(disk.path) },
-    disk && { label: 'Copy into my files (synced)', icon: 'filePlus', run: () => actions.copyToFiles(disk.path) },
+    disk && { label: isLocal() ? 'Copy into my files' : 'Copy into my files (synced)', icon: 'filePlus', run: () => actions.copyToFiles(disk.path) },
     disk && { label: 'Properties', icon: 'info', run: () => actions.showProperties(disk.path) },
     disk && (!isRemotePath(disk.path) || server(remoteParts(disk.path).id)?.protocol === 'sftp') && { label: 'Open a terminal in its folder', icon: 'terminal', run: () => actions.terminalHere(disk.path.slice(0, Math.max(disk.path.lastIndexOf('/'), disk.path.lastIndexOf('\\'))) || disk.path) },
     disk && { separator: true },
@@ -511,7 +512,7 @@ export function FileBar({ file, repo, disk, sealed, projects, canPreview, previe
     const doc = store.doc(repo.path);
     const project = doc?.project && projects.find((p) => p.key === projectKey(doc.project));
     return html`<div class="filebar">
-      <${WhereChip} kind="doc" label="Tracker" state=${whereState({ kind: 'doc', repo })} title=${`${KINDS.doc.hint}\n${repo.path}`} />
+      <${WhereChip} kind="doc" label="Tracker" state=${whereState({ kind: 'doc', repo, sync: { local: isLocal() } })} title=${`${kindHint('doc', isLocal())}\n${repo.path}`} />
       <span class="filebar-note" title=${`From the tracker: ${repo.path}`}><span class="filebar-title">${doc?.item.title || repo.name}</span></span>
       ${doc?.project && html`<${ProjectChip} project=${project} name=${doc.project} />`}
       <span class="spacer" />
@@ -524,7 +525,7 @@ export function FileBar({ file, repo, disk, sealed, projects, canPreview, previe
   if (!file) return null;
   const project = projects.find((p) => p.key === projectKey(file.project));
   const synced = html`<${WhereChip} kind="synced" label="My files" state=${whereState({ kind: 'synced', file, sync: syncInfo(sync) })}
-    onClick=${() => (isSyncConfigured() ? syncNow() : (location.hash = '#/settings'))} />`;
+    onClick=${() => (isLocal() ? undefined : isSyncConfigured() ? syncNow() : (location.hash = '#/settings'))} />`;
   if (sealed) {
     return html`<div class="filebar">
       ${synced}
@@ -558,6 +559,8 @@ export function FileBar({ file, repo, disk, sealed, projects, canPreview, previe
 }
 
 export function SyncBadge({ sync, compact = false }) {
+  // Local mode: the data stays here, nothing to show.
+  if (isLocal()) return null;
   const configured = isSyncConfigured();
   let icon = 'cloud';
   let label;
@@ -649,15 +652,16 @@ export function StatusBar({ recording, big, cursor, language, file, repo, disk, 
   let state = '';
   const kind = file ? 'synced' : repo ? 'doc' : disk ? (isRemotePath(disk.path) ? 'remote' : 'disk') : null;
   const srv = kind === 'remote' ? serverOf(disk.path) : null;
-  if (file) state = file.dirty ? 'Saved on this device · not synced yet' : file.sha ? `Synced · edited ${timeAgo(file.modifiedAt)}${file.modifiedBy ? ` on ${file.modifiedBy}` : ''}` : 'Saved on this device';
-  if (repo) state = repo.dirty ? 'Edited · goes to the tracker on the next sync' : 'Tracker file';
-  if (kind === 'disk') state = disk.dirty ? 'Not saved to disk · Ctrl+S saves' : disk.follow ? 'Following the file as it grows' : 'File on this computer · not synced';
+  if (file && isLocal()) state = `Saved · edited ${timeAgo(file.modifiedAt)}`;
+  else if (file) state = file.dirty ? 'Saved on this device · not synced yet' : file.sha ? `Synced · edited ${timeAgo(file.modifiedAt)}${file.modifiedBy ? ` on ${file.modifiedBy}` : ''}` : 'Saved on this device';
+  if (repo) state = repo.dirty && !isLocal() ? 'Edited · goes to the tracker on the next sync' : 'Tracker file';
+  if (kind === 'disk') state = disk.dirty ? 'Not saved to disk · Ctrl+S saves' : disk.follow ? 'Following the file as it grows' : isLocal() ? 'File on this computer, edited where it is' : 'File on this computer · not synced';
   if (kind === 'remote') state = `${protocolName(srv.conn?.protocol)} · ${remoteAddress(disk.path, srv.conn)}${disk.dirty ? ' · not saved to the server' : ''}`;
   const label = { synced: 'My files', doc: 'Tracker', disk: 'This computer', remote: srv?.conn?.name ?? 'Server' }[kind];
   const connection = srv && { connected: 'Connected', connecting: 'Connecting…', error: `Not connected: ${srv.status.error}`, disconnected: 'Not connected' }[srv.status.state];
   return html`<footer class="statusbar">
     ${kind &&
-    html`<span class="status-where kind-${kind}" title=${connection ? `${KINDS[kind].hint}\n${connection}` : KINDS[kind].hint}>
+    html`<span class="status-where kind-${kind}" title=${connection ? `${KINDS[kind].hint}\n${connection}` : kindHint(kind, isLocal())}>
       <${Icon} name=${KINDS[kind].icon} size=${13} /><span>${label}</span>${srv && html`<span class="conn-dot state-${srv.status.state}" aria-label=${connection} />`}
     </span>`}
     ${group &&
