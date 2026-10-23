@@ -94,6 +94,8 @@ import { SYNTAX_LANGUAGES, problemsFor, treeErrors } from './problems.js';
 import { convertIndent, detectIndent } from './indent.js';
 import { gitGutter, gitInfo, setGitBase } from './gitGutter.js';
 import { emmetOnTab, linkedTags } from './htmlTools.js';
+import { inlineSuggestions } from './inlineSuggest.js';
+import { findFileRefs } from './fileRefs.js';
 
 export { languages };
 
@@ -677,15 +679,23 @@ function linkAt(state, pos) {
   const line = state.doc.lineAt(pos);
   return parseLinks(line.text).find((l) => pos - line.from >= l.from && pos - line.from <= l.to) ?? null;
 }
+/** The "file:line" at a position (a stack trace, a compiler's message), if any. */
+function fileRefAt(state, pos) {
+  const line = state.doc.lineAt(pos);
+  if (line.length > 4000) return null;
+  return findFileRefs(line.text).find((r) => pos - line.from >= r.from && pos - line.from < r.to) ?? null;
+}
 
 /**
  * Creates the editor in `parent`. `onChange(key, text, { urgent })` gets the text of the
  * tab after you type (debounced); `onCursor(info)` the cursor position.
  * `onOpenLink(target)` opens a [[link]]; `linkTargets()` lists names to complete after [[.
+ * `onOpenRef(ref, key)` opens a Ctrl+clicked "file:line"; `onSuggest(request)` asks the
+ * model for the text at the cursor (suggestions as you type, setting `inlineSuggest`).
  * `openSide(key, el, …)` shows a second tab next to it (the split view); a tab's
  * state, with its undo history, moves between the panes.
  */
-export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpenLink, onImage, onProblems, linkTargets, settings }) {
+export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpenLink, onOpenRef, onSuggest, onImage, onProblems, linkTargets, settings }) {
   const states = new Map(); // key → EditorState
   const scroll = new Map(); // key → scroll position
   const pending = new Map(); // key → timer for onChange
@@ -742,6 +752,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
   let focused = 'main'; // the pane typed in last: commands and reading aloud use it
   // The view showing a tab, if one does.
   const viewOf = (key) => (key && key === active ? view : key && key === side?.key ? side.view : null);
+  const keyOfView = (v) => (v === view ? active : v === side?.view ? side.key : null);
   const current = () => (focused === 'side' && side ? side : { key: active, view });
 
   // A tab's indentation: its own (detected, from .editorconfig, or picked), else the default.
@@ -908,18 +919,32 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
           return true;
         },
         mousedown(e, v) {
-          if (!(e.ctrlKey || e.metaKey) || !onOpenLink) return false;
+          if (!(e.ctrlKey || e.metaKey) || e.button !== 0) return false;
           const pos = v.posAtCoords({ x: e.clientX, y: e.clientY });
-          const link = pos === null ? null : linkAt(v.state, pos);
-          if (!link) return false;
+          if (pos === null) return false;
+          const link = onOpenLink ? linkAt(v.state, pos) : null;
+          if (link) {
+            e.preventDefault();
+            onOpenLink(link.target);
+            return true;
+          }
+          const ref = onOpenRef ? fileRefAt(v.state, pos) : null;
+          if (!ref) return false;
           e.preventDefault();
-          onOpenLink(link.target);
+          onOpenRef(ref, keyOfView(v));
           return true;
         },
       }),
       wikiLinks,
       // Renaming a tag renames its other end (HTML, XML, JSX).
       linkedTags(() => options.linkedTags !== false),
+      // Grey text from the model after the cursor; Tab takes it.
+      inlineSuggestions({
+        ask: (request, v) => onSuggest({ ...request, key: keyOfView(v) }),
+        enabled: () => Boolean(onSuggest && options.inlineSuggest),
+        languageOf: (state) => state.facet(languageName),
+        nameOf: (state) => state.facet(fileName),
+      }),
       // The text itself is in the state's doc.
       [],
     ];

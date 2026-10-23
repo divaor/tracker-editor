@@ -1,5 +1,6 @@
 import { html, useEffect, useState } from '../../vendor/preact-htm.js';
 import { DEFAULT_LLM_URL } from '../llm.js';
+import { RUN_COMMANDS } from '../runFile.js';
 import { llmClient } from '../semantic.js';
 import { startReading, stopReading } from '../reader.js';
 import { isNaturalVoice, rankVoices } from '../speech.js';
@@ -128,6 +129,9 @@ function EditorCard({ settings }) {
       <${Check} checked=${settings.emmet !== false} label="Emmet: Tab expands abbreviations in HTML, XML and JSX" hint="ul>li*3, div.card, a[href], ! for a page"
         onChange=${(v) => saveSettings({ emmet: v })} />
       <${Check} checked=${settings.linkedTags !== false} label="Renaming a tag renames its other end" onChange=${(v) => saveSettings({ linkedTags: v })} />
+      <${Check} checked=${Boolean(settings.inlineSuggest)} label="Suggest the rest as you type (the model)"
+        hint=${settings.llm.enabled && settings.llm.provider !== 'async' ? 'Grey text after the cursor: Tab takes it, Ctrl+→ one word, Esc drops it. A code model (Settings → Model → Model for suggestions) works best.' : 'Needs a model on this computer or a server that answers at once: set it up under Model.'}
+        onChange=${(v) => saveSettings({ inlineSuggest: v })} />
       <${Check} checked=${settings.indentGuides !== false} label="Indentation guides" onChange=${(v) => saveSettings({ indentGuides: v })} />
       <${Check} checked=${settings.bracketColors !== false} label="Color bracket pairs by depth" onChange=${(v) => saveSettings({ bracketColors: v })} />
       <${Check} checked=${settings.stickyScroll !== false} label="Sticky scroll" hint="The lines that start the function or section you are in stay at the top"
@@ -146,6 +150,10 @@ function EditorCard({ settings }) {
         onChange=${(v) => saveSettings({ autoName: v })} />
       <${Check} checked=${settings.autoFile} label="File new notes under a project, with tags" hint="By the local model, from your projects and the tags you use. Undo is in the message."
         onChange=${(v) => saveSettings({ autoFile: v })} />
+      ${window.desktop &&
+      html`<${Field} label="Run commands (F5)" wide hint=${`One "type: command" per line, to change or add to the built-in ones (${Object.keys(RUN_COMMANDS).filter((e) => RUN_COMMANDS[e]).slice(0, 8).join(', ')}…). {file} is the file, {dir} its folder, {name} its name; an empty command turns a type off.`}>
+        <textarea class="run-commands" rows="3" spellcheck=${false} value=${settings.runCommands ?? ''} placeholder=${'py: uv run {file}\nts: bun {file}'} onInput=${(e) => saveSettings({ runCommands: e.currentTarget.value })} />
+      </${Field}>`}
     </div>
   </${Card}>`;
 }
@@ -433,6 +441,10 @@ function OpenAiModelForm({ settings, actions }) {
       <${Field} label="Model for images" hint="Reads text from images when you choose it in Text from an image, e.g. llama3.2-vision, qwen2.5vl, gemma3. Blank: the chat model.">
         ${models ? html`<select value=${form.visionModel ?? ''} onChange=${(e) => set({ visionModel: e.currentTarget.value })}><option value="">The chat model</option>${options(form.visionModel).map((m) => html`<option key=${m} value=${m}>${m}</option>`)}</select>`
         : html`<input value=${form.visionModel ?? ''} onInput=${(e) => set({ visionModel: e.currentTarget.value })} placeholder="llama3.2-vision" spellcheck=${false} />`}
+      </${Field}>
+      <${Field} label="Model for suggestions" hint="For Suggest the rest as you type (Settings → Editor): a code model that fills in the middle, e.g. qwen2.5-coder:1.5b, starcoder2, codegemma. Blank: the chat model.">
+        ${models ? html`<select value=${form.completeModel ?? ''} onChange=${(e) => set({ completeModel: e.currentTarget.value })}><option value="">The chat model</option>${options(form.completeModel).map((m) => html`<option key=${m} value=${m}>${m}</option>`)}</select>`
+        : html`<input value=${form.completeModel ?? ''} onInput=${(e) => set({ completeModel: e.currentTarget.value })} placeholder="qwen2.5-coder:1.5b" spellcheck=${false} />`}
       </${Field}>
       <${Field} label="API key" hint="Only if your server needs one"><input type="password" value=${form.apiKey} onInput=${(e) => set({ apiKey: e.currentTarget.value })} autocomplete="off" /></${Field}>
       <div class="form-actions span-2">

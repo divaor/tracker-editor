@@ -47,6 +47,10 @@ export const DEFAULT_SETTINGS = {
   // HTML, XML, JSX: Tab expands Emmet abbreviations; renaming a tag renames its other end.
   emmet: true,
   linkedTags: true,
+  // Suggestions as you type from the model (grey text, Tab takes it); off until turned on.
+  inlineSuggest: false,
+  // Run this file (F5): "extension: command" lines that replace or add to runFile.js's.
+  runCommands: '',
   indentGuides: true,
   bracketColors: true,
   stickyScroll: true,
@@ -101,6 +105,8 @@ export const DEFAULT_SETTINGS = {
     embedModel: '',
     // For text from images (a model that reads pictures); '' = the chat model.
     visionModel: '',
+    // For suggestions as you type (a code model that fills in the middle); '' = the chat model.
+    completeModel: '',
     apiKey: '',
     profile: '',
     webhook: { enabled: false, port: 8765, path: '/llm-webhook', publicUrl: '' },

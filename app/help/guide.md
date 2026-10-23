@@ -98,6 +98,7 @@ Not a full IDE, but enough to find your way in a code file (**Edit → Code** on
 - **Go to a function or section**: `Ctrl+P`, then type `@` and part of its name. The outline (`Ctrl+Shift+O`) lists them too.
 - **Where you are**: the status bar names the class and function the cursor is in (`Store › save`), or the YAML key or Markdown section; click it to go to another.
 - The name under the cursor is highlighted wherever else it appears. `Ctrl+Shift+\` jumps to the matching bracket.
+- **Run it** (`F5`, desktop) in a terminal in its folder, and click the `file:line` an error prints to go there (see [A terminal, and running a file](#a-terminal-and-running-a-file)). **Suggestions as you type** from the model: see [6](#suggestions-as-you-type).
 - **Problems as you type**: mistakes are underlined, with a mark next to the line; hover one to read it. In JSON (comments are fine in `tsconfig.json`, `.jsonc` and other files that allow them), YAML (also a key written twice in the same place, tabs in the indentation, a quote left open), XML, HTML, CSS, and code: JavaScript, TypeScript, Python, Go, Java, PHP, C, C++, Rust. The status bar counts errors and warnings; click it (or `Ctrl+Shift+M`) for the **Problems** list, click one to go there. `F8` goes to the next one, `Shift+F8` to the one before.
 - **Easier to read**: thin **guides** at each indentation level, **brackets colored** by how deep they are (strings and comments aside), and **sticky scroll**: when you scroll inside a long function, the lines that start it (and its class) stay at the top; click one to go there. Each can be turned off in **Settings → Editor** (or the **View** menu).
 
@@ -197,6 +198,13 @@ Open the assistant with the ✦ button in the top bar or `Ctrl+Shift+A`:
 
 With the model on, **new notes are named and filed**: one call names an untitled note and picks one of your existing projects (never a new one) and up to three tags, reusing the tags you already use. Only empty fields are filled, once per new file, and the message has **Undo**. Turn it off in **Settings → Editor → File new notes under a project, with tags**. **⋯ → Suggest project and tags** does it on demand for any file.
 
+### Suggestions as you type
+
+Turn on **Settings → Editor → Suggest the rest as you type**: a moment after you stop typing at the end of a line, the model's guess appears in grey after the cursor. `Tab` takes it, `Ctrl+→` takes one word, `Escape` (or typing something else) drops it; typing what it says keeps the rest. A bracket or quote closed for you after the cursor is taken care of: the suggestion replaces it.
+
+- It works best with a small code model that **fills in the middle** (it also reads what comes after the cursor): in Ollama for example `ollama pull qwen2.5-coder:1.5b`, then pick it in **Settings → Model → Model for suggestions**. Other models are asked like a chat, which is slower.
+- It needs a model that answers at once (Option A below), not a service that answers later. Encrypted files are never sent.
+
 ### Option A: a local model (Ollama, LM Studio)
 
 1. Install Ollama (ollama.com) and start it.
@@ -286,6 +294,12 @@ It types real key presses into whichever window has the focus when the countdown
 - **Filter lines** (`Alt+L`): show only the lines that match, or hide them; with match case and regex (`ERROR|WARN`). **Copy** or **New file** with the lines shown. Files over 3 MB or 60,000 lines open in a lighter mode (no highlighting or wrapping) that stays fast.
 - ⋯ → **Show in folder**, **Copy path**, **Copy into my files** (a synced copy). Closing a tab with unsaved edits asks first.
 
+### A terminal, and running a file
+
+- `` Ctrl+` `` (or **View → Terminal**) opens a terminal in a panel under the editor: on this computer (your usual shell: PowerShell on Windows, zsh or bash on Mac and Linux) in the folder of the open file or the one shown in Folders, or on the server when the open file is on one. Right-click a folder → **Open a terminal here** opens one there; **+** in the panel opens more (this computer or a server). See [Terminal on a server](#terminal-on-a-server) for the keys.
+- **Run this file** (`F5`, or **View → Run This File**): saves it, then runs it in a terminal of its own (**Run · …**), in the file's folder: `python3` for `.py` (`python` on Windows), `node` for `.js`, `bash` for `.sh`, PowerShell for `.ps1`, `go run`, `ruby`, `php`, `npx tsx` for `.ts` and more; `.html` opens in the browser. On a server it runs there, over SSH. Change or add commands in **Settings → Editor → Run commands**, one per line: `py: uv run {file}` (`{file}` the file, `{dir}` its folder, `{name}` its name; `js:` with nothing after turns a type off).
+- **`file:line` opens the file there**: in a terminal, the places programs print (`src/app.js:12:5`, `File "main.py", line 7`, `Foo.cs:line 42`, `a.ts(12,5)`) are links; click one. In the text (a log, a pasted stack trace), `Ctrl+click` one. Relative paths start from the terminal's folder, or the file's. Files outside the folders you opened in Folders do not open (open their folder first).
+
 ### Folders: a file explorer
 
 The sidebar has two views on the desktop: **My files** (synced) and **Folders** (on this computer). **View → Folders** (`Ctrl+Shift+E`) shows it; **File → Open Folder…** or the welcome screen's **Open a folder** adds one. Pick a folder in the system dialog (the buttons start it in Documents, Desktop or Downloads). The editor can only reach what is inside the folders you picked.
@@ -317,7 +331,7 @@ The sidebar has two views on the desktop: **My files** (synced) and **Folders** 
 | Replace in files | In Find in this folder, the arrow at the left of the field shows **Replace with**: each line found shows what it becomes (old struck out, new in green). Untick the files to leave alone, then **Replace in N files** (or `Enter`). With `.*` (a regular expression), `$1` puts back a group and `\n` a new line. The message has **Undo** (it puts back only files nobody changed since). Files open with unsaved edits are left out; open tabs show the new text. On servers too. |
 | Git | In a folder that is a Git repository (on this computer), the branch shows next to the folder's name, and files show what changed since the last commit: **M** changed, **U** new, **A** added, **R** renamed, **C** in conflict; folders with changes inside have a dot. Hover the branch for how many files changed and what is to push or pull. Right-click a changed file → **Compare with the last commit**. It uses the `git` program installed on the computer and only reads. |
 | Properties | `Alt+Enter` or right-click → **Properties**: where it is, size (**Count what is inside** for a folder), dates, owner, permissions. On Mac/Linux tick Read/Write/Run for Owner/Group/Others or type `644`, **Save permissions**; for a folder, **Also for everything inside**. On Windows: **Read-only**. |
-| Terminal | Right-click → **Open a terminal here**: your system's terminal (Windows Terminal or PowerShell) in that folder. |
+| Terminal | Right-click → **Open a terminal here**: a terminal in the panel under the editor, in that folder. **Open in the system’s terminal** opens your system's own (Windows Terminal or PowerShell, Terminal, …) there instead. |
 
 - **Files in a Git repository**: lines changed since the last commit have a bar next to their number (green added, blue changed, a red mark where lines were removed), and the status bar shows the branch with how many lines changed (**main ±3**); click it to compare with the last commit (also **Edit → Code → Compare with the Last Commit**).
 - **Open tabs follow**: rename or move a file (or its folder) and its tab follows, unsaved edits included. Deleting a file closes its tab, unless it has unsaved edits.
@@ -358,7 +372,7 @@ Working there:
 
 ### Terminal on a server
 
-`` Ctrl+` `` (or **View → Terminal**, or right-click a folder on an SFTP server → **Open a terminal here**, or ⋯ in a server file's bar → **Open a terminal in its folder**): a shell on the server opens in a panel under the editor, in that folder, signed in like its files.
+`` Ctrl+` `` (or **View → Terminal**, or right-click a folder on an SFTP server → **Open a terminal here**, or ⋯ in a server file's bar → **Open a terminal in its folder**): a shell on the server opens in a panel under the editor, in that folder, signed in like its files. (Terminals on this computer work the same way: see [A terminal, and running a file](#a-terminal-and-running-a-file).)
 
 - **+** opens another (one tab each); drag the panel's top edge to make it taller.
 - Keys go to the shell: `Ctrl+C` stops a command (copies if text is selected), `Ctrl+V` pastes; `Ctrl+Shift+C` / `Ctrl+Shift+V` also copy and paste; right-click for Copy, Paste, Clear.
@@ -416,7 +430,10 @@ Turn them on in **Settings → Desktop**.
 | `Ctrl+O` | Open a file from disk to edit in place (desktop) |
 | `Ctrl+Shift+E` | Folders on this computer and on servers (desktop) |
 | In the folders view | `Enter` open, `Backspace` up, `→` / `←` open / close a folder in place, `Space` view large, `F2` rename, `Del` delete, `Ctrl+C` / `Ctrl+X` / `Ctrl+V`, `Ctrl+A`, `Ctrl+Shift+N` new folder, `F5` refresh, `Alt+Enter` properties, `Ctrl+Shift+F` find in this folder |
-| `` Ctrl+` `` | Terminal on a server: show or hide (desktop) |
+| `` Ctrl+` `` | Terminal (this computer or a server): show or hide (desktop) |
+| `F5` | Run this file in the terminal (desktop) |
+| `Tab` / `Ctrl+→` / `Escape` | With a grey suggestion: take it / take a word / drop it |
+| `Ctrl+click` on `file:line` | Open that file at that line (in a terminal, a plain click) |
 | In the terminal | `Ctrl+Shift+C` / `Ctrl+Shift+V` copy / paste; `Ctrl+C` copies a selection, `Ctrl+V` pastes |
 | `F1` | Help: every command and shortcut (and this guide) |
 | `Ctrl+Shift+P` (or `Ctrl+P`, then `>`) | Run a command by name |
@@ -480,6 +497,9 @@ Turn them on in **Settings → Desktop**.
 - **"No SSH agent is running"**: on Windows start the *OpenSSH Authentication Agent* service (and `ssh-add` your key), or sign in with a key file.
 - **"Box could not reach …"**: the jump host is connected but can't reach the server behind it; check that server's host and port as seen from the jump host.
 - **`Ctrl+W` doesn't close the tab**: the terminal has the keys (it's the shell's "delete word"). Click into the editor first.
+- **F5 says "No run command for …"**: add one for that type in **Settings → Editor → Run commands** (`rs: cargo run`). "Run works on files in a folder": open the file from Folders (a synced file has no folder to run in).
+- **`python3` (or `node`…) is not found when running a file**: the terminal uses your usual shell and its PATH; install the program, or put its full path in **Run commands**.
+- **No grey suggestions**: turn on **Settings → Editor → Suggest the rest as you type**, connect a model in Settings → Model (a local one; a service that answers later can't), and type at the end of a line. Slow ones: pick a small code model as **Model for suggestions**.
 - **A mirror says the folder is empty or missing**: one side looks wiped out (a drive not plugged in, a server folder moved), so nothing was changed. Fix it, or remove the mirror and set it up again.
 - **A mirror waits with "deleted here: delete on the server too?"**: click **Review** and choose.
 

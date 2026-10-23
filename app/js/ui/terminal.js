@@ -5,11 +5,11 @@ import { activeTerminal, attach, clearTerminal, closeTerminal, copyFromTerminal,
 import { Icon } from './icons.js';
 import { Menu, MenuButton } from './menu.js';
 
-const baseName = (p) => p.replace(/\/+$/, '').split('/').pop() || '/';
+const baseName = (p) => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p;
 
 /**
- * The terminal panel under the editor (desktop): shells on servers, one tab each.
- * Hiding it keeps them running; closing a tab ends its shell.
+ * The terminal panel under the editor (desktop): shells on this computer and on servers,
+ * one tab each. Hiding it keeps them running; closing a tab ends its shell.
  */
 export function TerminalPanel({ settings, actions, onHide }) {
   const [, rerender] = useReducer((x) => x + 1, 0);
@@ -62,11 +62,16 @@ export function TerminalPanel({ settings, actions, onHide }) {
   };
 
   const sftp = servers().filter((c) => c.protocol === 'sftp');
-  const newItems = () =>
-    sftp.length
+  const here = () => actions.openTerminal('local', actions.localTerminalDir());
+  const newItems = () => [
+    { label: 'This computer', icon: 'disk', hint: actions.localTerminalDir() || 'Your home folder', run: here },
+    { separator: true },
+    ...(sftp.length
       ? sftp.map((c) => ({ label: `${c.name} (${c.user ? `${c.user}@` : ''}${c.host})`, icon: 'server', run: () => actions.openTerminal(c.id) }))
-      : [{ label: 'Connect to a server…', icon: 'server', run: () => actions.editServer() }];
-  const tabLabel = (s) => `${server(s.connId)?.name ?? 'Server'}${s.cwd ? ` · ${baseName(s.cwd)}` : ''}`;
+      : [{ label: 'Connect to a server…', icon: 'server', run: () => actions.editServer() }]),
+  ];
+  const place = (s) => (s.connId === 'local' ? 'This computer' : (server(s.connId)?.name ?? 'Server'));
+  const tabLabel = (s) => `${s.runner ? 'Run · ' : ''}${place(s)}${s.cwd ? ` · ${baseName(s.cwd)}` : ''}`;
 
   return html`<section class="terminal-panel" ref=${panel} style=${{ height: `${height}px` }} aria-label="Terminal">
     <div class="terminal-resize" role="separator" aria-orientation="horizontal" aria-label="Resize the terminal" onPointerDown=${resize} />
@@ -74,7 +79,7 @@ export function TerminalPanel({ settings, actions, onHide }) {
       <${Icon} name="terminal" size=${15} />
       <div class="terminal-tabs" role="tablist" aria-label="Terminals">
         ${list.map(
-          (s) => html`<div key=${s.key} role="tab" aria-selected=${s === current} class="terminal-tab kind-remote ${s === current ? 'active' : ''} ${s.exited ? 'exited' : ''}" title=${s.title || `${tabLabel(s)}${s.cwd ? ` (${s.cwd})` : ''}`}>
+          (s) => html`<div key=${s.key} role="tab" aria-selected=${s === current} class="terminal-tab ${s.connId === 'local' ? 'kind-disk' : 'kind-remote'} ${s === current ? 'active' : ''} ${s.exited ? 'exited' : ''}" title=${s.title || `${tabLabel(s)}${s.cwd ? ` (${s.cwd})` : ''}`}>
             <button type="button" class="terminal-tab-name" onClick=${() => setActiveTerminal(s)}>
               <span class="conn-dot ${s.exited ? 'state-disconnected' : 'state-connected'}" />${tabLabel(s)}
             </button>
@@ -95,12 +100,13 @@ export function TerminalPanel({ settings, actions, onHide }) {
       }}>
       ${!list.length &&
       html`<div class="terminal-empty">
-        <p>A terminal on a server, signed in like its files.</p>
+        <p>A terminal on this computer, or on a server (signed in like its files).</p>
         <div class="terminal-empty-servers">
+          <button type="button" class="btn sm" onClick=${here}><${Icon} name="disk" size=${15} />This computer</button>
           ${sftp.map((c) => html`<button type="button" key=${c.id} class="btn sm" onClick=${() => actions.openTerminal(c.id)}><${Icon} name="server" size=${15} />${c.name}</button>`)}
           ${!sftp.length && html`<button type="button" class="btn sm" onClick=${() => actions.editServer()}><${Icon} name="server" size=${15} />Connect to a server…</button>`}
         </div>
-        <p class="muted small">Only SFTP (SSH) servers have terminals. For a folder on this computer, use “Open a terminal here” in Folders.</p>
+        <p class="muted small">Only SFTP (SSH) servers have terminals. “Open a terminal here” in Folders opens one in that folder; F5 runs the open file in one.</p>
       </div>`}
     </div>
     ${menu &&

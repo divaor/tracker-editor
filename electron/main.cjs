@@ -470,16 +470,20 @@ ipcMain.handle('mirror:sync', guard((_e, id, opts = {}) =>
 ));
 app.whenReady().then(watchMirrors);
 
-// ---- Terminals on servers (SSH) ------------------------------------------------
-// A shell on the server, over the same connection as its files. The output goes to
-// the page in small batches (term:data); keys come back with term:input.
+// ---- Terminals (on servers over SSH, and on this computer) -----------------------
+// A shell on the server, over the same connection as its files, or ('local') the person's
+// own shell here (localShell.cjs: node-pty). The output goes to the page in small batches
+// (term:data); keys come back with term:input. A local shell's folder needs no pick: the
+// shell reaches everything anyway, and it starts only when the person opens one.
 const { StringDecoder } = require('node:string_decoder');
+const localShell = require('./localShell.cjs');
 const terminals = new Map(); // id → { stream }
 const clampInt = (n, min, max, fallback) => (Number.isFinite(Number(n)) ? Math.min(max, Math.max(min, Math.round(Number(n)))) : fallback);
 ipcMain.handle('term:open', guard(async (event, connId, opts = {}) => {
   const cols = clampInt(opts.cols, 20, 500, 100);
   const rows = clampInt(opts.rows, 5, 200, 24);
-  const stream = await remote.openShell(String(connId), { cols, rows, cwd: typeof opts.cwd === 'string' ? opts.cwd : '' });
+  const cwd = typeof opts.cwd === 'string' ? opts.cwd : '';
+  const stream = connId === 'local' ? localShell.openLocalShell({ cols, rows, cwd }) : await remote.openShell(String(connId), { cols, rows, cwd });
   const id = crypto.randomBytes(6).toString('hex');
   const sender = event.sender;
   const decoder = new StringDecoder('utf8');
@@ -508,7 +512,7 @@ ipcMain.handle('term:open', guard(async (event, connId, opts = {}) => {
   });
   terminals.set(id, { stream, sender });
   watchTerminalPage(sender);
-  return { id };
+  return { id, shell: stream.shell ?? 'posix' };
 }));
 // A page reloaded or closed: its shells end (once per page, not once per shell).
 const terminalPages = new WeakSet();
@@ -2392,6 +2396,7 @@ function buildMenu() {
         item('Local Model', 'CmdOrCtrl+Shift+A', 'assistant'),
         shown('Outline and Links', 'CmdOrCtrl+Shift+O', 'outline'),
         shown('Terminal', 'Ctrl+`', 'terminal'),
+        shown('Run This File', 'F5', 'run-file'),
         { type: 'separator' },
         item('Indentation Guides', undefined, 'indent-guides'),
         item('Colored Bracket Pairs', undefined, 'bracket-colors'),

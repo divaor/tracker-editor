@@ -3,6 +3,7 @@ import { createEditorHost, findLanguage, guessLanguage, PLAIN_TEXT } from './edi
 import { onLaunchFiles, takeShared } from './inbox.js';
 import { cleanModelName, filingMessages, isUntitled, MIN_NAMING_TEXT, nameFromHeading, namingMessages, parseFiling, uniqueName } from './naming.js';
 import { llmClient } from './semantic.js';
+import { completionMessages } from './completion.js';
 import { fileLink, parseRoute, safeName } from './model.js';
 import { fileVersions, versionName } from './versions.js';
 import { formatDateTime } from './format.js';
@@ -12,10 +13,12 @@ import { getReaderState, onReaderState, setReaderHighlighter, startReading, stop
 import { getSettings, getToken, isSyncConfigured, onSettings, resolvedTheme, saveSettings } from './settings.js';
 import { diskKey, fileKey, flush, parseKey, repoKey, store } from './store.js';
 import { diskAvailable, openDiskFiles, recheckServerTabs, reloadDiskTab, saveDiskTab, unwatchDisk, watchDiskTabs } from './diskTabs.js';
-import { isRemotePath, kindOfKey, remoteAddress, remoteParts, remoteRoot } from './where.js';
+import { isRemotePath, kindOfKey, remoteAddress, remoteParts, remoteRoot, toRemoteUri } from './where.js';
 import { onServers, server, watchServers } from './servers.js';
 import { HostKeyDialog, PromptDialog, ServerDialog, SshImportDialog } from './ui/servers.js';
-import { activeTerminal, focusTerminal, openTerminal, retheme, setToggleHandler, terminals, terminalsAvailable } from './terminals.js';
+import { activeTerminal, focusTerminal, openTerminal, retheme, runInTerminal, setRefHandler, setToggleHandler, terminals, terminalsAvailable } from './terminals.js';
+import { parseRunCommands, runCommandFor, runLine } from './runFile.js';
+import { resolveRef } from './fileRefs.js';
 import { TerminalPanel } from './ui/terminal.js';
 import { FolderSearchPanel } from './ui/folderSearch.js';
 import { PropertiesDialog } from './ui/properties.js';
@@ -1143,6 +1146,17 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
   }, []);
 }
 
+// Suggestions as you type: "server|model" → whether its /completions works (fill in the middle).
+const fillsMiddle = new Map();
+
+/** The folder a path is in: "/w/a.py" → "/w", "/a.py" → "/", "C:\\a.py" → "C:\\". */
+function parentDir(p) {
+  const at = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
+  if (at === -1) return p;
+  const dir = p.slice(0, at);
+  return !dir || /^[A-Za-z]:$/.test(dir) || /:\/\/[^/]*$/.test(dir) ? p.slice(0, at + 1) : dir;
+}
+
 export function App() {
   const [, rerender] = useReducer((x) => x + 1, 0);
   const [settings, setSettings] = useState(getSettings);
@@ -1167,7 +1181,33 @@ export function App() {
   const hostRef = useRef(null);
   const editorEl = useRef(null);
   const actions = useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setCompare, setUsagesOf, setSearchSeed });
-  const editorOptions = (s) => ({ ...s, dark: resolvedTheme(s.theme) === 'dark' });
+  const editorOptions = (s) => ({ ...s, dark: resolvedTheme(s.theme) === 'dark', inlineSuggest: Boolean(s.inlineSuggest && s.llm.enabled && s.llm.provider !== 'async') });
+
+  /**
+   * Suggestions as you type (inlineSuggest.js asks): the model's /completions with the text
+   * after the cursor (fill in the middle), or, for servers and models without it, a chat.
+   * Never for encrypted files.
+   */
+  actions.suggestText = async ({ prefix, suffix, language, name, signal, key }) => {
+    const s = getSettings();
+    const model = s.llm.completeModel || s.llm.chatModel;
+    if (!s.inlineSuggest || !s.llm.enabled || s.llm.provider === 'async' || !model) return '';
+    const k = parseKey(key);
+    if (k?.kind === 'file' && store.get(k.id)?.encrypted) return '';
+    const client = llmClient(s);
+    const where = `${s.llm.baseUrl}|${model}`;
+    if (fillsMiddle.get(where) !== false) {
+      try {
+        const text = await client.complete({ model, prompt: prefix, suffix, maxTokens: 96, temperature: 0.1, signal });
+        fillsMiddle.set(where, true);
+        return text;
+      } catch (err) {
+        if (err?.name === 'AbortError' || ![400, 404, 405, 422, 501].includes(err?.status) || fillsMiddle.get(where)) throw err;
+        fillsMiddle.set(where, false);
+      }
+    }
+    return client.chat({ model, messages: completionMessages({ prefix, suffix, language, name }), purpose: 'complete', signal, temperature: 0.1 });
+  };
 
   // Re-render on store changes; typing only updates the unsynced markers, so throttle that.
   useEffect(() => {
@@ -1277,6 +1317,13 @@ export function App() {
     hostRef.current = createEditorHost(editorEl.current, {
       settings: editorOptions(getSettings()),
       onOpenLink: (target) => actions.openLink(target),
+      // "file:line" Ctrl+clicked: from the file's folder when it has one.
+      onOpenRef: (ref, key) => {
+        const k = parseKey(key);
+        const base = k?.kind === 'disk' ? parentDir(k.path) : '';
+        actions.openRef(ref, base);
+      },
+      onSuggest: (request) => actions.suggestText(request),
       // An image pasted or dropped into the text: read its text.
       onImage: (file) => actions.readImages([{ blob: file, name: file.name || 'Pasted image' }]),
       linkTargets: () => store.live().map((f) => linkName(f.name)),
@@ -1317,7 +1364,7 @@ export function App() {
   }, []);
   useEffect(
     () => hostRef.current?.applySettings(editorOptions(settings)),
-    [settings.theme, settings.wordWrap, settings.showWhitespace, settings.tabSize, settings.lineNumbers, settings.problems, settings.indentGuides, settings.bracketColors, settings.stickyScroll, settings.detectIndent, settings.indentChosen, settings.emmet, settings.linkedTags],
+    [settings.theme, settings.wordWrap, settings.showWhitespace, settings.tabSize, settings.lineNumbers, settings.problems, settings.indentGuides, settings.bracketColors, settings.stickyScroll, settings.detectIndent, settings.indentChosen, settings.emmet, settings.linkedTags, settings.inlineSuggest, settings.llm],
   );
   useEffect(() => {
     const media = matchMedia('(prefers-color-scheme: dark)');
@@ -1515,7 +1562,8 @@ export function App() {
     setPanel('folderSearch');
   };
 
-  // Terminals on servers (desktop): the panel under the editor. Hiding it keeps the shells running.
+  // Terminals (desktop): on this computer ('local') and on servers, in the panel under the
+  // editor. Hiding it keeps the shells running.
   const [terminalShown, setTerminalShown] = useState(false);
   actions.openTerminal = async (connId, cwd = '') => {
     if (!terminalsAvailable()) return toast('Terminals work in the desktop app.', { kind: 'error' });
@@ -1528,7 +1576,14 @@ export function App() {
       toast(ipcMessage(err), { kind: 'error', timeout: 8000 });
     }
   };
-  /** Ctrl+`: shows or hides the terminal; the first time, one on the server you are looking at. */
+  /** Where a terminal on this computer starts: the open file's folder, else the one shown in Folders. */
+  actions.localTerminalDir = () => {
+    const k = parseKey(store.session.active);
+    if (k?.kind === 'disk' && !isRemotePath(k.path)) return parentDir(k.path);
+    const folder = getSettings().sidebarMode === 'folders' ? getSettings().folder : '';
+    return folder && !isRemotePath(folder) ? folder : '';
+  };
+  /** Ctrl+`: shows or hides the terminal; the first time, one where you are (a server's, or this computer's). */
   actions.toggleTerminal = () => {
     if (!terminalsAvailable()) return;
     if (terminalShown) {
@@ -1539,20 +1594,63 @@ export function App() {
     if (!terminals().length) {
       const folder = getSettings().sidebarMode === 'folders' ? getSettings().folder : '';
       const k = parseKey(store.session.active);
-      const near = isRemotePath(folder) ? folder : k?.kind === 'disk' && isRemotePath(k.path) ? k.path.slice(0, k.path.lastIndexOf('/')) : '';
+      const near = k?.kind === 'disk' ? (isRemotePath(k.path) ? parentDir(k.path) : '') : isRemotePath(folder) ? folder : '';
       if (near && server(remoteParts(near).id)?.protocol === 'sftp') return actions.openTerminal(remoteParts(near).id, remoteParts(near).path);
+      return actions.openTerminal('local', actions.localTerminalDir());
     }
     setTerminalShown(true);
     requestAnimationFrame(() => focusTerminal(activeTerminal()));
   };
-  /** A folder: on a server, a terminal here in the editor; on this computer, the system's terminal app. */
-  actions.terminalHere = (dir) => {
-    if (isRemotePath(dir)) return actions.openTerminal(remoteParts(dir).id, remoteParts(dir).path);
-    window.desktop?.folders?.terminal(dir).catch((err) => toast(ipcMessage(err), { kind: 'error' }));
+  /** A folder: a terminal there in the editor (on a server, or this computer). */
+  actions.terminalHere = (dir) => (isRemotePath(dir) ? actions.openTerminal(remoteParts(dir).id, remoteParts(dir).path) : actions.openTerminal('local', dir));
+  /** A folder on this computer in the system's own terminal app. */
+  actions.systemTerminalHere = (dir) => window.desktop?.folders?.terminal(dir).catch((err) => toast(ipcMessage(err), { kind: 'error' }));
+
+  /**
+   * "file:line" clicked in a terminal or Ctrl+clicked in the text: opens the file there.
+   * `base` is the folder relative paths start from (a remote:// one on servers).
+   */
+  actions.openRef = async (ref, base = '') => {
+    let target = null;
+    if (isRemotePath(base)) {
+      const { id, path } = remoteParts(base);
+      target = ref.path.startsWith('/') ? toRemoteUri(id, ref.path) : resolveRef(ref.path, toRemoteUri(id, path));
+    } else target = resolveRef(ref.path, base);
+    if (!target) return toast(`Where is ${ref.path}? Open it from Folders, or give the full path.`);
+    await actions.openDiskPath(target, { line: ref.line, column: ref.column });
   };
   useEffect(() => {
     setToggleHandler(() => actions.toggleTerminal());
+    setRefHandler((ref, s) => actions.openRef(ref, s.connId === 'local' ? s.cwd : toRemoteUri(s.connId, s.cwd || '/')));
   }, []);
+
+  /**
+   * F5: runs the open file in a terminal, in its folder (on this computer, or on its server
+   * over SSH), saved first. The command comes from its type (runFile.js), or Settings.
+   */
+  actions.runFile = async () => {
+    if (!terminalsAvailable()) return toast('Running files works in the desktop app.', { kind: 'error' });
+    const k = parseKey(store.session.active);
+    if (k?.kind !== 'disk') return toast('Run works on files in a folder, on this computer or on a server: open one from Folders (or save this one there).');
+    const remote = isRemotePath(k.path);
+    const conn = remote ? server(remoteParts(k.path).id) : null;
+    if (remote && conn?.protocol !== 'sftp') return toast(`${conn?.name ?? 'That server'} has no terminal: running files needs SSH (SFTP).`, { kind: 'error' });
+    const path = remote ? remoteParts(k.path).path : k.path;
+    const file = { path, dir: parentDir(path), name: path.split(/[\\/]/).pop() };
+    if (!remote && /\.html?$/i.test(file.name)) return window.desktop.folders.openExternal(k.path).catch((err) => toast(ipcMessage(err), { kind: 'error' }));
+    const platform = remote ? 'linux' : (window.desktop.platform ?? 'linux');
+    const kind = platform === 'win32' ? 'powershell' : 'posix';
+    const command = runCommandFor(file, { platform, shell: kind === 'powershell' ? 'pwsh' : '', custom: parseRunCommands(getSettings().runCommands) });
+    if (!command) return toast(`No run command for ${file.name}. Add one for its type in Settings → Editor → Run commands.`);
+    hostRef.current?.flushAll(); // what was typed a moment ago counts
+    if (store.diskTab(k.path)?.dirty && (await actions.saveDisk(k.path)) !== 'saved') return;
+    setTerminalShown(true);
+    try {
+      await runInTerminal(remote ? conn.id : 'local', { cwd: file.dir, line: runLine({ command, dir: file.dir, kind }) });
+    } catch (err) {
+      toast(ipcMessage(err), { kind: 'error', timeout: 8000 });
+    }
+  };
   useEffect(() => retheme(), [settings.theme]);
 
   // Filtering lines (Alt+L): the tabs whose filter bar is open.
@@ -1860,6 +1958,9 @@ export function App() {
       } else if (e.ctrlKey && e.key === '`') {
         e.preventDefault();
         actions.toggleTerminal();
+      } else if (e.key === 'F5' && !mod && !e.altKey && !e.shiftKey && window.desktop) {
+        e.preventDefault();
+        actions.runFile();
       } else if (mod && e.key === '\\') {
         e.preventDefault();
         actions.toggleSplit();
@@ -1895,6 +1996,7 @@ export function App() {
       'server-add': () => actions.editServer(),
       'servers-ssh': () => actions.importSshConfig(),
       terminal: () => actions.toggleTerminal(),
+      'run-file': () => actions.runFile(),
       folders: () => actions.showFolders(),
       'clipboard-history': () => actions.openClipboardHistory(),
       captures: () => actions.takeCaptures(),

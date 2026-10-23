@@ -1,7 +1,8 @@
 // A stand-in for a local model server with an OpenAI-compatible API (like
 // Ollama or LM Studio). Chat answers echo what they were asked, streamed in
 // awkward pieces; embeddings are bags of hashed words, so texts that share
-// words are similar.
+// words are similar. /completions (fill in the middle) answers with `complete(body)`,
+// or 404 when `complete` is null, as servers without it do.
 import { createServer } from 'node:http';
 
 const DIM = 64;
@@ -16,7 +17,7 @@ export function embedText(text) {
   return vector;
 }
 
-export function startFakeLlm({ models = ['llama3.2', 'nomic-embed-text'], answer } = {}) {
+export function startFakeLlm({ models = ['llama3.2', 'nomic-embed-text'], answer, complete = () => '' } = {}) {
   const calls = [];
   const server = createServer(async (req, res) => {
     const chunks = [];
@@ -32,6 +33,10 @@ export function startFakeLlm({ models = ['llama3.2', 'nomic-embed-text'], answer
       if (!models.includes(body.model)) return json(404, { error: { message: `model "${body.model}" not found, try pulling it first` } });
       const input = Array.isArray(body.input) ? body.input : [body.input];
       return json(200, { object: 'list', data: input.map((text, index) => ({ object: 'embedding', index, embedding: embedText(text) })) });
+    }
+    if (req.url === '/v1/completions' && complete) {
+      if (!models.includes(body.model)) return json(404, { error: { message: `model "${body.model}" not found, try pulling it first` } });
+      return json(200, { choices: [{ text: complete(body) }] });
     }
     if (req.url === '/v1/chat/completions') {
       if (!models.includes(body.model)) return json(404, { error: { message: `model "${body.model}" not found, try pulling it first` } });

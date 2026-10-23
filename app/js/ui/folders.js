@@ -915,6 +915,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     { label: 'Properties of this folder', icon: 'info', run: () => actions.showProperties(dir) },
     { label: 'Copy path', icon: 'copy', run: () => actions.copyPath(dir) },
     hasTerminal && { label: 'Open a terminal here', icon: 'terminal', run: () => actions.terminalHere(dir) },
+    !isRemotePath(dir) && bridge.terminal && { label: 'Open in the system’s terminal', icon: 'external', run: () => actions.systemTerminalHere(dir) },
     mirrorItem(dir),
     !remote && { label: 'Open in the file explorer', icon: 'external', run: () => bridge.openExternal(dir).catch(fail) },
   ];
@@ -948,6 +949,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       one && { label: 'Properties (Alt+Enter)', icon: 'info', run: () => actions.showProperties(one.path) },
       one?.dir && { label: 'Find in this folder…', icon: 'search', run: () => actions.findInFolder(one.path) },
       one?.dir && terminalFor(one.path) && { label: 'Open a terminal here', icon: 'terminal', run: () => actions.terminalHere(one.path) },
+      one?.dir && !remote && bridge.terminal && { label: 'Open in the system’s terminal', icon: 'external', run: () => actions.systemTerminalHere(one.path) },
       one?.dir && mirrorItem(one.path),
       one?.dir && !live.includes(one.path) && { label: 'Open beside (another root in the tree)', icon: 'columns', run: () => openBeside(one.path) },
       one?.dir && { label: (settings.folderFavorites ?? []).includes(one.path) ? 'Remove from favorites' : 'Add to favorites', icon: 'star', run: () => saveSettings({ folderFavorites: toggleFavorite(settings.folderFavorites, one.path) }) },

@@ -1,16 +1,19 @@
-// Terminals on servers (desktop): each one a shell over a server's SSH connection
-// (main.cjs term:*), shown with xterm.js, which is loaded the first time one opens.
-// The sessions live here, outside the panel, so hiding the panel keeps them; the
-// panel attaches their screens (attach) and fits them to its size.
+// Terminals (desktop): each one a shell over a server's SSH connection, or ('local') the
+// person's own shell on this computer (main.cjs term:*), shown with xterm.js, which is
+// loaded the first time one opens. The sessions live here, outside the panel, so hiding
+// the panel keeps them; the panel attaches their screens (attach) and fits them to its size.
+// "file:line" in the output is a link (fileRefs.js) that the app opens (setRefHandler).
+import { findFileRefs } from './fileRefs.js';
 import { getSettings, resolvedTheme } from './settings.js';
 
 let lib = null; // { Terminal, FitAddon }
-const sessions = []; // { key, id, connId, cwd, label, title, term, fit, el, exited, code, starting }
+const sessions = []; // { key, id, connId, cwd, label, title, term, fit, el, exited, code, starting, shell, runner }
 const listeners = new Set();
 let active = null;
 let wired = false;
 let lastSize = { cols: 100, rows: 24 };
 let onToggle = () => {};
+let onRef = null;
 
 const bridge = () => window.desktop?.terminal;
 const changed = () => listeners.forEach((l) => l());
@@ -27,6 +30,10 @@ export function onTerminals(callback) {
 /** What Ctrl+` does from inside a terminal (the app shows or hides the panel). */
 export function setToggleHandler(fn) {
   onToggle = fn;
+}
+/** What a click on "file:line" in a terminal does: `fn(ref, session)` (ref from findFileRefs). */
+export function setRefHandler(fn) {
+  onRef = fn;
 }
 
 const THEMES = {
@@ -68,13 +75,14 @@ async function start(s) {
   try {
     const cols = s.term.cols || lastSize.cols;
     const rows = s.term.rows || lastSize.rows;
-    const { id } = await bridge().open(s.connId, { cols, rows, cwd: s.cwd });
+    const { id, shell } = await bridge().open(s.connId, { cols, rows, cwd: s.cwd });
     // Closed while it was starting: the shell ends right away.
     if (s.closed) {
       bridge().close(id);
       return false;
     }
     s.id = id;
+    s.shell = shell ?? 'posix';
     s.exited = false;
     s.code = null;
     // Fitted meanwhile, and typed meanwhile: both go to the shell now.
@@ -100,10 +108,10 @@ const copySelection = (term) => {
 const pasteInto = (term) => navigator.clipboard.readText().then((text) => text && term.paste(text), () => {});
 
 /**
- * Opens a terminal on a server (an SFTP connection), in `cwd` when given.
- * Resolves with the session once its shell runs (or shows why it did not).
+ * Opens a terminal on a server (an SFTP connection's id) or on this computer ('local'),
+ * in `cwd` when given. Resolves with the session once its shell runs (or shows why it did not).
  */
-export async function openTerminal(connId, { cwd = '', label = 'Terminal' } = {}) {
+export async function openTerminal(connId, { cwd = '', label = 'Terminal', runner = false } = {}) {
   if (!bridge()) throw new Error('Terminals work in the desktop app.');
   const { Terminal, FitAddon } = await load();
   wire();
@@ -120,7 +128,7 @@ export async function openTerminal(connId, { cwd = '', label = 'Terminal' } = {}
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
-  const s = { key: `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, id: null, connId, cwd, label, title: '', term, fit, el: null, exited: false, code: null, starting: false, typed: '' };
+  const s = { key: `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, id: null, connId, cwd, label, title: '', term, fit, el: null, exited: false, code: null, starting: false, typed: '', runner };
   term.onData((data) => {
     if (s.exited) {
       if (data === '\r' && !s.starting) {
@@ -139,6 +147,23 @@ export async function openTerminal(connId, { cwd = '', label = 'Terminal' } = {}
   term.onTitleChange((title) => {
     s.title = title;
     changed();
+  });
+  // "file:line" (compilers, stack traces) opens the file there; Ctrl+click, or a click.
+  term.registerLinkProvider({
+    provideLinks(y, callback) {
+      const line = term.buffer.active.getLine(y - 1)?.translateToString(true) ?? '';
+      const refs = onRef ? findFileRefs(line) : [];
+      callback(
+        refs.length
+          ? refs.map((ref) => ({
+              range: { start: { x: ref.from + 1, y }, end: { x: ref.to, y } },
+              text: line.slice(ref.from, ref.to),
+              decorations: { underline: true, pointerCursor: true },
+              activate: () => onRef?.(ref, s),
+            }))
+          : undefined,
+      );
+    },
   });
   // Copy and paste as in terminals: Ctrl+Shift+C / V; Ctrl+C copies when text is
   // selected (else it interrupts), Ctrl+V pastes. Ctrl+` hides the panel.
@@ -218,6 +243,22 @@ export function closeTerminal(s) {
   if (active === s) active = sessions[Math.min(at, sessions.length - 1)] ?? null;
   bridge()?.ownKeys(false);
   changed();
+}
+
+/**
+ * Types `line` and Enter into the terminal kept for running files on `connId` (one per
+ * place), opened in `cwd` the first time. Resolves with the session.
+ */
+export async function runInTerminal(connId, { cwd = '', line, label = 'Run' }) {
+  let s = sessions.find((x) => x.runner && x.connId === connId && !x.exited && !x.closed);
+  if (!s) {
+    s = await openTerminal(connId, { cwd, label, runner: true });
+    if (s.exited) return s; // it said why in its screen
+  }
+  setActiveTerminal(s);
+  if (s.id && !s.starting) bridge().input(s.id, `${line}\r`);
+  else s.typed += `${line}\r`;
+  return s;
 }
 
 export const clearTerminal = (s = active) => s?.term.clear();

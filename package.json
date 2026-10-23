@@ -52,7 +52,11 @@
       "!node_modules/cpu-features/**",
       "!node_modules/nan/**",
       "!node_modules/ssh2/lib/protocol/crypto/build/**",
-      "!node_modules/ssh2/lib/protocol/crypto/src/**"
+      "!node_modules/ssh2/lib/protocol/crypto/src/**",
+      "!node_modules/@lydell/**/*.pdb"
+    ],
+    "asarUnpack": [
+      "node_modules/@lydell/**"
     ],
     "directories": {
       "output": "dist",
@@ -185,6 +189,7 @@
     "npmRebuild": false
   },
   "dependencies": {
+    "@lydell/node-pty": "1.2.0-beta.15",
     "basic-ftp": "^6.2.3",
     "fflate": "^0.8.3",
     "ssh2": "^1.17.0"
