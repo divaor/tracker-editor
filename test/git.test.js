@@ -13,7 +13,8 @@ const require = createRequire(import.meta.url);
 const { createGit } = require('../electron/git.cjs');
 
 test('a repository: its root, status, branch and a file at the last commit', async () => {
-  const dir = realpathSync(mkdtempSync(path.join(tmpdir(), 'git-test-')));
+  // The long, real path, as git reports it (Windows' temporary folder may come as RUNNER~1).
+  const dir = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'git-test-')));
   const git = (...args) => execFileSync('git', args, { cwd: dir, env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.org', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.org' } });
   git('init', '-q', '-b', 'main');
   mkdirSync(path.join(dir, 'src'));
