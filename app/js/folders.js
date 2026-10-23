@@ -51,10 +51,22 @@ export function parentOf(dir, root) {
   return crumbs.length > 1 ? crumbs[crumbs.length - 2].path : null;
 }
 
-/** The entries to show: hidden ones (dot files) only when asked, then those whose name has the query. */
-export function filterEntries(entries, { query = '', hidden = false } = {}) {
+/**
+ * Whether a name passes the filter: it has the text in it (any case), or with * or ?
+ * it fits the pattern ("*.yml", "test?.js"). An empty filter lets everything through.
+ */
+export function nameMatcher(query = '') {
   const q = query.trim().toLowerCase();
-  return entries.filter((e) => (hidden || !e.hidden) && (!q || e.name.toLowerCase().includes(q)));
+  if (!q) return () => true;
+  if (!/[*?]/.test(q)) return (name) => name.toLowerCase().includes(q);
+  const re = new RegExp(`^${q.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`);
+  return (name) => re.test(name.toLowerCase());
+}
+
+/** The entries to show: hidden ones (dot files) only when asked, then those whose name passes the filter. */
+export function filterEntries(entries, { query = '', hidden = false } = {}) {
+  const passes = nameMatcher(query);
+  return entries.filter((e) => (hidden || !e.hidden) && passes(e.name));
 }
 
 /** A path as a terminal takes it: quoted when it has spaces or shell characters. */
@@ -106,18 +118,20 @@ export const sortsUp = (sort, reverse = false) => (sort === 'modified' || sort =
 /**
  * The rows of the folder as a tree: [{ entry, depth, expanded }] with the contents of
  * expanded folders (`children`: folder → its entries, as listed) under them. With a
- * query, a file shows when its name has it and a folder when its name has it or an
- * expanded folder below shows something.
+ * query, a file shows when its name passes it and a folder when its name does or
+ * something listed inside it does (shown under it while it is open).
  */
 export function treeRows(entries, { expanded = new Set(), children = new Map(), query = '', hidden = false, sort = 'name', reverse = false } = {}) {
-  const q = query.trim().toLowerCase();
+  const q = query.trim();
+  const passes = nameMatcher(q);
   const walk = (list, depth, seen) => {
     const rows = [];
     for (const entry of sortEntries(list.filter((e) => hidden || !e.hidden), sort, reverse)) {
       const open = entry.dir && expanded.has(entry.path) && !seen.has(entry.path);
-      const below = open && children.has(entry.path) ? walk(children.get(entry.path) ?? [], depth + 1, new Set([...seen, entry.path])) : [];
-      if (q && !entry.name.toLowerCase().includes(q) && !below.length) continue;
-      rows.push({ entry, depth, expanded: open }, ...below);
+      // A closed folder with something that matches inside still shows (closed).
+      const below = (open || q) && entry.dir && children.has(entry.path) && !seen.has(entry.path) ? walk(children.get(entry.path) ?? [], depth + 1, new Set([...seen, entry.path])) : [];
+      if (q && !passes(entry.name) && !below.length) continue;
+      rows.push({ entry, depth, expanded: open }, ...(open ? below : []));
     }
     return rows;
   };
@@ -163,10 +177,19 @@ export function renameRange(name, dir = false) {
   return [0, dir || dot <= 0 ? name.length : dot];
 }
 
-/** Where `p` is after `from` moved to `to` (it, or something inside it), or null when it is not affected. */
+/**
+ * Where `p` is after `from` moved to `to` (it, or something inside it), or null when it
+ * is not affected. Moved between Windows and a server, the rest takes the new separator.
+ */
 export function remapPath(p, from, to) {
   if (p === from) return to;
-  for (const sep of ['/', '\\']) if (p.startsWith(from.endsWith(sep) ? from : from + sep)) return to + (from.endsWith(sep) ? sep : '') + p.slice(from.length);
+  for (const sep of ['/', '\\']) {
+    const base = from.endsWith(sep) ? from : from + sep;
+    if (!p.startsWith(base)) continue;
+    const rest = p.slice(base.length);
+    const next = sepOf(to);
+    return (to.endsWith(next) ? to : to + next) + (sepOf(from) === next ? rest : rest.split(sepOf(from)).join(next));
+  }
   return null;
 }
 

@@ -275,6 +275,10 @@ test('open tabs follow what moved, inside folders too', () => {
   assert.equal(page.remapPath('/a/docs', '/a/docs', '/b/docs'), '/b/docs');
   assert.equal(page.remapPath('/a/docs2/x.md', '/a/docs', '/b/docs'), null);
   assert.equal(page.remapPath('C:\\work\\a\\x.md', 'C:\\work\\a', 'C:\\work\\b'), 'C:\\work\\b\\x.md');
+  // Between Windows and a server, the rest of the path takes the other separator.
+  assert.equal(page.remapPath('C:\\work\\a\\sub\\x.md', 'C:\\work\\a', 'remote://s1/home/me/a'), 'remote://s1/home/me/a/sub/x.md');
+  assert.equal(page.remapPath('remote://s1/home/me/a/sub/x.md', 'remote://s1/home/me/a', 'C:\\work\\a'), 'C:\\work\\a\\sub\\x.md');
+  assert.equal(page.remapPath('/srv/a/x.md', '/srv/a', 'remote://s1/'), 'remote://s1/x.md');
 });
 
 test('the status line counts the selection', () => {

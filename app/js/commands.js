@@ -3,7 +3,7 @@
 // Alt (Option); `desktop` keys apply in the desktop app instead; `only` marks commands
 // that exist only there ('desktop'). Pure, so the Node tests can check it.
 
-export const COMMAND_GROUPS = ['Files and tabs', 'Find', 'Edit and text', 'View', 'Tools', 'Folders view', 'Terminal'];
+export const COMMAND_GROUPS = ['Files and tabs', 'Find', 'Edit and text', 'Code', 'View', 'Tools', 'Folders view', 'Terminal'];
 
 /** [{ id, group, label, keys?, desktop?, only?, hint?, run? }]; `run: false` for keys that only work in place. */
 export const COMMAND_LIST = [
@@ -48,8 +48,20 @@ export const COMMAND_LIST = [
   { id: 'undo', group: 'Edit and text', label: 'Undo', keys: 'Mod+Z' },
   { id: 'redo', group: 'Edit and text', label: 'Redo', keys: 'Mod+Y · Mod+Shift+Z' },
   { id: 'indent', group: 'Edit and text', label: 'Indent / outdent', keys: 'Tab · Shift+Tab', run: false },
-  { id: 'fold', group: 'Edit and text', label: 'Fold / unfold a block', keys: 'Ctrl+Shift+[ · Ctrl+Shift+]', mac: 'Mod+Alt+[ · Mod+Alt+]', run: false },
   { id: 'cursors', group: 'Edit and text', label: 'More cursors / a rectangle', keys: 'Alt+click · Alt+drag', run: false },
+
+  { id: 'goto-definition', group: 'Code', label: 'Go to where the name at the cursor is declared', keys: 'F12', hint: 'In this file. On the declaration itself: its usages' },
+  { id: 'find-usages', group: 'Code', label: 'Find usages of the name at the cursor', keys: 'Shift+F12', hint: 'In this file; the panel can look in all files' },
+  { id: 'rename-symbol', group: 'Code', label: 'Rename in this file (edit every use at once)', keys: 'F2' },
+  { id: 'goto-symbol', group: 'Code', label: 'Go to a function, class or section', keys: 'Mod+P, then @' },
+  { id: 'matchingBracket', group: 'Code', label: 'Go to the matching bracket', keys: 'Mod+Shift+\\' },
+  { id: 'fold', group: 'Code', label: 'Fold the block here', keys: 'Ctrl+Shift+[', mac: 'Mod+Alt+[', hint: 'Or click the arrow next to the line' },
+  { id: 'unfold', group: 'Code', label: 'Unfold the block here', keys: 'Ctrl+Shift+]', mac: 'Mod+Alt+]' },
+  { id: 'foldAll', group: 'Code', label: 'Fold everything (collapse all functions)', keys: 'Alt+0', hint: 'Blocks inside blocks too' },
+  { id: 'unfoldAll', group: 'Code', label: 'Unfold everything (expand all)', keys: 'Alt+Shift+0' },
+  { id: 'foldTop', group: 'Code', label: 'Fold the outer blocks (classes, top-level functions)', keys: 'Alt+1' },
+  { id: 'foldLevel2', group: 'Code', label: 'Fold one level in (methods in classes)', keys: 'Alt+2' },
+  { id: 'foldLevel3', group: 'Code', label: 'Fold two levels in', keys: 'Alt+3' },
 
   { id: 'toggle-sidebar', group: 'View', label: 'Show or hide the file list', keys: 'Mod+B' },
   { id: 'folders', group: 'View', label: 'Folders (this computer and servers)', keys: 'Mod+Shift+E', only: 'desktop' },

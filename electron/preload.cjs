@@ -65,6 +65,8 @@ contextBridge.exposeInMainWorld('desktop', {
     // Find in a folder and the ones inside it: files with matches come through onFound.
     find: (searchId, dir, query, opts) => ipcRenderer.invoke('folder:find', searchId, dir, query, opts),
     stopFind: (searchId) => ipcRenderer.invoke('folder:find-stop', searchId),
+    // The filter in the folders inside `dir`: { found: [{ entry, parent }], folders, truncated, stopped }.
+    findNames: (searchId, dir, query, opts) => ipcRenderer.invoke('folder:find-names', searchId, dir, query, opts),
     onFound(callback) {
       const found = (_event, data) => callback({ type: 'found', ...data });
       const progress = (_event, data) => callback({ type: 'progress', ...data });
@@ -80,6 +82,8 @@ contextBridge.exposeInMainWorld('desktop', {
     newFolder: (dir, name) => ipcRenderer.invoke('folder:new-folder', dir, name),
     rename: (from, name) => ipcRenderer.invoke('folder:rename', from, name),
     // `opts.onExists`: 'keep' (both, "name (2)"), 'replace' or 'skip' for names already in `dir`.
+    // To, from or between servers they return { transfer: id } at once and go on in the
+    // background (see `transfers`); otherwise [{ from, to }].
     move: (paths, dir, opts) => ipcRenderer.invoke('folder:move', paths, dir, opts),
     copy: (paths, dir, opts) => ipcRenderer.invoke('folder:copy', paths, dir, opts),
     // Which of these names are in `dir` already.
@@ -102,6 +106,15 @@ contextBridge.exposeInMainWorld('desktop', {
       return ipcRenderer.invoke('folder:copy-in', paths.filter(Boolean), dir, opts);
     },
     trash: (paths) => ipcRenderer.invoke('folder:trash', paths),
+    // Copies to, from and between servers running in the background: their state now, a
+    // stop, and every change (throttled while bytes move).
+    transfers: () => ipcRenderer.invoke('transfer:list'),
+    stopTransfer: (id) => ipcRenderer.invoke('transfer:stop', id),
+    onTransfer(callback) {
+      const listener = (_event, job) => callback(job);
+      ipcRenderer.on('transfer:update', listener);
+      return () => ipcRenderer.removeListener('transfer:update', listener);
+    },
     openExternal: (file) => ipcRenderer.invoke('folder:open-external', file),
     readImage: (file) => ipcRenderer.invoke('folder:read-image', file),
     // For the preview: a picture's or PDF's bytes; the start of a text file ({ text, more }).

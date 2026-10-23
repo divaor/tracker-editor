@@ -102,4 +102,57 @@ async function findInFolder({ root, list, read, decode, match, isText = () => tr
   return stats;
 }
 
-module.exports = { findInFolder, nameFilter, SKIP_DIRS };
+/**
+ * The folders view's filter in the folders inside `root`: entries whose name passes
+ * `matches(name)`, folder by folder (a few listed at a time), skipping hidden ones
+ * unless `hidden`, SKIP_DIRS and links (`entry.link`, never followed). Stops at
+ * `maxResults` found, `maxFolders` listed or `timeLimit` ms. Returns { found: [{ entry,
+ * parent }], folders: [{ entry, parent }] (the folders on the way to what was found),
+ * listed, truncated, stopped } (parent: the folder holding it).
+ */
+async function findNames({ root, list, matches, hidden = false, signal, maxResults = 500, maxFolders = 5000, timeLimit = 10000, concurrency = 4, now = Date.now }) {
+  const ends = now() + timeLimit;
+  const found = [];
+  const folderOf = new Map(); // folder → { entry, parent }
+  const pending = [root];
+  let listed = 0;
+  let truncated = false;
+  const full = () => found.length >= maxResults || listed >= maxFolders || now() > ends;
+  const visit = async (dir) => {
+    let entries = [];
+    try {
+      entries = await list(dir);
+    } catch {
+      return; // unreadable: left out
+    }
+    listed++;
+    for (const entry of entries) {
+      if (signal?.aborted) return;
+      if (!hidden && entry.name.startsWith('.')) continue;
+      // Directly in `root`: the listing shows those already.
+      if (dir !== root && matches(entry.name)) {
+        if (found.length >= maxResults) return void (truncated = true);
+        found.push({ entry, parent: dir });
+      }
+      if (entry.dir && !entry.link && !SKIP_DIRS.has(entry.name)) {
+        folderOf.set(entry.path, { entry, parent: dir });
+        pending.push(entry.path);
+      }
+    }
+  };
+  while (pending.length && !signal?.aborted) {
+    if (full()) {
+      truncated = true;
+      break;
+    }
+    await Promise.all(pending.splice(0, concurrency).map(visit));
+  }
+  // The folders between `root` and each one found, once each.
+  const folders = new Map();
+  for (const { parent } of found) {
+    for (let at = parent; at !== root && folderOf.has(at) && !folders.has(at); at = folderOf.get(at).parent) folders.set(at, folderOf.get(at));
+  }
+  return { found, folders: [...folders.values()], listed, truncated: truncated && !signal?.aborted, stopped: Boolean(signal?.aborted) };
+}
+
+module.exports = { findInFolder, findNames, nameFilter, SKIP_DIRS };

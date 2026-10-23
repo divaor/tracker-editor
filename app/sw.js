@@ -39,6 +39,7 @@ const ASSETS = [
   'js/model.js',
   'js/naming.js',
   'js/outline.js',
+  'js/codeNav.js',
   'js/previews.js',
   'js/reader.js',
   'js/search.js',
@@ -88,6 +89,7 @@ const ASSETS = [
   'js/ui/clipboardHistory.js',
   'js/ui/menu.js',
   'js/ui/outline.js',
+  'js/ui/usages.js',
   'js/ui/panels.js',
   'js/ui/preview.js',
   'js/ui/readAloud.js',
@@ -110,6 +112,8 @@ const ASSETS = [
   'js/ui/properties.js',
   'js/ui/mirrors.js',
   'js/mirrors.js',
+  'js/transfers.js',
+  'js/ui/transfers.js',
 ];
 
 self.addEventListener('install', (event) => {

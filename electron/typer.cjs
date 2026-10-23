@@ -4,6 +4,9 @@
 //   from PowerShell. It stops when another window gets the focus, or on Escape.
 // - macOS: System Events (needs Accessibility permission).
 // - Linux: xdotool (X11) or wtype (Wayland).
+// With `lineStart` (the other editor indents new lines by itself), after each Enter
+// whatever indentation it added is cleared (Shift+Home selects it, a space replaces
+// it, Backspace removes the space), so each line gets exactly its own indentation.
 const { spawn: nodeSpawn } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -32,7 +35,7 @@ public static class TrackerEditorTyper {
   [DllImport("user32.dll")] static extern short GetKeyState(int key);
   [DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
 
-  const uint KEYBOARD = 1, KEYUP = 0x2, UNICODE = 0x4, SCANCODE = 0x8;
+  const uint KEYBOARD = 1, EXTENDED = 0x1, KEYUP = 0x2, UNICODE = 0x4, SCANCODE = 0x8;
 
   static INPUT Key(ushort scan, uint flags) {
     INPUT input = new INPUT();
@@ -53,6 +56,18 @@ public static class TrackerEditorTyper {
 
   static void Unicode(char ch) { Send(Key(ch, UNICODE), Key(ch, UNICODE | KEYUP)); }
 
+  // After Enter: select what the other editor indented the new line with, replace it
+  // with a space and remove that, so the line starts at the left. Home is an extended
+  // key (without the flag it is the keypad's 7).
+  static void ClearIndent(int delay) {
+    ushort shiftSc = Scan(0x10), homeSc = Scan(0x24);
+    Send(Key(shiftSc, SCANCODE), Key(homeSc, SCANCODE | EXTENDED), Key(homeSc, SCANCODE | EXTENDED | KEYUP), Key(shiftSc, SCANCODE | KEYUP));
+    Thread.Sleep(delay);
+    Tap(0x20);
+    Thread.Sleep(delay);
+    Tap(0x08);
+  }
+
   static void Press(char ch) {
     if (ch == '\n') { Tap(0x0D); return; }
     if (ch == '\t') { Tap(0x09); return; }
@@ -70,7 +85,7 @@ public static class TrackerEditorTyper {
     } else Send(Key(sc, SCANCODE), Key(sc, SCANCODE | KEYUP));
   }
 
-  public static void Type(string text, int delay, long self, bool unicode) {
+  public static void Type(string text, int delay, long self, bool unicode, bool lineStart) {
     IntPtr target = GetForegroundWindow();
     if (self != 0 && target.ToInt64() == self) { Console.WriteLine("stopped self 0"); return; }
     for (int i = 0; i < text.Length; i++) {
@@ -80,6 +95,7 @@ public static class TrackerEditorTyper {
       if (char.IsHighSurrogate(ch) && i + 1 < text.Length) { Unicode(ch); Unicode(text[i + 1]); i++; }
       else if (unicode && ch != '\n' && ch != '\t') Unicode(ch);
       else Press(ch);
+      if (ch == '\n' && lineStart) { Thread.Sleep(delay); ClearIndent(delay); }
       if (i % 25 == 0) Console.WriteLine("progress " + i);
       Thread.Sleep(delay);
     }
@@ -98,18 +114,19 @@ function windowsScript() {
     // Starts at the end of the countdown, however long PowerShell took to get here.
     '$wait = [int64]$env:TYPER_AT - [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()',
     'if ($wait -gt 0) { Start-Sleep -Milliseconds $wait }',
-    "[TrackerEditorTyper]::Type($text, [int]$env:TYPER_DELAY, [int64]$env:TYPER_SELF, ($env:TYPER_UNICODE -eq '1'))",
+    "[TrackerEditorTyper]::Type($text, [int]$env:TYPER_DELAY, [int64]$env:TYPER_SELF, ($env:TYPER_UNICODE -eq '1'), ($env:TYPER_LINESTART -eq '1'))",
   ].join('\n');
 }
 
 /** For powershell.exe -EncodedCommand: base64 of the UTF-16LE script. */
 const encodeCommand = (script) => Buffer.from(script, 'utf16le').toString('base64');
 
-/** AppleScript: argv is the text file and the delay between keys in seconds. */
+/** AppleScript: argv is the text file, the delay between keys in seconds, and "1" to clear the indentation after Enter. */
 function macScript() {
   return `on run argv
   set theText to read (POSIX file (item 1 of argv)) as «class utf8»
   set pause to (item 2 of argv) as real
+  set lineStart to (item 3 of argv) is "1"
   tell application "System Events"
     set frontApp to name of first application process whose frontmost is true
     if frontApp is "Tracker Editor" or frontApp is "Electron" then error "stopped self"
@@ -117,6 +134,12 @@ function macScript() {
       set ch to contents of c
       if ch is linefeed or ch is return then
         key code 36
+        if lineStart then
+          delay pause
+          key code 123 using {command down, shift down}
+          keystroke " "
+          key code 51
+        end if
       else if ch is tab then
         key code 48
       else
@@ -131,13 +154,50 @@ end run
 
 const STOPPED = { self: 'self', focus: 'focus', escape: 'escape' };
 
+// Keys that clear the indentation the other editor put on a new line (see the top).
+const CLEAR_INDENT = { xdotool: ['shift+Home', 'space', 'BackSpace'], wtype: ['-M', 'shift', '-k', 'Home', '-m', 'shift', '-k', 'space', '-k', 'BackSpace'] };
+const MAX_ARGS = 60 * 1024;
+
 /**
- * Starts typing `text` at time `at` (ms since the epoch), `delay` ms between keys.
- * Returns { done, cancel }: done resolves to { typed, stopped? } where stopped is
- * 'self' (this app still had the focus), 'focus' (another window took it),
- * 'escape' or 'cancelled'; it rejects with a message to show.
+ * Linux, clearing the indentation after each Enter: the argument lists of the runs
+ * that type `text` line by line ([{ args, chars }], chars: how many characters a run
+ * types). xdotool's `type` takes every argument after it, so each xdotool run is one
+ * line: the keys for the line break before it, then `type` last. wtype takes text and
+ * keys in any order, so its runs only split to keep the arguments short.
  */
-function startTyping(text, { delay = 15, at = Date.now() + 5000, self = '0', unicode = false } = {}, deps = {}) {
+function lineRuns(text, { tool = 'xdotool', delay = 15 } = {}) {
+  const lines = text.split('\n');
+  if (tool !== 'wtype') {
+    return lines
+      .map((line, i) => ({
+        args: [...(i ? ['key', '--delay', String(delay), 'Return', ...CLEAR_INDENT.xdotool] : []), ...(line ? ['type', '--delay', String(delay), '--', line] : [])],
+        chars: line.length + (i ? 1 : 0),
+      }))
+      .filter((run) => run.args.length);
+  }
+  const runs = [];
+  let args = [];
+  let size = 0;
+  let chars = 0;
+  const flush = () => {
+    if (args.length) runs.push({ args: ['-d', String(delay), ...args], chars });
+    args = [];
+    size = 0;
+    chars = 0;
+  };
+  lines.forEach((line, i) => {
+    const step = [...(i ? ['-k', 'Return', ...CLEAR_INDENT.wtype] : []), ...(line ? [line] : [])];
+    const stepSize = step.reduce((n, a) => n + Buffer.byteLength(a) + 1, 0);
+    if (size && size + stepSize > MAX_ARGS) flush();
+    args.push(...step);
+    size += stepSize;
+    chars += line.length + (i ? 1 : 0);
+  });
+  flush();
+  return runs;
+}
+
+function startTyping(text, { delay = 15, at = Date.now() + 5000, self = '0', unicode = false, lineStart = false } = {}, deps = {}) {
   const { platform = process.platform, spawn = nodeSpawn, tmpdir = os.tmpdir(), env = process.env, onProgress = () => {}, isSelfFocused = () => false, setTimer = setTimeout, clearTimer = clearTimeout } = deps;
   const dir = fs.mkdtempSync(path.join(tmpdir, 'tracker-editor-typing-'));
   const file = path.join(dir, 'text.txt');
@@ -152,7 +212,9 @@ function startTyping(text, { delay = 15, at = Date.now() + 5000, self = '0', uni
 
   const done = new Promise((resolve, reject) => {
     settle = resolve;
-    const run = (command, args, options = {}) => {
+    // One run, or several in a row: `more` lists the next ones ({ args, chars }); `chars`
+    // is how many characters this one types (for the progress between runs).
+    const run = (command, args, options = {}, more = [], chars = 0) => {
       child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, ...options });
       let errText = '';
       let buffered = '';
@@ -177,6 +239,11 @@ function startTyping(text, { delay = 15, at = Date.now() + 5000, self = '0', uni
         reject(new Error(err.code === 'ENOENT' ? missingTool(platform, env) : err.message));
       });
       child.on('close', (code) => {
+        if (!cancelled && code === 0 && more.length) {
+          typed += chars;
+          onProgress(typed);
+          return run(command, more[0].args, options, more.slice(1), more[0].chars);
+        }
         cleanup();
         if (cancelled) return resolve({ typed, stopped: 'cancelled' });
         if (/stopped self/.test(errText)) return resolve({ typed: 0, stopped: 'self' });
@@ -188,7 +255,7 @@ function startTyping(text, { delay = 15, at = Date.now() + 5000, self = '0', uni
     if (platform === 'win32') {
       // Started now: PowerShell takes a moment, and waits for the end of the countdown itself.
       run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encodeCommand(windowsScript())], {
-        env: { ...env, TYPER_FILE: file, TYPER_AT: String(at), TYPER_DELAY: String(delay), TYPER_SELF: String(self || 0), TYPER_UNICODE: unicode ? '1' : '0' },
+        env: { ...env, TYPER_FILE: file, TYPER_AT: String(at), TYPER_DELAY: String(delay), TYPER_SELF: String(self || 0), TYPER_UNICODE: unicode ? '1' : '0', TYPER_LINESTART: lineStart ? '1' : '0' },
       });
       return;
     }
@@ -203,7 +270,14 @@ function startTyping(text, { delay = 15, at = Date.now() + 5000, self = '0', uni
       if (platform === 'darwin') {
         const script = path.join(dir, 'type.applescript');
         fs.writeFileSync(script, macScript(), 'utf8');
-        run('osascript', [script, file, String(delay / 1000)]);
+        run('osascript', [script, file, String(delay / 1000), lineStart ? '1' : '0']);
+      } else if (lineStart) {
+        // Line by line, with the keys that clear the other editor's indentation between them.
+        const tool = !env.DISPLAY && env.WAYLAND_DISPLAY ? 'wtype' : 'xdotool';
+        const utf8 = /utf-?8/i.test(env.LC_ALL || env.LC_CTYPE || env.LANG || '');
+        const [first, ...rest] = lineRuns(text, { tool, delay });
+        if (!first) return resolve({ typed: 0 });
+        run(tool, first.args, { env: utf8 || tool === 'wtype' ? env : { ...env, LC_ALL: 'C.UTF-8' } }, rest, first.chars);
       } else if (!env.DISPLAY && env.WAYLAND_DISPLAY) {
         run('wtype', ['-d', String(delay), '-'], { stdio: ['pipe', 'pipe', 'pipe'] });
         child.stdin?.end(text);
@@ -246,4 +320,4 @@ function explain(platform, errText) {
   return text.split('\n').filter(Boolean).slice(-3).join(' ');
 }
 
-module.exports = { startTyping, windowsScript, macScript, encodeCommand, WINDOWS_TYPER };
+module.exports = { startTyping, windowsScript, macScript, encodeCommand, lineRuns, WINDOWS_TYPER };

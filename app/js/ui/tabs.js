@@ -523,6 +523,9 @@ export function StatusBar({ recording, big, cursor, language, file, repo, disk, 
     ${recording && html`<button type="button" class="status-item status-btn-text status-recording" title="Recording a macro: Ctrl+Shift+R stops" onClick=${actions.toggleRecording}>● Recording macro</button>`}
     ${big && html`<span class="status-item status-big" title="A very large file: highlighting, wrapping and completion are off to keep it fast">Large file</span>`}
     <span class="spacer" />
+    ${cursor?.scope && html`<button type="button" class="status-item status-btn-text status-scope hide-narrow" title=${`In ${cursor.scope} · Ctrl+P then @ goes to another`} onClick=${() => actions.gotoSymbol()}>
+      <${Icon} name="code" size=${13} /><span>${cursor.scope}</span>
+    </button>`}
     ${cursor && html`<span class="status-item">Ln ${cursor.line}, Col ${cursor.column}${cursor.selected ? ` (${cursor.selected} selected)` : ''}${cursor.cursors > 1 ? ` · ${cursor.cursors} cursors` : ''}</span>`}
     ${cursor && html`<span class="status-item hide-narrow">${cursor.lines} lines</span>`}
     ${file &&

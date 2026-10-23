@@ -700,12 +700,101 @@ ipcMain.handle('folder:rename', guard((_e, from, name) => {
   return to;
 }));
 // Copies between this computer and servers (or two servers): uploads and downloads.
-async function copyAcross(paths, dir) {
-  if (isRemote(dir)) return remote.copyInto(paths.map((p) => (isRemote(p) ? p : checkFile(p))), dir);
+async function copyAcross(paths, dir, job = null) {
+  if (isRemote(dir)) return remote.copyInto(paths.map((p) => (isRemote(p) ? p : checkFile(p))), dir, { job });
   checkDir(dir);
   const local = paths.filter((p) => !isRemote(p)).map(checkFile);
-  return [...(local.length ? folders.copyInto(local, dir) : []), ...(await remote.downloadInto(paths.filter(isRemote), dir, folders.freePath))];
+  return [...(local.length ? folders.copyInto(local, dir) : []), ...(await remote.downloadInto(paths.filter(isRemote), dir, folders.freePath, { job }))];
 }
+
+// ---- Transfers: copies to, from and between servers, in the background ------------
+// folder:copy, move and copy-in that involve a server (other than a move within one)
+// return { transfer: id } at once and go on here; the page follows them through
+// 'transfer:update' (throttled while bytes move) and can stop them ('transfer:stop').
+// A job's `result` is the same list the call would have returned.
+
+const transfers = new Map(); // id → job
+let transferSeq = 0;
+const crossesDevices = (paths, dir) => paths.some((p) => isRemote(p) !== isRemote(dir)) || (isRemote(dir) && !sameServer(paths, dir));
+const nameOfPath = (p) => (isRemote(p) ? path.posix.basename(remoteFiles.parseUri(p).path) : path.basename(p));
+// What the page sees of a job (no functions, no timers).
+const transferView = (j) => ({ id: j.id, op: j.op, kind: j.kind, dir: j.dir, names: j.names, state: j.state, files: j.files, filesDone: j.filesDone, total: j.total, sent: j.sent, current: j.current, startedAt: j.startedAt, endedAt: j.endedAt, result: j.result, error: j.error });
+function sendTransfer(job, now = false) {
+  const send = () => {
+    clearTimeout(job.timer);
+    job.timer = null;
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('transfer:update', transferView(job));
+  };
+  if (now) return send();
+  if (!job.timer) job.timer = setTimeout(send, 250);
+}
+/**
+ * Runs `work(job)` in the background and returns { transfer: id }. `op` is what the
+ * page asked ('copy', 'move', 'copy-in'); `kind` 'upload', 'download' or 'copy'
+ * (between servers). The copy functions report through the job: plan(files) for the
+ * totals, then start(file), bytes(n so far of that file) and fileDone(file).
+ */
+function startTransfer({ op, kind, paths, dir }, work) {
+  const controller = new AbortController();
+  let doneBytes = 0;
+  const job = {
+    id: `t${++transferSeq}`,
+    op,
+    kind,
+    dir,
+    names: paths.map(nameOfPath),
+    state: 'running',
+    files: 0,
+    filesDone: 0,
+    total: 0,
+    sent: 0,
+    current: '',
+    startedAt: Date.now(),
+    endedAt: 0,
+    result: null,
+    error: '',
+    signal: controller.signal,
+    controller,
+    timer: null,
+    plan(items) {
+      job.files += items.length;
+      job.total += items.reduce((n, i) => n + (i.size || 0), 0);
+      sendTransfer(job);
+    },
+    start(item) {
+      job.current = String(item.path).split(/[\\/]/).pop();
+      sendTransfer(job);
+    },
+    bytes(n) {
+      job.sent = doneBytes + n;
+      sendTransfer(job);
+    },
+    fileDone(item) {
+      doneBytes += item.size || 0;
+      job.sent = doneBytes;
+      job.filesDone++;
+      sendTransfer(job);
+    },
+  };
+  transfers.set(job.id, job);
+  // Finished ones are kept a while for the page (after a reload, say), then let go.
+  const end = (patch) => {
+    Object.assign(job, patch, { current: '', endedAt: Date.now() });
+    sendTransfer(job, true);
+    setTimeout(() => transfers.delete(job.id), 10 * 60 * 1000).unref?.();
+  };
+  work(job).then(
+    (result) => end({ state: 'done', result }),
+    (err) => end({ state: err.stopped || controller.signal.aborted ? 'stopped' : 'failed', error: err.stopped ? '' : String(err.message ?? err), result: err.done ?? [] }),
+  );
+  sendTransfer(job, true);
+  return { transfer: job.id };
+}
+ipcMain.handle('transfer:list', guard(() => [...transfers.values()].map(transferView)));
+ipcMain.handle('transfer:stop', guard((_e, id) => {
+  transfers.get(id)?.controller.abort();
+  return true;
+}));
 const sameServer = (paths, dir) => isRemote(dir) && paths.every((p) => isRemote(p) && remoteFiles.parseUri(p).id === remoteFiles.parseUri(dir).id);
 // Names already in a folder: asked about first ('folder:existing'); then `onExists` says what
 // happens to them: 'keep' (both: the new one gets " (2)"), 'skip' (left out) or 'replace'.
@@ -799,23 +888,36 @@ ipcMain.handle('folder:move', guard(async (_e, paths, dir, opts = {}) => {
   // Everything is checked before anything changes.
   for (const p of paths) if (!isRemote(p)) checkEntry(p);
   if (!isRemote(dir)) checkDir(dir);
-  return placeWithExisting(paths, dir, opts?.onExists, async (sources) => {
-    if (!isRemote(dir) && !sources.some(isRemote)) return folders.moveInto(sources, dir);
-    if (sameServer(sources, dir)) return remote.moveWithin(sources, dir);
-    // Between this computer and a server: copied, then the originals removed (from here, to the Recycle Bin).
-    const copies = await copyAcross(sources, dir);
-    for (const c of copies) await (isRemote(c.from) ? remote.remove([c.from]) : shell.trashItem(c.from));
-    return copies;
-  });
+  const place = (job) =>
+    placeWithExisting(paths, dir, opts?.onExists, async (sources) => {
+      if (!isRemote(dir) && !sources.some(isRemote)) return folders.moveInto(sources, dir);
+      if (sameServer(sources, dir)) return remote.moveWithin(sources, dir);
+      // Between this computer and a server: copied, then the originals removed (from here, to the
+      // Recycle Bin). Stopped part way, only what got there is removed here.
+      let copies;
+      try {
+        copies = await copyAcross(sources, dir, job);
+      } catch (err) {
+        for (const c of err.done ?? []) await (isRemote(c.from) ? remote.remove([c.from]) : shell.trashItem(c.from)).catch(() => {});
+        throw err;
+      }
+      for (const c of copies) await (isRemote(c.from) ? remote.remove([c.from]) : shell.trashItem(c.from));
+      return copies;
+    });
+  if (crossesDevices(paths, dir)) return startTransfer({ op: 'move', kind: isRemote(dir) ? (paths.some(isRemote) ? 'copy' : 'upload') : 'download', paths, dir }, place);
+  return place(null);
 }));
 ipcMain.handle('folder:copy', guard(async (_e, paths, dir, opts = {}) => {
   checkList(paths);
   for (const p of paths) if (!isRemote(p) && !fs.existsSync(checkFile(p))) throw new Error(`${path.basename(p)} is not there any more.`);
   if (!isRemote(dir)) checkDir(dir);
-  return placeWithExisting(paths, dir, opts?.onExists, (sources) => {
-    if (!isRemote(dir) && !sources.some(isRemote)) return folders.copyInto(sources, dir);
-    return copyAcross(sources, dir);
-  });
+  const place = (job) =>
+    placeWithExisting(paths, dir, opts?.onExists, (sources) => {
+      if (!isRemote(dir) && !sources.some(isRemote)) return folders.copyInto(sources, dir);
+      return copyAcross(sources, dir, job);
+    });
+  if (paths.some(isRemote) || isRemote(dir)) return startTransfer({ op: 'copy', kind: !isRemote(dir) ? 'download' : paths.every(isRemote) ? 'copy' : 'upload', paths, dir }, place);
+  return place(null);
 }));
 // Files pasted or dropped from another app: the preload takes their paths from the
 // File objects (webUtils), so the page cannot name other files. They are copied in;
@@ -825,7 +927,8 @@ ipcMain.handle('folder:copy-in', guard(async (_e, paths, dir, opts = {}) => {
   if (!sources.length) throw new Error('Those files are not on disk.');
   checkList(sources);
   if (!isRemote(dir)) checkDir(dir);
-  return placeWithExisting(sources, dir, opts?.onExists, (list) => (isRemote(dir) ? remote.copyInto(list, dir) : folders.copyInto(list, dir)));
+  if (!isRemote(dir)) return placeWithExisting(sources, dir, opts?.onExists, (list) => folders.copyInto(list, dir));
+  return startTransfer({ op: 'copy-in', kind: 'upload', paths: sources, dir }, (job) => placeWithExisting(sources, dir, opts?.onExists, (list) => remote.copyInto(list, dir, { job })));
 }));
 // Zip archives (folders on this computer): the selection compressed next to it, or an
 // archive extracted into a new folder beside it (zip.cjs: never outside it).
@@ -1039,7 +1142,7 @@ ipcMain.handle('folder:watch', guard((event, dir) => {
 }));
 // Find in a folder (and the folders inside it), here or on a server: each file
 // with matches goes to the page as soon as it is read ('folder:found').
-const { findInFolder } = require('./findInFolder.cjs');
+const { findInFolder, findNames } = require('./findInFolder.cjs');
 const folderSearches = new Map(); // search id → AbortController
 let appModules = null;
 const loadAppModules = async () =>
@@ -1141,6 +1244,33 @@ ipcMain.handle('folder:find', guard(async (event, searchId, dir, query, opts = {
     if (folderSearches.get(searchId) === controller) folderSearches.delete(searchId);
   }
 }));
+// The folders view's filter in the folders inside the one shown (names only; a newer
+// search with the same id replaces it). Links are not followed, so it stays inside.
+ipcMain.handle('folder:find-names', guard(async (_e, searchId, dir, query, opts = {}) => {
+  if (typeof query !== 'string' || !query.trim()) return { found: [], folders: [], truncated: false };
+  const onServer = isRemote(dir);
+  if (!onServer) checkDir(dir);
+  const { folders: names } = await loadAppModules();
+  const controller = new AbortController();
+  folderSearches.get(searchId)?.abort();
+  folderSearches.set(searchId, controller);
+  try {
+    return await findNames({
+      root: dir,
+      list: onServer
+        ? async (d) => (await remote.list(d)).entries
+        : async (d) => folders.listFolder(d).entries.map((e) => (e.dir && fs.lstatSync(e.path).isSymbolicLink() ? { ...e, link: true } : e)),
+      matches: names.nameMatcher(query),
+      hidden: Boolean(opts.hidden),
+      signal: controller.signal,
+      maxFolders: onServer ? 1500 : 20000,
+      timeLimit: onServer ? 15000 : 8000,
+      concurrency: onServer ? (remote.isFtp(dir) ? 1 : 4) : 8,
+    });
+  } finally {
+    if (folderSearches.get(searchId) === controller) folderSearches.delete(searchId);
+  }
+}));
 ipcMain.handle('folder:find-stop', guard((_e, searchId) => {
   folderSearches.get(searchId)?.abort();
   return true;
@@ -1223,7 +1353,7 @@ ipcMain.handle('type:start', guard(async (event, text, opts = {}) => {
   const handle = mainWindow?.getNativeWindowHandle();
   const self = process.platform === 'win32' && handle ? (handle.length >= 8 ? handle.readBigUInt64LE() : BigInt(handle.readUInt32LE())).toString() : '0';
   const sender = event.sender;
-  typing = startTyping(text, { delay, at: Date.now() + wait, self, unicode: Boolean(opts.unicode) }, {
+  typing = startTyping(text, { delay, at: Date.now() + wait, self, unicode: Boolean(opts.unicode), lineStart: Boolean(opts.lineStart) }, {
     onProgress: (n) => !sender.isDestroyed() && sender.send('type:progress', n),
     isSelfFocused: () => Boolean(mainWindow?.isFocused()),
   });
@@ -1956,6 +2086,22 @@ function buildMenu() {
             item('Sort Lines', undefined, 'sortLines'),
             item('Remove Duplicate Lines', undefined, 'removeDuplicateLines'),
             item('Trim Trailing Spaces', undefined, 'trimTrailing'),
+          ],
+        },
+        {
+          label: 'Code',
+          submenu: [
+            shown('Go to Declaration', 'F12', 'goto-definition'),
+            shown('Find Usages', 'Shift+F12', 'find-usages'),
+            shown('Rename in This File', 'F2', 'rename-symbol'),
+            item('Go to Function or Section…', undefined, 'goto-symbol'),
+            shown('Go to Matching Bracket', 'CmdOrCtrl+Shift+\\', 'matchingBracket'),
+            { type: 'separator' },
+            shown('Fold Everything', 'Alt+0', 'foldAll'),
+            shown('Unfold Everything', 'Alt+Shift+0', 'unfoldAll'),
+            shown('Fold the Outer Blocks', 'Alt+1', 'foldTop'),
+            shown('Fold One Level In', 'Alt+2', 'foldLevel2'),
+            shown('Fold Two Levels In', 'Alt+3', 'foldLevel3'),
           ],
         },
         { type: 'separator' },

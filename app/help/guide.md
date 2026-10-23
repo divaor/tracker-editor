@@ -80,8 +80,20 @@ The editor uses the tracker's repo, token and projects. Its own files go to `edi
 
 - **Format document** (`Shift+Alt+F`, ⋯ menu, or **Edit → Format Document**): tidies the file, or only the selection (for example the JSON inside a log line). **JSON** on one line becomes one value per line (numbers and text exactly as written, comments kept); also **XML**, **SQL** (by dialect: pick PostgreSQL, MySQL, MS SQL… in the status bar), **JavaScript**, **TypeScript**, **CSS/SCSS/Less**, **HTML**, **Vue**, **Markdown**, **YAML** and **GraphQL**. It uses the file's name or the language picked in the status bar; text with no name is formatted when it looks like JSON or XML. Something it cannot read says what and where; `Ctrl+Z` takes a format back.
 - **Text tools** (⋯ → **Text tools**, **Edit → Text**, or Help): UPPER and lower case, sort lines, remove duplicate lines, trim trailing spaces, duplicate or delete a line, comment lines.
-- Multiple cursors, `Ctrl+D` select the next occurrence, `Ctrl+/` comment lines, bracket matching, code folding, `Alt+Z` word wrap, visible whitespace. Syntax highlighting for 140+ languages, from the file name, from pasted text, or picked in the status bar.
+- Multiple cursors, `Ctrl+D` select the next occurrence, `Ctrl+/` comment lines, bracket matching, `Alt+Z` word wrap, visible whitespace. Syntax highlighting for 140+ languages, from the file name, from pasted text, or picked in the status bar.
 - **Help** (`F1`, or the **?** at the top): every command with its shortcut, searchable (type "sort" or "Ctrl+K"); click one, or press `Enter`, to run it. **Print** gives a one-page cheat sheet. The **Guide** tab is this guide.
+
+### Code tools
+
+Not a full IDE, but enough to find your way in a code file (**Edit → Code** on the desktop):
+
+- **Fold and unfold**: click the arrow next to a line number, or `Ctrl+Shift+[` / `Ctrl+Shift+]`. `Alt+0` folds everything (open a class and its methods are still folded), `Alt+Shift+0` unfolds everything. `Alt+1` folds the outer blocks (classes, top-level functions), `Alt+2` the ones one level in (the methods of a class), `Alt+3` two levels in. Code folds by its braces or blocks; YAML by its keys; plain text and languages without their own folding by indentation.
+- **Go to the declaration** (`F12`): of the name at the cursor, in this file: the function, class, variable, parameter, import, key or table it names. Several with the same name (a `data` in each function)? It goes to the nearest one above. On the declaration itself, `F12` shows its usages.
+- **Usages** (`Shift+F12`): every line that uses the name, the declarations marked; click one to go there. **Edit all together** selects them all; **Find in all files** looks in your other files.
+- **Rename in this file** (`F2`): every use of the name gets a cursor; type the new name, `Escape` goes back to one cursor.
+- **Go to a function or section**: `Ctrl+P`, then type `@` and part of its name. The outline (`Ctrl+Shift+O`) lists them too.
+- **Where you are**: the status bar names the class and function the cursor is in (`Store › save`), or the YAML key or Markdown section; click it to go to another.
+- The name under the cursor is highlighted wherever else it appears. `Ctrl+Shift+\` jumps to the matching bracket.
 
 ---
 
@@ -239,13 +251,14 @@ It types real key presses into whichever window has the focus when the countdown
 | --- | --- |
 | Time to switch windows | 3, 5 or 10 seconds. |
 | Speed | Fast, Normal, or **Slow, for laggy connections** if characters go missing. |
-| The other editor indents new lines by itself | Leaves out leading spaces so indentation isn't doubled (SSMS, Visual Studio…). |
+| The other editor indents new lines by itself | Turn it on when the window you type into indents new lines on its own (VS Code, Visual Studio, SSMS, Notepad++, most editors over a remote desktop): after each line break, whatever indentation it added is cleared and the text's own is typed, so YAML, Python and code keep exactly their indentation. Without it, such editors pile up the indentation. |
 | Minimize Tracker Editor while it types | The window behind it (often the remote desktop) gets the focus. |
 | Send characters instead of key presses (Windows) | If symbols come out wrong because your keyboard layout differs from the remote one. |
 
 - **Windows**: works as is.
 - **macOS**: the first time, allow Tracker Editor in **System Settings → Privacy & Security → Accessibility**.
 - **Linux**: needs `xdotool` (X11) or `wtype` (Wayland).
+- If the other editor also **closes brackets and quotes** by itself (`(` becomes `()`), you may get doubles: turn that off there while typing, or type into a plain editor (Notepad) and copy from there.
 
 ---
 
@@ -276,17 +289,19 @@ The sidebar has two views on the desktop: **My files** (synced) and **Folders** 
 | Open | Double-click or `Enter`. A folder opens in the view (`Backspace` or ↑ goes back; click the path at the top to jump). A text file opens **in place** like `Ctrl+O` (not synced, `Ctrl+S` saves, Follow works). **Pictures and PDFs show large here** (as with `Space`; `Enter` there opens them with their program); to open them with their program straight away, choose that in **Settings → Desktop → Folders**. Office files and other formats open **with their own program**. |
 | Make | **New file**, **New folder** (`Ctrl+Shift+N`): type the name in the list, `Enter`. |
 | Rename | `F2`, type, `Enter` (`Escape` cancels). |
-| Copy, move | `Ctrl+C` / `Ctrl+X`, then `Ctrl+V` in another folder (or **Paste into this folder** on a folder). **Duplicate** makes "name - Copy". Or drag onto a folder or onto part of the path at the top: moves, with `Ctrl` copies. |
+| Copy, move | `Ctrl+C` / `Ctrl+X`, then `Ctrl+V` in another folder (or **Paste into this folder** on a folder). **Duplicate** makes "name - Copy". Or drag onto a folder or onto part of the path at the top: moves, with `Ctrl` copies. Dropped on a file inside an opened folder, it goes into that folder (the folder is outlined). |
+| Long lists | While you drag, bands at the top and bottom of the list say **Scroll up** / **Scroll down**: hold the pointer there and the list scrolls, faster nearer the edge. Hold a drag over a closed folder for a moment and it opens in place, so you can drop deeper. |
 | With your file explorer | Files you copy (`Ctrl+C`) or cut (`Ctrl+X`) here can be pasted in Explorer, Finder or your Linux file manager (cut moves them there). Copy files in Explorer or Finder, then `Ctrl+V` here: they are copied in. Drop files from another app: copied in. Drop a tab on a folder: a copy of it is saved there. Text copied anywhere and pasted becomes a new file (name it first). |
 | Delete | `Del` or the bin button: after asking, to the Recycle Bin (macOS: the Trash), where you can restore it. |
 | Undo | Rename, move, copy and paste show **Undo** in their message. |
-| Tree | The chevron next to a folder opens it in place, with what is inside under it (`→` opens, `←` closes or goes to the folder above). Select, copy and move across the folders you opened. A filter keeps the folders that lead to what matches. |
+| Tree | The chevron next to a folder opens it in place, with what is inside under it (`→` opens, `←` closes or goes to the folder above). Select, copy and move across the folders you opened. **New file**, **Paste**, **Duplicate**, **Compress** and **Text from the image** work in the folder of what you picked: an opened folder that is picked, or the folder something picked is in, not the top of the tree. |
+| Filter | The field under the path: what matches shows as you type, here and **in the folders inside, closed ones too** (on servers as well), under its folders opened for it; the line under the field says how many were found inside. `*.yml` or `test?.js` work as patterns. `.git` and `node_modules` are skipped; hidden files only when shown. |
 | Details | The columns button (right of the toolbar): **Name**, **Size** and **Modified** in columns (**Permissions** on servers when shown). Click a header to sort by it, click again to turn the order around. Folders stay first. |
 | Favorites | ☆ in the folder's bar adds it to the favorites (or right-click a folder → **Add to favorites**); they show under its name, one click away. Drop files on one to move them there. Right-click one to remove it. |
 | Recent | 🕘 in the folder's bar: the folders you visited last. |
 | Preview | The eye button: the file you pick shows under the list: pictures, PDFs, Markdown, HTML, CSV and JSON as they look, the start of any other text file; other formats say what they are, with **Open with its program**. Drag the top edge of the preview to make it taller. |
 | View large | `Space` (or right-click → **View it large**, or ⛶ in the preview): the file over the whole window, like Quick Look. `←` / `→` go through the folder's files, `Enter` opens it, `Space` or `Escape` closes it. |
-| Already there | When names you paste, drop or move are already in that folder, it asks once for all of them: **Replace** (the old ones go to the Recycle Bin; on a server they are deleted), **Keep both** (the new ones get " (2)") or **Skip** (those are left out). **Cancel** does nothing. |
+| Already there | When names you paste, drop or move are already in that folder, it asks once for all of them: **Replace** (the old ones go to the Recycle Bin; on a server they are deleted), **Keep both** (the new ones get " (2)") or **Skip** (those are left out). **Cancel** does nothing. Moving something into the folder it is already in says so. |
 | Compare | Select two text files, right-click → **Compare the two**: side by side, the second one opens in a tab. |
 | Zip | Right-click → **Compress to name.zip** (or **Compress N items to a zip**: `Archive.zip`) makes it next to them. On a `.zip`: **Extract into a new folder** unpacks it beside it ("name", or "name (2)" when taken). Unsafe names (that would land outside that folder) are left out, and an archive that unpacks to far more than its size is refused. On this computer only. |
 | Pictures | Right-click → **Text from the image…** reads the text on this computer; **Save as photo.txt here** keeps it next to the picture (or insert it, copy it, or make a synced file). |
@@ -311,6 +326,7 @@ Edit files on your servers as if they were here: **SFTP** (over SSH), **FTPS** (
 
 Working there:
 - Everything in the Folders view works on a server: open, new file and folder, rename (`F2`), cut/copy/paste, duplicate, drag onto folders, and drop or paste files from your computer to upload them. **Delete** is for good on a server (no Recycle Bin), so it asks first. Copy and paste also work between your computer and a server, both ways.
+- **Uploads and downloads go on in the background**: the **Transfers** card (bottom left) shows each one with a progress bar, how much, how fast and which file; keep working meanwhile (on FTP too: transfers use a connection of their own). **Stop** stops one: what got there stays, the file it was on is removed there. Make the card smaller with its arrow; finished ones go by themselves, **Show** opens where they went. A move to or from a server takes its open tabs along.
 - A server file opens in a **pink tab**. The file bar shows the server's name and **Saved on the server** or **Not saved to the server**; the status bar shows `SFTP · user@host:/path` and a dot (filled: connected).
 - **Ctrl+S** saves it to the server. Or turn on **Save to the server automatically** in the server's settings (⋯ next to its name → Edit), and it saves a moment after you stop typing.
 - **Changed on the server?** Tabs you haven't edited update by themselves. With your edits, you get **Compare**, **Reload** or **Keep mine and save over it**. **Follow** shows lines added to a log on the server.
@@ -395,6 +411,10 @@ Turn them on in **Settings → Desktop**.
 | `Shift+Alt+F` | Format document (or the selection) |
 | `Ctrl+F` / `Ctrl+H` | Find / replace in this file (`Enter` next, `Shift+Enter` previous, `Alt+Enter` select all; in the replace field `Enter` replaces, `Ctrl+Enter` replaces all) |
 | `Ctrl+G` | Go to line |
+| `F12` / `Shift+F12` / `F2` | In code: go to the declaration / its usages / rename it in this file |
+| `Ctrl+P`, then `@` | Go to a function, class or section of this file |
+| `Alt+0` / `Alt+Shift+0` | Fold everything / unfold everything (`Alt+1`, `Alt+2`, `Alt+3`: fold one level) |
+| `Ctrl+Shift+[` / `Ctrl+Shift+]` | Fold / unfold the block here |
 | `Ctrl+D` | Select the next occurrence |
 | `Ctrl+/` | Comment lines |
 | `Alt+Z` | Word wrap |

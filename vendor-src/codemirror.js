@@ -20,7 +20,7 @@ export {
   WidgetType,
   runScopeHandlers,
 } from '@codemirror/view';
-export { EditorState, EditorSelection, Compartment, Prec, Annotation, Transaction, StateField, StateEffect, RangeSetBuilder } from '@codemirror/state';
+export { EditorState, EditorSelection, Compartment, Prec, Annotation, Transaction, StateField, StateEffect, RangeSetBuilder, Facet } from '@codemirror/state';
 export {
   defaultKeymap,
   history,
@@ -36,6 +36,7 @@ export {
   moveLineDown,
   indentMore,
   indentLess,
+  cursorMatchingBracket,
 } from '@codemirror/commands';
 export {
   search,
@@ -58,6 +59,17 @@ export { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap, c
 export {
   foldGutter,
   foldKeymap,
+  foldCode,
+  unfoldCode,
+  foldAll,
+  unfoldAll,
+  foldable,
+  foldEffect,
+  unfoldEffect,
+  foldedRanges,
+  foldService,
+  ensureSyntaxTree,
+  StreamLanguage,
   indentOnInput,
   indentUnit,
   bracketMatching,

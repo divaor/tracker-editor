@@ -12,14 +12,12 @@ export const TYPING_SPEEDS = [
 export const typingDelay = (speed) => (TYPING_SPEEDS.find((s) => s.id === speed) ?? TYPING_SPEEDS[1]).delay;
 
 /**
- * The text as it will be typed: line breaks as Enter (LF only), and with
- * `autoIndent` (the other editor indents new lines by itself) no spaces or
- * tabs at the start of lines after the first, so indentation is not doubled.
+ * The text as it will be typed: line breaks as Enter (LF only). Indentation stays
+ * as it is: when the other editor indents new lines by itself, the typer clears what
+ * it adds after each Enter (`lineStart`), so every line keeps exactly its own.
  */
-export function prepareTyping(text, { autoIndent = false } = {}) {
-  let out = String(text ?? '').replace(/\r\n?/g, '\n');
-  if (autoIndent) out = out.replace(/\n[ \t]+/g, '\n');
-  return out;
+export function prepareTyping(text) {
+  return String(text ?? '').replace(/\r\n?/g, '\n');
 }
 
 /** About how long typing `length` characters takes, in seconds. */

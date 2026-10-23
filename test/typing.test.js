@@ -6,12 +6,13 @@ import fs from 'node:fs';
 import { formatDuration, prepareTyping, typingDelay, typingSeconds } from '../app/js/typing.js';
 
 const require = createRequire(import.meta.url);
-const { startTyping, windowsScript, macScript, encodeCommand, WINDOWS_TYPER } = require('../electron/typer.cjs');
+const { startTyping, windowsScript, macScript, encodeCommand, lineRuns, WINDOWS_TYPER } = require('../electron/typer.cjs');
 
 test('text is prepared for typing', () => {
   assert.equal(prepareTyping('a\r\nb\rc\n'), 'a\nb\nc\n');
   assert.equal(prepareTyping('if x:\n    y\n\tz\n'), 'if x:\n    y\n\tz\n');
-  assert.equal(prepareTyping('  if x:\n    y\n\tz\n', { autoIndent: true }), '  if x:\ny\nz\n');
+  // Indentation is kept: an editor that indents by itself has it cleared after each Enter instead.
+  assert.equal(prepareTyping('a:\n  b:\n    c: 1\nd: 2'), 'a:\n  b:\n    c: 1\nd: 2');
   assert.equal(typingDelay('slow'), 40);
   assert.equal(typingDelay('unknown'), 15);
   assert.equal(typingSeconds(1000, 15), 18);
@@ -30,6 +31,48 @@ test('the Windows helper uses scan codes, stops on a focus change or Escape, and
   assert.ok(!/\$"/.test(WINDOWS_TYPER));
   assert.equal(Buffer.from(encodeCommand('Write-Output é'), 'base64').toString('utf16le'), 'Write-Output é');
   assert.match(macScript(), /key code 36/);
+});
+
+test('an editor that indents by itself: after Enter its indentation is cleared, then the line is typed with its own', () => {
+  // Windows: Shift+Home with Home as an extended key (else it is the keypad's 7), then space and Backspace.
+  assert.ok(WINDOWS_TYPER.includes('EXTENDED = 0x1') && /ClearIndent/.test(WINDOWS_TYPER));
+  assert.match(WINDOWS_TYPER, /Scan\(0x24\)/);
+  assert.match(WINDOWS_TYPER, /if \(ch == '\\n' && lineStart\)/);
+  assert.ok(windowsScript().includes("$env:TYPER_LINESTART -eq '1'"));
+  // macOS: Cmd+Shift+Left after Return.
+  assert.match(macScript(), /key code 123 using \{command down, shift down\}/);
+  // Linux (xdotool, whose `type` takes every argument after it): one run per line, the
+  // keys for the line break first; a blank line only presses the keys.
+  const runs = lineRuns('a:\n  b: 1\n\nc: 2', { delay: 9 });
+  const keys = ['key', '--delay', '9', 'Return', 'shift+Home', 'space', 'BackSpace'];
+  assert.deepEqual(runs.map((r) => r.args), [
+    ['type', '--delay', '9', '--', 'a:'],
+    [...keys, 'type', '--delay', '9', '--', '  b: 1'],
+    keys,
+    [...keys, 'type', '--delay', '9', '--', 'c: 2'],
+  ]);
+  assert.equal(runs.reduce((n, r) => n + r.chars, 0), 'a:\n  b: 1\n\nc: 2'.length);
+  assert.ok(runs.every((r) => r.args.indexOf('type') === -1 || r.args.indexOf('type') === r.args.length - 5));
+  const wayland = lineRuns('x\n y', { tool: 'wtype', delay: 5 });
+  assert.deepEqual(wayland[0].args, ['-d', '5', 'x', '-k', 'Return', '-M', 'shift', '-k', 'Home', '-m', 'shift', '-k', 'space', '-k', 'BackSpace', ' y']);
+  // Long texts with wtype are split into several runs, in order, with every character counted.
+  const long = Array.from({ length: 3000 }, (_, i) => `  line ${i}: ${'x'.repeat(30)}`).join('\n');
+  const split = lineRuns(long, { tool: 'wtype' });
+  assert.ok(split.length > 1);
+  assert.equal(split.reduce((n, r) => n + r.chars, 0), long.length);
+  assert.ok(split.every((r) => r.args.reduce((n, a) => n + a.length + 1, 0) < 70 * 1024));
+});
+
+test('Linux with an editor that indents by itself: the runs go one after another, with progress', async () => {
+  const { spawn, calls } = fakeSpawn((child) => child.emit('close', 0));
+  const progress = [];
+  const long = Array.from({ length: 40 }, (_, i) => `  line ${i}: ${'x'.repeat(30)}`).join('\n');
+  const job = startTyping(long, { delay: 1, at: Date.now() + 10, lineStart: true }, { platform: 'linux', spawn, env: { DISPLAY: ':1', LANG: 'en_US.UTF-8' }, onProgress: (n) => progress.push(n) });
+  const result = await job.done;
+  assert.ok(calls.length > 1 && calls.every((c) => c.command === 'xdotool'));
+  assert.equal(calls[0].args[0], 'type');
+  assert.deepEqual(result, { typed: long.length });
+  assert.ok(progress.length === calls.length - 1 && progress.every((n, i) => i === 0 || n > progress[i - 1]));
 });
 
 function fakeSpawn(behave) {

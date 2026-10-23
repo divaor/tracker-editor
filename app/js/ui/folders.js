@@ -13,6 +13,7 @@ import { Icon } from './icons.js';
 import { Menu, MenuButton } from './menu.js';
 import { FileViewer, PeekPane } from './folderPreview.js';
 import { Splitter } from './splitter.js';
+import { onTransfers, running } from '../transfers.js';
 
 const PLACES = [
   { id: 'documents', label: 'Documents' },
@@ -23,6 +24,8 @@ const PLACES = [
 
 const message = (err) => String(err?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
 const fail = (err) => toast(message(err), { kind: 'error', timeout: 8000 });
+// How long a closed folder is held under a drag before it opens.
+const SPRING_MS = 800;
 const dirOf = (p) => p.slice(0, Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'))) || p;
 const count = (n, what) => `${n} ${what}${n === 1 ? '' : 's'}`;
 // A date for the Modified column: the day and time this year, the day before.
@@ -208,14 +211,49 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     window.addEventListener('folders:reload', reload);
     return () => window.removeEventListener('folders:reload', reload);
   }, [dir, root]);
+  // A transfer that ends (in the background): what it changed is read again.
+  useEffect(() => onTransfers((_jobs, job) => job && !running(job) && root && load(dir)), [dir, root, expanded]);
   // A server that connects again: its folder is read again.
   useEffect(() => {
     if (remote && connState?.state === 'connected' && listing?.error) load(dir);
   }, [connState?.state]);
 
+  // The filter looks in the folders inside too (in the main process, a moment after typing):
+  // what it finds shows under its folders, opened for it (`shut`: ones closed meanwhile).
+  const [deep, setDeep] = useState(null); // { dir, query, found, folders, truncated, searching }
+  const [deepTick, setDeepTick] = useState(0);
+  const [shut, setShut] = useState(() => new Set());
+  useEffect(() => {
+    const query = filter.trim();
+    setShut(new Set());
+    if (!query || !root || !bridge.findNames) return setDeep(null);
+    // While it looks, what was found for the last letters stays (the rows are filtered anyway).
+    setDeep((d) => ({ ...(d?.dir === dir ? d : { found: [], folders: [], truncated: false }), dir, query, searching: true }));
+    let stale = false;
+    const timer = setTimeout(async () => {
+      const res = await bridge.findNames('folders-filter', dir, query, { hidden: settings.showHidden }).catch(() => null);
+      if (!stale) setDeep({ dir, query, found: res?.found ?? [], folders: res?.folders ?? [], truncated: Boolean(res?.truncated), searching: false });
+    }, 250);
+    return () => {
+      stale = true;
+      clearTimeout(timer);
+    };
+  }, [filter, dir, root, settings.showHidden, deepTick]);
+  const deepOn = Boolean(filter.trim() && deep?.dir === dir);
+  const shown = new Set(expanded);
+  const treeChildren = new Map([...children].filter(([, v]) => Array.isArray(v)));
+  if (deepOn) {
+    for (const { entry, parent } of [...deep.folders, ...deep.found]) {
+      if (parent === dir) continue; // the listing has those
+      const list = treeChildren.get(parent) ?? [];
+      if (!list.some((e) => e.path === entry.path)) treeChildren.set(parent, [...list, entry]);
+      shown.add(parent);
+    }
+    for (const p of shut) shown.delete(p);
+  }
   const rows = treeRows(listing?.dir === dir ? listing.entries : [], {
-    expanded,
-    children: new Map([...children].filter(([, v]) => Array.isArray(v))),
+    expanded: shown,
+    children: treeChildren,
     query: filter,
     hidden: settings.showHidden,
     sort: settings.folderSort,
@@ -266,7 +304,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       const asText = !files.length && (!text || text.replace(/\r\n/g, '\n') === mine?.text);
       const ours = Boolean(mine) && same && (mine.system ? (await bridge.clipOurs().catch(() => false)) || asText : asText);
       if (mine && !ours && clip === mine) clip = null;
-      pasteInto(dir, { files, text, ours });
+      pasteInto(workDir(), { files, text, ours });
     };
     document.addEventListener('copy', onCopy);
     document.addEventListener('cut', onCopy);
@@ -281,7 +319,14 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   // ---- Moving around ----
 
   /** Opens a folder in place (its contents under it) or closes it. */
-  const toggleOpen = async (path, open = !expanded.has(path)) => {
+  const toggleOpen = async (path, open = !shown.has(path)) => {
+    if (deepOn)
+      setShut((s) => {
+        const next = new Set(s);
+        if (open) next.delete(path);
+        else for (const p of shown) if (p === path || rootOf(p, [path])) next.add(p);
+        return next;
+      });
     const next = new Set(expanded);
     if (!open) {
       // Closing a folder closes the ones inside it too.
@@ -322,6 +367,20 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     await bridge.forget(folder);
     refreshRoots();
   };
+  // In the tree: the folder being worked in. An opened folder that is picked, or the folder
+  // of what is picked inside an opened one; otherwise the folder shown.
+  const workDir = () => {
+    const e = cursor && byPath.get(cursor);
+    if (!e) return dir;
+    if (e.dir && shown.has(e.path)) return e.path;
+    const parent = dirOf(e.path);
+    return parent !== dir && shown.has(parent) ? parent : dir;
+  };
+  // The folder all of `items` are in (several folders: the one shown).
+  const folderOf = (items) => {
+    const parents = new Set(items.map((e) => dirOf(e.path ?? e)));
+    return parents.size === 1 ? [...parents][0] : dir;
+  };
   const select = (paths, { at = paths[paths.length - 1] ?? null, keepAnchor = false } = {}) => {
     setSelected(new Set(paths));
     setCursor(at);
@@ -357,26 +416,31 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   // ---- Changing things (each with Undo where it can be undone) ----
 
   // After a change: the list read again, open tabs following what moved, what changed here selected.
+  // A change made here: the filter looks in the folders inside again.
+  const lookAgain = () => filter.trim() && setDeepTick((t) => t + 1);
   const after = async ({ moves = [], made = [] }, done, undo) => {
     await load(dir);
+    lookAgain();
     if (moves.length) actions.followDiskMoves(moves);
-    const here = [...moves.map((m) => m.to), ...made].filter((p) => dirOf(p) === dir || expanded.has(dirOf(p)));
+    const here = [...moves.map((m) => m.to), ...made].filter((p) => dirOf(p) === dir || shown.has(dirOf(p)));
     if (here.length) select(here);
     if (done) toast(done, undo ? { action: { label: 'Undo', run: undo }, timeout: 8000 } : {});
   };
-  const create = async ({ kind, name, text }) => {
+  const create = async ({ kind, name, text, in: where = dir }) => {
     setCreating(null);
     try {
-      const path = kind === 'folder' ? await bridge.newFolder(dir, name) : await bridge.newFile(dir, name, { text: text ?? '' });
+      const path = kind === 'folder' ? await bridge.newFolder(where, name) : await bridge.newFile(where, name, { text: text ?? '' });
       await load(dir);
+      lookAgain();
       select([path]);
       if (kind === 'file' && opensInEditor(name)) await actions.openDiskPath(path);
       list.current?.focus();
     } catch (err) {
       fail(err);
-      setCreating({ kind, name, text });
+      setCreating({ kind, name, text, in: where });
     }
   };
+  const startCreating = (kind) => setCreating({ kind, name: kind === 'folder' ? 'New folder' : 'New file.txt', in: workDir() });
   const rename = async (e, name) => {
     setRenaming(null);
     list.current?.focus();
@@ -400,10 +464,18 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   const elsewhere = (paths, target) => paths.filter((p) => dirOf(p) !== target).map(baseName);
   const moveTo = (paths, target, onGo) => askExisting(elsewhere(paths, target), target, (onExists) => (onGo?.(), moveNow(paths, target, onExists)));
   const copyTo = (paths, target) => askExisting(elsewhere(paths, target), target, (onExists) => copyNow(paths, target, onExists));
+  // Copies next to the originals, in each one's own folder.
+  const duplicate = async (items) => {
+    const byFolder = new Map();
+    for (const e of items) byFolder.set(dirOf(e.path), [...(byFolder.get(dirOf(e.path)) ?? []), e.path]);
+    for (const [folder, paths] of byFolder) await copyNow(paths, folder, 'keep');
+  };
   const copyIn = (files, target) => askExisting([...files].map((f) => f.name).filter(Boolean), target, (onExists) => copyInNow(files, target, onExists));
   const moveNow = async (paths, target, onExists) => {
     try {
+      if (paths.every((p) => dirOf(p) === target)) return toast(`${paths.length === 1 ? baseName(paths[0]) : count(paths.length, 'item')} ${paths.length === 1 ? 'is' : 'are'} already in ${baseName(target)}.`);
       const moves = await bridge.move(paths, target, { onExists });
+      if (moves.transfer) return; // To or from a server: in the background (the Transfers card).
       if (!moves.length) return onExists === 'skip' && toast('Nothing was moved: those are there already.');
       await after({ moves }, `Moved ${count(moves.length, 'item')} to ${baseName(target)}`, async () => {
         const back = [];
@@ -417,6 +489,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   const copyNow = async (paths, target, onExists) => {
     try {
       const copies = await bridge.copy(paths, target, { onExists });
+      if (copies.transfer) return;
       if (!copies.length) return toast('Nothing was copied: those are there already.');
       await after({ made: copies.map((c) => c.to) }, `Copied ${count(copies.length, 'item')}${target === dir ? '' : ` to ${baseName(target)}`}`, () =>
         bridge.trash(copies.map((c) => c.to)).then(() => load(dir), fail),
@@ -428,6 +501,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   const copyInNow = async (files, target, onExists) => {
     try {
       const copies = await bridge.copyIn(files, target, { onExists });
+      if (copies.transfer) return;
       if (!copies.length) return toast('Nothing was added: those are there already.');
       await after({ made: copies.map((c) => c.to) }, `Added ${count(copies.length, 'item')}${target === dir ? '' : ` to ${baseName(target)}`}`, () =>
         bridge.trash(copies.map((c) => c.to)).then(() => load(dir), fail),
@@ -441,6 +515,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     try {
       const gone = await bridge.trash(doomed.map((e) => e.path));
       actions.closeDiskPaths(gone);
+      lookAgain();
       await load(dir);
       toast(`Moved ${count(gone.length, 'item')} to ${binName()}`);
     } catch (err) {
@@ -504,7 +579,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   const zipSelected = async (items) => {
     toast(`Compressing ${items.length === 1 ? items[0].name : count(items.length, 'item')}…`, { key: 'zip', timeout: 600000 });
     try {
-      const made = await bridge.zip(items.map((e) => e.path), dir);
+      const made = await bridge.zip(items.map((e) => e.path), folderOf(items));
       dismissToast('zip');
       await after({ made: [made] }, `Made ${baseName(made)}`, () => bridge.trash([made]).then(() => load(dir), fail));
     } catch (err) {
@@ -527,6 +602,61 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   };
 
   // ---- Dragging ----
+
+  // While something is dragged over the list, bands at its top and bottom scroll it:
+  // faster nearer the edge, and on while the pointer rests there (browsers repeat
+  // dragover about every 350 ms). They show only on a side that can scroll.
+  const DRAG_ZONE = 56;
+  const [dragZones, setDragZones] = useState(null); // { up, down, active: -1 | 0 | 1 }
+  const autoScroll = useRef({ speed: 0, frame: 0, last: 0, idle: 0 });
+  const stopAutoScroll = () => {
+    const a = autoScroll.current;
+    cancelAnimationFrame(a.frame);
+    clearTimeout(a.idle);
+    autoScroll.current = { speed: 0, frame: 0, last: 0, idle: 0 };
+    setDragZones(null);
+  };
+  useEffect(() => {
+    window.addEventListener('dragend', stopAutoScroll);
+    window.addEventListener('drop', stopAutoScroll);
+    return () => {
+      window.removeEventListener('dragend', stopAutoScroll);
+      window.removeEventListener('drop', stopAutoScroll);
+      stopAutoScroll();
+    };
+  }, []);
+  const onListDragOver = (ev) => {
+    const el = list.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const up = el.scrollTop > 0;
+    const down = el.scrollTop + el.clientHeight < el.scrollHeight - 1;
+    const pull = (d) => (d < DRAG_ZONE ? 3 + ((DRAG_ZONE - Math.max(0, d)) / DRAG_ZONE) ** 2 * 24 : 0);
+    const speed = up && ev.clientY - r.top < DRAG_ZONE ? -pull(ev.clientY - r.top) : down && r.bottom - ev.clientY < DRAG_ZONE ? pull(r.bottom - ev.clientY) : 0;
+    const a = autoScroll.current;
+    a.speed = speed;
+    a.last = performance.now();
+    clearTimeout(a.idle);
+    a.idle = setTimeout(stopAutoScroll, 700);
+    const active = Math.sign(speed);
+    setDragZones((z) => (z && z.up === up && z.down === down && z.active === active ? z : { up, down, active }));
+    if (speed && !a.frame) {
+      const step = () => {
+        const cur = autoScroll.current;
+        if (!cur.speed || performance.now() - cur.last > 700 || !list.current) return void (cur.frame = 0);
+        list.current.scrollTop += cur.speed;
+        cur.frame = requestAnimationFrame(step);
+      };
+      a.frame = requestAnimationFrame(step);
+    }
+  };
+  // A closed folder held under a drag opens in place, so the drop can go deeper.
+  useEffect(() => {
+    const e = dropTarget && dropTarget !== dir ? byPath.get(dropTarget) : null;
+    if (!e?.dir || shown.has(e.path)) return undefined;
+    const timer = setTimeout(() => toggleOpen(e.path, true), SPRING_MS);
+    return () => clearTimeout(timer);
+  }, [dropTarget]);
 
   const dragPaths = (e) => (selected.has(e.path) ? topmost(order.filter((p) => selected.has(p))) : [e.path]);
   const onDragStart = (ev, e) => {
@@ -596,9 +726,9 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       handled();
       const e = byPath.get(cursor);
       if (key === 'ArrowRight') {
-        if (e.dir && !expanded.has(e.path)) toggleOpen(e.path, true);
+        if (e.dir && !shown.has(e.path)) toggleOpen(e.path, true);
         else if (e.dir && order[at + 1] && depthOf.get(order[at + 1]) > depthOf.get(e.path)) select([order[at + 1]]);
-      } else if (e.dir && expanded.has(e.path)) toggleOpen(e.path, false);
+      } else if (e.dir && shown.has(e.path)) toggleOpen(e.path, false);
       else if (depthOf.get(e.path) > 0) select([dirOf(e.path)]);
       return;
     }
@@ -634,7 +764,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     if (mod && !ev.shiftKey && !ev.altKey && (key.toLowerCase() === 'c' || key.toLowerCase() === 'x')) return handled(), clipFromMenu(key.toLowerCase() === 'x' ? 'cut' : 'copy');
     // Ctrl+V goes on to the browser's paste, which brings the files copied in other apps.
     if (mod && key.toLowerCase() === 'v') return claimSelection();
-    if (mod && ev.shiftKey && key.toLowerCase() === 'n') return handled(), setCreating({ kind: 'folder', name: 'New folder' });
+    if (mod && ev.shiftKey && key.toLowerCase() === 'n') return handled(), startCreating('folder');
     // Find in the folder selected, or the one shown.
     if (mod && ev.shiftKey && key.toLowerCase() === 'f') return handled(), actions.findInFolder(targets().length === 1 && targets()[0].dir ? targets()[0].path : dir);
     if (key === 'Escape') {
@@ -659,8 +789,8 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
 
   const sortItems = FOLDER_SORTS.map((s) => ({ label: `Sort by ${s.label.toLowerCase()}`, checked: (settings.folderSort || 'name') === s.id, run: () => saveSettings({ folderSort: s.id }) }));
   const backgroundItems = () => [
-    { label: 'New file', icon: 'filePlus', run: () => setCreating({ kind: 'file', name: 'New file.txt' }) },
-    { label: 'New folder (Ctrl+Shift+N)', icon: 'folderPlus', run: () => setCreating({ kind: 'folder', name: 'New folder' }) },
+    { label: 'New file', icon: 'filePlus', run: () => startCreating('file') },
+    { label: 'New folder (Ctrl+Shift+N)', icon: 'folderPlus', run: () => startCreating('folder') },
     { label: 'Paste (Ctrl+V)', icon: 'clipboard', run: paste },
     { label: 'Find in this folder… (Ctrl+Shift+F)', icon: 'search', run: () => actions.findInFolder(dir) },
     { separator: true },
@@ -684,13 +814,13 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       { label: one?.dir ? 'Open' : 'Open (Enter)', icon: one?.dir ? 'folderOpen' : 'file', run: openSelected },
       one && !one.dir && { label: 'View it large (Space)', icon: 'fullscreen', run: () => setViewing(one.path) },
       one && !one.dir && { label: 'Open with its program', icon: 'external', run: () => openOutside(one) },
-      images.length && images.length === items.length && { label: `Text from ${images.length === 1 ? 'the image' : `${images.length} images`}…`, icon: 'scan', run: () => actions.readImageFiles(images.map((e) => e.path), dir) },
+      images.length && images.length === items.length && { label: `Text from ${images.length === 1 ? 'the image' : `${images.length} images`}…`, icon: 'scan', run: () => actions.readImageFiles(images.map((e) => e.path), folderOf(images)) },
       files.length === 2 && items.length === 2 && files.every((e) => opensInEditor(e.name)) && { label: 'Compare the two', icon: 'columns', run: () => actions.compareDiskFiles(files[0].path, files[1].path) },
       { separator: true },
       { label: 'Cut (Ctrl+X)', icon: 'scissors', run: () => clipFromMenu('cut') },
       { label: 'Copy (Ctrl+C)', icon: 'copy', run: () => clipFromMenu('copy') },
       one?.dir && { label: 'Paste into this folder', icon: 'clipboard', disabled: !clip, run: () => clip && pasteInto(one.path, {}) },
-      { label: 'Duplicate', icon: 'copy', run: () => copyTo(items.map((e) => e.path), dir) },
+      { label: 'Duplicate', icon: 'copy', run: () => duplicate(items) },
       one && { label: 'Rename (F2)', icon: 'edit', run: () => setRenaming(one.path) },
       { label: 'Delete (Del)', icon: 'trash', danger: true, run: () => setConfirm(items) },
       { separator: true },
@@ -798,11 +928,11 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     const children_ = children.get(e.path);
     return html`<div key=${e.path} data-path=${e.path} role="option" aria-selected=${isSelected} id=${`row-${order.indexOf(e.path)}`}
       aria-level=${depth + 1} aria-expanded=${e.dir ? open : undefined} style=${{ '--depth': depth }}
-      class="folder-row ${details ? 'with-columns' : ''} ${e.dir ? 'is-dir' : ''} ${isSelected ? 'selected' : ''} ${cursor === e.path ? 'cursor' : ''} ${activeKey === key ? 'active' : ''} ${e.hidden ? 'hidden-entry' : ''} ${clip?.op === 'cut' && clip.paths.includes(e.path) ? 'is-cut' : ''} ${dropTarget === e.path ? 'drop-target' : ''}"
+      class="folder-row ${details ? 'with-columns' : ''} ${e.dir ? 'is-dir' : ''} ${isSelected ? 'selected' : ''} ${cursor === e.path ? 'cursor' : ''} ${activeKey === key ? 'active' : ''} ${e.hidden ? 'hidden-entry' : ''} ${clip?.op === 'cut' && clip.paths.includes(e.path) ? 'is-cut' : ''} ${dropTarget === e.path ? 'drop-target' : ''} ${dropTarget && dropTarget !== dir && dirOf(e.path) === dropTarget ? 'drop-inside' : ''}"
       title=${remote ? `${remoteParts(e.path).path}${e.mode !== undefined ? `\n${modeString(e.mode, e.dir)}${e.owner ? ` ${e.owner}` : ''}${e.group ? ` ${e.group}` : ''}` : ''}` : e.path} draggable=${renaming !== e.path}
       onDragStart=${(ev) => onDragStart(ev, e)}
       onDragEnd=${() => (internalDrag.current = null)}
-      ...${e.dir ? dropProps(e.path) : {}}
+      ...${dropProps(e.dir ? e.path : dirOf(e.path))}
       onClick=${(ev) => {
         ev.stopPropagation();
         list.current?.focus();
@@ -879,8 +1009,8 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
         )}
       </div>`}
       <div class="folders-tools" role="toolbar" aria-label="Files">
-        ${tool('New file', 'filePlus', () => setCreating({ kind: 'file', name: 'New file.txt' }))}
-        ${tool('New folder (Ctrl+Shift+N)', 'folderPlus', () => setCreating({ kind: 'folder', name: 'New folder' }))}
+        ${tool('New file', 'filePlus', () => startCreating('file'))}
+        ${tool('New folder (Ctrl+Shift+N)', 'folderPlus', () => startCreating('folder'))}
         <span class="tools-sep" />
         ${tool('Cut (Ctrl+X)', 'scissors', () => clipFromMenu('cut'), !some)}
         ${tool('Copy (Ctrl+C)', 'copy', () => clipFromMenu('copy'), !some)}
@@ -913,6 +1043,9 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
           }} />
         <${ClearButton} value=${filter} onClear=${() => setFilter('')} label="Clear the filter" />
       </div>
+      ${deepOn && (deep.searching || deep.found.length > 0) && html`<p class="filter-deep muted small" role="status">
+        ${deep.searching ? 'Looking in the folders inside…' : `${deep.found.length} ${deep.found.length === 1 ? 'match' : 'matches'} in the folders inside${deep.truncated ? ' (the first ones: type more to narrow it down)' : ''}`}
+      </p>`}
     </div>
     <div class="file-list folder-list ${details ? 'details' : ''} ${dropTarget === dir ? 'drop-target' : ''}" role="listbox" aria-multiselectable="true" tabindex="0" ref=${list}
       aria-label=${`Files in ${dir === root ? rootName(root) : baseName(dir)}`} aria-activedescendant=${cursor && order.includes(cursor) ? `row-${order.indexOf(cursor)}` : undefined}
@@ -924,12 +1057,16 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
         setSelected(new Set());
         setMenu({ entry: null, at: { x: ev.clientX, y: ev.clientY } });
       }}
+      onDragOverCapture=${onListDragOver}
+      onDragLeave=${(ev) => !list.current?.contains(ev.relatedTarget) && setTimeout(() => autoScroll.current.last < performance.now() - 150 && stopAutoScroll(), 200)}
       ...${dropProps(dir)}>
+      ${dragZones?.up && html`<div class="drag-zone up ${dragZones.active < 0 ? 'active' : ''}" aria-hidden="true"><div><${Icon} name="arrowUp" size=${15} />Scroll up</div></div>`}
       ${columns}
       ${creating &&
       html`<div class="folder-row creating">
         <${Icon} name=${creating.kind === 'folder' ? 'folder' : 'file'} size=${15} />
-        <${NameField} key=${`${creating.kind}:${creating.name}`} initial=${creating.name} dir=${creating.kind === 'folder'} label=${creating.kind === 'folder' ? 'New folder name' : 'New file name'}
+        ${creating.in && creating.in !== dir && html`<span class="creating-in muted small" title=${creating.in}>in ${baseName(creating.in)}/</span>`}
+        <${NameField} key=${`${creating.kind}:${creating.name}`} initial=${creating.name} dir=${creating.kind === 'folder'} label=${`${creating.kind === 'folder' ? 'New folder name' : 'New file name'}${creating.in && creating.in !== dir ? ` in ${baseName(creating.in)}` : ''}`}
           onDone=${(name) => create({ ...creating, name })} onCancel=${() => (setCreating(null), list.current?.focus())} />
       </div>`}
       ${listing?.error &&
@@ -939,8 +1076,9 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       </div>`}
       ${rows.map(row)}
       ${listing?.dir === dir && !listing.error && !entries.length && !creating &&
-      html`<p class="muted small empty-list">${filter ? 'Nothing here matches.' : hiddenCount && !settings.showHidden ? `Only hidden files here (${hiddenCount}).` : 'This folder is empty. Drop or paste files here.'}</p>`}
+      html`<p class="muted small empty-list">${filter ? (deepOn && deep.searching ? 'Nothing here matches. Looking in the folders inside…' : 'Nothing here or in the folders inside matches.') : hiddenCount && !settings.showHidden ? `Only hidden files here (${hiddenCount}).` : 'This folder is empty. Drop or paste files here.'}</p>`}
       ${listing?.truncated && html`<p class="muted small empty-list">Showing the first ${listing.entries.length.toLocaleString()} entries. Filter to find the others, or open a folder inside.</p>`}
+      ${dragZones?.down && html`<div class="drag-zone down ${dragZones.active > 0 ? 'active' : ''}" aria-hidden="true"><div><${Icon} name="arrowUp" size=${15} class="turn-down" />Scroll down</div></div>`}
     </div>
     ${settings.folderPreview &&
     html`<${Splitter} orientation="horizontal" className="peek-resize" label="Resize the preview"

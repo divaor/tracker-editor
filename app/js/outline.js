@@ -10,6 +10,8 @@ const SYMBOLS = {
     [/^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\*?\s+([A-Za-z_$][\w$]*)/, 1],
     [/^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:function|\([^)]*\)\s*=>|[A-Za-z_$][\w$]*\s*=>)/, 1],
     [/^\s*(?:export\s+)?(?:interface|type|enum)\s+([A-Za-z_$][\w$]*)/, 1],
+    // Methods in classes and objects: name(…) { on an indented line.
+    [/^\s+(?:(?:static|async|get|set|public|private|protected|override|readonly)\s+)*\*?#?([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*(?::\s*[^{=]+)?\{\s*$/, 2],
   ],
   python: [
     [/^(\s*)class\s+([A-Za-z_]\w*)/, 'indent'],
@@ -25,11 +27,34 @@ const SYMBOLS = {
   shell: [[/^\s*(?:function\s+)?([A-Za-z_][\w-]*)\s*\(\)\s*\{?/, 1]],
   ini: [[/^\s*\[([^\]]+)\]/, 1]],
   powershell: [[/^\s*function\s+([\w-]+)/i, 1]],
+  // Keys at the top and one level in (lists left out).
+  yaml: [[/^(\s{0,2})([A-Za-z_][\w.-]*|"[^"\n]+"|'[^'\n]+')\s*:(?:\s|$)/, 'indent2']],
+  c: [
+    [/^\s*(?:typedef\s+)?(?:struct|class|enum|union|namespace)\s+([A-Za-z_]\w*)\s*(?:[:{]|$)/, 'indent2'],
+    [/^(?!\s*(?:if|for|while|switch|return|else|do|case|sizeof)\b)[A-Za-z_][\w\s*&:<>,~]*?[\s*&]([A-Za-z_~][\w:~]*)\s*\([^;]*$/, 1],
+  ],
+  php: [
+    [/^(\s*)(?:abstract\s+|final\s+)?(?:class|interface|trait|enum)\s+(\w+)/, 'indent2'],
+    [/^(\s*)(?:(?:public|private|protected|static|abstract|final)\s+)*function\s+&?(\w+)/, 'indent2'],
+  ],
+  ruby: [
+    [/^(\s*)(?:class|module)\s+([\w:]+)/, 'indent2'],
+    [/^(\s*)def\s+(?:self\.)?([\w?!=]+)/, 'indent2'],
+  ],
+  kotlin: [
+    [/^(\s*)(?:(?:public|private|internal|protected|open|override|suspend|inline|data|sealed|abstract|final|static|fileprivate|mutating)\s+)*(?:class|interface|object|struct|enum|protocol|extension)\s+(\w+)/, 'indent2'],
+    [/^(\s*)(?:(?:public|private|internal|protected|open|override|suspend|inline|static|fileprivate|mutating|@\w+)\s+)*(?:fun|func)\s+(?:<[^>]*>\s*)?(?:[\w.]+\.)?(\w+)/, 'indent2'],
+  ],
+  lua: [[/^\s*(?:local\s+)?function\s+([\w.:]+)/, 1]],
+  perl: [[/^\s*sub\s+(\w+)/, 1], [/^\s*package\s+([\w:]+)/, 1]],
 };
+// Words that look like a method in `name(…) {` but are not.
+const CONTROL = new Set(['if', 'for', 'while', 'switch', 'catch', 'function', 'return', 'else', 'do', 'with', 'foreach', 'elseif', 'using', 'lock', 'synchronized']);
 const FAMILY = {
   JavaScript: 'script', TypeScript: 'script', JSX: 'script', TSX: 'script',
   Python: 'python', SQL: 'sql', PostgreSQL: 'sql', MySQL: 'sql', MSSQL: 'sql', SQLite: 'sql', PLSQL: 'sql',
-  'C#': 'csharp', Java: 'csharp', Kotlin: 'csharp', Go: 'go', Rust: 'rust', Shell: 'shell', Properties: 'ini', TOML: 'ini', PowerShell: 'powershell',
+  'C#': 'csharp', Java: 'csharp', Go: 'go', Rust: 'rust', Shell: 'shell', Properties: 'ini', 'Properties files': 'ini', TOML: 'ini', PowerShell: 'powershell',
+  YAML: 'yaml', C: 'c', 'C++': 'c', 'Objective-C': 'c', 'Objective-C++': 'c', PHP: 'php', Ruby: 'ruby', Kotlin: 'kotlin', Swift: 'kotlin', Scala: 'kotlin', Lua: 'lua', Perl: 'perl',
 };
 
 /** [{ line, level, title }] for Markdown headings (outside code blocks), or the symbols of code. */
@@ -53,7 +78,10 @@ export function outline(text, language = '') {
       const m = re.exec(raw);
       if (!m) continue;
       const name = m[m.length - 1];
-      const lvl = level === 'indent' ? 1 + Math.floor(m[1].replace(/\t/g, '    ').length / 4) : level;
+      if (CONTROL.has(name)) continue;
+      const indent = m.length > 2 ? m[1].replace(/\t/g, '    ').length : 0;
+      // 'indent': a level per 4 spaces (Python); 'indent2': indented ones one level in.
+      const lvl = level === 'indent' ? 1 + Math.floor(indent / 4) : level === 'indent2' ? (indent ? 2 : 1) : level;
       out.push({ line: i + 1, level: Math.min(lvl, 6), title: FAMILY[language] === 'sql' ? `${m[1].toUpperCase()} ${name}` : name });
       break;
     }

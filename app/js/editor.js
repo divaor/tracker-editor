@@ -30,6 +30,19 @@ import {
   dropCursor,
   foldGutter,
   foldKeymap,
+  foldable,
+  foldAll,
+  foldCode,
+  foldedRanges,
+  foldEffect,
+  foldService,
+  unfoldAll,
+  unfoldCode,
+  unfoldEffect,
+  ensureSyntaxTree,
+  cursorMatchingBracket,
+  Facet,
+  StreamLanguage,
   getChunks,
   goToNextChunk,
   goToPreviousChunk,
@@ -67,7 +80,7 @@ import {
   WidgetType,
 } from '../vendor/cm/codemirror.js';
 import { compileFilter, hiddenRuns, isBigText } from './logtools.js';
-import { parseLinks } from './outline.js';
+import { currentEntry, outline, parseLinks } from './outline.js';
 import { isOwnDrop } from './dragOut.js';
 import { createSearchPanel, openReplacePanel } from './searchPanel.js';
 
@@ -174,6 +187,104 @@ const withLines = (fn) => (view) => {
   return true;
 };
 
+// ---- Folding ----
+
+// The language shown in a state (by name), for the outline and the status bar.
+const languageName = Facet.define({ combine: (values) => values[0] ?? '' });
+
+const indentOf = (text, tab) => {
+  let n = 0;
+  for (const ch of text) {
+    if (ch === ' ') n++;
+    else if (ch === '\t') n += tab - (n % tab);
+    else break;
+  }
+  return n;
+};
+/**
+ * Folding by indentation, for languages without their own (plain text, older modes):
+ * a line folds when the lines after it are indented further.
+ */
+const indentFolding = foldService.of((state, from) => {
+  const line = state.doc.lineAt(from);
+  if (!line.text.trim()) return null;
+  const base = indentOf(line.text, state.tabSize);
+  let end = null;
+  for (let n = line.number + 1, seen = 0; n <= state.doc.lines && seen < 50000; n++, seen++) {
+    const next = state.doc.line(n);
+    if (!next.text.trim()) continue;
+    if (indentOf(next.text, state.tabSize) <= base) break;
+    end = next;
+  }
+  return end ? { from: line.to, to: end.to } : null;
+});
+
+// The foldable blocks with how deep each is (1: not inside another): [{ from, to, depth }].
+function foldableBlocks(state) {
+  ensureSyntaxTree(state, state.doc.length, 300);
+  const out = [];
+  const open = []; // ends of the blocks the line is inside
+  for (let n = 1; n <= state.doc.lines; n++) {
+    const line = state.doc.line(n);
+    while (open.length && line.from > open[open.length - 1]) open.pop();
+    const range = foldable(state, line.from, line.to);
+    if (range && range.to > range.from) {
+      out.push({ ...range, depth: open.length + 1 });
+      open.push(range.to);
+    }
+  }
+  return out;
+}
+// Folds every block (`level` 0), or only the blocks that deep, after unfolding the rest.
+const foldLevel = (level) => (view) => {
+  const { state } = view;
+  const effects = [];
+  foldedRanges(state).between(0, state.doc.length, (from, to) => void effects.push(unfoldEffect.of({ from, to })));
+  for (const b of foldableBlocks(state)) if (!level || b.depth === level) effects.push(foldEffect.of({ from: b.from, to: b.to }));
+  if (effects.length) view.dispatch({ effects });
+  return true;
+};
+
+// The outline of a text, once per version of it (and its language: it loads after the text).
+const outlines = new WeakMap();
+const outlineOf = (state) => {
+  const name = state.facet(languageName);
+  let known = outlines.get(state.doc);
+  if (known?.name !== name) {
+    known = { name, entries: state.doc.length > 3_000_000 ? [] : outline(state.doc.toString(), name || '') };
+    outlines.set(state.doc, known);
+  }
+  return known.entries;
+};
+/**
+ * Where `pos` is: the names of the class, function or section around it, outermost
+ * first ("Store › load"). Code uses the blocks the names start (their folds); text, the
+ * last heading above.
+ */
+function scopeAt(state, pos) {
+  const entries = outlineOf(state);
+  if (!entries.length) return '';
+  const lineNo = state.doc.lineAt(pos).number;
+  const name = state.facet(languageName);
+  if (name === 'Markdown' || name === '') {
+    const at = currentEntry(entries, lineNo);
+    return at === -1 ? '' : entries[at].title;
+  }
+  const path = [];
+  let level = Infinity;
+  for (let i = currentEntry(entries, lineNo), looked = 0; i >= 0 && looked < 400; i--, looked++) {
+    const e = entries[i];
+    if (e.level >= level) continue;
+    const line = state.doc.line(e.line);
+    const block = line.number === lineNo ? { to: line.to } : foldable(state, line.from, line.to);
+    if (!block || block.to < pos) continue;
+    path.unshift(e.title);
+    level = e.level;
+    if (level <= 1) break;
+  }
+  return path.join(' › ');
+}
+
 /** Editing commands beyond CodeMirror's keymaps (menus and the command list). */
 export const COMMANDS = {
   undo,
@@ -190,6 +301,14 @@ export const COMMANDS = {
   sortLines: withLines((lines) => [...lines].sort((a, b) => a.localeCompare(b))),
   removeDuplicateLines: withLines((lines) => [...new Set(lines)]),
   trimTrailing: withLines((lines) => lines.map((l) => l.replace(/[ \t]+$/, ''))),
+  fold: foldCode,
+  unfold: unfoldCode,
+  foldAll: foldLevel(0),
+  foldTop: foldLevel(1),
+  foldLevel2: foldLevel(2),
+  foldLevel3: foldLevel(3),
+  unfoldAll,
+  matchingBracket: cursorMatchingBracket,
   // (Format document is actions.formatDocument: formatter.js, which loads its parts when needed.)
 };
 
@@ -372,7 +491,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
     wrap: o.wordWrap ? EditorView.lineWrapping : [],
     whitespace: o.showWhitespace ? [highlightWhitespace(), highlightTrailingWhitespace()] : [],
     tabs: [EditorState.tabSize.of(o.tabSize), indentUnit.of(' '.repeat(o.tabSize))],
-    gutter: o.lineNumbers ? [lineNumbers(), foldGutter()] : [],
+    gutter: [o.lineNumbers ? lineNumbers() : [], foldGutter()],
   });
 
   const flush = (key, urgent = false) => {
@@ -404,7 +523,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
   const report = (state) => {
     const sel = state.selection.main;
     const line = state.doc.lineAt(sel.head);
-    onCursor?.({ line: line.number, column: sel.head - line.from + 1, selected: state.selection.ranges.reduce((n, r) => n + (r.to - r.from), 0), lines: state.doc.lines, cursors: state.selection.ranges.length });
+    onCursor?.({ line: line.number, column: sel.head - line.from + 1, selected: state.selection.ranges.reduce((n, r) => n + (r.to - r.from), 0), lines: state.doc.lines, cursors: state.selection.ranges.length, scope: scopeAt(state, sel.head) });
   };
 
   function extensions(key, text) {
@@ -429,7 +548,8 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       rectangularSelection(),
       crosshairCursor(),
       highlightActiveLine(),
-      big ? [] : highlightSelectionMatches(),
+      // The selection's other occurrences, and the name under the cursor's.
+      big ? [] : highlightSelectionMatches({ highlightWordAroundCursor: true, minSelectionLength: 2 }),
       readingField,
       search({ top: true, createPanel: createSearchPanel }),
       placeholder('Type or paste here. Everything is saved on this device as you type and synced to GitHub.'),
@@ -439,6 +559,15 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
         { key: 'Alt-z', run: () => onShortcut?.('toggleWrap') ?? true },
         { key: 'Shift-Alt-f', run: () => onShortcut?.('format') ?? true, preventDefault: true },
         { key: 'Mod-s', run: () => onShortcut?.('sync') ?? true, preventDefault: true },
+        // Code: definitions, usages, renaming in the file; folding by level (as in Notepad++).
+        { key: 'F12', run: () => onShortcut?.('definition') ?? true, preventDefault: true },
+        { key: 'Shift-F12', run: () => onShortcut?.('usages') ?? true, preventDefault: true },
+        { key: 'F2', run: () => onShortcut?.('renameSymbol') ?? true, preventDefault: true },
+        { key: 'Alt-0', run: COMMANDS.foldAll, preventDefault: true },
+        { key: 'Alt-Shift-0', run: unfoldAll, preventDefault: true },
+        { key: 'Alt-1', run: COMMANDS.foldTop, preventDefault: true },
+        { key: 'Alt-2', run: COMMANDS.foldLevel2, preventDefault: true },
+        { key: 'Alt-3', run: COMMANDS.foldLevel3, preventDefault: true },
         { key: 'Mod-Shift-d', run: copyLineDown },
         { key: 'Mod-Shift-k', run: deleteLine },
         ...closeBracketsKeymap,
@@ -519,7 +648,9 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
     if (bigKeys.has(key)) return PLAIN_TEXT;
     const desc = findLanguage(name, chosen);
     const support = desc ? (desc.support ?? (await desc.load().catch(() => null))) : null;
-    const effects = lang.reconfigure(support ?? []);
+    // Older modes (and plain text) fold by indentation.
+    const ownFolding = support && !(support.language instanceof StreamLanguage);
+    const effects = lang.reconfigure([support ?? [], languageName.of(desc?.name ?? ''), ownFolding ? [] : indentFolding]);
     if (viewOf(key)) viewOf(key).dispatch({ effects });
     else if (states.has(key)) states.set(key, states.get(key).update({ effects }).state);
     return desc?.name ?? PLAIN_TEXT;
@@ -829,6 +960,22 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
     selectionText() {
       const { state } = current().view;
       return state.selection.ranges.map((r) => state.sliceDoc(r.from, r.to)).join('\n');
+    },
+
+    /** The pane typed in last (or the one showing `of`), for code navigation: { key, text, pos, language, symbols }. */
+    codeContext(of = null) {
+      const { key, view: v } = of ? { key: of, view: viewOf(of) } : current();
+      if (!key || !v) return null;
+      const { state } = v;
+      return { key, text: state.doc.toString(), pos: state.selection.main.head, selection: state.sliceDoc(state.selection.main.from, state.selection.main.to), language: state.facet(languageName), symbols: outlineOf(state) };
+    },
+
+    /** Selects `ranges` ([{ from, to }]) in the pane typed in last (or the one showing `of`), the one at `main` as the main one. */
+    selectRanges(ranges, main = 0, of = null) {
+      const { key, view: v } = of ? { key: of, view: viewOf(of) } : current();
+      if (!key || !v || !ranges.length) return;
+      v.dispatch({ selection: EditorSelection.create(ranges.map((r) => EditorSelection.range(r.from, r.to)), main), effects: EditorView.scrollIntoView(ranges[main].from, { y: 'center' }), userEvent: 'select' });
+      v.focus();
     },
 
     focus: () => view.focus(),

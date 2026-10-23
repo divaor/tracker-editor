@@ -21,6 +21,8 @@ import { FolderSearchPanel } from './ui/folderSearch.js';
 import { PropertiesDialog } from './ui/properties.js';
 import { lastSyncText, mirror as mirrorById, onMirrors, watchMirrors as watchMirrorStatus } from './mirrors.js';
 import { MirrorDeletesDialog, MirrorDialog, MirrorsDialog } from './ui/mirrors.js';
+import { onTransfers, watchTransfers } from './transfers.js';
+import { TransfersCard } from './ui/transfers.js';
 import { claudeText, opensInEditor, remapPath } from './folders.js';
 import { draggedPaths, draggedTab, dropped, isOwnDrop } from './dragOut.js';
 import { getSyncState, onSyncResult, onSyncState, syncClient, syncNow } from './syncManager.js';
@@ -41,6 +43,8 @@ import { SnippetPicker } from './ui/snippets.js';
 import { AssistBubble, AssistPanel } from './ui/askSelection.js';
 import { resultExtension } from './selectionAsk.js';
 import { OutlinePanel } from './ui/outline.js';
+import { UsagesPanel } from './ui/usages.js';
+import { DASHED_LANGUAGES, findDefinition, lineStart, occurrences, wordAt } from './codeNav.js';
 import { FilterBar } from './ui/filterBar.js';
 import { MacroDialog } from './ui/macro.js';
 import { CloseDiskDialog, ReloadDiskDialog } from './ui/diskDialogs.js';
@@ -97,7 +101,7 @@ function download(name, text) {
 }
 
 /** Everything the components need, in one place. */
-function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setCompare }) {
+function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setCompare, setUsagesOf, setSearchSeed }) {
   return useMemo(() => {
     const activeFile = () => {
       const key = parseKey(store.session.active);
@@ -255,6 +259,64 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
        * Format document (Shift+Alt+F): the selection, or the whole file, by its kind (formatter.js);
        * an edit Ctrl+Z takes back. Text with no known kind is formatted when it looks like JSON or XML.
        */
+      // ---- Code: declarations and usages in the open file ----
+      /** The name at the cursor in the pane typed in last: { ctx, word, from, to }, or null (says why). */
+      codeWord() {
+        const ctx = hostRef.current?.codeContext();
+        if (!ctx) return null;
+        const w = wordAt(ctx.text, ctx.pos, { dashes: DASHED_LANGUAGES.has(ctx.language) });
+        if (!w) toast('Put the cursor on a name first.');
+        return w && { ctx, ...w };
+      },
+      /** Goes to where the name at the cursor is declared (F12); on the declaration, lists its usages. */
+      goToDefinition() {
+        const w = actions.codeWord();
+        if (!w) return;
+        const found = findDefinition(w.ctx.text, w.word, w.from);
+        if (!found) return toast(`No declaration of “${w.word}” found in this file.`, { action: { label: 'Find in all files', run: () => actions.findEverywhere(w.word) }, timeout: 8000 });
+        if (found.from === w.from) return actions.findUsages();
+        hostRef.current.selectRanges([found]);
+      },
+      /** Lists where the name at the cursor is used in this file (Shift+F12). */
+      findUsages() {
+        const w = actions.codeWord();
+        if (!w) return;
+        setUsagesOf({ word: w.word });
+        setPanel('usages');
+      },
+      /** Selects every use of the name at the cursor, to retype them all at once (F2). */
+      renameSymbol() {
+        const w = actions.codeWord();
+        if (w) actions.selectOccurrences(w.word, w.from);
+      },
+      /** Selects every use of `word` in the pane typed in last (the main cursor on the one at or after `near`). */
+      selectOccurrences(word, near = null, key = null) {
+        const ctx = hostRef.current?.codeContext(key);
+        const found = ctx ? occurrences(ctx.text, word) : [];
+        if (!found.length) return toast(`“${word}” is not in this file.`);
+        const at = near ?? ctx.pos;
+        hostRef.current.selectRanges(found, Math.max(0, found.findIndex((o) => o.to >= at)), ctx.key);
+        toast(found.length > 1 ? `${found.length} × “${word}” selected: type the new name. Esc leaves one cursor.` : `“${word}” is used only here.`);
+      },
+      /** Selects `from`–`to` in the pane typed in last, or the one showing `key` (a usage). */
+      revealRange: (from, to = from, key = null) => hostRef.current?.selectRanges([{ from, to }], 0, key),
+      /** Goes to an outline entry ({ line, title }) in the pane typed in last, its name selected. */
+      revealSymbol(entry) {
+        const ctx = hostRef.current?.codeContext();
+        if (!ctx) return;
+        const from = lineStart(ctx.text, entry.line);
+        const lineText = ctx.text.slice(from, ctx.text.indexOf('\n', from) === -1 ? undefined : ctx.text.indexOf('\n', from));
+        const at = lineText.indexOf(entry.title);
+        hostRef.current.selectRanges([at === -1 ? { from, to: from } : { from: from + at, to: from + at + entry.title.length }]);
+      },
+      /** Lists the classes, functions and sections of this file to jump to (Ctrl+P, then @). */
+      gotoSymbol: () => setDialog({ type: 'quickOpen', query: '@' }),
+      /** Find in files with `word` as a whole word. */
+      findEverywhere(word) {
+        setSearchSeed({ query: word, wholeWord: true, at: Date.now() });
+        setPanel('search');
+      },
+
       async formatDocument() {
         const now = activeInfo();
         if (!now) return;
@@ -1029,6 +1091,8 @@ export function App() {
   const [sync, setSync] = useState(getSyncState);
   const [view, setView] = useState('editor');
   const [panel, setPanel] = useState(null);
+  const [usagesOf, setUsagesOf] = useState(null); // { word }: the Usages panel
+  const [searchSeed, setSearchSeed] = useState(null); // what Find in files starts with
   const [dialog, setDialog] = useState(null);
   const [sidebar, setSidebar] = useState(() => !isNarrow());
   const [cursor, setCursor] = useState(null);
@@ -1042,7 +1106,7 @@ export function App() {
   const [compare, setCompare] = useState(null);
   const hostRef = useRef(null);
   const editorEl = useRef(null);
-  const actions = useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setCompare });
+  const actions = useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setCompare, setUsagesOf, setSearchSeed });
   const editorOptions = (s) => ({ ...s, dark: resolvedTheme(s.theme) === 'dark' });
 
   // Re-render on store changes; typing only updates the unsynced markers, so throttle that.
@@ -1087,6 +1151,15 @@ export function App() {
         seen.set(m.id, m.state);
       }
       rerender();
+    });
+    return () => (off(), offList());
+  }, []);
+  // Transfers (desktop): to and from servers, in the background. A move that got there
+  // takes its open tabs along.
+  useEffect(() => {
+    const off = watchTransfers();
+    const offList = onTransfers((_jobs, job) => {
+      if (job?.op === 'move' && job.state !== 'running' && job.result?.length) actions.followDiskMoves(job.result.map(({ from, to }) => ({ from, to })));
     });
     return () => (off(), offList());
   }, []);
@@ -1166,6 +1239,9 @@ export function App() {
         // Ctrl+S is handled by the window's key handler (saveOrSync), which sees it too.
         if (name === 'toggleWrap') actions.toggleWrap?.();
         if (name === 'format') actions.formatDocument?.();
+        if (name === 'definition') actions.goToDefinition();
+        if (name === 'usages') actions.findUsages();
+        if (name === 'renameSymbol') actions.renameSymbol();
         return true;
       },
     });
@@ -1392,13 +1468,13 @@ export function App() {
     if (given === null && !snap) return toast('Open a file first.');
     const selected = given !== null || whole ? '' : host.selectionText();
     const options = getSettings().typing;
-    const text = prepareTyping(given ?? (selected || snap.text), { autoIndent: options.autoIndent });
+    const text = prepareTyping(given ?? (selected || snap.text));
     if (!text) return toast('Nothing to type: the file is empty.');
     const delay = typingDelay(options.speed);
     const wait = options.countdown * 1000;
     setTypingJob({ total: text.length, at: Date.now() + wait, delay, typed: 0, what: what || (selected ? 'selection' : 'file') });
     try {
-      const { typed, stopped } = await typer.start(text, { delay, wait, minimize: options.minimize, unicode: options.unicode });
+      const { typed, stopped } = await typer.start(text, { delay, wait, minimize: options.minimize, unicode: options.unicode, lineStart: options.autoIndent });
       const done = `${typed.toLocaleString()} character${typed === 1 ? '' : 's'}`;
       if (!stopped) toast(`Typed ${done}.`);
       else if (stopped === 'self') toast(`Nothing typed: Tracker Editor still had the focus. Start again, then click into the other window within ${options.countdown} seconds.`, { timeout: 9000 });
@@ -1665,6 +1741,10 @@ export function App() {
       replace: () => actions.run('replace'),
       'goto-line': () => actions.run('gotoLine'),
       'find-in-files': () => setPanel('search'),
+      'goto-definition': () => actions.goToDefinition(),
+      'find-usages': () => actions.findUsages(),
+      'rename-symbol': () => actions.renameSymbol(),
+      'goto-symbol': () => actions.gotoSymbol(),
       assistant: () => setPanel((p) => (p === 'assistant' ? null : 'assistant')),
       sync: () => {
         hostRef.current?.flushAll();
@@ -1821,7 +1901,8 @@ export function App() {
     </main>
 
     ${panel === 'folderSearch' && folderSearchDir && window.desktop?.folders && html`<${FolderSearchPanel} key=${folderSearchDir} dir=${folderSearchDir} actions=${actions} onClose=${() => setPanel(null)} />`}
-    ${panel === 'search' && html`<${SearchPanel} files=${scoped} docs=${scopedDocs} allFiles=${store.live()} allDocs=${docs} openKeys=${store.session.open} settings=${settings} actions=${actions} onClose=${() => setPanel(null)} />`}
+    ${panel === 'usages' && usagesOf && activeKey && !activeSealed && html`<${UsagesPanel} word=${usagesOf.word} name=${activeName} fileKey=${activeKey} text=${activeText()} actions=${actions} onClose=${() => setPanel(null)} />`}
+    ${panel === 'search' && html`<${SearchPanel} key=${searchSeed?.at ?? 0} seed=${searchSeed} files=${scoped} docs=${scopedDocs} allFiles=${store.live()} allDocs=${docs} openKeys=${store.session.open} settings=${settings} actions=${actions} onClose=${() => setPanel(null)} />`}
     ${panel === 'history' && activeKey && (activeFile || activeRepo) && html`<${HistoryPanel} key=${activeKey} selected=${compare?.sha}
       target=${{ key: activeKey, kind: activeFile ? 'file' : 'repo', id: activeFile?.id, path: activeRepo?.path, name: activeName, dirty: activeFile?.dirty || activeRepo?.dirty }}
       actions=${actions} onClose=${() => setPanel(null)} />`}
@@ -1834,7 +1915,8 @@ export function App() {
     (dialog.pick === 'compare'
       ? html`<${QuickOpen} files=${store.live()} docs=${docs} actions=${actions} title=${`Compare ${activeName} with…`} exclude=${activeFile ? activeFile.id : activeRepo ? `r:${activeRepo.path}` : ''}
           onPick=${(entry) => actions.compareWithEntry(entry)} onClose=${() => setDialog(null)} />`
-      : html`<${QuickOpen} files=${store.live()} docs=${docs} actions=${actions} onClose=${() => setDialog(null)} />`)}
+      : html`<${QuickOpen} files=${store.live()} docs=${docs} actions=${actions} initial=${dialog.query ?? ''} symbols=${() => (activeKey ? (hostRef.current?.codeContext()?.symbols ?? []) : [])}
+          onSymbol=${(entry) => actions.revealSymbol(entry)} onClose=${() => setDialog(null)} />`)}
     ${dialog?.type === 'ocr' && html`<${OcrDialog} images=${dialog.images} saveTo=${dialog.saveTo} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'server' && html`<${ServerDialog} conn=${dialog.conn} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'sshImport' && html`<${SshImportDialog} onClose=${() => setDialog(null)} />`}
@@ -1864,6 +1946,7 @@ export function App() {
       }} />`}
     ${dialog?.type === 'reloadDisk' && store.diskTab(dialog.path) &&
     html`<${ReloadDiskDialog} tab=${store.diskTab(dialog.path)} onClose=${() => setDialog(null)} onReload=${() => (setDialog(null), actions.reloadDisk(dialog.path))} />`}
+    ${diskAvailable() && html`<${TransfersCard} onShow=${actions.showFolder} />`}
     <${Toasts} />
   </div>`;
 }

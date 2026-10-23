@@ -19,6 +19,10 @@ const SCHEME = 'remote://';
 const PROTOCOLS = ['sftp', 'ftps', 'ftp'];
 const DEFAULT_PORT = { sftp: 22, ftps: 21, ftp: 21 };
 const MAX_COPY_ENTRIES = 10000;
+// Transfers with progress (putFile/getFile): requests in flight at once, and their size.
+const XFER_PARALLEL = 32;
+const XFER_CHUNK = 32 * 1024;
+const stoppedError = () => Object.assign(new Error('Stopped.'), { stopped: true });
 
 const isRemote = (p) => typeof p === 'string' && p.startsWith(SCHEME);
 // A name a server lists that cannot be a file's own name (it would lead elsewhere): left out.
@@ -368,6 +372,107 @@ class SftpSession {
     await this.call('fastPut', localPath, p, {});
   }
 
+  /**
+   * A file here written to `p`, many requests at a time (as fastPut does), reporting
+   * the bytes sent so far (`onBytes`); when `signal` aborts it stops and throws.
+   */
+  async putFile(localPath, p, { onBytes = () => {}, signal } = {}) {
+    const size = fs.statSync(localPath).size;
+    const fd = fs.openSync(localPath, 'r');
+    let handle = null;
+    try {
+      handle = await this.call('open', p, 'w');
+      await new Promise((resolve, reject) => {
+        let pos = 0;
+        let sent = 0;
+        let inFlight = 0;
+        let error = null;
+        // Stopped or failed: settled once the requests already sent have come back.
+        const settle = () => !inFlight && reject(error);
+        const stop = (err) => ((error ??= err), settle());
+        const pump = () => {
+          if (error) return settle();
+          if (signal?.aborted) return stop(stoppedError());
+          if (pos >= size && !inFlight) return resolve();
+          while (inFlight < XFER_PARALLEL && pos < size) {
+            const at = pos;
+            const len = Math.min(XFER_CHUNK, size - at);
+            pos += len;
+            const buf = Buffer.allocUnsafe(len);
+            fs.readSync(fd, buf, 0, len, at);
+            inFlight++;
+            this.sftp.write(handle, buf, 0, len, at, (err) => {
+              inFlight--;
+              if (err) return stop(err);
+              if (error) return settle();
+              sent += len;
+              onBytes(sent);
+              pump();
+            });
+          }
+        };
+        pump();
+      });
+    } finally {
+      fs.closeSync(fd);
+      if (handle) await this.call('close', handle).catch(() => {});
+    }
+  }
+
+  /** A file on the server written to `localPath` here, like putFile the other way. */
+  async getFile(p, localPath, { onBytes = () => {}, signal } = {}) {
+    const size = (await this.call('stat', p)).size;
+    const handle = await this.call('open', p, 'r');
+    const fd = fs.openSync(localPath, 'wx');
+    try {
+      await new Promise((resolve, reject) => {
+        let pos = 0;
+        let got = 0;
+        let inFlight = 0;
+        let error = null;
+        // Stopped or failed: settled once the reads already asked for have come back, so
+        // none of them writes to the file after it is closed.
+        const settle = () => !inFlight && reject(error);
+        const stop = (err) => ((error ??= err), settle());
+        // A read that comes back short is asked again for the rest.
+        const request = (at, len) => {
+          inFlight++;
+          const buf = Buffer.allocUnsafe(len);
+          this.sftp.read(handle, buf, 0, len, at, (err, n) => {
+            inFlight--;
+            if (err) return stop(err);
+            if (error) return settle();
+            if (n > 0) {
+              try {
+                fs.writeSync(fd, buf, 0, n, at);
+              } catch (writeErr) {
+                return stop(writeErr);
+              }
+              got += n;
+              onBytes(got);
+              if (n < len) request(at + n, len - n);
+            }
+            pump();
+          });
+        };
+        const pump = () => {
+          if (error) return settle();
+          if (signal?.aborted) return stop(stoppedError());
+          if (pos >= size && !inFlight) return resolve();
+          while (inFlight < XFER_PARALLEL && pos < size) {
+            const len = Math.min(XFER_CHUNK, size - pos);
+            request(pos, len);
+            pos += len;
+          }
+        };
+        pump();
+      });
+    } finally {
+      fs.closeSync(fd);
+      await this.call('close', handle).catch(() => {});
+    }
+  }
+
   async rmdir(p) {
     await this.call('rmdir', p);
   }
@@ -460,6 +565,7 @@ class FtpSession {
       this.client = new ftp.Client(30000);
       try {
         await this.client.access(options(password));
+        this.access = options(password);
         break;
       } catch (err) {
         this.client.close();
@@ -515,6 +621,52 @@ class FtpSession {
 
   async downloadTo(p, localPath) {
     await this.run((c) => c.downloadTo(localPath, p));
+  }
+
+  /**
+   * putFile and getFile as for SFTP: the bytes so far from basic-ftp's progress. They go
+   * on a connection of their own, so the folder can be browsed meanwhile and stopping
+   * closes only that one; a server that allows only one connection gets them in turn.
+   */
+  async putFile(localPath, p, opts = {}) {
+    return this.transfer((c) => c.uploadFrom(localPath, p), opts);
+  }
+
+  async getFile(p, localPath, opts = {}) {
+    return this.transfer((c) => c.downloadTo(fs.createWriteStream(localPath, { flags: 'wx' }), p), opts);
+  }
+
+  async transfer(fn, { onBytes = () => {}, signal } = {}) {
+    if (signal?.aborted) throw stoppedError();
+    const ftp = require('basic-ftp');
+    const own = new ftp.Client(30000);
+    try {
+      await own.access(this.access);
+    } catch {
+      own.close();
+      return this.run((c) => this.transferOn(c, fn, { onBytes, signal, own: false }));
+    }
+    return this.transferOn(own, fn, { onBytes, signal, own: true });
+  }
+
+  async transferOn(c, fn, { onBytes, signal, own }) {
+    // Stopped: a connection of its own is closed (the main one is left for the rest).
+    const onAbort = () => own && c.close();
+    signal?.addEventListener('abort', onAbort);
+    c.trackProgress((info) => {
+      onBytes(info.bytes);
+      if (signal?.aborted && !own) c.close();
+    });
+    try {
+      await fn(c);
+    } catch (err) {
+      throw signal?.aborted ? stoppedError() : err;
+    } finally {
+      c.trackProgress();
+      signal?.removeEventListener('abort', onAbort);
+      if (own) c.close();
+    }
+    if (signal?.aborted) throw stoppedError();
   }
 
   /** A file's time by MDTM (for listings without MLSD), or 0. */
@@ -771,11 +923,15 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
   async function walk(s, p, out = []) {
     const st = await s.stat(p);
     if (!st) throw Object.assign(new Error('Not found on the server.'), { notFound: true });
-    out.push({ path: p, dir: st.dir, mode: st.mode });
+    out.push({ path: p, dir: st.dir, mode: st.mode, size: st.dir ? 0 : st.size });
     if (out.length > MAX_COPY_ENTRIES) throw new Error('Too many files at once (more than 10,000).');
     if (st.dir) for (const e of await s.list(p)) await walk(s, e.path, out);
     return out;
   }
+
+  // A hidden name beside `dest` that a transfer writes to before taking the real name, so a
+  // stopped or failed one never leaves half a file under it.
+  const partOf = (dest, join = posix.join, dirname = posix.dirname, basename = posix.basename) => join(dirname(dest), `.${basename(dest)}.part-${crypto.randomBytes(3).toString('hex')}`);
 
   const api = {
     isRemote,
@@ -1143,55 +1299,124 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
     },
     /**
      * Copies into a folder on a server: from the same server, another one, or
-     * this computer (local paths). Returns [{ from, to }].
+     * this computer (local paths). Returns [{ from, to }]. With `job` (see main.cjs's
+     * transfers) everything is listed first for the totals, files go through putFile
+     * with progress, and when the job stops, what was done so far is on the error
+     * (`done`).
      */
-    async copyInto(sources, dirUri, { sameNameAsCopy = true } = {}) {
+    async copyInto(sources, dirUri, { sameNameAsCopy = true, job = null } = {}) {
       const { id, path: dir } = parseUri(dirUri);
-      const done = [];
+      const plans = [];
       for (const source of sources) {
         const name = isRemote(source) ? posix.basename(parseUri(source).path) : nodePath.basename(source);
         const same = isRemote(source) && parseUri(source).id === id && posix.dirname(parseUri(source).path) === dir;
         if (isRemote(source) && parseUri(source).id === id && (dir === parseUri(source).path || dir.startsWith(`${parseUri(source).path}/`))) throw new Error(`${name} cannot go inside itself.`);
-        const target = await withPath(dirUri, (s) => freeRemotePath(s, dir, name, { copy: same && sameNameAsCopy }));
         const items = isRemote(source) ? await withPath(source, (s, p) => walk(s, p)) : localWalk(source);
-        const root = isRemote(source) ? parseUri(source).path : source;
-        for (const item of items) {
-          const rel = isRemote(source) ? posix.relative(root, item.path) : nodePath.relative(root, item.path).split(nodePath.sep).join('/');
-          const dest = rel ? posix.join(target, rel) : target;
-          if (item.dir) await withPath(dirUri, (s) => s.mkdir(dest));
-          else {
-            const bytes = isRemote(source) ? await withPath(source, (s) => s.read(item.path)) : fs.readFileSync(item.path);
-            await withPath(dirUri, (s) => s.write(dest, bytes));
+        plans.push({ source, name, same, items });
+      }
+      job?.plan(plans.flatMap((pl) => pl.items.filter((i) => !i.dir)));
+      const done = [];
+      try {
+        for (const { source, name, same, items } of plans) {
+          const target = await withPath(dirUri, (s) => freeRemotePath(s, dir, name, { copy: same && sameNameAsCopy }));
+          const root = isRemote(source) ? parseUri(source).path : source;
+          for (const item of items) {
+            if (job?.signal.aborted) throw stoppedError();
+            const rel = isRemote(source) ? posix.relative(root, item.path) : nodePath.relative(root, item.path).split(nodePath.sep).join('/');
+            const dest = rel ? posix.join(target, rel) : target;
+            if (item.dir) await withPath(dirUri, (s) => s.mkdir(dest));
+            else if (!job) {
+              const bytes = isRemote(source) ? await withPath(source, (s) => s.read(item.path)) : fs.readFileSync(item.path);
+              await withPath(dirUri, (s) => s.write(dest, bytes));
+            } else await sendFile(source, item, dirUri, dest, job);
           }
+          done.push({ from: source, to: toUri(id, target) });
         }
-        done.push({ from: source, to: toUri(id, target) });
+      } catch (err) {
+        throw Object.assign(err, { done });
       }
       return done;
     },
-    /** Copies files and folders from a server into a folder on this computer. Returns [{ from, to }]. */
-    async downloadInto(uris, localDir, freePath) {
+    /** Copies files and folders from a server into a folder on this computer. Returns [{ from, to }]; `job` as for copyInto. */
+    async downloadInto(uris, localDir, freePath, { job = null } = {}) {
+      const plans = [];
+      for (const uri of uris) plans.push({ uri, items: await withPath(uri, (s, p) => walk(s, p)) });
+      job?.plan(plans.flatMap((pl) => pl.items.filter((i) => !i.dir)));
       const done = [];
-      for (const uri of uris) {
-        const { path: root } = parseUri(uri);
-        const target = freePath(localDir, posix.basename(root));
-        for (const item of await withPath(uri, (s, p) => walk(s, p))) {
-          const rel = posix.relative(root, item.path);
-          const dest = rel ? localUnder(target, rel) : target;
-          if (item.dir) fs.mkdirSync(dest, { recursive: true });
-          else fs.writeFileSync(dest, await withPath(uri, (s) => s.read(item.path)), { flag: 'wx' });
+      try {
+        for (const { uri, items } of plans) {
+          const { path: root } = parseUri(uri);
+          const target = freePath(localDir, posix.basename(root));
+          for (const item of items) {
+            if (job?.signal.aborted) throw stoppedError();
+            const rel = posix.relative(root, item.path);
+            const dest = rel ? localUnder(target, rel) : target;
+            if (item.dir) fs.mkdirSync(dest, { recursive: true });
+            else if (!job) fs.writeFileSync(dest, await withPath(uri, (s) => s.read(item.path)), { flag: 'wx' });
+            else {
+              const part = partOf(dest, nodePath.join, nodePath.dirname, nodePath.basename);
+              job.start(item);
+              try {
+                await withPath(uri, (s) => s.getFile(item.path, part, { onBytes: (n) => job.bytes(n), signal: job.signal }));
+                fs.renameSync(part, dest);
+              } catch (err) {
+                fs.rmSync(part, { force: true });
+                throw err;
+              }
+              job.fileDone(item);
+            }
+          }
+          done.push({ from: uri, to: target });
         }
-        done.push({ from: uri, to: target });
+      } catch (err) {
+        throw Object.assign(err, { done });
       }
       return done;
     },
   };
+
+  // One file to `dest` on a server, through a .part name, with progress: from this computer
+  // with putFile; from a server through a temporary file here (or in memory when small).
+  async function sendFile(source, item, dirUri, dest, job) {
+    const part = partOf(dest);
+    job.start(item);
+    let temp = null;
+    try {
+      let from = item.path;
+      if (isRemote(source)) {
+        if (item.size <= 4 * 1024 * 1024) {
+          const bytes = await withPath(source, (s) => s.read(item.path));
+          job.bytes(Math.floor(bytes.length / 2));
+          await withPath(dirUri, (s) => s.write(part, bytes));
+        } else {
+          temp = nodePath.join(fs.mkdtempSync(nodePath.join(os.tmpdir(), 'tracker-editor-xfer-')), 'file');
+          await withPath(source, (s) => s.getFile(item.path, temp, { onBytes: (n) => job.bytes(Math.floor(n / 2)), signal: job.signal }));
+          from = temp;
+        }
+      }
+      if (!isRemote(source) || temp) {
+        const half = isRemote(source) ? Math.floor(item.size / 2) : 0;
+        await withPath(dirUri, (s) => s.putFile(from, part, { onBytes: (n) => job.bytes(half + (isRemote(source) ? Math.floor(n / 2) : n)), signal: job.signal }));
+      }
+      await withPath(dirUri, (s) => s.rename(part, dest));
+    } catch (err) {
+      // What a stopped connection left behind goes too (once more a moment later, when an
+      // FTP server's only connection was closed to stop it and opens again).
+      const removePart = () => withPath(dirUri, (s) => s.remove(part));
+      await removePart().catch(() => new Promise((r) => setTimeout(r, 300)).then(removePart)).catch(() => {});
+      throw err;
+    } finally {
+      if (temp) fs.rmSync(nodePath.dirname(temp), { recursive: true, force: true });
+    }
+    job.fileDone(item);
+  }
   return api;
 }
 
 // Files and folders under a local path, for uploading.
 function localWalk(p, out = []) {
   const st = fs.statSync(p);
-  out.push({ path: p, dir: st.isDirectory() });
+  out.push({ path: p, dir: st.isDirectory(), size: st.isDirectory() ? 0 : st.size });
   if (out.length > MAX_COPY_ENTRIES) throw new Error('Too many files at once (more than 10,000).');
   if (st.isDirectory()) for (const name of fs.readdirSync(p)) localWalk(nodePath.join(p, name), out);
   return out;

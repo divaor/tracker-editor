@@ -80,3 +80,70 @@ test('file name filters', () => {
   assert.equal(nameFilter('')('anything'), true);
   assert.equal(nameFilter('report')('Q3 Report.md'), true);
 });
+
+// 0.13: the folders view's filter looks in the folders inside.
+test('names in the folders inside: found under their folders, links and .git left out', async () => {
+  const { findNames } = require('../electron/findInFolder.cjs');
+  const { nameMatcher } = await import('../app/js/folders.js');
+  const tree = {
+    '/r/': null,
+    '/r/config.yml': '',
+    '/r/app/': null,
+    '/r/app/deploy/': null,
+    '/r/app/deploy/config.yml': '',
+    '/r/app/deploy/other.txt': '',
+    '/r/app/config/': null,
+    '/r/app/config/readme.md': '',
+    '/r/.hidden/': null,
+    '/r/.hidden/config.yml': '',
+    '/r/node_modules/': null,
+    '/r/node_modules/config.yml': '',
+    '/r/linked/': null,
+    '/r/linked/config.yml': '',
+  };
+  const lister = async (dir) =>
+    Object.keys(tree)
+      .filter((p) => p !== dir && p.startsWith(dir) && !p.slice(dir.length).replace(/\/$/, '').includes('/'))
+      .map((p) => ({ name: p.slice(dir.length).replace(/\/$/, ''), path: p.replace(/\/$/, '') + (p.endsWith('/') ? '/' : ''), dir: p.endsWith('/'), link: p === '/r/linked/' }));
+  const res = await findNames({ root: '/r/', list: lister, matches: nameMatcher('config') });
+  const paths = (list) => list.map((f) => f.entry.path).sort();
+  // config.yml directly in /r/ is left to the listing; the folder named config is found too.
+  assert.deepEqual(paths(res.found), ['/r/app/config/', '/r/app/deploy/config.yml']);
+  assert.deepEqual(paths(res.folders), ['/r/app/', '/r/app/deploy/']);
+  assert.equal(res.found.find((f) => f.entry.name === 'config.yml').parent, '/r/app/deploy/');
+  assert.equal(res.truncated, false);
+  const hidden = await findNames({ root: '/r/', list: lister, matches: nameMatcher('*.yml'), hidden: true });
+  assert.deepEqual(paths(hidden.found), ['/r/.hidden/config.yml', '/r/app/deploy/config.yml']);
+  // Limits: results, folders listed, time.
+  const few = await findNames({ root: '/r/', list: lister, matches: () => true, maxResults: 2 });
+  assert.equal(few.found.length, 2);
+  assert.equal(few.truncated, true);
+  const shallow = await findNames({ root: '/r/', list: lister, matches: nameMatcher('config'), maxFolders: 1 });
+  assert.deepEqual(shallow.found, []);
+  assert.equal(shallow.truncated, true);
+  let t = 0;
+  const slow = await findNames({ root: '/r/', list: lister, matches: nameMatcher('config'), timeLimit: 5, now: () => (t += 10) });
+  assert.equal(slow.truncated, true);
+  const controller = new AbortController();
+  controller.abort();
+  const stopped = await findNames({ root: '/r/', list: lister, matches: () => true, signal: controller.signal });
+  assert.equal(stopped.stopped, true);
+  assert.equal(stopped.truncated, false);
+});
+
+test('the folders filter: text anywhere in the name, or a pattern', async () => {
+  const { nameMatcher, treeRows } = await import('../app/js/folders.js');
+  assert.equal(nameMatcher('Conf')('my-config.json'), true);
+  assert.equal(nameMatcher('*.yml')('deploy.YML'), true);
+  assert.equal(nameMatcher('*.yml')('deploy.yaml'), false);
+  assert.equal(nameMatcher('test?.js')('test1.js'), true);
+  assert.equal(nameMatcher('a(b')('xa(b'), true);
+  assert.equal(nameMatcher('[x].*')('[x].md'), true);
+  assert.equal(nameMatcher('  ')('anything'), true);
+  const rows = treeRows([{ name: 'app', path: '/r/app', dir: true }, { name: 'b.yml', path: '/r/b.yml' }], {
+    query: '*.yml',
+    expanded: new Set(['/r/app']),
+    children: new Map([['/r/app', [{ name: 'c.yml', path: '/r/app/c.yml' }, { name: 'd.txt', path: '/r/app/d.txt' }]]]),
+  });
+  assert.deepEqual(rows.map((r) => r.entry.path), ['/r/app', '/r/app/c.yml', '/r/b.yml']);
+});

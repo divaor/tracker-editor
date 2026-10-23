@@ -1395,6 +1395,109 @@ button.project-chip:hover {
   pointer-events: none;
 }
 
+/* Transfers (desktop): uploads and downloads going on in the background. */
+.transfers {
+  position: fixed;
+  left: 12px;
+  bottom: 34px;
+  z-index: 55;
+  width: min(360px, calc(100vw - 24px));
+  max-height: min(50vh, 420px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  font-size: 13px;
+  animation: rise 0.16s ease-out;
+}
+
+.transfers-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 6px 6px 12px;
+  color: var(--text-2);
+}
+
+.transfers-title {
+  flex: 1;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.transfers.small {
+  width: auto;
+  min-width: 220px;
+}
+
+.transfers.small > .transfer-bar {
+  margin: 0 12px 10px;
+}
+
+.transfer-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 12px 8px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.transfer {
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+
+.transfer-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.transfer-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transfer.ok .transfer-name {
+  color: var(--done);
+}
+
+.transfer.warn .transfer-name {
+  color: var(--warn);
+}
+
+.transfer.error .transfer-name {
+  color: var(--danger);
+}
+
+.transfer-detail {
+  margin-top: 3px;
+  color: var(--text-3);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.transfer-bar {
+  height: 6px;
+  margin-top: 6px;
+  border-radius: 3px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.transfer-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--kind-remote);
+  transition: width 0.25s ease-out;
+}
+
 .toast {
   display: flex;
   align-items: center;
@@ -1621,6 +1724,12 @@ button.project-chip:hover {
   border: 0 !important;
   box-shadow: none !important;
   background: transparent !important;
+}
+
+/* The folders view's filter: what it found in the folders inside. */
+.filter-deep {
+  margin: 4px 2px 0;
+  font-size: 12px;
 }
 
 /* The × in search and filter fields (components.js ClearButton). */
@@ -2542,6 +2651,100 @@ button.folder-col:hover {
 
 .folder-list.drop-target {
   box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+/* Scrolling the list while dragging: bands that stay at its top and bottom (ui/folders.js). */
+.drag-zone {
+  position: sticky;
+  z-index: 4;
+  height: 0;
+  margin: 0 -6px;
+  pointer-events: none;
+}
+
+.drag-zone.up {
+  top: -6px;
+}
+
+.drag-zone.down {
+  bottom: -6px;
+}
+
+.drag-zone > div {
+  position: absolute;
+  right: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 56px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.75;
+  transition: opacity 0.12s;
+}
+
+.drag-zone.up > div {
+  top: 0;
+  align-items: flex-start;
+  padding-top: 6px;
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--accent) 22%, var(--surface)) 0%, transparent 100%);
+}
+
+.drag-zone.down > div {
+  bottom: 0;
+  align-items: flex-end;
+  padding-bottom: 6px;
+  background: linear-gradient(to top, color-mix(in srgb, var(--accent) 22%, var(--surface)) 0%, transparent 100%);
+}
+
+.drag-zone.active > div {
+  opacity: 1;
+}
+
+.icon.turn-down {
+  transform: rotate(180deg);
+}
+
+/* A closed folder under a drag fills up, then opens (SPRING_MS). */
+.folder-row.is-dir.drop-target[aria-expanded='false'] {
+  position: relative;
+}
+
+.folder-row.is-dir.drop-target[aria-expanded='false']::after {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: var(--accent);
+  animation: spring-open 0.8s linear forwards;
+  content: '';
+}
+
+@keyframes spring-open {
+  from {
+    width: 0;
+  }
+
+  to {
+    width: 100%;
+  }
+}
+
+/* What is inside the folder a drop goes to (in the tree): a drop on them goes there too. */
+.folder-row.drop-inside {
+  background: color-mix(in srgb, var(--accent-soft) 60%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.creating-in {
+  flex-shrink: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .folder-row.creating {
@@ -4928,6 +5131,77 @@ svg.up {
   color: var(--text);
   font-size: 13px;
   text-align: left;
+}
+
+/* The class, function or section the cursor is in (status bar). */
+.status-scope {
+  max-width: 34ch;
+  min-width: 0;
+}
+
+.status-scope span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Usages of a name in the open file (ui/usages.js). */
+.usages-word {
+  margin: 0 0 2px;
+  font-size: 15px;
+}
+
+.usages-word code {
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--surface-2);
+}
+
+.usages-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 10px;
+}
+
+.usage-row {
+  align-items: baseline;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.usage-line {
+  flex: none;
+  min-width: 3ch;
+  color: var(--text-3);
+  text-align: right;
+}
+
+.usage-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: pre;
+  text-overflow: ellipsis;
+}
+
+.usage-text mark {
+  border-radius: 3px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.usage-kind {
+  flex: none;
+  font-family: var(--font);
+  font-size: 11px;
+  color: var(--done);
+}
+
+.usage-row.declaration .usage-text mark {
+  background: rgba(35, 132, 95, 0.14);
+  color: var(--done);
 }
 
 .outline-row:hover {
