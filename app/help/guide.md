@@ -82,7 +82,9 @@ The editor uses the tracker's repo, token and projects. Its own files go to `edi
 - **Text tools** (⋯ → **Text tools**, **Edit → Text**, or Help): UPPER and lower case, sort lines, remove duplicate lines, trim trailing spaces, duplicate or delete a line, comment lines.
 - **Indentation**: each file keeps its own, tabs or spaces and how many: from its text, or from an `.editorconfig` next to a file on disk or on a server. The status bar shows it (**Spaces: 2**, **Tab size: 4**); click it to indent with tabs or spaces, pick the width, **convert** the whole file, or go back to what the text uses. What you pick is remembered for the file. Files that say nothing use **Settings → Editor → Indentation**.
 - Multiple cursors, `Ctrl+D` select the next occurrence, `Ctrl+/` comment lines, bracket matching, `Alt+Z` word wrap, visible whitespace. Syntax highlighting for 140+ languages, from the file name, from pasted text, or picked in the status bar.
+- **HTML, XML and JSX**: type an **Emmet** abbreviation and press `Tab`: `ul>li*3` makes a list of three items, `div.card#main` a div with that class and id, `a[href=#]{Home}` a link with its text, `table>tr*2>td*3` a table, `!` (in an empty HTML file) a whole page; `>` goes inside, `+` next to it, `^` back up, `$` numbers the copies. Words that aren't tag names are left alone, and `Tab` indents as usual. **Tags close themselves** when you type the `>` of an opening tag (or `</`), and **renaming a tag renames its other end** (`<div>` … `</div>` → `<section>` … `</section>`; one `Ctrl+Z` takes both back). Both can be turned off in **Settings → Editor**.
 - **Help** (`F1`, or the **?** at the top): every command with its shortcut, searchable (type "sort" or "Ctrl+K"); click one, or press `Enter`, to run it. **Print** gives a one-page cheat sheet. The **Guide** tab is this guide.
+- **Run a command by name** (`Ctrl+Shift+P`, or `Ctrl+P` then `>`), as in VS Code: type part of it ("wrap", "fold", "problems") and press `Enter`.
 
 ### Code tools
 
@@ -271,7 +273,7 @@ It types real key presses into whichever window has the focus when the countdown
 
 - **Snippets** (`Alt+I`): mark a file as a snippet (⋯ → **Use as a snippet**), or select text and choose **Save as snippet**. Write `{{name}}` where a value changes (`{{name:default}}` for a default), plus `{{date}}`, `{{time}}`, `{{clipboard}}`, `{{selection}}` and `{{cursor}}`. `Alt+I` finds a snippet by name, asks for its fields, then **Insert**, **Copy** or **Type into another window**.
 - **Outline and links** (`Ctrl+Shift+O`): the headings of a Markdown file, or the classes, functions and tables of code; click one to jump there. Write `[[another note]]` to link notes: `Ctrl+click` opens it (or offers to create it), typing `[[` suggests names, and the panel lists this file's links and the files that link to it.
-- **Macros**: `Ctrl+Shift+R` starts recording your typing and shortcuts, `Ctrl+Shift+R` again stops. `Ctrl+Shift+P` plays it from the cursor; **⋯ → Run the macro…** runs it N times or to the end of the file.
+- **Macros**: `Ctrl+Shift+R` starts recording your typing and shortcuts, `Ctrl+Shift+R` again stops. `Alt+Shift+P` plays it from the cursor; **⋯ → Run the macro…** runs it N times or to the end of the file.
 - **Compare with clipboard** (⋯): what you copied against the file, with **Use the clipboard text**.
 - **Send checklist to tracker** (⋯): the open `- [ ]` items of the selection or the file become tracker tasks linking back to the line; dates like `(due 2026-10-30)` become due dates, and items already sent start unticked.
 
@@ -417,6 +419,8 @@ Turn them on in **Settings → Desktop**.
 | `` Ctrl+` `` | Terminal on a server: show or hide (desktop) |
 | In the terminal | `Ctrl+Shift+C` / `Ctrl+Shift+V` copy / paste; `Ctrl+C` copies a selection, `Ctrl+V` pastes |
 | `F1` | Help: every command and shortcut (and this guide) |
+| `Ctrl+Shift+P` (or `Ctrl+P`, then `>`) | Run a command by name |
+| `Tab` in HTML, XML, JSX | Expand an Emmet abbreviation (`ul>li*3`, `div.card`, `!`) |
 | `Shift+Alt+F` | Format document (or the selection) |
 | `Ctrl+F` / `Ctrl+H` | Find / replace in this file (`Enter` next, `Shift+Enter` previous, `Alt+Enter` select all; in the replace field `Enter` replaces, `Ctrl+Enter` replaces all) |
 | `Ctrl+G` | Go to line |
@@ -435,7 +439,7 @@ Turn them on in **Settings → Desktop**.
 | `Alt+I` | Insert a snippet |
 | `Alt+L` | Filter lines |
 | `Ctrl+Shift+O` | Outline and links |
-| `Ctrl+Shift+R` / `Ctrl+Shift+P` | Record a macro / play it |
+| `Ctrl+Shift+R` / `Alt+Shift+P` | Record a macro / play it |
 | `Ctrl+Shift+V` | Clipboard history (desktop) |
 | `Ctrl+Alt+N` / `Ctrl+Alt+O` | Quick capture / text from a screenshot, anywhere (desktop, when turned on) |
 | `Ctrl+\` | Split view on or off |

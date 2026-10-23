@@ -2368,7 +2368,7 @@ function buildMenu() {
         },
         { type: 'separator' },
         shown('Start or Stop Recording a Macro', 'CmdOrCtrl+Shift+R', 'macro-record'),
-        shown('Play the Macro', 'CmdOrCtrl+Shift+P', 'macro-play'),
+        shown('Play the Macro', 'Alt+Shift+P', 'macro-play'),
         item('Run the Macro…', undefined, 'macro-run'),
         { type: 'separator' },
         shown('Type into Another Window', 'Alt+T', 'type-out'),
@@ -2416,6 +2416,7 @@ function buildMenu() {
       role: 'help',
       submenu: [
         shown('Commands and Shortcuts', 'F1', 'help'),
+        shown('Run a Command…', 'CmdOrCtrl+Shift+P', 'command-palette'),
         item('Guide', undefined, 'help-guide'),
         { type: 'separator' },
         { label: 'Project on GitHub', click: () => shell.openExternal(REPO_URL) },

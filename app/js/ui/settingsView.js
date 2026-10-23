@@ -125,6 +125,9 @@ function EditorCard({ settings }) {
         onChange=${(v) => saveSettings({ detectIndent: v })} />
       <${Check} checked=${settings.problems !== false} label="Show problems as you type" hint="JSON, YAML, XML, HTML, CSS and code: Ctrl+Shift+M lists them, F8 goes to the next"
         onChange=${(v) => saveSettings({ problems: v })} />
+      <${Check} checked=${settings.emmet !== false} label="Emmet: Tab expands abbreviations in HTML, XML and JSX" hint="ul>li*3, div.card, a[href], ! for a page"
+        onChange=${(v) => saveSettings({ emmet: v })} />
+      <${Check} checked=${settings.linkedTags !== false} label="Renaming a tag renames its other end" onChange=${(v) => saveSettings({ linkedTags: v })} />
       <${Check} checked=${settings.indentGuides !== false} label="Indentation guides" onChange=${(v) => saveSettings({ indentGuides: v })} />
       <${Check} checked=${settings.bracketColors !== false} label="Color bracket pairs by depth" onChange=${(v) => saveSettings({ bracketColors: v })} />
       <${Check} checked=${settings.stickyScroll !== false} label="Sticky scroll" hint="The lines that start the function or section you are in stay at the top"

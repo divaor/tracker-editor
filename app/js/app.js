@@ -46,6 +46,7 @@ import { OutlinePanel } from './ui/outline.js';
 import { UsagesPanel } from './ui/usages.js';
 import { ProblemsPanel } from './ui/problems.js';
 import { DeclarationPicker, SymbolSearch } from './ui/symbols.js';
+import { CommandPalette } from './ui/palette.js';
 import { SYNTAX_LANGUAGES } from './problems.js';
 import { DASHED_LANGUAGES, declarationKind, findDefinition, lineStart, occurrences, wordAt } from './codeNav.js';
 import { FilterBar } from './ui/filterBar.js';
@@ -1316,7 +1317,7 @@ export function App() {
   }, []);
   useEffect(
     () => hostRef.current?.applySettings(editorOptions(settings)),
-    [settings.theme, settings.wordWrap, settings.showWhitespace, settings.tabSize, settings.lineNumbers, settings.problems, settings.indentGuides, settings.bracketColors, settings.stickyScroll, settings.detectIndent, settings.indentChosen],
+    [settings.theme, settings.wordWrap, settings.showWhitespace, settings.tabSize, settings.lineNumbers, settings.problems, settings.indentGuides, settings.bracketColors, settings.stickyScroll, settings.detectIndent, settings.indentChosen, settings.emmet, settings.linkedTags],
   );
   useEffect(() => {
     const media = matchMedia('(prefers-color-scheme: dark)');
@@ -1363,6 +1364,8 @@ export function App() {
 
   actions.toggleWrap = () => saveSettings({ wordWrap: !getSettings().wordWrap });
   actions.toggleProblems = () => setPanel((p) => (p === 'problems' ? null : 'problems'));
+  /** Ctrl+Shift+P: every command by name (as in VS Code). */
+  actions.commandPalette = (query = '') => setDialog((d) => (d?.type === 'palette' ? null : { type: 'palette', query }));
   // ---- Indentation of the open tab ----
   const rememberIndent = (key, indent) => {
     const chosen = { ...getSettings().indentChosen };
@@ -1568,7 +1571,7 @@ export function App() {
   actions.lineFilter = (key) => hostRef.current?.lineFilter(key) ?? { filter: null, shown: 0, total: 0 };
   actions.shownLines = (key) => hostRef.current?.shownLines(key) ?? '';
 
-  // Macros (Ctrl+Shift+R records, Ctrl+Shift+P plays). The last one is kept on this device.
+  // Macros (Ctrl+Shift+R records, Alt+Shift+P plays). The last one is kept on this device.
   const [recording, setRecording] = useState(false);
   const MACRO_KEY = 'tracker-editor:macro';
   const savedMacro = () => {
@@ -1590,7 +1593,7 @@ export function App() {
       } catch {
         // kept for this session only
       }
-      toast(`Macro recorded (${steps.length} step${steps.length === 1 ? '' : 's'}). Ctrl+Shift+P plays it.`);
+      toast(`Macro recorded (${steps.length} step${steps.length === 1 ? '' : 's'}). Alt+Shift+P plays it.`);
       return;
     }
     if (!activeKey) return toast('Open a file first.');
@@ -1824,7 +1827,10 @@ export function App() {
       } else if (mod && e.shiftKey && k === 'r') {
         e.preventDefault();
         actions.toggleRecording();
-      } else if (mod && e.shiftKey && k === 'p') {
+      } else if (mod && e.shiftKey && !e.altKey && k === 'p') {
+        e.preventDefault();
+        actions.commandPalette();
+      } else if (e.altKey && e.shiftKey && !mod && e.code === 'KeyP') {
         e.preventDefault();
         actions.playMacro();
       } else if (mod && e.shiftKey && k === 'o') {
@@ -1910,6 +1916,7 @@ export function App() {
       'rename-symbol': () => actions.renameSymbol(),
       'goto-symbol': () => actions.gotoSymbol(),
       'goto-symbol-all': () => actions.gotoSymbolAll(),
+      'command-palette': () => actions.commandPalette(),
       'git-compare': () => actions.compareWithHead(),
       problems: () => actions.toggleProblems(),
       'indent-spaces': () => actions.setIndent({ tabs: false }),
@@ -2095,6 +2102,7 @@ export function App() {
           onPick=${(entry) => actions.compareWithEntry(entry)} onClose=${() => setDialog(null)} />`
       : html`<${QuickOpen} files=${store.live()} docs=${docs} actions=${actions} initial=${dialog.query ?? ''} symbols=${() => (activeKey ? (hostRef.current?.codeContext()?.symbols ?? []) : [])}
           roots=${folderRoots(settings)} hidden=${Boolean(settings.showHidden)} onSymbol=${(entry) => actions.revealSymbol(entry)} onClose=${() => setDialog(null)} />`)}
+    ${dialog?.type === 'palette' && html`<${CommandPalette} initial=${dialog.query ?? ''} onRun=${(c) => setTimeout(() => actions.command(c.id), 0)} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'symbols' && html`<${SymbolSearch} files=${store.live()} roots=${folderRoots(settings)} initial=${dialog.query ?? ''} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'declarations' && html`<${DeclarationPicker} word=${dialog.word} places=${dialog.places} roots=${folderRoots(settings)} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'ocr' && html`<${OcrDialog} images=${dialog.images} saveTo=${dialog.saveTo} actions=${actions} onClose=${() => setDialog(null)} />`}

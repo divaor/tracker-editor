@@ -93,6 +93,7 @@ import { createSearchPanel, openReplacePanel } from './searchPanel.js';
 import { SYNTAX_LANGUAGES, problemsFor, treeErrors } from './problems.js';
 import { convertIndent, detectIndent } from './indent.js';
 import { gitGutter, gitInfo, setGitBase } from './gitGutter.js';
+import { emmetOnTab, linkedTags } from './htmlTools.js';
 
 export { languages };
 
@@ -705,7 +706,8 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
   const bigKeys = new Set(); // tabs in the lighter editor for very large files
   // Macro being recorded: keys the keymaps handle, and typed or pasted text, in order.
   let recording = null;
-  const MACRO_KEYS = (e) => (e.ctrlKey || e.metaKey) && e.shiftKey && /^[rp]$/i.test(e.key);
+  // The macro's own keys (Ctrl+Shift+R records, Alt+Shift+P plays) are not recorded.
+  const MACRO_KEYS = (e) => ((e.ctrlKey || e.metaKey) && e.shiftKey && /^r$/i.test(e.key)) || (e.altKey && e.shiftKey && e.code === 'KeyP');
   const recorder = [
     EditorView.domEventHandlers({
       keydown(e) {
@@ -855,6 +857,8 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
         ...historyKeymap,
         ...foldKeymap,
         ...completionKeymap,
+        // HTML, XML, JSX: Tab expands an Emmet abbreviation (ul>li*3), else indents.
+        { key: 'Tab', run: emmetOnTab((state) => state.facet(languageName), () => options.emmet !== false) },
         indentWithTab,
       ]),
       lang.of([]),
@@ -914,6 +918,8 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
         },
       }),
       wikiLinks,
+      // Renaming a tag renames its other end (HTML, XML, JSX).
+      linkedTags(() => options.linkedTags !== false),
       // The text itself is in the state's doc.
       [],
     ];

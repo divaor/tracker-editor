@@ -8,10 +8,10 @@ const TABS = [
   { id: 'commands', label: 'Commands and shortcuts' },
   { id: 'guide', label: 'Guide' },
 ];
-const isMac = () => window.desktop?.platform === 'darwin' || /Mac|iPhone|iPad/.test(navigator.platform);
+export const isMac = () => window.desktop?.platform === 'darwin' || /Mac|iPhone|iPad/.test(navigator.platform);
 
 /** A shortcut as keys: "Ctrl+Shift+F · F3" → <kbd>Ctrl</kbd>+<kbd>Shift</kbd>… */
-const Keys = ({ keys }) =>
+export const Keys = ({ keys }) =>
   keys &&
   html`<span class="help-keys">${keys.split(' · ').map(
     (combo, i) => html`${i > 0 && html`<span class="muted"> or </span>`}${combo.split('+').map((k, j) => html`${j > 0 && '+'}<kbd>${k}</kbd>`)}`,

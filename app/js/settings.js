@@ -44,6 +44,9 @@ export const DEFAULT_SETTINGS = {
   // Problems as you type (JSON, YAML, XML, HTML, code), a guide at each indentation level,
   // brackets colored by how deep they are, and the enclosing function or section kept at the top.
   problems: true,
+  // HTML, XML, JSX: Tab expands Emmet abbreviations; renaming a tag renames its other end.
+  emmet: true,
+  linkedTags: true,
   indentGuides: true,
   bracketColors: true,
   stickyScroll: true,

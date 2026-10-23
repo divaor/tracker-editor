@@ -31,7 +31,7 @@ It is the companion of [Tracker](https://github.com/divaor/tracking_app) and sha
 - **Outline, `[[links]]` and backlinks** (`Ctrl+Shift+O`): the headings of a Markdown file or the classes, functions and tables of code, to jump to. Write `[[another note]]` to link notes (Ctrl+click opens it, or offers to create it); the panel lists the links and the files that link here.
 - **Snippets with fields** (`Alt+I`): mark files as snippets and insert them with their `{{fields}}` filled in, plus `{{date}}`, `{{clipboard}}`, `{{selection}}` and `{{cursor}}`. Insert, copy or type them into another window.
 - **Log tools**: **Filter lines** (`Alt+L`) shows only the lines that match (or hides them), with regex; copy them or make a file of them. Very large files open in a lighter mode that stays fast.
-- **Macros**: `Ctrl+Shift+R` records your edits, `Ctrl+Shift+P` plays them back, or run them many times or to the end of the file.
+- **Macros**: `Ctrl+Shift+R` records your edits, `Alt+Shift+P` plays them back, or run them many times or to the end of the file.
 - **Compare with the clipboard**, and **send a checklist to the tracker**: the open `- [ ]` items of a file or the selection become tasks that link back to it.
 - **A local model on your computer** (Ollama, LM Studio or any OpenAI-compatible server): summarize a file, ask questions about one or all of your files with sources, and **find by meaning** when you don't remember the words. Nothing leaves your machine.
   - **Help with the text**: the ✦ bubble at the bottom right (or `Ctrl+K`) works on the selection, or the whole file. Fix, rewrite, shorten or expand it; change the tone; **advanced replace** (say what to change: "every date to YYYY-MM-DD"); tidy it, **make it Markdown**, **convert it** to JSON, YAML, CSV, a table…; **check the syntax** of a query, find problems, add comments, rewrite it in another language or SQL dialect, write a regex; translate it; or ask anything and follow up. New versions open as a comparison to accept, keep as a new file or copy.
@@ -55,7 +55,8 @@ It is the companion of [Tracker](https://github.com/divaor/tracking_app) and sha
 - **Syntax highlighting** for 140+ languages, detected from the file name or the content of pasted text, or picked in the status bar.
 - **Find and replace** (`Ctrl+F`, `Ctrl+H`): match case, whole word and regular expressions as toggles in the field, how many matches and which one you are on, previous / next / select all, and Replace or Replace all on a second line.
 - **Format document** (`Shift+Alt+F`): one-line JSON becomes readable (numbers and text kept exactly), and XML, SQL, JavaScript, TypeScript, CSS, HTML, Markdown, YAML and GraphQL are tidied too; the whole file or just the selection.
-- **Help** (`F1`): every command and its shortcut in a searchable cheat sheet you can run commands from (or print), and the full guide.
+- **Help** (`F1`): every command and its shortcut in a searchable cheat sheet you can run commands from (or print), and the full guide. `Ctrl+Shift+P` (or `Ctrl+P` then `>`) runs a command by name, as in VS Code.
+- **HTML, XML and JSX**: Emmet abbreviations on `Tab` (`ul>li*3`, `div.card#main`, `a[href=#]{Home}`, `!` for a page), tags closed as you type, and renaming a tag renames its other end.
 - **Editing tools**: go to line, multiple cursors, select next occurrence, comment lines, duplicate/delete/sort lines, remove duplicates, trim trailing spaces, upper/lower case, format JSON, word wrap, visible whitespace, bracket matching.
 - **Code tools** (not a full IDE): fold and unfold blocks, everything at once (`Alt+0` / `Alt+Shift+0`) or by level (`Alt+1`–`Alt+3`: classes, then their methods); **go to the declaration** (`F12`), **usages** (`Shift+F12`) and **rename** (`F2`) of a name in the file; **go to a function or section** (`Ctrl+P`, then `@`); the status bar names the function you are in; the name under the cursor is highlighted where else it is used. YAML and plain text fold by indentation.
 - **Across files**: `F12` on a name not declared in the open file finds it in your other files and in the folders open in Folders (a list when there are several); `Ctrl+T` (or `Ctrl+P` then `#`) goes to a class, function or section in any of them.
@@ -332,6 +333,7 @@ All three are in **Settings → Desktop**, off until you turn them on.
 | In the terminal | `Ctrl+Shift+C` / `Ctrl+Shift+V` copy / paste (`Ctrl+C` copies when text is selected, `Ctrl+V` pastes) |
 | `Ctrl+F` / `Ctrl+H` | Find / replace in this file |
 | `Ctrl+G` | Go to line |
+| `Ctrl+Shift+P` | Run a command by name |
 | `Ctrl+Shift+M` / `F8` / `Shift+F8` | Problems in this file / next one / previous one |
 | `Ctrl+T` | Go to a class, function or section in any file (desktop) |
 | `Ctrl+D` | Select the next occurrence |
@@ -343,7 +345,7 @@ All three are in **Settings → Desktop**, off until you turn them on.
 | `Alt+I` | Insert a snippet |
 | `Alt+L` | Filter lines |
 | `Ctrl+Shift+O` | Outline and links |
-| `Ctrl+Shift+R` / `Ctrl+Shift+P` | Record a macro / play it |
+| `Ctrl+Shift+R` / `Alt+Shift+P` | Record a macro / play it |
 | `Ctrl+Shift+V` | Clipboard history (desktop) |
 | `Ctrl+\` | Split view: open or close the side pane |
 | `Ctrl+B` | Show or hide the file list |
