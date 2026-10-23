@@ -49,6 +49,7 @@ import {
   RangeSetBuilder,
   cursorMatchingBracket,
   Facet,
+  forceLinting,
   StreamLanguage,
   getChunks,
   goToNextChunk,
@@ -319,13 +320,23 @@ function parserErrors(state) {
  * The linter for one tab: problemsFor (problems.js) with the parser's errors; `onProblems(key,
  * list, language)` hears each result ([{ from, to, line, column, severity, message }]).
  */
+/**
+ * A language server's problems for a tab (lsp.js): `(state) => [{ from, to, severity, message,
+ * source }]`. With one, they replace the parser's.
+ */
+export const serverProblems = Facet.define({ combine: (values) => values[0] ?? null });
+// The server reported: the linter runs again (forceLinting alone only hurries a run already due).
+const problemsChanged = StateEffect.define();
+
 const problemsLinter = (key, onProblems, onProblemAction) =>
   linter(
     (view) => {
       const { state } = view;
       const language = state.facet(languageName);
+      const fromServer = state.facet(serverProblems);
       let list = [];
-      if (language === 'JSON' || SYNTAX_LANGUAGES.has(language)) {
+      if (fromServer) list = fromServer(state);
+      else if (language === 'JSON' || SYNTAX_LANGUAGES.has(language)) {
         const { errors, parsed } = language === 'JSON' ? { errors: [], parsed: state.doc.length } : parserErrors(state);
         list = problemsFor(state.doc.toString(), { language, name: state.facet(fileName), errors }).filter((p) => p.from <= parsed);
       }
@@ -333,9 +344,9 @@ const problemsLinter = (key, onProblems, onProblemAction) =>
       const found = list.map((p) => {
         const from = Math.min(p.from, end);
         const line = state.doc.lineAt(from);
-        return { from, to: Math.min(Math.max(p.to, from), end), severity: p.severity, message: p.message, line: line.number, column: from - line.from + 1 };
+        return { from, to: Math.min(Math.max(p.to, from), end), severity: p.severity, message: p.message, source: p.source ?? '', line: line.number, column: from - line.from + 1 };
       });
-      onProblems?.(key, found, language);
+      onProblems?.(key, found, language, { server: Boolean(fromServer) });
       // In the tooltip: the model explains this one, or fixes them all (the model panel).
       const actions = (p) =>
         onProblemAction
@@ -346,8 +357,14 @@ const problemsLinter = (key, onProblems, onProblemAction) =>
           : undefined;
       return found.map((p) => ({ from: p.from, to: p.to, severity: p.severity, message: p.message, actions: actions(p) }));
     },
-    // Again when the language has loaded (the first look was before).
-    { delay: 600, needsRefresh: (update) => update.startState.facet(languageName) !== update.state.facet(languageName) },
+    // Again when the language has loaded (the first look was before), a server came or went, or it reported.
+    {
+      delay: 600,
+      needsRefresh: (update) =>
+        update.startState.facet(languageName) !== update.state.facet(languageName) ||
+        update.startState.facet(serverProblems) !== update.state.facet(serverProblems) ||
+        update.transactions.some((tr) => tr.effects.some((e) => e.is(problemsChanged))),
+    },
   );
 
 // ---- Indentation guides, bracket colors, the enclosing lines on top ----
@@ -704,7 +721,7 @@ function fileRefAt(state, pos) {
  * `openSide(key, el, …)` shows a second tab next to it (the split view); a tab's
  * state, with its undo history, moves between the panes.
  */
-export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpenLink, onOpenRef, onSuggest, onImage, onProblems, onProblemAction, linkTargets, settings }) {
+export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpenLink, onOpenRef, onSuggest, onImage, onProblems, onProblemAction, onDrop, linkTargets, settings }) {
   const states = new Map(); // key → EditorState
   const scroll = new Map(); // key → scroll position
   const pending = new Map(); // key → timer for onChange
@@ -718,6 +735,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
   const checks = new Compartment(); // problems as you type
   const aids = new Compartment(); // indentation guides, bracket colors, sticky scroll
   const gitBar = new Compartment(); // lines changed since the last commit (files in a Git repository)
+  const server = new Compartment(); // a language server's completion, hover, problems (lsp.js)
   const indents = new Map(); // key → { tabs, size, source: 'detected' | 'editorconfig' | 'chosen' }
   let options = settings;
   let active = null;
@@ -889,6 +907,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       checks.of(config.checks),
       aids.of(config.aids),
       gitBar.of([]),
+      server.of([]),
       EditorView.updateListener.of((update) => {
         if (update.docChanged && !update.transactions.some((tr) => tr.annotation(remote))) {
           clearTimeout(pending.get(key));
@@ -1313,6 +1332,42 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       if (key === side?.key) this.closeSide();
       states.delete(key);
       scroll.delete(key);
+      onDrop?.(key);
+    },
+
+    // ---- Language servers (lsp.js) ----
+    /** Puts a language server's extensions in a tab (shown or not); [] takes them out. */
+    setLanguageServer(key, extensions) {
+      const effects = server.reconfigure(extensions);
+      if (viewOf(key)) viewOf(key).dispatch({ effects });
+      else if (states.has(key)) states.set(key, states.get(key).update({ effects }).state);
+    },
+    /** A tab's editor state (shown or not), or null. */
+    stateOf: (key) => viewOf(key)?.state ?? states.get(key) ?? null,
+    /** The view showing a tab, if one does. */
+    viewFor: (key) => viewOf(key),
+    /** Problems again now (a server reported); a tab not shown gets them when shown. */
+    refreshProblems(key) {
+      const v = viewOf(key);
+      if (!v) return;
+      v.dispatch({ effects: problemsChanged.of(null) });
+      forceLinting(v);
+    },
+    /** Applies changes ({ changes, userEvent… }, as for dispatch) to a tab shown or not, as an edit Ctrl+Z takes back. */
+    applyChanges(key, spec) {
+      const v = viewOf(key);
+      if (v) {
+        v.dispatch(spec);
+        return true;
+      }
+      if (!states.has(key)) return false;
+      const tr = states.get(key).update(spec);
+      states.set(key, tr.state);
+      if (tr.docChanged) {
+        pending.set(key, null);
+        flush(key, true);
+      }
+      return true;
     },
 
     /** Marks the passage being read aloud in a tab ({ from, to }, or null to clear) and scrolls to it. */

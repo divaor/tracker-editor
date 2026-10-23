@@ -543,6 +543,38 @@ ipcMain.handle('term:keys', guard((event, own) => {
   return true;
 }));
 
+// ---- Language servers (lsp.cjs) ------------------------------------------------
+// For files on this computer inside what the person opened: the page names the file, and
+// lsp.cjs picks the server from its catalog (found on PATH or in the project). A page
+// reloaded or closed stops its servers.
+const lsp = require('./lsp.cjs');
+const lspHost = lsp.createLspHost({
+  send: (sender, channel, payload) => {
+    if (!sender.isDestroyed()) sender.send(channel, payload);
+  },
+});
+const lspPages = new WeakSet();
+ipcMain.handle('lsp:start', guard(async (event, file) => {
+  if (typeof file !== 'string' || isRemote(file)) return { none: true };
+  checkFile(file);
+  const sender = event.sender;
+  if (!lspPages.has(sender)) {
+    lspPages.add(sender);
+    sender.on('did-navigate', () => lspHost.stopAll(sender));
+    sender.once('destroyed', () => lspHost.stopAll(sender));
+  }
+  // The project folder is looked for up to the folder the person picked, not above it.
+  const stop = allowedFolders.find((f) => folders.allowedBy([f], file)) ?? '';
+  return lspHost.start(sender, file, { stop });
+}));
+ipcMain.on('lsp:send', (event, id, message) => {
+  if (fromApp(event)) lspHost.write(id, message, event.sender);
+});
+ipcMain.handle('lsp:stop', guard((event, id) => lspHost.stop(id, '', event.sender)));
+ipcMain.handle('lsp:restart', guard((event, id) => lspHost.restart(id, event.sender)));
+ipcMain.handle('lsp:list', guard((event) => lspHost.list(event.sender)));
+app.on('before-quit', () => lspHost.stopAll());
+
 // A file on a server is checked now and then while the server is connected (never
 // connecting by itself), and 'disk:changed' says when it changed there.
 const remoteWatches = new Map(); // remote:// path → { timer, last, busy }

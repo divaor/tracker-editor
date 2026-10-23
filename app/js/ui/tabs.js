@@ -7,6 +7,7 @@ import { syncNow } from '../syncManager.js';
 import { projectKey } from '../tracker-model.js';
 import { ProjectChip } from './components.js';
 import { Icon } from './icons.js';
+import { serverLabel } from '../lspTools.js';
 import { dictationSupported } from './dictation.js';
 import { canDragOut, draggedTab, dropped, isOwnDrop, onDragOutEnd, startDragOut } from '../dragOut.js';
 import { Menu, MenuButton } from './menu.js';
@@ -584,7 +585,26 @@ function IndentButton({ indent, actions }) {
 // "5 lines changed" from the editor's Git changes.
 const changedLines = (changes) => (changes ?? []).reduce((n, c) => n + (c.kind === 'deleted' ? 1 : c.to - c.from + 1), 0);
 
-export function StatusBar({ recording, big, cursor, language, file, repo, disk, settings, actions, problems, problemsOpen, git }) {
+/**
+ * The open file's language server: its state (click: the Language servers panel), or Set up…
+ * when none is installed, or Start when it stopped.
+ */
+function ServerStatus({ lsp, open, actions }) {
+  if (lsp.pending) return html`<span class="status-item status-lsp muted" title="Looking for a language server">Language server…</span>`;
+  if (lsp.missing)
+    return html`<button type="button" class="status-item status-btn-text status-lsp state-missing" title=${`No ${lsp.missing.language} language server on this computer: what to install`} onClick=${() => actions.setUpLanguageServer(lsp.missing)}>
+      <${Icon} name="code" size=${13} /><span>Set up ${lsp.missing.language}…</span>
+    </button>`;
+  if (lsp.stopped)
+    return html`<button type="button" class="status-item status-btn-text status-lsp state-stopped" title=${`${lsp.stopped} Click to start it again.`} onClick=${() => actions.retryLanguageServer()}>
+      <${Icon} name="code" size=${13} /><span>${lsp.server ?? "Language server"} stopped · Start</span>
+    </button>`;
+  return html`<button type="button" class=${`status-item status-btn-text status-lsp state-${lsp.state}`} aria-pressed=${Boolean(open)} title=${`${lsp.server}: ${lsp.state === 'running' ? 'checks this file and answers F12, Shift+F12, F2, completion and hover' : lsp.message || lsp.state}. Click for the Language servers panel.`} onClick=${() => actions.showLanguageServers()}>
+    <span class="server-dot state-${lsp.state}" aria-hidden="true" /><span>${serverLabel(lsp)}</span>
+  </button>`;
+}
+
+export function StatusBar({ recording, big, cursor, language, file, repo, disk, settings, actions, problems, problemsOpen, git, lsp, lspOpen }) {
   const setLanguage = (value) => file && actions.patch(file.id, { language: value === 'auto' ? '' : value });
   let state = '';
   const kind = file ? 'synced' : repo ? 'doc' : disk ? (isRemotePath(disk.path) ? 'remote' : 'disk') : null;
@@ -609,6 +629,7 @@ export function StatusBar({ recording, big, cursor, language, file, repo, disk, 
       <${Icon} name="xCircle" size=${13} /><span>${problems.list.filter((p) => p.severity === 'error').length}</span>
       <${Icon} name="alert" size=${13} /><span>${problems.list.filter((p) => p.severity !== 'error').length}</span>
     </button>`}
+    ${lsp && html`<${ServerStatus} lsp=${lsp} open=${lspOpen} actions=${actions} />`}
     ${git &&
     html`<button type="button" class="status-item status-btn-text status-git hide-narrow" disabled=${!git.tracked}
       title=${git.tracked ? `Git: branch ${git.branch}${git.changes ? ` · ${changedLines(git.changes) ? `${changedLines(git.changes)} line${changedLines(git.changes) === 1 ? '' : 's'} changed` : 'no changes'} since the last commit` : ''}. Click to compare.` : `Git: branch ${git.branch} · a new file, not committed yet`}

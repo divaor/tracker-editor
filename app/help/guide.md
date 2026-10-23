@@ -102,6 +102,23 @@ Not a full IDE, but enough to find your way in a code file (**Edit → Code** on
 - **Problems as you type**: mistakes are underlined, with a mark next to the line; hover one to read it. In JSON (comments are fine in `tsconfig.json`, `.jsonc` and other files that allow them), YAML (also a key written twice in the same place, tabs in the indentation, a quote left open), XML, HTML, CSS, and code: JavaScript, TypeScript, Python, Go, Java, PHP, C, C++, Rust. The status bar counts errors and warnings; click it (or `Ctrl+Shift+M`) for the **Problems** list, click one to go there. `F8` goes to the next one, `Shift+F8` to the one before. With a model connected, it can explain them or fix them for you: see [Help with errors](#help-with-errors).
 - **Easier to read**: thin **guides** at each indentation level, **brackets colored** by how deep they are (strings and comments aside), and **sticky scroll**: when you scroll inside a long function, the lines that start it (and its class) stay at the top; click one to go there. Each can be turned off in **Settings → Editor** (or the **View** menu).
 
+### Language servers (desktop): code that knows its types
+
+For **TypeScript, JavaScript and Python** files opened from **Folders** on this computer, the editor uses a **language server**, the same kind of program VS Code uses, when one is installed. The status bar names it (**TypeScript 7.0.2 · ready**, **Pyright · Indexing 40%**). Then:
+
+- **Type errors** are underlined as you type, with the compiler's own message, and the **Problems** list says where each one comes from (`ts`, `Pyright`).
+- **Completion** lists members, with their types and docs (`Math.` shows `abs`, `floor`…).
+- **Hover** a name for its type and documentation.
+- **Typing `(`** shows the parameters, the current one in bold; `Ctrl+Shift+Space` shows them again, `Escape` hides them.
+- **`F12`** goes to the declaration in any file of the project, **`Shift+F12`** lists the uses across files (click one to go there), and **`F2`** renames the name everywhere it is used: a dialog asks for the new name. Open files change as an edit `Ctrl+Z` takes back; files that were not open open as tabs with the change, not saved yet, so you check and save them (`Ctrl+S`).
+- A file with no server, or a name the server does not know, works as before.
+
+**Setting one up.** When a file has none, the status bar says **Set up TypeScript…** (or Python): it shows the command to install one, `npm install -g typescript` (TypeScript 7 has its language server built in) or `npm install -g pyright` / `pip install pyright`, and **Type it in a terminal** opens a terminal with the command typed in, for you to press Enter. Nothing is downloaded or run behind your back. Then **It is installed: start it**. A project with its own TypeScript in `node_modules` uses that one.
+
+- Each server runs for one **project folder** (the nearest folder with a `package.json`, `tsconfig.json`, `pyproject.toml`…, never above the folder you opened in Folders); at most four run at once, and one stops 10 minutes after its last file is closed.
+- Click the server in the status bar for the **Language servers** panel: what runs for which folder, **Restart**, **Stop**, and **Show its messages** for when something goes wrong. A server that keeps crashing stops after three times; the status bar then offers **Start**.
+- Turn them off in **Settings → Editor → Language servers**.
+
 ---
 
 ## 3. Tabs, pinning, groups and the split view
@@ -473,7 +490,8 @@ Turn them on in **Settings → Desktop**.
 | `Ctrl+F` / `Ctrl+H` | Find / replace in this file (`Enter` next, `Shift+Enter` previous, `Alt+Enter` select all; in the replace field `Enter` replaces, `Ctrl+Enter` replaces all) |
 | `Ctrl+G` | Go to line |
 | `Ctrl+Shift+M` / `F8` / `Shift+F8` | Problems in this file / the next one / the one before |
-| `F12` / `Shift+F12` / `F2` | In code: go to the declaration / its usages / rename it in this file |
+| `F12` / `Shift+F12` / `F2` | In code: go to the declaration / its usages / rename it (with a language server: across the project) |
+| `Ctrl+Shift+Space` | With a language server: the parameters of the call at the cursor |
 | `Ctrl+P`, then `@` | Go to a function, class or section of this file |
 | `Ctrl+T` (or `Ctrl+P`, then `#`) | Go to a function, class or section in any file (desktop: also the folders open in Folders) |
 | `Alt+0` / `Alt+Shift+0` | Fold everything / unfold everything (`Alt+1`, `Alt+2`, `Alt+3`: fold one level) |
@@ -533,6 +551,8 @@ Turn them on in **Settings → Desktop**.
 - **`Ctrl+W` doesn't close the tab**: the terminal has the keys (it's the shell's "delete word"). Click into the editor first.
 - **F5 says "No run command for …"**: add one for that type in **Settings → Editor → Run commands** (`rs: cargo run`). "Run works on files in a folder": open the file from Folders (a synced file has no folder to run in).
 - **`python3` (or `node`…) is not found when running a file**: the terminal uses your usual shell and its PATH; install the program, or put its full path in **Run commands**.
+- **The status bar says "Set up TypeScript…" but it is installed**: the editor looks on the PATH of your login shell and in the project's `node_modules`. For TypeScript it needs version 7 or later (`tsc --version`), or `typescript-language-server` with an older one. Install it for everyone (`npm install -g typescript`), then **It is installed: start it**.
+- **A language server says nothing, or stopped**: click it in the status bar → **Show its messages**; **Restart** starts it again. For Python, open the project's folder (the one with `pyproject.toml`) so Pyright reads its settings there (`[tool.pyright]`, or a `pyrightconfig.json`, which also says which virtual environment to use).
 - **No grey suggestions**: turn on **Settings → Editor → Suggest the rest as you type**, connect a model in Settings → Model (a local one; a service that answers later can't), and type at the end of a line. Slow ones: pick a small code model as **Model for suggestions**.
 - **A mirror says the folder is empty or missing**: one side looks wiped out (a drive not plugged in, a server folder moved), so nothing was changed. Fix it, or remove the mirror and set it up again.
 - **A mirror waits with "deleted here: delete on the server too?"**: click **Review** and choose.

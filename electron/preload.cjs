@@ -216,6 +216,24 @@ contextBridge.exposeInMainWorld('desktop', {
       return () => ipcRenderer.removeListener('term:exit', listener);
     },
   },
+  // Language servers for files on this computer (lsp.cjs): the page names a file, never a program.
+  lsp: {
+    start: (path) => ipcRenderer.invoke('lsp:start', path),
+    send: (id, message) => ipcRenderer.send('lsp:send', id, message),
+    stop: (id) => ipcRenderer.invoke('lsp:stop', id),
+    restart: (id) => ipcRenderer.invoke('lsp:restart', id),
+    list: () => ipcRenderer.invoke('lsp:list'),
+    onMessage(callback) {
+      const listener = (_event, message) => callback(message);
+      ipcRenderer.on('lsp:message', listener);
+      return () => ipcRenderer.removeListener('lsp:message', listener);
+    },
+    onStatus(callback) {
+      const listener = (_event, status) => callback(status);
+      ipcRenderer.on('lsp:status', listener);
+      return () => ipcRenderer.removeListener('lsp:status', listener);
+    },
+  },
   // Dragging tabs or files out to other apps: { path } or { paths } on disk, or { name, text } for a copy.
   drag: {
     start: (item) => ipcRenderer.send('drag:start', item),

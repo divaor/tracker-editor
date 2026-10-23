@@ -250,15 +250,17 @@ export function closeTerminal(s) {
  * Types `line` and Enter into the terminal kept for running files on `connId` (one per
  * place), opened in `cwd` the first time. Resolves with the session.
  */
-export async function runInTerminal(connId, { cwd = '', line, label = 'Run' }) {
+export async function runInTerminal(connId, { cwd = '', line, label = 'Run', enter = true }) {
   let s = sessions.find((x) => x.runner && x.connId === connId && !x.exited && !x.closed);
   if (!s) {
     s = await openTerminal(connId, { cwd, label, runner: true });
     if (s.exited) return s; // it said why in its screen
   }
   setActiveTerminal(s);
-  if (s.id && !s.starting) bridge().input(s.id, `${line}\r`);
-  else s.typed += `${line}\r`;
+  // Without `enter`, the line is typed for the person to run (Set up… for a language server).
+  const typed = enter ? `${line}\r` : line;
+  if (s.id && !s.starting) bridge().input(s.id, typed);
+  else s.typed += typed;
   return s;
 }
 

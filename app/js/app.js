@@ -21,6 +21,9 @@ import { parseRunCommands, runCommandFor, runLine } from './runFile.js';
 import { findFileRefs, resolveRef } from './fileRefs.js';
 import { claudeAppPrompt, claudeAppUrl, codeAround, errorContextText, EXPLAIN_ERROR, explainProblemAction, fixForErrorAction, fixProblemsAction } from './errorHelp.js';
 import { TerminalPanel } from './ui/terminal.js';
+import { createLanguageServers } from './lsp.js';
+import { editsByFile, lineOf, textChanges, uriPath } from './lspTools.js';
+import { LanguageServersPanel, ReferencesPanel, RenameSymbolDialog, SetupServerDialog } from './ui/languageServers.js';
 import { FolderSearchPanel } from './ui/folderSearch.js';
 import { PropertiesDialog } from './ui/properties.js';
 import { lastSyncText, mirror as mirrorById, onMirrors, watchMirrors as watchMirrorStatus } from './mirrors.js';
@@ -1181,6 +1184,9 @@ export function App() {
   const [compare, setCompare] = useState(null);
   const hostRef = useRef(null);
   const editorEl = useRef(null);
+  const lspRef = useRef(null); // language servers (lsp.js), desktop
+  const [lspTick, setLspTick] = useState(0);
+  const [refs, setRefs] = useState(null); // { word, list, server }: the References panel
   const actions = useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setCompare, setUsagesOf, setSearchSeed });
   const editorOptions = (s) => ({ ...s, dark: resolvedTheme(s.theme) === 'dark', inlineSuggest: Boolean(s.inlineSuggest && s.llm.enabled && s.llm.provider !== 'async') });
 
@@ -1330,6 +1336,8 @@ export function App() {
       // An image pasted or dropped into the text: read its text.
       onImage: (file) => actions.readImages([{ blob: file, name: file.name || 'Pasted image' }]),
       linkTargets: () => store.live().map((f) => linkName(f.name)),
+      // A tab's editor state is gone (closed, or made again under a new path): its server forgets it.
+      onDrop: (key) => lspRef.current?.forget(key),
       onChange(key, text, { urgent } = {}) {
         const k = parseKey(key);
         if (k?.kind === 'repo') return store.setRepoText(k.path, text, { urgent });
@@ -1345,8 +1353,8 @@ export function App() {
         }
       },
       onCursor: setCursor,
-      onProblems(key, list, language) {
-        const checked = language === 'JSON' || SYNTAX_LANGUAGES.has(language);
+      onProblems(key, list, language, { server = false } = {}) {
+        const checked = server || language === 'JSON' || SYNTAX_LANGUAGES.has(language);
         setProblems((all) => {
           const was = all[key];
           if (!checked) return was ? (({ [key]: _gone, ...rest }) => rest)(all) : all;
@@ -1364,7 +1372,17 @@ export function App() {
         return true;
       },
     });
+    lspRef.current = createLanguageServers({
+      host: hostRef.current,
+      onChange: () => setLspTick((n) => n + 1),
+      onMessage: (text, kind) => toast(text, { kind, timeout: 8000 }),
+      openPath: (path) => actions.openDiskPath(path),
+    });
   }, []);
+  // Turned off in Settings: the tabs lose their servers (turned on again: when shown next).
+  useEffect(() => {
+    if (settings.languageServers === false) lspRef.current?.detachAll();
+  }, [settings.languageServers]);
   useEffect(
     () => hostRef.current?.applySettings(editorOptions(settings)),
     [settings.theme, settings.wordWrap, settings.showWhitespace, settings.tabSize, settings.lineNumbers, settings.problems, settings.indentGuides, settings.bracketColors, settings.stickyScroll, settings.detectIndent, settings.indentChosen, settings.emmet, settings.linkedTags, settings.inlineSuggest, settings.llm],
@@ -1409,8 +1427,179 @@ export function App() {
     // A followed file, or the tail of a huge one, is read-only.
     if (activeDisk) host.setReadOnly(activeKey, Boolean(activeDisk.follow || activeDisk.truncated));
     setBig(host.isBig(activeKey));
+    // Code on this computer gets its language server (started when needed).
+    if (activeDisk && !isRemotePath(activeDisk.path) && getSettings().languageServers !== false && !host.isBig(activeKey)) lspRef.current?.attach(activeKey, activeDisk.path);
     if (!isNarrow()) host.focus();
   }, [activeKey, view, Boolean(activeFile || activeRepo || activeDisk), activeSealed]);
+
+  // ---- Language servers (desktop): F12, Shift+F12 and F2 ask the file's server first ----
+  // The editor's own ways (codeNav.js: the declarations it recognizes) when there is none.
+  const ownWays = useRef(null);
+  ownWays.current ??= { goToDefinition: actions.goToDefinition, findUsages: actions.findUsages, renameSymbol: actions.renameSymbol };
+  const serverOf = (key) => (lspRef.current?.has(key) ? lspRef.current : null);
+  /** Places a server answered with ([{ uri, range }]) as { path, line, column, length, text } (the line, when it can be read). */
+  actions.serverPlaces = async (locs) => {
+    const texts = new Map();
+    const textOf = async (path) => {
+      if (!texts.has(path)) {
+        let text = hostRef.current?.stateOf(diskKey(path))?.doc.toString() ?? store.diskTab(path)?.text ?? null;
+        // Files not open are read (only those inside the folders you opened; 40 at most).
+        if (text == null && texts.size < 40) text = await window.desktop.disk.read(path).then((r) => r.text, () => null);
+        texts.set(path, text);
+      }
+      return texts.get(path);
+    };
+    const out = [];
+    for (const l of locs.slice(0, 500)) {
+      const path = uriPath(l.uri);
+      if (!path) continue;
+      const text = await textOf(path);
+      const { start, end } = l.range;
+      out.push({ path, line: start.line + 1, column: start.character + 1, length: end.line === start.line ? end.character - start.character : 0, text: text == null ? null : lineOf(text, start.line) });
+    }
+    return out;
+  };
+  actions.openPlace = (p) => actions.openDiskPath(p.path, { line: p.line, column: p.column, length: p.length });
+  actions.goToDefinition = async () => {
+    const w = actions.codeWord();
+    if (!w) return;
+    const lsp = serverOf(w.ctx.key);
+    if (lsp) {
+      try {
+        const places = await actions.serverPlaces(lsp.locations(await lsp.request(w.ctx.key, 'textDocument/definition', w.from, {}, 'definitionProvider')));
+        if (places.length === 1) return actions.openPlace(places[0]);
+        if (places.length > 1) return setDialog({ type: 'declarations', word: w.word, places: places.map((p) => ({ ...p, text: p.text?.trim() ?? '' })) });
+      } catch {
+        // the server could not say: the editor's own way
+      }
+    }
+    return ownWays.current.goToDefinition();
+  };
+  actions.findUsages = async () => {
+    const w = actions.codeWord();
+    if (!w) return;
+    const lsp = serverOf(w.ctx.key);
+    if (lsp) {
+      try {
+        const result = await lsp.request(w.ctx.key, 'textDocument/references', w.from, { context: { includeDeclaration: true } }, 'referencesProvider');
+        const here = parseKey(w.ctx.key)?.path;
+        // This file first, then the others by name; each by line.
+        const list = (await actions.serverPlaces(lsp.locations(result))).sort((a, b) => (b.path === here) - (a.path === here) || a.path.localeCompare(b.path) || a.line - b.line || a.column - b.column);
+        if (list.length) {
+          setRefs({ word: w.word, list, server: lsp.statusOf(w.ctx.key)?.server ?? 'the language server' });
+          return setPanel('references');
+        }
+      } catch {
+        // the editor's own way
+      }
+    }
+    return ownWays.current.findUsages();
+  };
+  actions.renameSymbol = () => {
+    const w = actions.codeWord();
+    if (!w) return;
+    if (serverOf(w.ctx.key)?.statusOf(w.ctx.key)) return setDialog({ type: 'renameSymbol', word: w.word, key: w.ctx.key, pos: w.from });
+    return ownWays.current.renameSymbol();
+  };
+  /**
+   * F2 with a server: its rename, in every file it names. Open tabs change as an edit Ctrl+Z takes
+   * back; files not open (inside the folders you opened, 30 at most) open as tabs with the change,
+   * not saved yet.
+   */
+  actions.renameWithServer = async ({ key, pos, word }, newName) => {
+    const lsp = lspRef.current;
+    const host = hostRef.current;
+    let edit;
+    try {
+      edit = await lsp?.request(key, 'textDocument/rename', pos, { newName }, 'renameProvider');
+    } catch (err) {
+      return toast(`Could not rename “${word}”: ${err?.message ?? err}`, { kind: 'error', timeout: 8000 });
+    }
+    const files = editsByFile(edit).filter((f) => f.edits.length);
+    if (!files.length) return toast(`The language server has nothing to rename for “${word}”.`);
+    host.flushAll();
+    const back = store.session.active;
+    const skipped = [];
+    let places = 0;
+    let opened = 0;
+    const closed = files.filter((f) => !store.diskTab(uriPath(f.uri) ?? ''));
+    if (closed.length > 30) return toast(`“${word}” is used in ${closed.length} files that are not open: too many to open as tabs (30 at most). Nothing was changed.`, { kind: 'error', timeout: 10000 });
+    for (const f of files) {
+      const path = uriPath(f.uri);
+      if (!path) continue;
+      const k = diskKey(path);
+      const state = host.stateOf(k);
+      if (state) {
+        // An open tab: the edits are for the text the server had, which is the text now (just sent).
+        const synced = lsp.syncedText(k);
+        const changes = synced === null || synced === state.doc.toString() ? textChanges(state.doc.toString(), f.edits) : null;
+        if (!changes) {
+          skipped.push(path);
+          continue;
+        }
+        host.applyChanges(k, { changes, userEvent: 'input.rename' });
+        places += changes.length;
+        continue;
+      }
+      // A file not open, or a tab not shown since the app started (its text is read again): the
+      // change goes into its text before the tab is ever shown, so it opens with it, unsaved.
+      const tab = store.diskTab(path);
+      let info = null;
+      if (!tab || tab.stale) {
+        try {
+          info = await window.desktop.disk.read(path);
+        } catch {
+          skipped.push(path);
+          continue;
+        }
+      }
+      const base = info ? info.text : tab.text;
+      const changes = textChanges(base, f.edits);
+      if (!changes) {
+        skipped.push(path);
+        continue;
+      }
+      let text = base;
+      for (const c of [...changes].reverse()) text = text.slice(0, c.from) + c.insert + text.slice(c.to);
+      if (!tab) {
+        store.openDiskFile(info);
+        window.desktop.disk.watch(path).catch(() => {});
+        opened++;
+      } else if (info) store.diskReloaded(path, info);
+      store.setDiskText(path, text, { urgent: true });
+      places += changes.length;
+    }
+    if (back && store.session.active !== back) store.open(back);
+    const fileCount = files.length - skipped.length;
+    toast(
+      `Renamed “${word}” to “${newName}”: ${places} place${places === 1 ? '' : 's'} in ${fileCount} file${fileCount === 1 ? '' : 's'}${opened ? ` (${opened} opened as tabs, not saved yet)` : ''}.${skipped.length ? ` Not changed: ${skipped.map((p) => p.split(/[\\/]/).pop()).join(', ')}.` : ''}`,
+      { kind: skipped.length ? 'error' : 'info', timeout: 10000 },
+    );
+  };
+  actions.setUpLanguageServer = (missing) => setDialog({ type: 'lspSetup', missing });
+  actions.retryLanguageServer = () => lspRef.current?.retry(store.session.active);
+  actions.showLanguageServers = () => setPanel((p) => (p === 'servers' ? null : 'servers'));
+  actions.restartLanguageServer = async (id) => {
+    await lspRef.current?.restart(id).catch((err) => toast(ipcMessage(err), { kind: 'error' }));
+    setLspTick((n) => n + 1);
+  };
+  actions.stopLanguageServer = async (id) => {
+    await lspRef.current?.stop(id).catch(() => {});
+    setLspTick((n) => n + 1);
+  };
+  /** Opens a terminal on this computer with `command` typed in, for the person to run. */
+  actions.typeInTerminal = async (command, cwd = '') => {
+    if (!terminalsAvailable()) return toast('Terminals work in the desktop app.', { kind: 'error' });
+    setTerminalShown(true);
+    try {
+      await runInTerminal('local', { cwd, line: command, label: 'Set up', enter: false });
+      setTimeout(() => focusTerminal(), 100);
+      toast('The command is typed in the terminal: press Enter to run it. Then start the server from the status bar.', { timeout: 10000 });
+    } catch (err) {
+      toast(ipcMessage(err), { kind: 'error' });
+    }
+  };
+  actions.copyText = (text) => navigator.clipboard.writeText(text).then(() => toast('Copied.'), () => toast('Could not copy.', { kind: 'error' }));
 
   actions.toggleWrap = () => saveSettings({ wordWrap: !getSettings().wordWrap });
   actions.toggleProblems = () => setPanel((p) => (p === 'problems' ? null : 'problems'));
@@ -2093,6 +2282,7 @@ export function App() {
       'goto-definition': () => actions.goToDefinition(),
       'find-usages': () => actions.findUsages(),
       'rename-symbol': () => actions.renameSymbol(),
+      'language-servers': () => actions.showLanguageServers(),
       'goto-symbol': () => actions.gotoSymbol(),
       'goto-symbol-all': () => actions.gotoSymbolAll(),
       'command-palette': () => actions.commandPalette(),
@@ -2259,11 +2449,14 @@ export function App() {
         <${ReadAloudBar} />
         <${StatusBar} recording=${recording} big=${big && Boolean(activeKey)} cursor=${activeKey ? cursor : null} language=${languageName} file=${activeFile} repo=${activeRepo} disk=${activeDisk} settings=${settings} sync=${sync} actions=${actions}
           problems=${settings.problems !== false && activeKey ? problems[activeKey] : null} problemsOpen=${panel === 'problems'}
+          lsp=${activeKey && settings.languageServers !== false ? lspRef.current?.statusOf(activeKey) : null} lspOpen=${panel === 'servers'}
           git=${activeKey && gitHeads[activeKey] ? { ...gitHeads[activeKey], changes: hostRef.current?.gitChanges(activeKey)?.changes ?? null } : null} />
       </div>
     </main>
 
     ${panel === 'folderSearch' && folderSearchDir && window.desktop?.folders && html`<${FolderSearchPanel} key=${folderSearchDir} dir=${folderSearchDir} actions=${actions} onClose=${() => setPanel(null)} />`}
+    ${panel === 'servers' && lspRef.current && html`<${LanguageServersPanel} lsp=${lspRef.current} tick=${lspTick} actions=${actions} onClose=${() => setPanel(null)} />`}
+    ${panel === 'references' && refs && html`<${ReferencesPanel} refs=${refs} actions=${actions} onClose=${() => setPanel(null)} />`}
     ${panel === 'usages' && usagesOf && activeKey && !activeSealed && html`<${UsagesPanel} word=${usagesOf.word} name=${activeName} fileKey=${activeKey} text=${activeText()} actions=${actions} onClose=${() => setPanel(null)} />`}
     ${panel === 'problems' && activeKey && !activeSealed && html`<${ProblemsPanel} name=${activeName} fileKey=${activeKey} problems=${settings.problems !== false ? problems[activeKey] : null} actions=${actions} onClose=${() => setPanel(null)} />`}
     ${panel === 'search' && html`<${SearchPanel} key=${searchSeed?.at ?? 0} seed=${searchSeed} files=${scoped} docs=${scopedDocs} allFiles=${store.live()} allDocs=${docs} openKeys=${store.session.open} settings=${settings} actions=${actions} onClose=${() => setPanel(null)} />`}
@@ -2283,6 +2476,8 @@ export function App() {
           roots=${folderRoots(settings)} hidden=${Boolean(settings.showHidden)} onSymbol=${(entry) => actions.revealSymbol(entry)} onClose=${() => setDialog(null)} />`)}
     ${dialog?.type === 'palette' && html`<${CommandPalette} initial=${dialog.query ?? ''} onRun=${(c) => setTimeout(() => actions.command(c.id), 0)} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'symbols' && html`<${SymbolSearch} files=${store.live()} roots=${folderRoots(settings)} initial=${dialog.query ?? ''} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'lspSetup' && html`<${SetupServerDialog} missing=${dialog.missing} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'renameSymbol' && html`<${RenameSymbolDialog} word=${dialog.word} onClose=${() => (setDialog(null), hostRef.current?.focus())} onRename=${(name) => (setDialog(null), actions.renameWithServer(dialog, name), hostRef.current?.focus())} />`}
     ${dialog?.type === 'declarations' && html`<${DeclarationPicker} word=${dialog.word} places=${dialog.places} roots=${folderRoots(settings)} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'ocr' && html`<${OcrDialog} images=${dialog.images} saveTo=${dialog.saveTo} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'server' && html`<${ServerDialog} conn=${dialog.conn} actions=${actions} onClose=${() => setDialog(null)} />`}

@@ -31,6 +31,7 @@ export function ProblemsPanel({ name, fileKey, problems, actions, onClose }) {
             <button type="button" class="outline-row problem-row ${p.severity}" onClick=${() => actions.revealRange(p.from, p.to, fileKey)} title=${`Line ${p.line}, column ${p.column}`}>
               <${Icon} name=${p.severity === 'error' ? 'xCircle' : 'alert'} size=${14} class="problem-icon" />
               <span class="problem-message">${p.message}</span>
+              ${p.source && html`<span class="problem-source">${p.source}</span>`}
               <span class="problem-where">Ln ${p.line}, Col ${p.column}</span>
             </button>
             <button type="button" class="icon-btn xs problem-explain" aria-label=${`Explain: ${p.message}`} title="Explain it (the model)" onClick=${() => actions.explainProblem(p, fileKey)}><${Icon} name="sparkle" size=${13} /></button>

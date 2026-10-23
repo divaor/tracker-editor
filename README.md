@@ -58,6 +58,7 @@ It is the companion of [Tracker](https://github.com/divaor/tracking_app) and sha
 - **Find and replace** (`Ctrl+F`, `Ctrl+H`): match case, whole word and regular expressions as toggles in the field, how many matches and which one you are on, previous / next / select all, and Replace or Replace all on a second line.
 - **Format document** (`Shift+Alt+F`): one-line JSON becomes readable (numbers and text kept exactly), and XML, SQL, JavaScript, TypeScript, CSS, HTML, Markdown, YAML and GraphQL are tidied too; the whole file or just the selection.
 - **Help** (`F1`): every command and its shortcut in a searchable cheat sheet you can run commands from (or print), and the full guide. `Ctrl+Shift+P` (or `Ctrl+P` then `>`) runs a command by name, as in VS Code.
+- **Language servers** (desktop): for TypeScript, JavaScript and Python files opened from Folders, the language server installed on the computer (TypeScript 7's own, or Pyright) gives type errors as you type, completion with types, hover, the parameters of a call, and `F12` / `Shift+F12` / `F2` across the project (renaming in files not open opens them as tabs, unsaved). **Set up…** in the status bar shows what to install and types the command into a terminal for you to run.
 - **Run this file** (desktop, `F5`): saved, then run in a terminal in its folder (Python, Node, shell, PowerShell, Go, Ruby, PHP, TypeScript with tsx…; your own commands in Settings), on this computer or on its server over SSH. `file:line` in the output (and Ctrl+clicked in the text, like a pasted stack trace) opens the file at that line.
 - **Suggestions as you type** (optional, with a model that answers at once): grey text after the cursor, `Tab` takes it, `Ctrl+→` one word. Best with a small code model that fills in the middle (`qwen2.5-coder:1.5b` in Ollama); others are asked like a chat. Never for encrypted files.
 - **HTML, XML and JSX**: Emmet abbreviations on `Tab` (`ul>li*3`, `div.card#main`, `a[href=#]{Home}`, `!` for a page), tags closed as you type, and renaming a tag renames its other end.
@@ -412,7 +413,7 @@ npm start         # run the desktop app
 npm run vendor    # re-bundle CodeMirror and xterm.js, copy Preact/htm, marked, DOMPurify and tesseract.js into app/vendor/
 ```
 
-The web app is plain ES modules with no build step. CodeMirror 6 and its languages are bundled once by `npm run vendor` (esbuild, one chunk per language) into `app/vendor/cm/`; the [Anthropic SDK](https://github.com/anthropics/anthropic-sdk-typescript) into `app/vendor/anthropic.js` (loaded when Claude is first asked); [xterm.js](https://xtermjs.org/) with its fit add-on into `app/vendor/xterm/` (the terminal, loaded when one opens); text recognition (tesseract.js, its WebAssembly core and the English and Spanish models) is copied into `app/vendor/ocr/`.
+The web app is plain ES modules with no build step. CodeMirror 6 and its languages are bundled once by `npm run vendor` (esbuild, one chunk per language) into `app/vendor/cm/`; CodeMirror's [language server client](https://github.com/codemirror/lsp-client) into `app/vendor/cm/lsp.js` (sharing the bundle's chunks; loaded when a language server starts); the [Anthropic SDK](https://github.com/anthropics/anthropic-sdk-typescript) into `app/vendor/anthropic.js` (loaded when Claude is first asked); [xterm.js](https://xtermjs.org/) with its fit add-on into `app/vendor/xterm/` (the terminal, loaded when one opens); text recognition (tesseract.js, its WebAssembly core and the English and Spanish models) is copied into `app/vendor/ocr/`.
 
 The desktop app's runtime dependencies are [ssh2](https://github.com/mscdex/ssh2) (SFTP) and [basic-ftp](https://github.com/patrickjuchli/basic-ftp) (FTP, FTPS), both plain JavaScript, [fflate](https://github.com/101arrowz/fflate) (zip) and [@lydell/node-pty](https://github.com/lydell/node-pty) (the terminal on this computer: node-pty with prebuilt binaries for Windows, macOS and Linux on x64 and arm64, unpacked from the asar by `build.asarUnpack`). ssh2's optional native speed-ups are left out of the installers (`build.files` in package.json), so builds need no compiler; it uses its JavaScript and WebAssembly code instead.
 
@@ -440,6 +441,7 @@ app/                  the web app (also loaded by Electron)
   js/where.js, servers.js         where a file lives (kinds, colors, states), the servers and their connections
   js/terminals.js, mirrors.js     terminals (xterm.js sessions, here and on servers), mirrors and their status
   js/runFile.js, fileRefs.js      run this file (commands by type, quoting), file:line in output and logs
+  js/lsp.js, lspTools.js          language servers: the client per server, file URIs, problems, places, rename edits
   js/completion.js, inlineSuggest.js  suggestions as you type (what to ask the model, the grey text)
   js/capture.js, ocr.js, ocrEngine.js, dictation.js       quick capture, text from images, voice notes
   js/ui/              tabs, sidebar, panels, dialogs, model panel, settings, compare, history, trash
@@ -452,6 +454,7 @@ electron/             main process + preload (app:// protocol, keychain, model p
   folders.cjs         which paths the page may reach in picked folders, listings, rename/move/copy, what may open outside
   remote.cjs          servers: SFTP (ssh2) and FTP/FTPS (basic-ftp), signing in, jump hosts, host keys, files, folders, shells
   localShell.cjs      the terminal on this computer (node-pty, prebuilt for Windows, macOS and Linux)
+  lsp.cjs             language servers: which one (on PATH or in the project), the project folder, running them
   sshConfig.cjs       the hosts of ~/.ssh/config
   findInFolder.cjs    find in a folder, here or on a server
   mirror.cjs          mirrors: what a sync does (pure) and doing it
@@ -472,6 +475,7 @@ test/                 unit tests
 - **Other programs**: files open with their default program only when they are not programs, scripts or shortcuts, so a page can never start one.
 - **Servers**: passwords and key passphrases are kept by the main process in the keychain store and never sent to the page; key files can only be ones picked in the file dialog, or named by `IdentityFile` in your SSH config (read by the main process; the page only picks hosts by name). Answers to the server's questions go to the server only: one-time codes are never kept, passwords only when you tick **Remember**. SSH host keys are checked against the fingerprint you trusted (for each server, also those reached through a jump host), and a changed key stops the connection unless you accept it. FTPS checks the server's certificate unless you allow a self-signed one; FTP is marked as unencrypted.
 - **Terminal**: keys typed in it go only to the shell; the editor's own shortcuts do not see them while it has the focus. A terminal on this computer starts only when you open one (or press `F5`), and always your default shell: the page cannot choose the program or its arguments. Links in it open files only inside folders you picked.
+- **Language servers** are programs already installed on the computer (found on PATH or in the project's `node_modules`); the page names a file, never a program, and the main process picks the server from a fixed list. Nothing is installed for you: **Set up…** types the install command into a terminal and you press Enter. They start only for files inside folders you opened, at most four at once. Their Markdown (hover, docs) is sanitized with DOMPurify. Renames change files only as unsaved tabs.
 - **Suggestions as you type** are off until you turn them on; they send the text around the cursor to the model you set up, never for encrypted files.
 - **Mirrors**: deleting on a server waits for your yes; deleting here goes to the Recycle Bin; a side that suddenly looks empty stops the sync without changing anything. Local mirror folders are picked in the dialog like other folders.
 - **Dragged tabs**: synced files dragged out are written as plain copies to a temporary folder, deleted after a week; encrypted files are never written out.

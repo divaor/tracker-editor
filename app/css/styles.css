@@ -7117,3 +7117,152 @@ button.help-command:focus-visible {
   flex: none;
   color: var(--kc, currentColor);
 }
+
+/* ---- Language servers (lsp.js, ui/languageServers.js) ---- */
+.status-lsp {
+  gap: 6px;
+  max-width: 30ch;
+}
+
+.status-lsp span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-lsp.state-missing,
+.status-lsp.state-stopped {
+  color: var(--warn);
+}
+
+.server-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.server-dot.state-running {
+  background: var(--done);
+}
+
+.server-dot.state-starting,
+.server-dot.state-restarting {
+  background: var(--warn);
+}
+
+.server-dot.state-stopped {
+  background: var(--danger);
+}
+
+.server-row {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.server-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.server-root {
+  margin: 4px 0 0 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.server-message {
+  margin: 6px 0 0 16px;
+  color: var(--warn);
+}
+
+.server-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 0 16px;
+}
+
+.server-log {
+  max-height: 240px;
+  margin: 8px 0 0;
+  padding: 8px;
+  overflow: auto;
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.setup-command {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.setup-command code {
+  font-family: var(--mono);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.references-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 2px;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.problem-source {
+  flex: none;
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+/* The language server's hover, signature help and completion docs. */
+.cm-editor .cm-lsp-hover-tooltip,
+.cm-editor .cm-lsp-signature-tooltip {
+  max-width: min(36em, 80vw);
+  font-family: var(--font);
+  font-size: 13px;
+}
+
+.cm-editor .cm-lsp-hover-tooltip {
+  max-height: 18em;
+  overflow: auto;
+  padding: 4px 10px;
+}
+
+.cm-editor .cm-lsp-documentation pre,
+.cm-editor .cm-lsp-documentation code {
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.cm-editor .cm-lsp-signature-tooltip .cm-lsp-signature {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.cm-editor .cm-lsp-active-parameter {
+  color: var(--accent);
+}
+
+.cm-editor.cm-signature-hidden .cm-lsp-signature-tooltip {
+  display: none;
+}

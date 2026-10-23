@@ -50,6 +50,8 @@ export const DEFAULT_SETTINGS = {
   linkedTags: true,
   // Suggestions as you type from the model (grey text, Tab takes it); off until turned on.
   inlineSuggest: false,
+  // Language servers for code files on this computer (desktop): types, completion, F12 across files.
+  languageServers: true,
   // Run this file (F5): "extension: command" lines that replace or add to runFile.js's.
   runCommands: '',
   indentGuides: true,

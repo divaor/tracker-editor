@@ -61,8 +61,10 @@ export const COMMAND_LIST = [
   { id: 'indent-detect', group: 'Edit and text', label: 'Indentation from the text again (detect it)', hint: 'Or from the .editorconfig of a file on disk' },
 
   { id: 'goto-definition', group: 'Code', label: 'Go to where the name at the cursor is declared', keys: 'F12', hint: 'In this file, else your other files and the folders open in Folders. On the declaration itself: its usages' },
-  { id: 'find-usages', group: 'Code', label: 'Find usages of the name at the cursor', keys: 'Shift+F12', hint: 'In this file; the panel can look in all files' },
-  { id: 'rename-symbol', group: 'Code', label: 'Rename in this file (edit every use at once)', keys: 'F2' },
+  { id: 'find-usages', group: 'Code', label: 'Find usages of the name at the cursor', keys: 'Shift+F12', hint: 'In this file (the panel can look in all files); across the project with a language server' },
+  { id: 'rename-symbol', group: 'Code', label: 'Rename the name at the cursor (every use)', keys: 'F2', hint: 'In this file; with a language server, everywhere in the project' },
+  { id: 'signature-help', group: 'Code', label: 'Show the parameters of the call here', keys: 'Mod+Shift+Space', run: false, hint: 'With a language server; they also show as you type "("' },
+  { id: 'language-servers', group: 'Code', label: 'Language servers (TypeScript, Python): their state and messages', only: 'desktop', hint: 'Restart or stop one; or click the server in the status bar' },
   { id: 'goto-symbol', group: 'Code', label: 'Go to a function, class or section', keys: 'Mod+P, then @' },
   { id: 'goto-symbol-all', group: 'Code', label: 'Go to a function, class or section in any file', desktop: 'Mod+T', keys: 'Mod+P, then #', hint: 'Your files and the folders open in Folders' },
   { id: 'matchingBracket', group: 'Code', label: 'Go to the matching bracket', keys: 'Mod+Shift+\\' },

@@ -3,8 +3,9 @@
 // upgrading any of them.
 // - Preact/htm, marked and DOMPurify ship browser builds that are copied as is.
 // - CodeMirror is bundled with esbuild into app/vendor/cm/: codemirror.js plus
-//   one chunk per language, loaded the first time a file needs it. files.json
-//   lists them so the service worker can cache all of them for offline use.
+//   one chunk per language, loaded the first time a file needs it, and lsp.js (the
+//   language server client, desktop). files.json lists them so the service worker can
+//   cache all of them for offline use.
 // - xterm.js (with its fit add-on) is bundled into app/vendor/xterm/xterm.js, next
 //   to its stylesheet: the terminal on servers in the desktop app.
 // - Anthropic's SDK for the Claude API is bundled into app/vendor/anthropic.js (claude.js
@@ -40,8 +41,17 @@ for (const file of files) {
 
 await rm(cmDir, { recursive: true, force: true });
 const { version: cmVersion } = await pkgInfo('@codemirror/view');
+// The language server client is a second entry (cm/lsp.js), so it shares CodeMirror's chunks;
+// its Markdown renderer uses the marked copied above (../marked.js), not a second copy.
+const markedFromVendor = {
+  name: 'marked-from-vendor',
+  setup(b) {
+    b.onResolve({ filter: /^marked$/ }, () => ({ path: '../marked.js', external: true }));
+  },
+};
 await build({
-  entryPoints: { codemirror: path.join(root, 'vendor-src', 'codemirror.js') },
+  entryPoints: { codemirror: path.join(root, 'vendor-src', 'codemirror.js'), lsp: path.join(root, 'vendor-src', 'lsp.js') },
+  plugins: [markedFromVendor],
   bundle: true,
   splitting: true,
   format: 'esm',
@@ -54,7 +64,11 @@ await build({
   logLevel: 'warning',
 });
 const chunks = (await readdir(path.join(cmDir, 'chunks'))).sort().map((name) => `chunks/${name}`);
-await writeFile(path.join(cmDir, 'files.json'), `${JSON.stringify(['codemirror.js', ...chunks], null, 2)}\n`);
+// '../marked.js' only resolves from cm/ itself: a chunk importing it would break.
+for (const chunk of chunks) {
+  if ((await readFile(path.join(cmDir, chunk), 'utf8')).includes('../marked.js')) throw new Error(`${chunk} imports ../marked.js; only cm/lsp.js may`);
+}
+await writeFile(path.join(cmDir, 'files.json'), `${JSON.stringify(['codemirror.js', 'lsp.js', ...chunks], null, 2)}\n`);
 console.log(`app/vendor/cm/codemirror.js + ${chunks.length} chunks <- CodeMirror ${cmVersion}`);
 
 const xtermDir = path.join(outDir, 'xterm');
