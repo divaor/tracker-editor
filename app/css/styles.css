@@ -6901,3 +6901,173 @@ button.help-command:focus-visible {
   text-overflow: ellipsis;
   tab-size: 4;
 }
+
+/* ---- Git (gitGutter.js, the folders view, the status bar) ---- */
+:root {
+  --git-added: #2e9e5b;
+  --git-modified: #2f6fd6;
+  --git-deleted: #d14343;
+  --git-conflict: #c23b3b;
+  --git-untracked: #2e9e5b;
+}
+
+.cm-git-gutter {
+  width: 4px;
+}
+
+.cm-git-gutter .cm-gutterElement {
+  padding: 0;
+}
+
+.cm-git-mark {
+  width: 3px;
+  height: 100%;
+  margin-left: 1px;
+}
+
+.cm-git-mark.added {
+  background: var(--git-added);
+}
+
+.cm-git-mark.modified {
+  background: var(--git-modified);
+}
+
+.cm-git-mark.deleted,
+.cm-git-mark.deleted-top {
+  width: 0;
+  height: 0;
+  margin-top: -4px;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid var(--git-deleted);
+}
+
+.cm-git-mark.deleted {
+  position: relative;
+  top: 100%;
+}
+
+.git-badge {
+  flex: none;
+  min-width: 1.2em;
+  margin-left: 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.git-badge.git-M,
+.git-badge.git-R {
+  color: var(--warn);
+}
+
+.git-badge.git-A,
+.git-badge.git-U {
+  color: var(--git-added);
+}
+
+.git-badge.git-C {
+  color: var(--git-conflict);
+}
+
+.git-badge.git-dot {
+  min-width: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warn);
+}
+
+.folder-row.git-M .folder-name,
+.folder-row.git-R .folder-name {
+  color: var(--warn);
+}
+
+.folder-row.git-A .folder-name,
+.folder-row.git-U .folder-name {
+  color: var(--git-added);
+}
+
+.folder-row.git-C .folder-name {
+  color: var(--git-conflict);
+}
+
+.git-branch {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  max-width: 14ch;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-git {
+  gap: 4px;
+  max-width: 24ch;
+}
+
+.status-git span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-git .git-count {
+  color: var(--git-modified);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+/* ---- Replace in a folder (ui/folderSearch.js) ---- */
+.replace-toggle svg {
+  transition: transform 0.12s;
+}
+
+.replace-toggle svg.open {
+  transform: rotate(90deg);
+}
+
+.replace-box {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.replace-box input {
+  flex: 1;
+  min-width: 0;
+}
+
+.search-results del {
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--danger);
+  text-decoration: line-through;
+}
+
+.search-results ins {
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--git-added) 18%, transparent);
+  color: var(--git-added);
+  text-decoration: none;
+}
+
+.replace-summary {
+  margin: 6px 0;
+}
+
+/* ---- Ctrl+T and F12 in other files (ui/symbols.js) ---- */
+.symbol-row .quick-rel {
+  max-width: 45%;
+}
+
+.symbol-row .quick-kind {
+  flex: none;
+  color: var(--kc, currentColor);
+}

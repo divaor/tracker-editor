@@ -2,15 +2,29 @@ import { html, useEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import { isRemotePath, remoteParts } from '../where.js';
 import { server } from '../servers.js';
 import { Icon } from './icons.js';
-import { ClearButton } from './components.js';
+import { ClearButton, toast } from './components.js';
+import { replaceAll } from '../replace.js';
+import { store } from '../store.js';
 
 const message = (err) => String(err?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
 const plural = (n, what, many = `${what}s`) => `${n.toLocaleString()} ${n === 1 ? what : many}`;
 const folderName = (dir) => (isRemotePath(dir) ? remoteParts(dir).path : dir).replace(/[\\/]+$/, '').split(/[\\/]/).pop() || '/';
 
-function Highlight({ text, at, length }) {
-  return html`${text.slice(0, at)}<mark>${text.slice(at, at + length)}</mark>${text.slice(at + length)}`;
+function Highlight({ text, at, length, instead = null }) {
+  const found = text.slice(at, at + length);
+  // With Replace: the match struck out and what takes its place.
+  if (instead !== null) return html`${text.slice(0, at)}<del>${found}</del><ins>${instead}</ins>${text.slice(at + length)}`;
+  return html`${text.slice(0, at)}<mark>${found}</mark>${text.slice(at + length)}`;
 }
+
+// What one match turns into (for the preview; the files themselves are replaced whole).
+const insteadOf = (found, query, options, replacement) => {
+  try {
+    return replaceAll(found, query, options, replacement).text;
+  } catch {
+    return replacement;
+  }
+};
 
 /**
  * Find in a folder and the folders inside it (desktop), on this computer or on a
@@ -28,6 +42,12 @@ export function FolderSearchPanel({ dir, actions, onClose }) {
   const [hidden, setHidden] = useState(false);
   const [run, setRun] = useState(null); // { id, results, stats, done, error }
   const [collapsed, setCollapsed] = useState(() => new Set());
+  // Replace: shown or not, what to put instead, the files left out, and what was done.
+  const [replacing, setReplacing] = useState(false);
+  const [replacement, setReplacement] = useState('');
+  const [leftOut, setLeftOut] = useState(() => new Set());
+  const [busy, setBusy] = useState(false);
+  const [replaced, setReplaced] = useState(null); // { total, files, skipped }
   const current = useRef(null);
   const input = useRef(null);
   current.current = run;
@@ -48,6 +68,8 @@ export function FolderSearchPanel({ dir, actions, onClose }) {
     if (run && !run.done) bridge.stopFind(run.id);
     const id = `f${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     setCollapsed(new Set());
+    setLeftOut(new Set());
+    setReplaced(null);
     setRun({ id, results: [], stats: null, done: false, error: '' });
     bridge.find(id, dir, query, { ...options, files, hidden }).then(
       (stats) => setRun((r) => r && r.id === id && { ...r, stats, done: true }),
@@ -62,6 +84,53 @@ export function FolderSearchPanel({ dir, actions, onClose }) {
     if (run.results[0]) open(run.results[0]);
   };
 
+  // Replace in every file found (and ticked): files open with unsaved edits are left alone.
+  const chosen = (run?.results ?? []).filter((f) => !leftOut.has(f.path));
+  const replaceAllFiles = async () => {
+    if (!run?.done || !chosen.length || busy) return;
+    const unsaved = chosen.filter((f) => store.diskTab(f.path)?.dirty);
+    const paths = chosen.filter((f) => !unsaved.includes(f)).map((f) => f.path);
+    if (!paths.length) return toast('Those files have unsaved edits: save them first.', { kind: 'error' });
+    setBusy(true);
+    try {
+      const result = await bridge.replace(dir, query, options, replacement, paths);
+      const skipped = [...result.skipped, ...unsaved.map((f) => ({ path: f.path, reason: 'unsaved edits' }))];
+      setReplaced({ total: result.total, files: result.files.length, skipped });
+      // Open tabs show the new text (they had no edits of their own).
+      for (const f of result.files) if (store.diskTab(f.path)) await actions.reloadDisk(f.path);
+      const done = new Set(result.files.map((f) => f.path));
+      setRun((r) => r && { ...r, results: r.results.filter((f) => !done.has(f.path)) });
+      if (result.total) {
+        toast(`Replaced ${plural(result.total, 'match', 'matches')} in ${plural(result.files.length, 'file')}`, {
+          timeout: 15000,
+          action: result.id && {
+            label: 'Undo',
+            run: async () => {
+              try {
+                const back = await bridge.replaceUndo(result.id);
+                for (const p of back.restored) if (store.diskTab(p)) await actions.reloadDisk(p);
+                toast(back.skipped.length ? `Put back ${plural(back.restored.length, 'file')}; ${plural(back.skipped.length, 'file')} changed since, left as they are.` : `Put back ${plural(back.restored.length, 'file')}.`);
+                start();
+              } catch (err) {
+                toast(message(err), { kind: 'error' });
+              }
+            },
+          },
+        });
+      }
+    } catch (err) {
+      toast(message(err), { kind: 'error' });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const tick = (path) =>
+    setLeftOut((s) => {
+      const next = new Set(s);
+      next.has(path) ? next.delete(path) : next.add(path);
+      return next;
+    });
+
   const stats = run?.stats;
   const where = isRemotePath(dir) ? `${server(remoteParts(dir).id)?.name ?? 'Server'}: ${remoteParts(dir).path}` : dir;
   const total = (run?.results ?? []).reduce((n, f) => n + f.count, 0);
@@ -75,7 +144,9 @@ export function FolderSearchPanel({ dir, actions, onClose }) {
     </div>
     <div class="panel-body">
       <p class="muted small folder-search-where ${isRemotePath(dir) ? 'kind-remote' : 'kind-disk'}" title=${where}><${Icon} name=${isRemotePath(dir) ? 'server' : 'folder'} size=${14} />${where}</p>
-      <form class="search-box" onSubmit=${(e) => (e.preventDefault(), start())}>
+      <form class="search-box ${replacing ? 'with-replace' : ''}" onSubmit=${(e) => (e.preventDefault(), start())}>
+        <button type="button" class="opt replace-toggle ${replacing ? 'on' : ''}" aria-pressed=${replacing} aria-label="Replace" title="Replace in the files found"
+          onClick=${() => setReplacing(!replacing)}><${Icon} name="chevronRight" size=${14} class=${replacing ? 'open' : ''} /></button>
         <input ref=${input} value=${query} onInput=${(e) => setQuery(e.currentTarget.value)} placeholder="Find in these files… (Enter)" aria-label="Find in this folder"
           onKeyDown=${(e) => e.key === 'Escape' && (run && !run.done ? stop() : onClose())} />
         <${ClearButton} value=${query} onClear=${() => setQuery('')} label="Clear the search" />
@@ -85,6 +156,15 @@ export function FolderSearchPanel({ dir, actions, onClose }) {
           <button type="button" class="opt ${options.regex ? 'on' : ''}" aria-pressed=${options.regex} title="Regular expression" onClick=${() => toggle('regex')}>.*</button>
         </div>
       </form>
+      ${replacing &&
+      html`<div class="search-box replace-box">
+        <input value=${replacement} onInput=${(e) => setReplacement(e.currentTarget.value)} placeholder=${options.regex ? 'Replace with… ($1 for a group, \\n for a new line)' : 'Replace with…'} aria-label="Replace with"
+          onKeyDown=${(e) => e.key === 'Enter' && (e.preventDefault(), replaceAllFiles())} />
+        <button type="button" class="btn sm ${run?.done && chosen.length ? 'primary' : ''}" disabled=${!run?.done || !chosen.length || busy} onClick=${replaceAllFiles}
+          title="Replace in the files found and ticked (those open with unsaved edits are left out)">
+          <${Icon} name="replace" size=${14} />${busy ? 'Replacing…' : run?.done && chosen.length ? `Replace in ${plural(chosen.length, 'file')}` : 'Replace'}
+        </button>
+      </div>`}
       <div class="folder-search-filters">
         <input value=${files} onInput=${(e) => setFiles(e.currentTarget.value)} placeholder="Files: *.js, *.md, !*.min.js" aria-label="Only these files"
           title="Which files: patterns like *.log, a ! in front leaves them out" onKeyDown=${(e) => e.key === 'Enter' && start()} />
@@ -94,6 +174,11 @@ export function FolderSearchPanel({ dir, actions, onClose }) {
           : html`<button type="button" class="btn sm primary" disabled=${!query} onClick=${start}>Find</button>`}
       </div>
       ${run?.error && html`<p class="notice error"><${Icon} name="alert" size=${15} />${run.error}</p>`}
+      ${replaced &&
+      html`<p class="muted small replace-summary" aria-live="polite">
+        Replaced ${plural(replaced.total, 'match', 'matches')} in ${plural(replaced.files, 'file')}.
+        ${replaced.skipped.length > 0 && html`<br />Left as they were: ${replaced.skipped.map((x) => `${x.path.split(/[\\/]/).pop()} (${x.reason})`).join(', ')}.`}
+      </p>`}
       ${run && !run.error &&
       html`<p class="muted small search-summary" aria-live="polite">
         ${!run.done
@@ -112,6 +197,7 @@ export function FolderSearchPanel({ dir, actions, onClose }) {
         ${run?.results.map(
           (f) => html`<div class="result-file" key=${f.path}>
             <div class="result-head">
+              ${replacing && html`<input type="checkbox" class="result-pick" checked=${!leftOut.has(f.path)} aria-label=${`Replace in ${f.name}`} onChange=${() => tick(f.path)} />`}
               <button type="button" class="result-toggle" aria-expanded=${!collapsed.has(f.path)} title=${f.name} onClick=${() =>
                 setCollapsed((c) => {
                   const next = new Set(c);
@@ -127,7 +213,8 @@ export function FolderSearchPanel({ dir, actions, onClose }) {
             f.matches.map(
               (m) => html`<button type="button" class="result-line" key=${m.line} onClick=${() => open(f, m)}>
                 <span class="line-no">${m.line}</span>
-                <span class="line-text">${m.prefix ? '…' : ''}<${Highlight} text=${m.preview} at=${m.at} length=${m.length} /></span>
+                <span class="line-text">${m.prefix ? '…' : ''}<${Highlight} text=${m.preview} at=${m.at} length=${m.length}
+                  instead=${replacing && !leftOut.has(f.path) ? insteadOf(m.preview.slice(m.at, m.at + m.length), query, options, replacement) : null} /></span>
               </button>`,
             )}
           </div>`,

@@ -14,6 +14,15 @@ import { Menu, MenuButton } from './menu.js';
 import { FileViewer, PeekPane } from './folderPreview.js';
 import { Splitter } from './splitter.js';
 import { onTransfers, running } from '../transfers.js';
+import { gitCodeOf, gitOf, onGitState, refreshGit } from '../gitState.js';
+import { GIT_LABELS } from '../gitStatus.js';
+
+// "Git: branch main, 2 ahead … · 3 changed files" for a folder's branch chip.
+const branchTitle = (g) => {
+  const changed = Object.keys(g.files).length;
+  const sync = [g.ahead && `${g.ahead} to push`, g.behind && `${g.behind} to pull`].filter(Boolean).join(', ');
+  return `Git: branch ${g.branch}${g.upstream ? ` (${g.upstream}${sync ? `: ${sync}` : ''})` : ''} · ${changed ? `${changed} changed file${changed === 1 ? '' : 's'}` : 'nothing changed'} since the last commit`;
+};
 
 const PLACES = [
   { id: 'documents', label: 'Documents' },
@@ -221,6 +230,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       which.forEach((s, i) => next.set(s, lists[i]));
       return next;
     });
+    refreshGit(which.filter((s) => !isRemotePath(s)), { force: true });
     const present = new Set([...lists.flatMap((l) => l.entries), ...deeper].map((e) => e.path));
     const read = (p) => which.some((s) => rootOf(p, [s]));
     if (pendingSelect.current && present.has(pendingSelect.current)) {
@@ -231,6 +241,10 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   useEffect(() => {
     if (live.length) load();
   }, [liveKey]);
+  // Git (folders on this computer): rows colored by what changed since the last commit.
+  const [, setGitVersion] = useState(0);
+  useEffect(() => onGitState(() => setGitVersion((v) => v + 1)), []);
+  const gitOn = (p) => (isRemotePath(p) ? null : gitCodeOf(rootOf(p, live) ?? dir, p, false));
   // The folders shown are watched, and read again when the window comes back.
   useEffect(() => {
     if (!live.length) return;
@@ -914,6 +928,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       { label: one?.dir ? 'Open' : 'Open (Enter)', icon: one?.dir ? 'folderOpen' : 'file', run: openSelected },
       one && !one.dir && { label: 'View it large (Space)', icon: 'fullscreen', run: () => setViewing(one.path) },
       one && !one.dir && { label: 'Open with its program', icon: 'external', run: () => openOutside(one) },
+      one && !one.dir && ['M', 'R'].includes(gitOn(one.path)) && opensInEditor(one.name) && { label: 'Compare with the last commit (Git)', icon: 'branch', run: () => actions.compareWithHead(one.path) },
       images.length && images.length === items.length && { label: `Text from ${images.length === 1 ? 'the image' : `${images.length} images`}…`, icon: 'scan', run: () => actions.readImageFiles(images.map((e) => e.path), folderOf(images)) },
       files.length === 2 && items.length === 2 && files.every((e) => opensInEditor(e.name)) && { label: 'Compare the two', icon: 'columns', run: () => actions.compareDiskFiles(files[0].path, files[1].path) },
       { separator: true },
@@ -1061,6 +1076,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   const perms = live.some(isRemotePath) && settings.showPermissions;
   const row = ({ entry: e, depth, expanded: open }) => {
     const key = diskKey(e.path);
+    const git = isRemotePath(e.path) ? null : gitCodeOf(rootOf(e.path, live) ?? dir, e.path, e.dir);
     const isSelected = selected.has(e.path);
     const twisty = e.dir
       ? html`<button type="button" class="tree-twisty ${open ? 'open' : ''}" tabindex="-1" aria-label=${open ? `Close ${e.name}` : `Open ${e.name} here`}
@@ -1072,7 +1088,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     const children_ = children.get(e.path);
     return html`<div key=${e.path} data-path=${e.path} role="option" aria-selected=${isSelected} id=${`row-${order.indexOf(e.path)}`}
       aria-level=${depth + 1} aria-expanded=${e.dir ? open : undefined} style=${{ '--depth': depth }}
-      class="folder-row ${details ? 'with-columns' : ''} ${e.dir ? 'is-dir' : ''} ${isSelected ? 'selected' : ''} ${cursor === e.path ? 'cursor' : ''} ${activeKey === key ? 'active' : ''} ${e.hidden ? 'hidden-entry' : ''} ${clip?.op === 'cut' && clip.paths.includes(e.path) ? 'is-cut' : ''} ${dropTarget === e.path ? 'drop-target' : ''} ${dropTarget && !live.includes(dropTarget) && dirOf(e.path) === dropTarget ? 'drop-inside' : ''}"
+      class="folder-row ${git ? `git-${git}` : ''} ${details ? 'with-columns' : ''} ${e.dir ? 'is-dir' : ''} ${isSelected ? 'selected' : ''} ${cursor === e.path ? 'cursor' : ''} ${activeKey === key ? 'active' : ''} ${e.hidden ? 'hidden-entry' : ''} ${clip?.op === 'cut' && clip.paths.includes(e.path) ? 'is-cut' : ''} ${dropTarget === e.path ? 'drop-target' : ''} ${dropTarget && !live.includes(dropTarget) && dirOf(e.path) === dropTarget ? 'drop-inside' : ''}"
       title=${isRemotePath(e.path) ? `${remoteParts(e.path).path}${e.mode !== undefined ? `\n${modeString(e.mode, e.dir)}${e.owner ? ` ${e.owner}` : ''}${e.group ? ` ${e.group}` : ''}` : ''}` : e.path} draggable=${renaming !== e.path}
       onDragStart=${(ev) => onDragStart(ev, e)}
       onDragEnd=${() => (internalDrag.current = null)}
@@ -1104,6 +1120,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
         <${Icon} name=${e.dir ? (open ? 'folderOpen' : 'folder') : isImageName(e.name) ? 'image' : 'file'} size=${15} />
         ${name}
         ${openKeys.includes(key) && html`<span class="tab-dot open-dot" title="Open in a tab" />`}
+        ${git && html`<span class="git-badge git-${git}" title=${git === 'dot' ? 'Changed files inside (Git)' : `${GIT_LABELS[git]} (Git)`}>${git === 'dot' ? '' : git}</span>`}
         ${open && children_?.error && html`<span class="error-text small" title=${children_.error}>(cannot read it)</span>`}
       </span>
       ${details
@@ -1173,6 +1190,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       <${Icon} name=${rem ? 'server' : 'folder'} size=${15} class="root-head-icon" />
       <span class="root-head-name">${name}</span>
       <span class="root-head-where">${where}</span>
+      ${!rem && gitOf(d) && html`<span class="git-branch" title=${branchTitle(gitOf(d))}><${Icon} name="branch" size=${12} />${gitOf(d).branch}</span>`}
       ${rem && html`<span class="conn-dot state-${state}" />`}
       ${shut_ && matches > 0 && html`<span class="root-head-count" title=${`${matches} ${matches === 1 ? 'match' : 'matches'} in it: click to see`}>${matches}</span>`}
       <button type="button" class="icon-btn xs root-head-close" aria-label=${`Close ${name} here`} title="Close it here (nothing is deleted)"
@@ -1195,6 +1213,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
           title=${remote ? `${protocolName(conn?.protocol)} · ${conn?.user ? `${conn.user}@` : ''}${conn?.host} · ${connState?.state === 'connected' ? 'connected' : 'not connected'}` : root} onClick=${() => go(root)} ...${dropProps(root)}>
           <${Icon} name=${remote ? 'server' : 'folder'} size=${15} /><span>${rootName(root)}</span>${remote && html`<span class="conn-dot state-${connState?.state}" />`}
         </button>
+        ${!multi && !remote && gitOf(dir) && html`<span class="git-branch" title=${branchTitle(gitOf(dir))}><${Icon} name="branch" size=${12} />${gitOf(dir).branch}</span>`}
         <span class="spacer" />
         ${tool('Up one folder (Backspace)', 'arrowUp', () => go(up), !up)}
         ${tool('Refresh (F5)', 'rotate', () => load())}

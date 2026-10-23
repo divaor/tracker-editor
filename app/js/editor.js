@@ -92,6 +92,7 @@ import { isOwnDrop } from './dragOut.js';
 import { createSearchPanel, openReplacePanel } from './searchPanel.js';
 import { SYNTAX_LANGUAGES, problemsFor, treeErrors } from './problems.js';
 import { convertIndent, detectIndent } from './indent.js';
+import { gitGutter, gitInfo, setGitBase } from './gitGutter.js';
 
 export { languages };
 
@@ -696,6 +697,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
   const readOnly = new Compartment();
   const checks = new Compartment(); // problems as you type
   const aids = new Compartment(); // indentation guides, bracket colors, sticky scroll
+  const gitBar = new Compartment(); // lines changed since the last commit (files in a Git repository)
   const indents = new Map(); // key → { tabs, size, source: 'detected' | 'editorconfig' | 'chosen' }
   let options = settings;
   let active = null;
@@ -862,6 +864,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       tabs.of(config.tabs),
       checks.of(config.checks),
       aids.of(config.aids),
+      gitBar.of([]),
       EditorView.updateListener.of((update) => {
         if (update.docChanged && !update.transactions.some((tr) => tr.annotation(remote))) {
           clearTimeout(pending.get(key));
@@ -1196,6 +1199,32 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       if (active) view.dispatch({ effects: effectsFor(active) });
       if (side) side.view.dispatch({ effects: effectsFor(side.key) });
       if (active) report(view.state, active);
+    },
+
+    /**
+     * The text a tab's file had at the last commit (files in a Git repository): its changed
+     * lines get a bar next to the line numbers. null takes the bar away.
+     */
+    setGitBase(key, text) {
+      const apply = (spec) => {
+        const v = viewOf(key);
+        if (v) v.dispatch(spec);
+        else if (states.has(key)) states.set(key, states.get(key).update(spec).state);
+      };
+      const state = viewOf(key)?.state ?? states.get(key);
+      if (!state || bigKeys.has(key)) return;
+      const has = Boolean(gitInfo(state)) || state.field(gitGutter[0], false) !== undefined;
+      if (text === null) {
+        if (has) apply({ effects: gitBar.reconfigure([]) });
+        return;
+      }
+      if (!has) apply({ effects: gitBar.reconfigure(gitGutter) });
+      apply({ effects: setGitBase.of(text) });
+    },
+    /** { base, changes } of a tab's file against the last commit, or null. */
+    gitChanges(key) {
+      const state = viewOf(key)?.state ?? states.get(key);
+      return state ? gitInfo(state) : null;
     },
 
     /** A tab's indentation: { tabs, size, source } (source: 'detected', 'editorconfig', 'chosen' or 'default'). */

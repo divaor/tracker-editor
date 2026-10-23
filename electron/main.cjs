@@ -1207,6 +1207,8 @@ ipcMain.handle('folder:watch', guard((event, dirs) => {
 // Find in a folder (and the folders inside it), here or on a server: each file
 // with matches goes to the page as soon as it is read ('folder:found').
 const { findInFolder, findNames, listFiles } = require('./findInFolder.cjs');
+const { findDeclarations, createSymbolIndex } = require('./codeIndex.cjs');
+const { createGit } = require('./git.cjs');
 const folderSearches = new Map(); // search id → AbortController
 let appModules = null;
 const loadAppModules = async () =>
@@ -1214,6 +1216,10 @@ const loadAppModules = async () =>
     search: await import(pathToFileURL(path.join(APP_DIR, 'js', 'search.js')).href),
     folders: await import(pathToFileURL(path.join(APP_DIR, 'js', 'folders.js')).href),
     indent: await import(pathToFileURL(path.join(APP_DIR, 'js', 'indent.js')).href),
+    codeNav: await import(pathToFileURL(path.join(APP_DIR, 'js', 'codeNav.js')).href),
+    outline: await import(pathToFileURL(path.join(APP_DIR, 'js', 'outline.js')).href),
+    gitStatus: await import(pathToFileURL(path.join(APP_DIR, 'js', 'gitStatus.js')).href),
+    replace: await import(pathToFileURL(path.join(APP_DIR, 'js', 'replace.js')).href),
   });
 // The matching runs in a worker thread, so a pattern that takes very long (or a huge
 // minified file) never freezes the window; Stop, or 15 s on one file, ends the worker.
@@ -1352,6 +1358,167 @@ ipcMain.handle('folder:index', guard(async (_e, dir, opts = {}) => {
     timeLimit: onServer ? 10000 : 6000,
     concurrency: onServer ? (remote.isFtp(dir) ? 1 : 4) : 8,
   });
+}));
+// ---- Code across the folders shown (F12 in other files, Ctrl+T), here and on servers ----
+// Listed and read through the same calls as the folders view: links are not followed here.
+const anyList = async (d) =>
+  isRemote(d) ? (await remote.list(d)).entries : folders.listFolder(d).entries.map((e) => (e.dir && fs.lstatSync(e.path).isSymbolicLink() ? { ...e, link: true } : e));
+const anyRead = (p) => (isRemote(p) ? remote.readBytes(p, 2 * 1024 * 1024) : fs.promises.readFile(p));
+const anyDecode = (bytes) => disk.decode(bytes).text;
+// The folders that can be read now: picked ones here, and servers that are connected.
+const usableRoots = (dirs) =>
+  (Array.isArray(dirs) ? dirs : []).filter((d) => {
+    if (typeof d !== 'string') return false;
+    if (isRemote(d)) return remote.isConnected(remoteFiles.parseUri(d).id);
+    try {
+      checkDir(d);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+ipcMain.handle('code:declarations', guard(async (_e, dirs, word) => {
+  if (typeof word !== 'string' || !/^[\p{L}\p{N}_$-]{1,100}$/u.test(word)) return { found: [], truncated: false };
+  const { codeNav, outline } = await loadAppModules();
+  const roots = usableRoots(dirs);
+  return findDeclarations({
+    roots,
+    list: anyList,
+    read: anyRead,
+    decode: anyDecode,
+    isCode: (name) => Boolean(outline.languageForName(name)),
+    kindOf: codeNav.declarationKind,
+    word,
+    concurrency: roots.some(isRemote) ? 4 : 8,
+  });
+}));
+let symbolIndex = null;
+const symbolReads = new Map(); // folder → { at, promise, truncated }
+ipcMain.handle('code:symbols', guard(async (_e, dirs, query = '') => {
+  const { outline, search } = await loadAppModules();
+  symbolIndex ??= createSymbolIndex({ list: anyList, read: anyRead, decode: anyDecode, outline: outline.outline, languageFor: outline.languageForName, score: search.fuzzyScore });
+  const roots = usableRoots(dirs);
+  let truncated = false;
+  await Promise.all(
+    roots.map(async (root) => {
+      let known = symbolReads.get(root);
+      // Read again when asked after a while (only files that changed are read).
+      if (!known || (!known.promise && Date.now() - known.at > 20_000)) {
+        const onServer = isRemote(root);
+        const entry = { at: Date.now(), promise: null, truncated: false };
+        entry.promise = symbolIndex
+          .refresh(root, { concurrency: onServer ? (remote.isFtp(root) ? 1 : 4) : 8, maxFiles: onServer ? 1500 : 6000 })
+          .then((r) => void (entry.truncated = r.truncated))
+          .catch(() => {})
+          .finally(() => {
+            entry.promise = null;
+            entry.at = Date.now();
+          });
+        symbolReads.set(root, entry);
+        known = entry;
+      }
+      if (known.promise) await known.promise;
+      truncated ||= known.truncated;
+    }),
+  );
+  return { symbols: symbolIndex.query(roots, String(query).slice(0, 200), { limit: 200 }), truncated };
+}));
+
+// ---- Replace in a folder: the files Find in a folder found ----
+// Each file is read, replaced and written back only if it did not change since it was read;
+// what it held is kept for Undo (which also writes only over what it wrote).
+const replaceUndos = new Map(); // id → [{ path, before: { text, eol, bom, encoding }, mtimeMs, size }]
+const underDir = (p, dir) => {
+  if (isRemote(dir)) {
+    if (!isRemote(p)) return false;
+    const a = remoteFiles.parseUri(p);
+    const b = remoteFiles.parseUri(dir);
+    return a.id === b.id && `${a.path}/`.startsWith(`${b.path.replace(/\/+$/, '')}/`);
+  }
+  return !isRemote(p) && folders.isInside(path.resolve(dir), path.resolve(p));
+};
+ipcMain.handle('folder:replace', guard(async (_e, dir, query, opts = {}, replacement = '', paths = []) => {
+  if (typeof query !== 'string' || !query) throw new Error('Type what to find.');
+  if (typeof replacement !== 'string') throw new Error('Type what to put instead.');
+  checkList(paths);
+  const { replace } = await loadAppModules();
+  const options = { caseSensitive: Boolean(opts.caseSensitive), wholeWord: Boolean(opts.wholeWord), regex: Boolean(opts.regex) };
+  if (!isRemote(dir)) checkDir(dir);
+  const done = [];
+  const skipped = [];
+  const undo = [];
+  for (const p of paths) {
+    if (typeof p !== 'string' || !underDir(p, dir)) continue;
+    try {
+      const read = isRemote(p) ? await remote.read(p) : disk.readTextFile(checkFile(p));
+      if (read.truncated) {
+        skipped.push({ path: p, reason: 'too large' });
+        continue;
+      }
+      const { text, count } = replace.replaceAll(read.text, query, options, replacement);
+      if (!count) continue;
+      const format = { eol: read.eol, bom: read.bom, encoding: read.encoding };
+      const written = isRemote(p) ? await remote.write(p, text, { ...format, expectedMtime: read.mtimeMs, expectedSize: read.size }) : disk.writeTextFile(p, text, { ...format, expectedMtime: read.mtimeMs });
+      if (written.conflict) {
+        skipped.push({ path: p, reason: 'changed meanwhile' });
+        continue;
+      }
+      undo.push({ path: p, before: { text: read.text, ...format }, mtimeMs: written.mtimeMs, size: written.size });
+      done.push({ path: p, count });
+    } catch (err) {
+      skipped.push({ path: p, reason: err.message });
+    }
+  }
+  const id = `r${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  if (undo.length) replaceUndos.set(id, undo);
+  // The last few can be undone.
+  while (replaceUndos.size > 10) replaceUndos.delete(replaceUndos.keys().next().value);
+  return { id: undo.length ? id : null, files: done, total: done.reduce((n, f) => n + f.count, 0), skipped };
+}));
+ipcMain.handle('folder:replace-undo', guard(async (_e, id) => {
+  const undo = replaceUndos.get(id);
+  if (!undo) throw new Error('That can no longer be undone.');
+  replaceUndos.delete(id);
+  const restored = [];
+  const skipped = [];
+  for (const u of undo) {
+    try {
+      const written = isRemote(u.path)
+        ? await remote.write(u.path, u.before.text, { ...u.before, expectedMtime: u.mtimeMs, expectedSize: u.size })
+        : disk.writeTextFile(checkFile(u.path), u.before.text, { ...u.before, expectedMtime: u.mtimeMs });
+      if (written.conflict) skipped.push({ path: u.path, reason: 'changed since' });
+      else restored.push(u.path);
+    } catch (err) {
+      skipped.push({ path: u.path, reason: err.message });
+    }
+  }
+  return { restored, skipped };
+}));
+
+// ---- Git for folders on this computer (read-only) ----
+let gitTool = null;
+const git = async () => (gitTool ??= createGit({ parseStatus: (await loadAppModules()).gitStatus.parseStatus }));
+ipcMain.handle('git:status', guard(async (_e, dir) => {
+  if (typeof dir !== 'string' || isRemote(dir)) return null;
+  checkDir(dir);
+  return (await git()).status(dir);
+}));
+ipcMain.handle('git:head', guard(async (_e, file) => {
+  if (typeof file !== 'string' || isRemote(file)) return null;
+  const tool = await git();
+  const found = await tool.headBytes(checkFile(file));
+  if (!found) {
+    // A new file in a repository still has a branch to show.
+    const root = await tool.repoOf(path.dirname(file));
+    return root ? { text: null, root, branch: await tool.branch(root) } : null;
+  }
+  let text = null;
+  try {
+    text = disk.decode(found.bytes).text;
+  } catch {
+    // not text
+  }
+  return { text, rel: found.rel, root: found.root, branch: await tool.branch(found.root) };
 }));
 ipcMain.handle('folder:find-stop', guard((_e, searchId) => {
   folderSearches.get(searchId)?.abort();
@@ -2178,6 +2345,7 @@ function buildMenu() {
             shown('Find Usages', 'Shift+F12', 'find-usages'),
             shown('Rename in This File', 'F2', 'rename-symbol'),
             item('Go to Function or Section…', undefined, 'goto-symbol'),
+            shown('Go to Function or Section in Any File…', 'CmdOrCtrl+T', 'goto-symbol-all'),
             shown('Go to Matching Bracket', 'CmdOrCtrl+Shift+\\', 'matchingBracket'),
             { type: 'separator' },
             shown('Fold Everything', 'Alt+0', 'foldAll'),
@@ -2189,6 +2357,7 @@ function buildMenu() {
             shown('Problems', 'CmdOrCtrl+Shift+M', 'problems'),
             shown('Next Problem', 'F8', 'nextProblem'),
             shown('Previous Problem', 'Shift+F8', 'previousProblem'),
+            item('Compare with the Last Commit (Git)', undefined, 'git-compare'),
             { type: 'separator' },
             item('Indent This File with Spaces', undefined, 'indent-spaces'),
             item('Indent This File with Tabs', undefined, 'indent-tabs'),

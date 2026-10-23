@@ -58,10 +58,11 @@ export const COMMAND_LIST = [
   { id: 'indent-to-tabs', group: 'Edit and text', label: 'Convert the indentation to tabs' },
   { id: 'indent-detect', group: 'Edit and text', label: 'Indentation from the text again (detect it)', hint: 'Or from the .editorconfig of a file on disk' },
 
-  { id: 'goto-definition', group: 'Code', label: 'Go to where the name at the cursor is declared', keys: 'F12', hint: 'In this file. On the declaration itself: its usages' },
+  { id: 'goto-definition', group: 'Code', label: 'Go to where the name at the cursor is declared', keys: 'F12', hint: 'In this file, else your other files and the folders open in Folders. On the declaration itself: its usages' },
   { id: 'find-usages', group: 'Code', label: 'Find usages of the name at the cursor', keys: 'Shift+F12', hint: 'In this file; the panel can look in all files' },
   { id: 'rename-symbol', group: 'Code', label: 'Rename in this file (edit every use at once)', keys: 'F2' },
   { id: 'goto-symbol', group: 'Code', label: 'Go to a function, class or section', keys: 'Mod+P, then @' },
+  { id: 'goto-symbol-all', group: 'Code', label: 'Go to a function, class or section in any file', desktop: 'Mod+T', keys: 'Mod+P, then #', hint: 'Your files and the folders open in Folders' },
   { id: 'matchingBracket', group: 'Code', label: 'Go to the matching bracket', keys: 'Mod+Shift+\\' },
   { id: 'fold', group: 'Code', label: 'Fold the block here', keys: 'Ctrl+Shift+[', mac: 'Mod+Alt+[', hint: 'Or click the arrow next to the line' },
   { id: 'unfold', group: 'Code', label: 'Unfold the block here', keys: 'Ctrl+Shift+]', mac: 'Mod+Alt+]' },
@@ -71,6 +72,7 @@ export const COMMAND_LIST = [
   { id: 'foldLevel2', group: 'Code', label: 'Fold one level in (methods in classes)', keys: 'Alt+2' },
   { id: 'foldLevel3', group: 'Code', label: 'Fold two levels in', keys: 'Alt+3' },
   { id: 'problems', group: 'Code', label: 'Problems in this file (errors as you type)', keys: 'Mod+Shift+M', hint: 'JSON, YAML, XML, HTML, CSS and code' },
+  { id: 'git-compare', group: 'Code', label: 'Compare with the last commit (Git)', only: 'desktop', hint: 'A file on this computer in a Git repository; or click the branch in the status bar' },
   { id: 'nextProblem', group: 'Code', label: 'Next problem', keys: 'F8' },
   { id: 'previousProblem', group: 'Code', label: 'Previous problem', keys: 'Shift+F8' },
 

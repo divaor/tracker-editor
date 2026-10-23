@@ -45,8 +45,9 @@ import { resultExtension } from './selectionAsk.js';
 import { OutlinePanel } from './ui/outline.js';
 import { UsagesPanel } from './ui/usages.js';
 import { ProblemsPanel } from './ui/problems.js';
+import { DeclarationPicker, SymbolSearch } from './ui/symbols.js';
 import { SYNTAX_LANGUAGES } from './problems.js';
-import { DASHED_LANGUAGES, findDefinition, lineStart, occurrences, wordAt } from './codeNav.js';
+import { DASHED_LANGUAGES, declarationKind, findDefinition, lineStart, occurrences, wordAt } from './codeNav.js';
 import { FilterBar } from './ui/filterBar.js';
 import { MacroDialog } from './ui/macro.js';
 import { CloseDiskDialog, ReloadDiskDialog } from './ui/diskDialogs.js';
@@ -283,7 +284,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         const w = actions.codeWord();
         if (!w) return;
         const found = findDefinition(w.ctx.text, w.word, w.from);
-        if (!found) return toast(`No declaration of “${w.word}” found in this file.`, { action: { label: 'Find in all files', run: () => actions.findEverywhere(w.word) }, timeout: 8000 });
+        if (!found) return actions.declarationElsewhere(w.word, w.ctx.key);
         if (found.from === w.from) return actions.findUsages();
         hostRef.current.selectRanges([found]);
       },
@@ -321,6 +322,47 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       },
       /** Lists the classes, functions and sections of this file to jump to (Ctrl+P, then @). */
       gotoSymbol: () => setDialog({ type: 'quickOpen', query: '@' }),
+      /** Ctrl+T: a class, function or section in any file (yours, and those in the folders open in Folders). */
+      gotoSymbolAll: (query = '') => setDialog({ type: 'symbols', query }),
+      /** Opens a place: { id } of your files or { path } on disk or a server, at line and column; `title` is selected there. */
+      openAt(place) {
+        const position = { line: place.line, column: place.column ?? 1, length: place.title?.length ?? 0 };
+        return place.id ? actions.openFile(place.id, position) : actions.openDiskPath(place.path, position);
+      },
+      /**
+       * F12 when the name is not declared in the open file: your other files, then the files in the
+       * folders open in Folders (read in the main process). One place opens; several are listed.
+       */
+      async declarationElsewhere(word, fromKey) {
+        const places = [];
+        for (const f of store.live()) {
+          if (fileKey(f.id) === fromKey) continue;
+          const text = store.text(f.id);
+          if (!text.includes(word)) continue;
+          for (const o of occurrences(text, word, { limit: 500 })) {
+            if (declarationKind(o.text, o.column, word) === 'strong') places.push({ id: f.id, fileName: f.name, line: o.line, column: o.column, text: o.text.trim().slice(0, 200) });
+          }
+        }
+        const roots = folderRoots(getSettings());
+        if (roots.length && window.desktop?.code) {
+          toast(`Looking for “${word}” in your folders…`, { key: 'declarations', timeout: 4000 });
+          const found = await window.desktop.code.declarations(roots.map((r) => r.dir), word).catch(() => ({ found: [] }));
+          dismissToast('declarations');
+          const here = fromKey?.startsWith('d:') ? fromKey.slice(2) : '';
+          // The nearest to the open file first (the most of its path in common).
+          const near = (p) => {
+            let n = 0;
+            while (n < p.length && p[n] === here[n]) n++;
+            return n;
+          };
+          places.push(...found.found.filter((f) => f.path !== here).sort((a, b) => near(b.path) - near(a.path)));
+        }
+        if (!places.length) {
+          return toast(`No declaration of “${word}” found in this file, your files${roots.length ? ' or your folders' : ''}.`, { key: 'declarations', action: { label: 'Find in all files', run: () => actions.findEverywhere(word) }, timeout: 8000 });
+        }
+        if (places.length === 1) return actions.openAt({ ...places[0], title: word });
+        setDialog({ type: 'declarations', word, places: places.slice(0, 60) });
+      },
       /** Find in files with `word` as a whole word. */
       findEverywhere(word) {
         setSearchSeed({ query: word, wholeWord: true, at: Date.now() });
@@ -1369,6 +1411,41 @@ export function App() {
     });
   };
   useEffect(() => lookUpEditorConfig(activeKey), [activeKey]);
+  // ---- Git: files on this computer in a repository ----
+  // The text at the last commit gives the editor its bar of changed lines; the branch goes
+  // to the status bar. Asked when a tab shows and when the window comes back (a commit
+  // made elsewhere).
+  const [gitHeads, setGitHeads] = useState({}); // key → { branch, root, tracked } or null
+  const lookUpGit = (key) => {
+    if (!key?.startsWith('d:') || isRemotePath(key.slice(2)) || !window.desktop?.git) return;
+    window.desktop.git.head(key.slice(2)).then(
+      (head) => {
+        hostRef.current?.setGitBase(key, head?.text ?? null);
+        const next = head ? { branch: head.branch, root: head.root, tracked: head.text !== null } : null;
+        setGitHeads((all) => (JSON.stringify(all[key]) === JSON.stringify(next) ? all : { ...all, [key]: next }));
+      },
+      () => {},
+    );
+  };
+  useEffect(() => lookUpGit(activeKey), [activeKey]);
+  useEffect(() => {
+    const onFocus = () => lookUpGit(store.session.active);
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
+  /** The open file next to its text at the last commit (Git). */
+  actions.compareWithHead = async (path = null) => {
+    const key = path ? diskKey(path) : store.session.active;
+    if (!key?.startsWith('d:') || !window.desktop?.git) return;
+    if (path && store.session.active !== key && (await actions.openDiskPath(path))) return;
+    const head = await window.desktop.git.head(key.slice(2)).catch(() => null);
+    if (!head) return toast('This file is not in a Git repository.');
+    if (head.text === null) return toast('This file is new: it is not in the last commit yet.');
+    hostRef.current?.flushAll();
+    const tab = store.diskTab(key.slice(2));
+    if (!tab) return;
+    setCompare({ key, name: tab.name, language: '', left: { label: `Last commit (${head.branch || 'Git'})`, text: head.text }, right: { label: `${tab.name} now`, text: tab.text }, actions: [] });
+  };
   actions.togglePreview = () => {
     hostRef.current?.flushAll();
     // The preview takes the side view's place.
@@ -1753,6 +1830,9 @@ export function App() {
       } else if (mod && e.shiftKey && k === 'o') {
         e.preventDefault();
         actions.toggleOutline();
+      } else if (mod && !e.shiftKey && !e.altKey && k === 't') {
+        e.preventDefault();
+        actions.gotoSymbolAll();
       } else if (mod && e.shiftKey && k === 'm') {
         e.preventDefault();
         actions.toggleProblems();
@@ -1829,6 +1909,8 @@ export function App() {
       'find-usages': () => actions.findUsages(),
       'rename-symbol': () => actions.renameSymbol(),
       'goto-symbol': () => actions.gotoSymbol(),
+      'goto-symbol-all': () => actions.gotoSymbolAll(),
+      'git-compare': () => actions.compareWithHead(),
       problems: () => actions.toggleProblems(),
       'indent-spaces': () => actions.setIndent({ tabs: false }),
       'indent-tabs': () => actions.setIndent({ tabs: true }),
@@ -1990,7 +2072,8 @@ export function App() {
         ${terminalShown && html`<${TerminalPanel} settings=${settings} actions=${actions} onHide=${() => (setTerminalShown(false), hostRef.current?.focus())} />`}
         <${ReadAloudBar} />
         <${StatusBar} recording=${recording} big=${big && Boolean(activeKey)} cursor=${activeKey ? cursor : null} language=${languageName} file=${activeFile} repo=${activeRepo} disk=${activeDisk} settings=${settings} sync=${sync} actions=${actions}
-          problems=${settings.problems !== false && activeKey ? problems[activeKey] : null} problemsOpen=${panel === 'problems'} />
+          problems=${settings.problems !== false && activeKey ? problems[activeKey] : null} problemsOpen=${panel === 'problems'}
+          git=${activeKey && gitHeads[activeKey] ? { ...gitHeads[activeKey], changes: hostRef.current?.gitChanges(activeKey)?.changes ?? null } : null} />
       </div>
     </main>
 
@@ -2012,6 +2095,8 @@ export function App() {
           onPick=${(entry) => actions.compareWithEntry(entry)} onClose=${() => setDialog(null)} />`
       : html`<${QuickOpen} files=${store.live()} docs=${docs} actions=${actions} initial=${dialog.query ?? ''} symbols=${() => (activeKey ? (hostRef.current?.codeContext()?.symbols ?? []) : [])}
           roots=${folderRoots(settings)} hidden=${Boolean(settings.showHidden)} onSymbol=${(entry) => actions.revealSymbol(entry)} onClose=${() => setDialog(null)} />`)}
+    ${dialog?.type === 'symbols' && html`<${SymbolSearch} files=${store.live()} roots=${folderRoots(settings)} initial=${dialog.query ?? ''} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'declarations' && html`<${DeclarationPicker} word=${dialog.word} places=${dialog.places} roots=${folderRoots(settings)} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'ocr' && html`<${OcrDialog} images=${dialog.images} saveTo=${dialog.saveTo} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'server' && html`<${ServerDialog} conn=${dialog.conn} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'sshImport' && html`<${SshImportDialog} onClose=${() => setDialog(null)} />`}

@@ -178,8 +178,16 @@ export function QuickOpen({ files, docs, actions, onClose, onPick, title = 'Open
   return html`<div class="modal-backdrop top" onPointerDown=${(e) => e.target === e.currentTarget && onClose()}>
     <div class="quick-open" role="dialog" aria-label=${title}>
       ${onPick && html`<div class="quick-title">${title}</div>`}
-      <input value=${query} placeholder=${symbols ? `Type part of a file${roots.length && !onPick ? ', folder' : ''} or project name, or @ for this file’s functions and sections…` : 'Type part of a file or project name…'} aria-label="File name" ref=${input}
-        onInput=${(e) => setQuery(e.currentTarget.value)}
+      <input value=${query} placeholder=${symbols ? `Type part of a file${roots.length && !onPick ? ', folder' : ''} or project name; @ for this file’s functions and sections, # for any file’s…` : 'Type part of a file or project name…'} aria-label="File name" ref=${input}
+        onInput=${(e) => {
+          const value = e.currentTarget.value;
+          // "#…": a symbol in any file (Ctrl+T).
+          if (value.startsWith('#') && !onPick && actions.gotoSymbolAll) {
+            onClose();
+            return actions.gotoSymbolAll(value.slice(1));
+          }
+          setQuery(value);
+        }}
         onKeyDown=${(e) => {
           if (e.key === 'ArrowDown') {
             e.preventDefault();

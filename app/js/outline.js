@@ -57,6 +57,21 @@ const FAMILY = {
   YAML: 'yaml', C: 'c', 'C++': 'c', 'Objective-C': 'c', 'Objective-C++': 'c', PHP: 'php', Ruby: 'ruby', Kotlin: 'kotlin', Swift: 'kotlin', Scala: 'kotlin', Lua: 'lua', Perl: 'perl',
 };
 
+// The language of a file by its extension, for files read outside the editor (the folders'
+// symbols, F12 across files): only those with an outline here.
+const BY_EXTENSION = {
+  js: 'JavaScript', mjs: 'JavaScript', cjs: 'JavaScript', jsx: 'JSX', ts: 'TypeScript', mts: 'TypeScript', cts: 'TypeScript', tsx: 'TSX',
+  py: 'Python', pyw: 'Python', sql: 'SQL', cs: 'C#', java: 'Java', go: 'Go', rs: 'Rust', sh: 'Shell', bash: 'Shell', zsh: 'Shell',
+  ps1: 'PowerShell', psm1: 'PowerShell', yml: 'YAML', yaml: 'YAML', c: 'C', h: 'C', cpp: 'C++', cc: 'C++', cxx: 'C++', hpp: 'C++', hh: 'C++',
+  m: 'Objective-C', mm: 'Objective-C++', php: 'PHP', rb: 'Ruby', kt: 'Kotlin', kts: 'Kotlin', swift: 'Swift', scala: 'Scala', lua: 'Lua', pl: 'Perl', pm: 'Perl',
+  ini: 'Properties files', properties: 'Properties files', toml: 'TOML', vue: 'JavaScript', svelte: 'JavaScript',
+};
+/** The language a file name says, when this module outlines it ('' when not). */
+export function languageForName(name = '') {
+  const ext = /\.([^.\\/]+)$/.exec(name)?.[1]?.toLowerCase() ?? '';
+  return BY_EXTENSION[ext] ?? '';
+}
+
 /** [{ line, level, title }] for Markdown headings (outside code blocks), or the symbols of code. */
 export function outline(text, language = '') {
   const lines = String(text ?? '').split('\n');

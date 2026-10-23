@@ -581,7 +581,10 @@ function IndentButton({ indent, actions }) {
     ${at && html`<${Menu} items=${items()} at=${at} label="Indentation" owner=${button} onClose=${() => setAt(null)} />`}`;
 }
 
-export function StatusBar({ recording, big, cursor, language, file, repo, disk, settings, actions, problems, problemsOpen }) {
+// "5 lines changed" from the editor's Git changes.
+const changedLines = (changes) => (changes ?? []).reduce((n, c) => n + (c.kind === 'deleted' ? 1 : c.to - c.from + 1), 0);
+
+export function StatusBar({ recording, big, cursor, language, file, repo, disk, settings, actions, problems, problemsOpen, git }) {
   const setLanguage = (value) => file && actions.patch(file.id, { language: value === 'auto' ? '' : value });
   let state = '';
   const kind = file ? 'synced' : repo ? 'doc' : disk ? (isRemotePath(disk.path) ? 'remote' : 'disk') : null;
@@ -605,6 +608,12 @@ export function StatusBar({ recording, big, cursor, language, file, repo, disk, 
       aria-pressed=${Boolean(problemsOpen)} title=${`${problemsSummary(problems.list)} (Ctrl+Shift+M; F8 goes to the next)`} onClick=${actions.toggleProblems}>
       <${Icon} name="xCircle" size=${13} /><span>${problems.list.filter((p) => p.severity === 'error').length}</span>
       <${Icon} name="alert" size=${13} /><span>${problems.list.filter((p) => p.severity !== 'error').length}</span>
+    </button>`}
+    ${git &&
+    html`<button type="button" class="status-item status-btn-text status-git hide-narrow" disabled=${!git.tracked}
+      title=${git.tracked ? `Git: branch ${git.branch}${git.changes ? ` · ${changedLines(git.changes) ? `${changedLines(git.changes)} line${changedLines(git.changes) === 1 ? '' : 's'} changed` : 'no changes'} since the last commit` : ''}. Click to compare.` : `Git: branch ${git.branch} · a new file, not committed yet`}
+      onClick=${() => actions.compareWithHead()}>
+      <${Icon} name="branch" size=${13} /><span>${git.branch}</span>${git.tracked && git.changes && changedLines(git.changes) > 0 ? html`<span class="git-count">±${changedLines(git.changes)}</span>` : ''}
     </button>`}
     <span class="spacer" />
     ${cursor?.scope && html`<button type="button" class="status-item status-btn-text status-scope hide-narrow" title=${`In ${cursor.scope} · Ctrl+P then @ goes to another`} onClick=${() => actions.gotoSymbol()}>

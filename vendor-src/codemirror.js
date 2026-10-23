@@ -19,6 +19,8 @@ export {
   MatchDecorator,
   WidgetType,
   runScopeHandlers,
+  gutter,
+  GutterMarker,
 } from '@codemirror/view';
 export { EditorState, EditorSelection, Compartment, Prec, Annotation, Transaction, StateField, StateEffect, RangeSetBuilder, Facet } from '@codemirror/state';
 export {

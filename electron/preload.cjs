@@ -69,6 +69,8 @@ contextBridge.exposeInMainWorld('desktop', {
     // The filter in the folders inside `dir`: { found: [{ entry, parent }], folders, truncated, stopped }.
     findNames: (searchId, dir, query, opts) => ipcRenderer.invoke('folder:find-names', searchId, dir, query, opts),
     index: (dir, opts) => ipcRenderer.invoke('folder:index', dir, opts),
+    replace: (dir, query, opts, replacement, paths) => ipcRenderer.invoke('folder:replace', dir, query, opts, replacement, paths),
+    replaceUndo: (id) => ipcRenderer.invoke('folder:replace-undo', id),
     onFound(callback) {
       const found = (_event, data) => callback({ type: 'found', ...data });
       const progress = (_event, data) => callback({ type: 'progress', ...data });
@@ -133,6 +135,16 @@ contextBridge.exposeInMainWorld('desktop', {
     paste: () => ipcRenderer.invoke('edit:paste'),
   },
   // Servers (SFTP, FTP, FTPS): files there are remote://<id>/<path> and go through disk and folders above.
+  // Code across the folders shown: where a name is declared, symbols by name (Ctrl+T).
+  code: {
+    declarations: (dirs, word) => ipcRenderer.invoke('code:declarations', dirs, word),
+    symbols: (dirs, query) => ipcRenderer.invoke('code:symbols', dirs, query),
+  },
+  // Git for folders on this computer: status, a file at the last commit.
+  git: {
+    status: (dir) => ipcRenderer.invoke('git:status', dir),
+    head: (file) => ipcRenderer.invoke('git:head', file),
+  },
   remote: {
     connections: () => ipcRenderer.invoke('remote:connections'),
     // `secrets`: { password, passphrase } to keep (sent once; never read back).

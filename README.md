@@ -58,6 +58,9 @@ It is the companion of [Tracker](https://github.com/divaor/tracking_app) and sha
 - **Help** (`F1`): every command and its shortcut in a searchable cheat sheet you can run commands from (or print), and the full guide.
 - **Editing tools**: go to line, multiple cursors, select next occurrence, comment lines, duplicate/delete/sort lines, remove duplicates, trim trailing spaces, upper/lower case, format JSON, word wrap, visible whitespace, bracket matching.
 - **Code tools** (not a full IDE): fold and unfold blocks, everything at once (`Alt+0` / `Alt+Shift+0`) or by level (`Alt+1`–`Alt+3`: classes, then their methods); **go to the declaration** (`F12`), **usages** (`Shift+F12`) and **rename** (`F2`) of a name in the file; **go to a function or section** (`Ctrl+P`, then `@`); the status bar names the function you are in; the name under the cursor is highlighted where else it is used. YAML and plain text fold by indentation.
+- **Across files**: `F12` on a name not declared in the open file finds it in your other files and in the folders open in Folders (a list when there are several); `Ctrl+T` (or `Ctrl+P` then `#`) goes to a class, function or section in any of them.
+- **Git** (folders on this computer, read-only, with the `git` program): the branch next to the folder, files marked M/U/A/R/C by what changed since the last commit, a bar of changed lines next to the line numbers, the branch and count in the status bar, and **Compare with the last commit**.
+- **Replace in a folder**: Find in this folder has a Replace line, with a preview of each change, files to leave out, and Undo (here and on servers).
 - **Problems as you type**: mistakes are underlined in JSON (comments allowed in `tsconfig.json`, `.jsonc` and the like), YAML (also a key twice, tabs, an open quote), XML, HTML, CSS and code (JavaScript, TypeScript, Python, Go, Java, PHP, C/C++, Rust); the status bar counts them, `Ctrl+Shift+M` lists them, `F8` / `Shift+F8` go to the next / previous one.
 - **Indentation per file**: tabs or spaces and how many, from the file's text or its `.editorconfig` (files on disk and on servers); the status bar shows it (`Spaces: 2`), changes it and converts the file. Indentation guides, brackets colored by depth, and sticky scroll (the lines of the class and function you are in stay at the top), each one can be turned off in Settings → Editor.
 - **Preview**: a reading view next to the text (instead of it on phones):
@@ -330,6 +333,7 @@ All three are in **Settings → Desktop**, off until you turn them on.
 | `Ctrl+F` / `Ctrl+H` | Find / replace in this file |
 | `Ctrl+G` | Go to line |
 | `Ctrl+Shift+M` / `F8` / `Shift+F8` | Problems in this file / next one / previous one |
+| `Ctrl+T` | Go to a class, function or section in any file (desktop) |
 | `Ctrl+D` | Select the next occurrence |
 | `Ctrl+/` | Comment lines |
 | `Alt+Z` | Word wrap |
