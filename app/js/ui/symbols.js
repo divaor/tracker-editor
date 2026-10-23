@@ -88,9 +88,27 @@ function whereOf(row) {
  * Ctrl+T: a class, function or section in any file: your files and those in the folders
  * open in Folders (`roots`: [{ dir, label, kind }], read in the main process).
  */
-export function SymbolSearch({ files, roots, actions, onClose, initial = '' }) {
+export function SymbolSearch({ files, roots, servers = null, actions, onClose, initial = '' }) {
   const [query, setQuery] = useState(initial);
   const [inFolders, setInFolders] = useState({ list: [], loading: roots.length > 0, truncated: false });
+  // The language servers' own (workspace/symbol): precise, for the projects they run for.
+  const [fromServers, setFromServers] = useState([]);
+  useEffect(() => {
+    if (!servers || !query.trim()) return setFromServers([]);
+    let stale = false;
+    const timer = setTimeout(
+      () =>
+        servers.workspaceSymbols(query.trim()).then(
+          (list) => !stale && setFromServers(list.filter((s) => rootOf(s.path, roots)).map((s) => ({ ...s, rel: relOf(s.path, roots), kind: kindOf(s.path, roots), symbolKind: s.kind }))),
+          () => !stale && setFromServers([]),
+        ),
+      180,
+    );
+    return () => {
+      stale = true;
+      clearTimeout(timer);
+    };
+  }, [query]);
   const own = useMemo(() => files.flatMap((f) => symbolsOf(f).map((s) => ({ ...s, id: f.id, fileName: f.name }))), [files]);
   useEffect(() => {
     if (!roots.length || !window.desktop?.code) return undefined;
@@ -109,16 +127,19 @@ export function SymbolSearch({ files, roots, actions, onClose, initial = '' }) {
     };
   }, [query]);
   const rows = useMemo(() => {
-    const scored = [...own, ...inFolders.list].map((s, i) => ({ s, i, score: query ? fuzzyScore(s.title, query) : 0 })).filter((r) => r.score >= 0);
+    // A server's answer first when two name the same place.
+    const seen = new Set(fromServers.map((s) => `${s.path}:${s.line}`));
+    const all = [...fromServers, ...own, ...inFolders.list.filter((s) => !seen.has(`${s.path}:${s.line}`))];
+    const scored = all.map((s, i) => ({ s, i, score: query ? fuzzyScore(s.title, query) : 0 })).filter((r) => r.score >= 0);
     scored.sort((a, b) => b.score - a.score || a.i - b.i);
     return scored.slice(0, 200).map((r) => r.s);
-  }, [own, inFolders, query]);
+  }, [own, inFolders, fromServers, query]);
   return html`<${PickList} title="Go to a symbol in all files" placeholder="Type part of a class, function or section name…" query=${query} setQuery=${setQuery} rows=${rows}
     onClose=${onClose} onPick=${(s) => actions.openAt(s)}
     empty=${inFolders.loading ? 'Reading the files in your folders…' : query ? 'No class, function or section matches.' : 'No classes, functions or sections found.'}
     note=${inFolders.truncated ? 'Some folders have too many files: only part of them was read.' : ''}
     render=${(s) => html`<${Icon} name=${s.level > 1 ? 'chevronRight' : 'code'} size=${14} class=${s.kind ? `quick-kind kind-${s.kind}` : ''} />
-      <span class="quick-name">${s.title}</span>${whereOf(s)}<span class="spacer" /><span class="muted small">line ${s.line}</span>`} />`;
+      <span class="quick-name">${s.title}</span>${s.container && html`<span class="muted small">${s.container}</span>`}${whereOf(s)}<span class="spacer" />${s.symbolKind && html`<span class="muted small" title=${`From ${s.server}`}>${s.symbolKind}</span>`}<span class="muted small">line ${s.line}</span>`} />`;
 }
 
 const rootOf = (path, roots) => roots.find((r) => path === r.dir || path.startsWith(`${r.dir.replace(/[\\/]+$/, '')}/`) || path.startsWith(`${r.dir.replace(/[\\/]+$/, '')}\\`));

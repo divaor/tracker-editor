@@ -7,7 +7,7 @@ import { Icon } from './icons.js';
  * do not clip it. Items: { label, icon?, run, disabled?, danger?, checked?, hint?, key? },
  * { separator: true } or { heading: true, label, color? }. Closes on a choice, a click elsewhere or Escape.
  */
-export function Menu({ items, at, onClose, label = 'Menu', owner }) {
+export function Menu({ items, at, onClose, label = 'Menu', owner, className = '' }) {
   const ref = useRef(null);
   const [pos, setPos] = useState({ left: at.x, top: at.y });
   useLayoutEffect(() => {
@@ -39,7 +39,7 @@ export function Menu({ items, at, onClose, label = 'Menu', owner }) {
       document.removeEventListener('keydown', onKey, true);
     };
   }, []);
-  return html`<div class="menu" role="menu" aria-label=${label} ref=${ref} style=${{ left: `${pos.left}px`, top: `${pos.top}px` }}>
+  return html`<div class="menu ${className}" role="menu" aria-label=${label} ref=${ref} style=${{ left: `${pos.left}px`, top: `${pos.top}px` }}>
     ${items.filter(Boolean).map((item, i) =>
       item.separator
         ? html`<div class="menu-separator" key=${`s${i}`} role="separator" />`

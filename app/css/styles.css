@@ -7830,3 +7830,161 @@ button.help-command:focus-visible {
 .ft-green { color: var(--ft-green); }
 .ft-brown { color: var(--ft-brown); }
 .ft-gray { color: var(--ft-gray); }
+
+/* ---- Edits a language server makes across files (ui/languageServers.js WorkspaceEditDialog) ---- */
+.edit-files {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: min(60vh, 520px);
+  overflow: auto;
+}
+
+.edit-file {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--surface);
+}
+
+.edit-file.failed {
+  opacity: 0.7;
+}
+
+.edit-file-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 8px;
+}
+
+.edit-file-name {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+.edit-name {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.edit-rel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.edit-lines {
+  border-top: 1px solid var(--border);
+  padding: 4px 0;
+  overflow-x: auto;
+}
+
+.edit-hunk + .edit-hunk {
+  border-top: 1px dashed var(--border);
+}
+
+.edit-line {
+  display: flex;
+  gap: 6px;
+  padding: 0 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre;
+}
+
+.edit-line code {
+  font: inherit;
+  background: none;
+}
+
+.edit-line.del {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--danger);
+}
+
+.edit-line.ins {
+  background: color-mix(in srgb, var(--git-added) 12%, transparent);
+  color: var(--git-added);
+}
+
+.edit-ln {
+  min-width: 3ch;
+  text-align: right;
+  color: var(--muted);
+}
+
+.edit-mark {
+  width: 1ch;
+}
+
+.edit-summary {
+  align-self: center;
+}
+
+/* The 💡 at the end of a line with a problem (lsp.js), and the quick fixes menu. */
+.cm-lightbulb {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: #d9a400;
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+.cm-lightbulb:hover {
+  background: color-mix(in srgb, #d9a400 18%, transparent);
+}
+
+.menu.code-actions {
+  max-width: min(520px, calc(100vw - 16px));
+  max-height: min(60vh, 460px);
+  overflow-y: auto;
+}
+
+.menu.code-actions .menu-item > span:not(.menu-icon) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Settings → Language servers: the person's own servers. */
+.custom-server {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  min-width: 0;
+}
+
+.custom-server-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.custom-server-text code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+}
+
+.custom-server-form {
+  margin-top: 8px;
+}

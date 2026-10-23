@@ -22,8 +22,9 @@ import { findFileRefs, resolveRef } from './fileRefs.js';
 import { claudeAppPrompt, claudeAppUrl, codeAround, errorContextText, EXPLAIN_ERROR, explainProblemAction, fixForErrorAction, fixProblemsAction } from './errorHelp.js';
 import { TerminalPanel } from './ui/terminal.js';
 import { createLanguageServers } from './lsp.js';
-import { editsByFile, lineOf, textChanges, uriPath } from './lspTools.js';
-import { LanguageServersPanel, ReferencesPanel, RenameSymbolDialog, SetupServerDialog } from './ui/languageServers.js';
+import { applyTextEdits, changedLines, codeActionRows, editPlan, lineOf, textChanges, uriPath } from './lspTools.js';
+import { Menu } from './ui/menu.js';
+import { LanguageServersPanel, ReferencesPanel, RenameSymbolDialog, SetupServerDialog, WorkspaceEditDialog } from './ui/languageServers.js';
 import { FolderSearchPanel } from './ui/folderSearch.js';
 import { PropertiesDialog } from './ui/properties.js';
 import { lastSyncText, mirror as mirrorById, onMirrors, watchMirrors as watchMirrorStatus } from './mirrors.js';
@@ -123,6 +124,11 @@ const folderRoots = (settings) =>
         isRemotePath(dir) ? { dir, kind: 'remote', label: server(remoteParts(dir).id)?.name ?? 'Server' } : { dir, kind: 'disk', label: baseName(dir) },
       )
     : [];
+// A path as "folder/inside/it" when it is in one of the folders open in Folders, else as it is.
+const relInFolders = (path, settings) => {
+  const root = folderRoots(settings).find((r) => path.startsWith(`${r.dir.replace(/[\\/]+$/, '')}/`) || path.startsWith(`${r.dir.replace(/[\\/]+$/, '')}\\`));
+  return root ? `${root.label}/${path.slice(root.dir.replace(/[\\/]+$/, '').length + 1).replace(/\\/g, '/')}` : path;
+};
 
 function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setCompare, setUsagesOf, setSearchSeed }) {
   return useMemo(() => {
@@ -429,6 +435,8 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         const source = part ? part.text : now.text;
         if (!source.trim()) return;
         const formatter = formatterFor(now.name, findLanguage(now.name, now.language)?.name ?? '') ?? guessFormatter(source);
+        // A language server that formats: first, unless the editor's own are chosen (Settings), or alone.
+        if ((getSettings().formatter !== 'builtin' || !formatter) && (await actions.formatWithServer?.(now.key, part))) return;
         if (!formatter) return toast(`No formatter for this kind of file. Pick its language in the status bar; these can be formatted: ${FORMATTABLE}.`, { timeout: 8000 });
         if (source.length > 5 * 1024 * 1024 && !['json', 'xml'].includes(formatter.kind)) return toast('This is too large to format here.');
         const { tabSize = 4 } = getSettings();
@@ -1240,6 +1248,7 @@ export function App() {
   const lspRef = useRef(null); // language servers (lsp.js), desktop
   const [lspTick, setLspTick] = useState(0);
   const [refs, setRefs] = useState(null); // { word, list, server }: the References panel
+  const [codeMenu, setCodeMenu] = useState(null); // { key, rows, at }: a language server's quick fixes
   const actions = useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setCompare, setUsagesOf, setSearchSeed });
   const editorOptions = (s) => ({ ...s, dark: resolvedTheme(s.theme) === 'dark', inlineSuggest: Boolean(s.inlineSuggest && s.llm.enabled && s.llm.provider !== 'async') });
 
@@ -1431,7 +1440,7 @@ export function App() {
       },
       onSuggest: (request) => actions.suggestText(request),
       // A problem's tooltip: the model explains it, or fixes the file's problems.
-      onProblemAction: (kind, key, problem) => (kind === 'fix' ? actions.fixProblems(key) : actions.explainProblem(problem, key)),
+      onProblemAction: (kind, key, problem) => (kind === 'quickfix' ? actions.quickFix({ key, from: problem.from, to: problem.to }) : kind === 'fix' ? actions.fixProblems(key) : actions.explainProblem(problem, key)),
       // An image pasted or dropped into the text: read its text.
       onImage: (file) => actions.readImages([{ blob: file, name: file.name || 'Pasted image' }]),
       linkTargets: () => store.live().map((f) => linkName(f.name)),
@@ -1468,6 +1477,8 @@ export function App() {
         if (name === 'definition') actions.goToDefinition();
         if (name === 'usages') actions.findUsages();
         if (name === 'renameSymbol') actions.renameSymbol();
+        if (name === 'quickFix') actions.quickFix();
+        if (name === 'organizeImports') actions.organizeImports();
         return true;
       },
     });
@@ -1476,12 +1487,25 @@ export function App() {
       onChange: () => setLspTick((n) => n + 1),
       onMessage: (text, kind) => toast(text, { kind, timeout: 8000 }),
       openPath: (path) => actions.openDiskPath(path),
+      // Edits a server asks for (after a command): shown first when they reach files not open.
+      applyEdit: (edit, { label, server }) => actions.applyWorkspaceEdit(edit, { title: label || `Changes from ${server}`, userEvent: 'input.codeaction' }),
+      onQuickFix: () => actions.quickFix(),
     });
   }, []);
   // Turned off in Settings: the tabs lose their servers (turned on again: when shown next).
   useEffect(() => {
     if (settings.languageServers === false) lspRef.current?.detachAll();
   }, [settings.languageServers]);
+  // A server of your own added or removed (Settings): the tabs without one look again.
+  useEffect(() => {
+    const onChanged = () => {
+      const key = store.session.active;
+      const disk = key?.startsWith('d:') ? store.diskTab(key.slice(2)) : null;
+      lspRef.current?.refresh(disk && !isRemotePath(disk.path) && getSettings().languageServers !== false ? key : null, disk?.path);
+    };
+    window.addEventListener('lsp:servers-changed', onChanged);
+    return () => window.removeEventListener('lsp:servers-changed', onChanged);
+  }, []);
   useEffect(
     () => hostRef.current?.applySettings(editorOptions(settings)),
     [settings.theme, settings.wordWrap, settings.showWhitespace, settings.tabSize, settings.lineNumbers, settings.problems, settings.indentGuides, settings.bracketColors, settings.stickyScroll, settings.detectIndent, settings.indentChosen, settings.emmet, settings.linkedTags, settings.inlineSuggest, settings.llm],
@@ -1607,86 +1631,280 @@ export function App() {
     }
     return ownWays.current.findUsages();
   };
-  actions.renameSymbol = () => {
+  actions.renameSymbol = async () => {
     const w = actions.codeWord();
     if (!w) return;
-    if (serverOf(w.ctx.key)?.statusOf(w.ctx.key)) return setDialog({ type: 'renameSymbol', word: w.word, key: w.ctx.key, pos: w.from });
-    return ownWays.current.renameSymbol();
+    const lsp = serverOf(w.ctx.key);
+    const provider = lsp?.capability(w.ctx.key, 'renameProvider');
+    if (!provider) return ownWays.current.renameSymbol();
+    let word = w.word;
+    // The server says first whether (and what) can be renamed here.
+    if (provider.prepareProvider) {
+      try {
+        const r = await lsp.request(w.ctx.key, 'textDocument/prepareRename', w.from);
+        if (!r) return toast(`“${w.word}” cannot be renamed here.`);
+        if (r.placeholder) word = r.placeholder;
+      } catch (err) {
+        return toast(`“${w.word}” cannot be renamed: ${err?.message ?? err}`, { kind: 'error', timeout: 8000 });
+      }
+    }
+    setDialog({ type: 'renameSymbol', word, key: w.ctx.key, pos: w.from });
   };
-  /**
-   * F2 with a server: its rename, in every file it names. Open tabs change as an edit Ctrl+Z takes
-   * back; files not open (inside the folders you opened, 30 at most) open as tabs with the change,
-   * not saved yet.
-   */
+  /** F2 with a server: its rename, everywhere it finds the name (other files: shown first). */
   actions.renameWithServer = async ({ key, pos, word }, newName) => {
-    const lsp = lspRef.current;
-    const host = hostRef.current;
     let edit;
     try {
-      edit = await lsp?.request(key, 'textDocument/rename', pos, { newName }, 'renameProvider');
+      edit = await lspRef.current?.request(key, 'textDocument/rename', pos, { newName }, 'renameProvider');
     } catch (err) {
       return toast(`Could not rename “${word}”: ${err?.message ?? err}`, { kind: 'error', timeout: 8000 });
     }
-    const files = editsByFile(edit).filter((f) => f.edits.length);
-    if (!files.length) return toast(`The language server has nothing to rename for “${word}”.`);
+    if (!edit || !editPlan(edit).files.length) return toast(`The language server has nothing to rename for “${word}”.`);
+    return actions.applyWorkspaceEdit(edit, { title: `Rename “${word}” to “${newName}”`, preview: 'always', userEvent: 'input.rename' });
+  };
+
+  /**
+   * Makes the edits a language server asks for (a rename, a quick fix, workspace/applyEdit):
+   * - a tab with an editor changes as an edit Ctrl+Z takes back; an open tab not shown yet gets
+   *   the change in its text; neither is saved (like typing);
+   * - files not open are written to disk, each only if it did not change since it was read;
+   *   new files are made inside the folders you opened (renaming or deleting files: not done);
+   * - `preview` 'always' shows the changes first when they reach other files, 'auto' when they
+   *   reach files not open, 'never' does not.
+   * Undo (in the message) takes it all back where nothing changed since. Returns
+   * { applied, failureReason }, the answer to workspace/applyEdit.
+   */
+  actions.applyWorkspaceEdit = async (edit, { title = 'Changes', preview = 'auto', userEvent = 'input' } = {}) => {
+    const plan = editPlan(edit);
+    if (plan.unsupported.length) {
+      toast(`${title}: this would ${plan.unsupported.join(' and ')} files, which the editor does not do. Nothing was changed.`, { kind: 'error', timeout: 9000 });
+      return { applied: false, failureReason: `The editor does not ${plan.unsupported.join(' or ')} files.` };
+    }
+    if (!plan.files.length && !plan.creates.length) return { applied: true };
+    const host = hostRef.current;
+    const lsp = lspRef.current;
     host.flushAll();
-    const back = store.session.active;
-    const skipped = [];
-    let places = 0;
-    let opened = 0;
-    const closed = files.filter((f) => !store.diskTab(uriPath(f.uri) ?? ''));
-    if (closed.length > 30) return toast(`“${word}” is used in ${closed.length} files that are not open: too many to open as tabs (30 at most). Nothing was changed.`, { kind: 'error', timeout: 10000 });
-    for (const f of files) {
+    // Line breaks as the editor keeps them (files with \r\n are written back with theirs).
+    const clean = (edits) => edits.map((e) => ({ ...e, newText: String(e.newText ?? '').replace(/\r\n?/g, '\n') }));
+    const entries = [];
+    for (const c of plan.creates) {
+      const path = uriPath(c.uri);
+      if (path) entries.push({ path, kind: 'new', create: c, base: '', edits: [] });
+    }
+    for (const f of plan.files) {
       const path = uriPath(f.uri);
-      if (!path) continue;
-      const k = diskKey(path);
-      const state = host.stateOf(k);
+      const edits = clean(f.edits);
+      if (!path) {
+        entries.push({ path: f.uri, error: 'not a file on this computer', edits });
+        continue;
+      }
+      const made = entries.find((e) => e.kind === 'new' && e.path === path);
+      if (made) {
+        made.edits.push(...edits);
+        continue;
+      }
+      const key = diskKey(path);
+      const state = host.stateOf(key);
       if (state) {
         // An open tab: the edits are for the text the server had, which is the text now (just sent).
-        const synced = lsp.syncedText(k);
-        const changes = synced === null || synced === state.doc.toString() ? textChanges(state.doc.toString(), f.edits) : null;
-        if (!changes) {
-          skipped.push(path);
-          continue;
-        }
-        host.applyChanges(k, { changes, userEvent: 'input.rename' });
-        places += changes.length;
+        const text = state.doc.toString();
+        const synced = lsp?.syncedText(key);
+        entries.push({ path, key, kind: 'tab', base: text, edits, ...(synced != null && synced !== text ? { error: 'changed since the server looked: try again' } : {}) });
         continue;
       }
-      // A file not open, or a tab not shown since the app started (its text is read again): the
-      // change goes into its text before the tab is ever shown, so it opens with it, unsaved.
       const tab = store.diskTab(path);
-      let info = null;
-      if (!tab || tab.stale) {
-        try {
-          info = await window.desktop.disk.read(path);
-        } catch {
-          skipped.push(path);
-          continue;
-        }
-      }
-      const base = info ? info.text : tab.text;
-      const changes = textChanges(base, f.edits);
-      if (!changes) {
-        skipped.push(path);
+      if (tab && !tab.stale) {
+        entries.push({ path, key, kind: 'stored', base: tab.text, edits });
         continue;
       }
-      let text = base;
-      for (const c of [...changes].reverse()) text = text.slice(0, c.from) + c.insert + text.slice(c.to);
-      if (!tab) {
-        store.openDiskFile(info);
-        window.desktop.disk.watch(path).catch(() => {});
-        opened++;
-      } else if (info) store.diskReloaded(path, info);
-      store.setDiskText(path, text, { urgent: true });
-      places += changes.length;
+      // Not open (or open but not read since the app started): on disk.
+      try {
+        const info = await window.desktop.disk.read(path);
+        entries.push(info.truncated ? { path, error: 'too large', edits } : { path, kind: 'disk', base: info.text, info, edits });
+      } catch (err) {
+        entries.push({ path, error: ipcMessage(err), edits });
+      }
     }
-    if (back && store.session.active !== back) store.open(back);
-    const fileCount = files.length - skipped.length;
-    toast(
-      `Renamed “${word}” to “${newName}”: ${places} place${places === 1 ? '' : 's'} in ${fileCount} file${fileCount === 1 ? '' : 's'}${opened ? ` (${opened} opened as tabs, not saved yet)` : ''}.${skipped.length ? ` Not changed: ${skipped.map((p) => p.split(/[\\/]/).pop()).join(', ')}.` : ''}`,
-      { kind: skipped.length ? 'error' : 'info', timeout: 10000 },
-    );
+    for (const e of entries) {
+      if (e.error) continue;
+      e.next = applyTextEdits(e.base, e.edits);
+      e.rows = changedLines(e.base, e.edits) ?? [];
+      if (e.next === null) e.error = 'the change does not fit the file as it is now';
+    }
+    const elsewhere = entries.some((e) => e.kind === 'disk' || e.kind === 'new');
+    const show = preview === 'always' ? entries.length > 1 || elsewhere : preview === 'auto' && elsewhere;
+    let chosen = entries.filter((e) => !e.error);
+    if (show) {
+      const picked = await new Promise((resolve) => setDialog({ type: 'workspaceEdit', title, entries, onDone: resolve }));
+      setDialog((d) => (d?.type === 'workspaceEdit' ? null : d));
+      if (!picked) return { applied: false, failureReason: 'Cancelled.' };
+      chosen = chosen.filter((e) => picked.includes(e.path));
+    }
+    const skipped = entries.filter((e) => e.error).map((e) => ({ path: e.path, reason: e.error }));
+    const undo = [];
+    const written = [];
+    const made = [];
+    let places = 0;
+    for (const e of chosen) {
+      try {
+        if (e.kind === 'tab') {
+          if (host.stateOf(e.key)?.doc.toString() !== e.base) throw new Error('it changed meanwhile');
+          host.applyChanges(e.key, { changes: textChanges(e.base, e.edits), userEvent });
+          undo.push({ kind: 'tab', key: e.key, before: e.base, after: e.next });
+        } else if (e.kind === 'stored') {
+          if (store.diskTab(e.path)?.text !== e.base) throw new Error('it changed meanwhile');
+          store.setDiskText(e.path, e.next, { urgent: true });
+          undo.push({ kind: 'stored', path: e.path, before: e.base, after: e.next });
+        } else if (e.kind === 'new') {
+          const dir = e.path.replace(/[\\/][^\\/]*$/, '');
+          await window.desktop.folders.newFile(dir, e.path.slice(dir.length + 1), { text: e.next });
+          made.push(e.path);
+          undo.push({ kind: 'new', path: e.path, text: e.next });
+        } else {
+          const format = { eol: e.info.eol, bom: e.info.bom, encoding: e.info.encoding };
+          const w = await window.desktop.disk.write(e.path, e.next, { ...format, expectedMtime: e.info.mtimeMs });
+          if (w.conflict) throw new Error('it changed on disk meanwhile');
+          written.push(e.path);
+          undo.push({ kind: 'disk', path: e.path, before: e.base, format, mtimeMs: w.mtimeMs });
+        }
+        places += e.edits.length;
+      } catch (err) {
+        skipped.push({ path: e.path, reason: ipcMessage(err) });
+      }
+    }
+    if (written.length || made.length) lsp?.filesChanged(written, { created: made });
+    const nameOf = (p) => String(p).split(/[\\/]/).pop();
+    const undoAll = async () => {
+      const failed = [];
+      const back = [];
+      for (const u of [...undo].reverse()) {
+        try {
+          if (u.kind === 'tab') {
+            if (!host.restoreText(u.key, u.after, u.before)) failed.push(u.key.slice(2));
+          } else if (u.kind === 'stored') {
+            if (store.diskTab(u.path)?.text === u.after) store.setDiskText(u.path, u.before, { urgent: true });
+            else failed.push(u.path);
+          } else if (u.kind === 'new') {
+            const now = await window.desktop.disk.read(u.path);
+            if (now.text === u.text) await window.desktop.folders.trash([u.path]);
+            else failed.push(u.path);
+          } else {
+            const w = await window.desktop.disk.write(u.path, u.before, { ...u.format, expectedMtime: u.mtimeMs });
+            if (w.conflict) failed.push(u.path);
+            else back.push(u.path);
+          }
+        } catch {
+          failed.push(u.path ?? u.key);
+        }
+      }
+      if (back.length) lsp?.filesChanged(back);
+      toast(failed.length ? `Undone, except in ${failed.map(nameOf).join(', ')} (changed since).` : 'Undone.', { kind: failed.length ? 'error' : 'info', timeout: 8000 });
+    };
+    const files = undo.length;
+    // A quick fix in the open file speaks for itself; anything wider (or that failed) is told.
+    if (files > 1 || written.length || made.length || skipped.length || preview === 'always') {
+      toast(
+        `${title}: ${places} change${places === 1 ? '' : 's'} in ${files} file${files === 1 ? '' : 's'}${written.length + made.length ? ` (${written.length + made.length} saved to disk)` : ''}.${skipped.length ? ` Not changed: ${skipped.map((x) => `${nameOf(x.path)} (${x.reason})`).join(', ')}.` : ''}`,
+        { kind: skipped.length ? 'error' : 'info', timeout: 12000, ...(undo.length ? { action: { label: 'Undo', run: undoAll } } : {}) },
+      );
+    }
+    return undo.length || !chosen.length ? { applied: true } : { applied: false, failureReason: skipped.map((x) => `${nameOf(x.path)}: ${x.reason}`).join('; ') };
+  };
+
+  /**
+   * Format document with the tab's language server (the selection, or all): true when it did (or
+   * found nothing to change); false when it has none that formats, or it failed.
+   */
+  actions.formatWithServer = async (key, part) => {
+    const lsp = lspRef.current?.has(key) ? lspRef.current : null;
+    if (!lsp?.capability(key, part ? 'documentRangeFormattingProvider' : 'documentFormattingProvider')) return false;
+    const host = hostRef.current;
+    const name = lsp.serverName(key);
+    const state = host.stateOf(key);
+    const before = state.doc.toString();
+    const { tabs, size } = host.indentation(key);
+    const options = { tabSize: size, insertSpaces: !tabs, ...(part ? {} : { trimTrailingWhitespace: true, insertFinalNewline: true, trimFinalNewlines: true }) };
+    const at = (pos) => {
+      const line = state.doc.lineAt(pos);
+      return { line: line.number - 1, character: pos - line.from };
+    };
+    let edits;
+    try {
+      edits = part
+        ? await lsp.requestFile(key, 'textDocument/rangeFormatting', { range: { start: at(part.from), end: at(part.to) }, options }, 'documentRangeFormattingProvider')
+        : await lsp.requestFile(key, 'textDocument/formatting', { options }, 'documentFormattingProvider');
+    } catch (err) {
+      toast(`${name} could not format it: ${err?.message ?? err}`, { kind: 'error', timeout: 8000 });
+      return false;
+    }
+    const changes = edits?.length ? textChanges(before, edits.map((e) => ({ ...e, newText: String(e.newText).replace(/\r\n?/g, '\n') }))) : [];
+    if (changes === null) return false;
+    if (host.stateOf(key)?.doc.toString() !== before) {
+      toast('The text changed meanwhile; format it again.');
+      return true;
+    }
+    if (changes.length) host.applyChanges(key, { changes, userEvent: 'input.format' });
+    if (!changes.length || host.stateOf(key)?.doc.toString() === before) {
+      toast(`Already formatted (${name})`);
+      return true;
+    }
+    toast(`Formatted ${part ? 'the selection ' : ''}by ${name}`, { action: { label: 'Undo', run: () => hostRef.current?.run('undo') } });
+    return true;
+  };
+
+  /**
+   * Ctrl+. (or the 💡, or Quick fix… on a problem): the server's quick fixes and refactorings
+   * for the selection or the cursor (or `at`: { key, from, to }), in a menu by the cursor.
+   */
+  actions.quickFix = async (at = null) => {
+    const host = hostRef.current;
+    const sel = host?.selectionInfo();
+    const key = at?.key ?? sel?.key;
+    const lsp = lspRef.current;
+    if (!key || !lsp?.has(key)) return toast('Quick fixes come from a language server: open a code file from Folders (desktop app).', { timeout: 7000 });
+    if (!lsp.capability(key, 'codeActionProvider')) return toast(`${lsp.serverName(key)} has no quick fixes.`);
+    const from = at?.from ?? sel.from;
+    const to = at?.to ?? sel.to;
+    let result;
+    try {
+      result = await lsp.codeActions(key, from, to);
+    } catch (err) {
+      return toast(`No quick fixes: ${err?.message ?? err}`, { kind: 'error' });
+    }
+    const rows = codeActionRows(result);
+    if (!rows.length) return toast('No quick fixes or refactorings here.');
+    const r = host.coordsAt(key, from);
+    setCodeMenu({ key, rows, at: r ? { x: r.left, y: r.bottom + 4 } : { x: innerWidth / 2 - 160, y: innerHeight / 3 } });
+  };
+  /** Carries out a code action (or a server command): its edit (resolved first if need be), then its command. */
+  actions.runCodeAction = async (key, item) => {
+    const lsp = lspRef.current;
+    try {
+      if (typeof item.command === 'string') return void (await lsp.executeCommand(key, item));
+      const action = await lsp.resolveCodeAction(key, item);
+      if (action.edit) {
+        const done = await actions.applyWorkspaceEdit(action.edit, { title: action.title, userEvent: 'input.codeaction' });
+        if (!done.applied) return;
+      }
+      if (action.command) await lsp.executeCommand(key, action.command);
+    } catch (err) {
+      toast(`${item.title}: ${err?.message ?? err}`, { kind: 'error', timeout: 8000 });
+    }
+  };
+  /** Shift+Alt+O: the server sorts the file's imports and drops the unused ones. */
+  actions.organizeImports = async () => {
+    const key = store.session.active;
+    const lsp = lspRef.current;
+    if (!key || !lsp?.has(key)) return toast('Organize imports comes from a language server: open a code file from Folders (desktop app).', { timeout: 7000 });
+    const state = hostRef.current.stateOf(key);
+    let result = null;
+    try {
+      result = await lsp.codeActions(key, 0, state.doc.length, ['source.organizeImports']);
+    } catch {
+      // none
+    }
+    const row = codeActionRows(result).find((r) => r.kind.startsWith('source.organizeImports') && !r.disabled);
+    if (!row) return toast(`${lsp.serverName(key)} has no imports to organize here.`);
+    return actions.runCodeAction(key, row.item);
   };
   actions.setUpLanguageServer = (missing) => setDialog({ type: 'lspSetup', missing });
   actions.retryLanguageServer = () => lspRef.current?.retry(store.session.active);
@@ -2409,6 +2627,8 @@ export function App() {
       'goto-definition': () => actions.goToDefinition(),
       'find-usages': () => actions.findUsages(),
       'rename-symbol': () => actions.renameSymbol(),
+      'quick-fix': () => actions.quickFix(),
+      'organize-imports': () => actions.organizeImports(),
       'language-servers': () => actions.showLanguageServers(),
       'goto-symbol': () => actions.gotoSymbol(),
       'goto-symbol-all': () => actions.gotoSymbolAll(),
@@ -2602,7 +2822,14 @@ export function App() {
       : html`<${QuickOpen} files=${store.live()} docs=${docs} openTabs=${openDiskTabs()} actions=${actions} initial=${dialog.query ?? ''} symbols=${() => (activeKey ? (hostRef.current?.codeContext()?.symbols ?? []) : [])}
           roots=${folderRoots(settings)} hidden=${Boolean(settings.showHidden)} onSymbol=${(entry) => actions.revealSymbol(entry)} onClose=${() => setDialog(null)} />`)}
     ${dialog?.type === 'palette' && html`<${CommandPalette} initial=${dialog.query ?? ''} onRun=${(c) => setTimeout(() => actions.command(c.id), 0)} onClose=${() => setDialog(null)} />`}
-    ${dialog?.type === 'symbols' && html`<${SymbolSearch} files=${store.live()} roots=${folderRoots(settings)} initial=${dialog.query ?? ''} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'symbols' && html`<${SymbolSearch} files=${store.live()} roots=${folderRoots(settings)} servers=${settings.languageServers !== false ? lspRef.current : null} initial=${dialog.query ?? ''} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'workspaceEdit' && html`<${WorkspaceEditDialog} title=${dialog.title} entries=${dialog.entries} rel=${(p) => relInFolders(p, settings)} onDone=${dialog.onDone} />`}
+    ${codeMenu &&
+    html`<${Menu} className="code-actions" label="Quick fixes and refactorings" at=${codeMenu.at} onClose=${() => (setCodeMenu(null), hostRef.current?.focus())}
+      items=${codeMenu.rows.flatMap((r, i) => [
+        ...(i === 0 || codeMenu.rows[i - 1].group !== r.group ? [{ heading: true, label: r.group, key: `h-${r.group}` }] : []),
+        { key: `a${i}`, label: r.title, icon: r.preferred ? 'bulb' : undefined, disabled: Boolean(r.disabled), hint: r.disabled || undefined, run: () => actions.runCodeAction(codeMenu.key, r.item) },
+      ])} />`}
     ${dialog?.type === 'folderGroup' && html`<${FolderGroupDialog} path=${dialog.path} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'sideBySide' && html`<${SideBySideDialog} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'lspSetup' && html`<${SetupServerDialog} missing=${dialog.missing} actions=${actions} onClose=${() => setDialog(null)} />`}

@@ -246,6 +246,10 @@ contextBridge.exposeInMainWorld('desktop', {
     stop: (id) => ipcRenderer.invoke('lsp:stop', id),
     restart: (id) => ipcRenderer.invoke('lsp:restart', id),
     list: () => ipcRenderer.invoke('lsp:list'),
+    // Servers the person adds: saving one asks in a native dialog (the page cannot add one alone).
+    customList: () => ipcRenderer.invoke('lsp:custom-list'),
+    customSave: (def) => ipcRenderer.invoke('lsp:custom-save', def),
+    customRemove: (id) => ipcRenderer.invoke('lsp:custom-remove', id),
     onMessage(callback) {
       const listener = (_event, message) => callback(message);
       ipcRenderer.on('lsp:message', listener);

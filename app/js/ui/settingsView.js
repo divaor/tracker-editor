@@ -198,10 +198,6 @@ function EditorCard({ settings }) {
       <${Check} checked=${Boolean(settings.inlineSuggest)} label="Suggest the rest as you type (the model)"
         hint=${settings.llm.enabled && settings.llm.provider !== 'async' ? 'Grey text after the cursor: Tab takes it, Ctrl+→ one word, Esc drops it. A code model (Settings → Model → Model for suggestions) works best.' : 'Needs a model on this computer or a server that answers at once: set it up under Model.'}
         onChange=${(v) => saveSettings({ inlineSuggest: v })} />
-      ${window.desktop?.lsp &&
-      html`<${Check} checked=${settings.languageServers !== false} label="Language servers for code (TypeScript, JavaScript, Python)"
-        hint="Type errors, completion with types, hover and F12 / Shift+F12 / F2 across the project, for files opened from Folders. Uses the servers installed on this computer; the status bar offers Set up… when one is missing."
-        onChange=${(v) => saveSettings({ languageServers: v })} />`}
       <${Check} checked=${settings.indentGuides !== false} label="Indentation guides" onChange=${(v) => saveSettings({ indentGuides: v })} />
       <${Check} checked=${settings.bracketColors !== false} label="Color bracket pairs by depth" onChange=${(v) => saveSettings({ bracketColors: v })} />
       <${Check} checked=${settings.stickyScroll !== false} label="Sticky scroll" hint="The lines that start the function or section you are in stay at the top"
@@ -238,6 +234,87 @@ function EditorCard({ settings }) {
 }
 
 // Desktop only: typing a selection or file into another window (Alt+T).
+const BUILT_IN_SERVERS = 'TypeScript and JavaScript, Python, Go, Rust, C and C++, JSON, CSS, HTML, YAML and Bash';
+const quoteArg = (a) => (/[\s"']/.test(a) || !a ? `"${a.replace(/"/g, '\\"')}"` : a);
+const ipcMessage = (err) => String(err?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
+
+/**
+ * Language servers (desktop): on or off, which formatter goes first, and servers of your own for
+ * other languages (the main process asks you to confirm the exact program before keeping one).
+ */
+function LanguageServersCard({ settings, actions }) {
+  const bridge = window.desktop.lsp;
+  const [list, setList] = useState(null);
+  const [draft, setDraft] = useState(null); // the server being added or changed
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    bridge.customList().then(setList, () => setList([]));
+  }, []);
+  // The open tabs look for their server again.
+  const changed = (next) => {
+    setList(next);
+    window.dispatchEvent(new CustomEvent('lsp:servers-changed'));
+  };
+  const set = (name) => (e) => setDraft({ ...draft, [name]: e.currentTarget.value });
+  const save = async (e) => {
+    e.preventDefault();
+    setError('');
+    setBusy(true);
+    try {
+      const r = await bridge.customSave(draft);
+      if (r.cancelled) return;
+      changed(r.list);
+      actions.toast(`${draft.label.trim()} is set up: it starts when you open one of its files from Folders.`, { timeout: 8000 });
+      setDraft(null);
+    } catch (err) {
+      setError(ipcMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const edit = (c) => setDraft({ id: c.id, label: c.label, exts: c.exts.join(', '), command: c.command, args: c.args.map(quoteArg).join(' '), markers: c.markers.join(', ') });
+  return html`<${Card} title="Language servers" icon="code" id="language-servers">
+    <${Check} checked=${settings.languageServers !== false} label="Language servers for code"
+      hint=${`Type errors, completion with types, hover, quick fixes (Ctrl+.) and F12 / Shift+F12 / F2 across the project, for files opened from Folders. Built in: ${BUILT_IN_SERVERS}, each once installed on this computer (the status bar offers Set up… when one is missing).`}
+      onChange=${(v) => saveSettings({ languageServers: v })} />
+    <div class="field-grid">
+      <div class="field span-2"><span>Format document (Shift+Alt+F) uses first</span>
+        <${Segmented} small label="Formatter" value=${settings.formatter === 'builtin' ? 'builtin' : 'server'} onChange=${(formatter) => saveSettings({ formatter })}
+          options=${[{ id: 'server', label: 'The language server' }, { id: 'builtin', label: 'Prettier and the editor’s own' }]} />
+        <small>When that one cannot format a file, the other does.</small>
+      </div>
+    </div>
+    <h3 class="settings-sub">Servers of your own</h3>
+    <p class="muted small">For another language (Lua, Ruby, PHP, Kotlin…): the program and the files it is for. Before it is kept, the app shows you the exact program it found and asks.</p>
+    ${list?.map(
+      (c) => html`<div class="custom-server" key=${c.id}>
+        <div class="custom-server-text">
+          <strong>${c.label}</strong> <span class="muted small">${c.exts.join(', ')}</span>
+          <code class="small" title=${[c.command, ...c.args].join(' ')}>${[c.command, ...c.args.map(quoteArg)].join(' ')}</code>
+        </div>
+        <span class="spacer" />
+        <button type="button" class="btn ghost sm" onClick=${() => edit(c)}>Change</button>
+        <button type="button" class="btn ghost sm danger" onClick=${async () => changed(await bridge.customRemove(c.id))}>Remove</button>
+      </div>`,
+    )}
+    ${draft
+      ? html`<form class="field-grid settings-form custom-server-form" onSubmit=${save}>
+          <${Field} label="Name"><input value=${draft.label} onInput=${set('label')} placeholder="Lua" autocomplete="off" /></${Field}>
+          <${Field} label="File extensions"><input value=${draft.exts} onInput=${set('exts')} placeholder=".lua, .luau" autocomplete="off" spellcheck=${false} /></${Field}>
+          <${Field} label="Program" hint="Its name, found on this computer's PATH, or its full path"><input value=${draft.command} onInput=${set('command')} placeholder="lua-language-server" autocomplete="off" spellcheck=${false} /></${Field}>
+          <${Field} label="Arguments" hint="As you would type them; most servers want --stdio"><input value=${draft.args} onInput=${set('args')} placeholder="--stdio" autocomplete="off" spellcheck=${false} /></${Field}>
+          <${Field} label="Project files (optional)" wide hint="The nearest folder up with one of these is the project (.luarc.json, Gemfile…); without them, the folder you opened"><input value=${draft.markers} onInput=${set('markers')} placeholder=".luarc.json" autocomplete="off" spellcheck=${false} /></${Field}>
+          ${error && html`<p class="small error-text span-2" role="alert">${error}</p>`}
+          <div class="field-row span-2">
+            <button type="submit" class="btn primary sm" disabled=${busy || !draft.label.trim() || !draft.exts.trim() || !draft.command.trim()}>${draft.id ? 'Save' : 'Add it'}</button>
+            <button type="button" class="btn ghost sm" onClick=${() => (setDraft(null), setError(''))}>Cancel</button>
+          </div>
+        </form>`
+      : html`<div class="field-row"><button type="button" class="btn sm" onClick=${() => setDraft({ label: '', exts: '', command: '', args: '--stdio', markers: '' })}><${Icon} name="plus" size=${14} />Add a server…</button></div>`}
+  </${Card}>`;
+}
+
 function TypingCard({ settings }) {
   const t = settings.typing;
   const set = (patch) => saveSettings({ typing: patch });
@@ -779,6 +856,7 @@ export function SettingsView({ settings, sync, actions }) {
     </div>
     <${SyncCard} sync=${sync} actions=${actions} />
     <${EditorCard} settings=${settings} />
+    ${window.desktop?.lsp && html`<${LanguageServersCard} settings=${settings} actions=${actions} />`}
     <${ModelCard} settings=${settings} actions=${actions} />
     <${ReadAloudCard} settings=${settings} actions=${actions} />
     ${window.desktop?.typing && html`<${TypingCard} settings=${settings} />`}

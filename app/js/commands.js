@@ -47,7 +47,7 @@ export const COMMAND_LIST = [
   { id: 'selectNext', group: 'Find', label: 'Select the next occurrence', keys: 'Mod+D' },
   { id: 'select-all-matches', group: 'Find', label: 'Select every occurrence', keys: 'Mod+Shift+L', run: false },
 
-  { id: 'format', group: 'Edit and text', label: 'Format document (JSON, XML, SQL, JavaScript, CSS, HTML, YAML…)', keys: 'Shift+Alt+F', hint: 'The selection, or the whole file' },
+  { id: 'format', group: 'Edit and text', label: 'Format document (JSON, XML, SQL, JavaScript, CSS, HTML, YAML…)', keys: 'Shift+Alt+F', hint: 'The selection, or the whole file; with a language server, its formatter (gofmt, clangd…)' },
   { id: 'toggleComment', group: 'Edit and text', label: 'Comment or uncomment lines', keys: 'Mod+/' },
   { id: 'duplicateLine', group: 'Edit and text', label: 'Duplicate the line', keys: 'Mod+Shift+D' },
   { id: 'deleteLine', group: 'Edit and text', label: 'Delete the line', keys: 'Mod+Shift+K' },
@@ -74,9 +74,11 @@ export const COMMAND_LIST = [
 
   { id: 'goto-definition', group: 'Code', label: 'Go to where the name at the cursor is declared', keys: 'F12', hint: 'In this file, else your other files and the folders open in Folders. On the declaration itself: its usages' },
   { id: 'find-usages', group: 'Code', label: 'Find usages of the name at the cursor', keys: 'Shift+F12', hint: 'In this file (the panel can look in all files); across the project with a language server' },
-  { id: 'rename-symbol', group: 'Code', label: 'Rename the name at the cursor (every use)', keys: 'F2', hint: 'In this file; with a language server, everywhere in the project' },
+  { id: 'rename-symbol', group: 'Code', label: 'Rename the name at the cursor (every use)', keys: 'F2', hint: 'In this file; with a language server, everywhere in the project (you see every change first)' },
+  { id: 'quick-fix', group: 'Code', label: 'Quick fixes and refactorings here (language server)', keys: 'Mod+.', only: 'desktop', hint: 'Add a missing import, fix a problem, extract a function… Or the 💡 at the end of a line with a problem' },
+  { id: 'organize-imports', group: 'Code', label: 'Organize imports (language server)', keys: 'Shift+Alt+O', only: 'desktop', hint: 'Sorts them and removes the unused ones' },
   { id: 'signature-help', group: 'Code', label: 'Show the parameters of the call here', keys: 'Mod+Shift+Space', run: false, hint: 'With a language server; they also show as you type "("' },
-  { id: 'language-servers', group: 'Code', label: 'Language servers (TypeScript, Python): their state and messages', only: 'desktop', hint: 'Restart or stop one; or click the server in the status bar' },
+  { id: 'language-servers', group: 'Code', label: 'Language servers: their state and messages', only: 'desktop', hint: 'Restart or stop one; or click the server in the status bar' },
   { id: 'goto-symbol', group: 'Code', label: 'Go to a function, class or section', keys: 'Mod+P, then @' },
   { id: 'goto-symbol-all', group: 'Code', label: 'Go to a function, class or section in any file', desktop: 'Mod+T', keys: 'Mod+P, then #', hint: 'Your files and the folders open in Folders' },
   { id: 'matchingBracket', group: 'Code', label: 'Go to the matching bracket', keys: 'Mod+Shift+\\' },

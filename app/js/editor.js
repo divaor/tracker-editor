@@ -348,10 +348,12 @@ const problemsLinter = (key, onProblems, onProblemAction) =>
         return { from, to: Math.min(Math.max(p.to, from), end), severity: p.severity, message: p.message, source: p.source ?? '', line: line.number, column: from - line.from + 1 };
       });
       onProblems?.(key, found, language, { server: Boolean(fromServer) });
-      // In the tooltip: the model explains this one, or fixes them all (the model panel).
+      // In the tooltip: the language server's quick fixes (when it reported it), the model
+      // explains this one, or fixes them all (the model panel).
       const actions = (p) =>
         onProblemAction
           ? [
+              ...(fromServer ? [{ name: 'Quick fix…', apply: () => onProblemAction('quickfix', key, p) }] : []),
               { name: 'Explain', apply: () => onProblemAction('explain', key, p) },
               { name: 'Fix with the model', apply: () => onProblemAction('fix', key, p) },
             ]
@@ -883,6 +885,8 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
         { key: 'F12', run: () => onShortcut?.('definition') ?? true, preventDefault: true },
         { key: 'Shift-F12', run: () => onShortcut?.('usages') ?? true, preventDefault: true },
         { key: 'F2', run: () => onShortcut?.('renameSymbol') ?? true, preventDefault: true },
+        { key: 'Mod-.', run: () => onShortcut?.('quickFix') ?? true, preventDefault: true },
+        { key: 'Shift-Alt-o', run: () => onShortcut?.('organizeImports') ?? true, preventDefault: true },
         { key: 'Alt-0', run: COMMANDS.foldAll, preventDefault: true },
         { key: 'Alt-Shift-0', run: unfoldAll, preventDefault: true },
         { key: 'Alt-1', run: COMMANDS.foldTop, preventDefault: true },
@@ -1348,6 +1352,11 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       if (viewOf(key)) viewOf(key).dispatch({ effects });
       else if (states.has(key)) states.set(key, states.get(key).update({ effects }).state);
     },
+    /** Where a position of a shown tab is on screen ({ left, right, top, bottom }), or null. */
+    coordsAt(key, pos) {
+      const v = viewOf(key);
+      return v ? v.coordsAtPos(Math.min(pos, v.state.doc.length)) : null;
+    },
     /** A tab's editor state (shown or not), or null. */
     stateOf: (key) => viewOf(key)?.state ?? states.get(key) ?? null,
     /** The view showing a tab, if one does. */
@@ -1374,6 +1383,17 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
         flush(key, true);
       }
       return true;
+    },
+
+    /**
+     * Puts a tab's text back to `text` when it is still `expected` (an Undo of an edit made
+     * elsewhere), as an edit Ctrl+Z takes back; shown or not. False when it changed since.
+     */
+    restoreText(key, expected, text) {
+      const state = viewOf(key)?.state ?? states.get(key);
+      if (!state || state.doc.toString() !== expected) return false;
+      const changes = minimalChange(expected, text);
+      return changes ? this.applyChanges(key, { changes, userEvent: 'input' }) : true;
     },
 
     /** Marks the passage being read aloud in a tab ({ from, to }, or null to clear) and scrolls to it. */

@@ -56,10 +56,52 @@ function createReader(onMessage, onError = () => {}) {
 
 // ---- Which server, and where it is ----
 
+// Schemas for well-known JSON files (the JSON server fetches them from schemastore.org); a
+// file's own "$schema" works too.
+const SCHEMA_STORE = 'https://json.schemastore.org';
+const JSON_SCHEMAS = [
+  [['package.json'], 'package.json'],
+  [['tsconfig.json', 'tsconfig.*.json'], 'tsconfig.json'],
+  [['jsconfig.json', 'jsconfig.*.json'], 'jsconfig.json'],
+  [['.eslintrc', '.eslintrc.json'], 'eslintrc.json'],
+  [['.prettierrc', '.prettierrc.json'], 'prettierrc.json'],
+  [['.babelrc', '.babelrc.json', 'babel.config.json'], 'babelrc.json'],
+  [['composer.json'], 'composer.json'],
+  [['lerna.json'], 'lerna.json'],
+  [['renovate.json', '.renovaterc', '.renovaterc.json'], 'renovate.json'],
+  [['vercel.json'], 'now.json'],
+  [['turbo.json'], 'turbo.json'],
+  [['.swcrc'], 'swcrc.json'],
+  [['nest-cli.json'], 'nest-cli.json'],
+  [['angular.json'], 'angular.json'],
+  [['firebase.json'], 'firebase.json'],
+  [['appsettings.json', 'appsettings.*.json'], 'appsettings.json'],
+  [['launchSettings.json'], 'launchsettings.json'],
+  [['global.json'], 'global.json'],
+  [['devcontainer.json', '.devcontainer.json'], 'devcontainer.json'],
+  [['manifest.json', '*.webmanifest'], 'web-manifest-combined.json'],
+].map(([fileMatch, name]) => ({ fileMatch, url: `${SCHEMA_STORE}/${name}` }));
+
+// YAML files Kubernetes reads, by where they usually live; GitHub Actions, Compose files and
+// the rest are recognized by the schema store's own list.
+const KUBERNETES_GLOBS = ['k8s/**/*.yaml', 'k8s/**/*.yml', 'kubernetes/**/*.yaml', 'kubernetes/**/*.yml', 'manifests/**/*.yaml', 'manifests/**/*.yml', '**/*.k8s.yaml', '**/*.k8s.yml'];
+
+// A server installed with npm (or in the project's node_modules): `name` started with `args`.
+const npmServer = (name, args, label = name) =>
+  async function find(ctx) {
+    const found = ctx.projectBin(name) ?? (await ctx.onPath(name));
+    return found ? { name: label, ...ctx.runnable(found), args } : null;
+  };
+
 /**
  * The servers this app knows. `find(ctx)` looks for one on this computer (ctx: the project
  * folder and helpers) and says how to start it: { name, command, args } or, for a script
  * Node runs, { name, script, args } (run on Electron's own Node: no Node.js needed).
+ * `install`: the commands Set up… offers (by platform when they differ); `note`: what else to
+ * know. `scope: 'folder'`: one server for the whole folder opened (light servers for single
+ * files: JSON, CSS…) rather than one per project inside it. `settings` answer the server's
+ * workspace/configuration and also go to it once started (didChangeConfiguration, which the
+ * JSON server reads them from); `init` are its initializationOptions.
  */
 const CATALOG = [
   {
@@ -107,12 +149,176 @@ const CATALOG = [
       return null;
     },
   },
+  {
+    id: 'go',
+    label: 'Go (gopls)',
+    exts: ['.go'],
+    languageIds: { '.go': 'go' },
+    markers: ['go.work', 'go.mod'],
+    install: ['go install golang.org/x/tools/gopls@latest'],
+    note: 'It needs Go (go.dev/dl).',
+    async find(ctx) {
+      const found = await ctx.onPath('gopls');
+      return found ? { name: 'gopls', ...ctx.runnable(found), args: [] } : null;
+    },
+  },
+  {
+    id: 'rust',
+    label: 'Rust (rust-analyzer)',
+    exts: ['.rs'],
+    languageIds: { '.rs': 'rust' },
+    markers: ['Cargo.toml'],
+    install: ['rustup component add rust-analyzer'],
+    note: 'It needs Rust (rustup.rs).',
+    async find(ctx) {
+      const found = await ctx.onPath('rust-analyzer');
+      // rustup puts a stand-in on PATH that fails until the component is added.
+      if (!found || !(await ctx.works(found, ['--version']))) return null;
+      return { name: 'rust-analyzer', ...ctx.runnable(found), args: [] };
+    },
+  },
+  {
+    id: 'c',
+    label: 'C and C++ (clangd)',
+    exts: ['.c', '.h', '.cc', '.cpp', '.cxx', '.c++', '.hh', '.hpp', '.hxx', '.h++', '.ipp', '.inl'],
+    languageIds: { '.c': 'c', '.h': 'c', '.cc': 'cpp', '.cpp': 'cpp', '.cxx': 'cpp', '.c++': 'cpp', '.hh': 'cpp', '.hpp': 'cpp', '.hxx': 'cpp', '.h++': 'cpp', '.ipp': 'cpp', '.inl': 'cpp' },
+    markers: ['compile_commands.json', 'compile_flags.txt', '.clangd'],
+    install: { win32: ['winget install LLVM.LLVM'], darwin: ['xcode-select --install', 'brew install llvm'], default: ['sudo apt install clangd', 'sudo dnf install clang-tools-extra'] },
+    note: 'For a project built with CMake or make, a compile_commands.json (cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON) tells it the flags.',
+    async find(ctx) {
+      const found = await ctx.onPath('clangd');
+      return found ? { name: 'clangd', ...ctx.runnable(found), args: [] } : null;
+    },
+  },
+  {
+    id: 'json',
+    label: 'JSON',
+    exts: ['.json', '.jsonc', '.code-workspace'],
+    languageIds: { '.json': 'json', '.jsonc': 'jsonc', '.code-workspace': 'jsonc' },
+    markers: [],
+    scope: 'folder',
+    install: ['npm install -g vscode-langservers-extracted'],
+    note: 'The same package gives CSS and HTML their servers. Schemas for package.json, tsconfig.json and other well-known files come from schemastore.org.',
+    init: { provideFormatter: true },
+    settings: { json: { validate: { enable: true }, format: { enable: true }, schemas: JSON_SCHEMAS } },
+    find: npmServer('vscode-json-language-server', ['--stdio'], 'JSON'),
+  },
+  {
+    id: 'css',
+    label: 'CSS, SCSS and Less',
+    exts: ['.css', '.scss', '.less'],
+    languageIds: { '.css': 'css', '.scss': 'scss', '.less': 'less' },
+    markers: [],
+    scope: 'folder',
+    install: ['npm install -g vscode-langservers-extracted'],
+    note: 'The same package gives JSON and HTML their servers.',
+    init: { provideFormatter: true },
+    settings: Object.fromEntries(['css', 'scss', 'less'].map((section) => [section, { validate: true, lint: {} }])),
+    find: npmServer('vscode-css-language-server', ['--stdio'], 'CSS'),
+  },
+  {
+    id: 'html',
+    label: 'HTML',
+    exts: ['.html', '.htm', '.xhtml'],
+    languageIds: { '.html': 'html', '.htm': 'html', '.xhtml': 'html' },
+    markers: [],
+    scope: 'folder',
+    install: ['npm install -g vscode-langservers-extracted'],
+    note: 'The same package gives JSON and CSS their servers.',
+    init: { provideFormatter: true, embeddedLanguages: { css: true, javascript: true }, configurationSection: ['html', 'css', 'javascript'] },
+    settings: { html: { format: { enable: true }, validate: { scripts: true, styles: true }, suggest: { html5: true } }, css: { validate: true }, javascript: { validate: { enable: true } } },
+    find: npmServer('vscode-html-language-server', ['--stdio'], 'HTML'),
+  },
+  {
+    id: 'yaml',
+    label: 'YAML',
+    exts: ['.yaml', '.yml'],
+    languageIds: { '.yaml': 'yaml', '.yml': 'yaml' },
+    markers: [],
+    scope: 'folder',
+    install: ['npm install -g yaml-language-server'],
+    note: 'GitHub Actions workflows, Compose files and many others are checked against their schemas (schemastore.org); Kubernetes files in k8s/, kubernetes/ or manifests/ folders, or named *.k8s.yaml. A first line "# yaml-language-server: $schema=<url>" picks one for any file.',
+    settings: { yaml: { validate: true, hover: true, completion: true, format: { enable: true }, schemaStore: { enable: true }, schemas: { kubernetes: KUBERNETES_GLOBS } } },
+    find: npmServer('yaml-language-server', ['--stdio'], 'YAML'),
+  },
+  {
+    id: 'bash',
+    label: 'Bash',
+    exts: ['.sh', '.bash'],
+    languageIds: { '.sh': 'shellscript', '.bash': 'shellscript' },
+    markers: [],
+    scope: 'folder',
+    install: ['npm install -g bash-language-server'],
+    note: 'Its problems come from ShellCheck: install it too (winget install koalaman.shellcheck, brew install shellcheck, or sudo apt install shellcheck).',
+    find: npmServer('bash-language-server', ['start'], 'Bash'),
+  },
 ];
 
-const catalogFor = (file) => {
+/** The commands Set up… offers for an entry on this platform. */
+const installFor = (entry, platform = process.platform) => (Array.isArray(entry.install) ? entry.install : (entry.install?.[platform] ?? entry.install?.default ?? []));
+
+/** The entry for a file, by its extension: the person's own servers first, then the catalog. */
+const catalogFor = (file, entries = CATALOG) => {
   const ext = path.extname(String(file)).toLowerCase();
-  return CATALOG.find((e) => e.exts.includes(ext)) ?? null;
+  return entries.find((e) => e.exts.includes(ext)) ?? null;
 };
+
+/** The folder a server runs for: the project (markers), or the whole folder opened for `scope: 'folder'` servers. */
+function rootFor(entry, file, { stop = '', exists = fs.existsSync } = {}) {
+  if (entry.scope === 'folder' && stop && isInside(stop, path.dirname(file))) return path.resolve(stop);
+  return findRoot(file, entry.markers, { stop, exists });
+}
+
+// ---- Servers the person adds (Settings → Language servers), kept in prefs.json ----
+
+/**
+ * "--stdio --log 'a b'" → ['--stdio', '--log', 'a b']: quotes group, as a shell would; inside
+ * double quotes only \" is special, so Windows paths keep their backslashes.
+ */
+function parseArgs(text) {
+  const out = [];
+  const re = /"((?:[^"\\]|\\.)*)"|'([^']*)'|(\S+)/g;
+  for (const m of String(text ?? '').matchAll(re)) out.push(m[1] !== undefined ? m[1].replace(/\\"/g, '"') : (m[2] ?? m[3]));
+  return out;
+}
+
+/**
+ * A server the person described, checked: { id, label, exts, command, args, markers }. Throws
+ * with what is wrong. Extensions as ".lua, .luau" (or without dots); args as text or a list.
+ */
+function cleanCustom(def) {
+  const label = String(def?.label ?? '').trim();
+  if (!label || label.length > 40) throw new Error('Give it a name (up to 40 characters).');
+  const exts = [...new Set(String(Array.isArray(def.exts) ? def.exts.join(',') : (def.exts ?? '')).split(/[\s,;]+/).filter(Boolean).map((e) => `.${e.replace(/^\*?\./, '').toLowerCase()}`))];
+  if (!exts.length || exts.length > 12 || exts.some((e) => !/^\.[a-z0-9_+-]{1,15}$/.test(e))) throw new Error('Give the file extensions it is for, like .lua or .lua, .luau.');
+  const command = String(def.command ?? '').trim();
+  if (!command || command.length > 500 || /[\r\n\0]/.test(command)) throw new Error('Give the program to run: its name (found on PATH) or its full path.');
+  const args = Array.isArray(def.args) ? def.args.map(String) : parseArgs(def.args);
+  if (args.length > 30 || args.some((a) => a.length > 300 || /[\r\n\0]/.test(a))) throw new Error('Too many arguments, or one too long.');
+  const markers = String(Array.isArray(def.markers) ? def.markers.join(',') : (def.markers ?? '')).split(/[\s,;]+/).filter(Boolean).slice(0, 10);
+  if (markers.some((m) => m.length > 100 || /[\\/]|^\.\.?$/.test(m))) throw new Error('Project markers are file names, like stylua.toml or .luarc.json.');
+  const id = /^[a-z0-9-]{1,40}$/.test(def.id ?? '') ? def.id : label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'server';
+  return { id, label, exts, command, args, markers };
+}
+
+/** A custom server as a catalog entry: it runs exactly the program it names. */
+function customEntry(def) {
+  return {
+    id: `custom:${def.id}`,
+    label: def.label,
+    custom: true,
+    command: [def.command, ...def.args].join(' '),
+    exts: def.exts,
+    languageIds: Object.fromEntries(def.exts.map((e) => [e, e.slice(1)])),
+    markers: def.markers ?? [],
+    scope: def.markers?.length ? undefined : 'folder',
+    install: [],
+    async find(ctx) {
+      const found = path.isAbsolute(def.command) ? (isFile(def.command) ? def.command : null) : await ctx.onPath(def.command);
+      return found ? { name: def.label, ...ctx.runnable(found), args: def.args } : null;
+    },
+  };
+}
 
 /**
  * The project a file belongs to: the nearest folder up from it with one of `markers` (or a
@@ -158,7 +364,8 @@ function isFile(p) {
 
 /**
  * How to run a program that was found: Node scripts (an npm link, or the script an npm
- * .cmd shim names) on Electron's own Node; anything else as it is.
+ * .cmd shim names) on Electron's own Node; anything else as it is, by the path it was found at
+ * (rustup's rust-analyzer is a link to rustup, which picks the program by the name it is run as).
  */
 function runnable(found, { platform = process.platform, realpath = (p) => fs.realpathSync(p), read = (p) => fs.readFileSync(p, 'utf8').slice(0, 4096) } = {}) {
   let real = found;
@@ -174,7 +381,7 @@ function runnable(found, { platform = process.platform, realpath = (p) => fs.rea
     return { command: real, shell: true };
   }
   if (platform !== 'win32' && /^#!.*\bnode\b/.test(safeRead(read, real).split('\n')[0])) return { script: real };
-  return { command: real };
+  return { command: found };
 }
 const safeRead = (read, p) => {
   try {
@@ -233,11 +440,22 @@ function shellPath({ env = process.env, platform = process.platform, run = execF
 function searchEnv(env, extra, platform = process.platform, known = true) {
   const sep = platform === 'win32' ? ';' : ':';
   const home = os.homedir();
+  // npm's global folder, Go's and Cargo's bin folders, LLVM's (clangd).
+  const goBin = env.GOPATH ? [path.join(String(env.GOPATH).split(sep)[0], 'bin')] : [];
   const places = !known
     ? []
     : platform === 'win32'
-      ? [env.APPDATA && path.win32.join(env.APPDATA, 'npm')]
-      : [path.join(home, '.local', 'bin'), path.join(home, '.npm-global', 'bin'), '/usr/local/bin', '/opt/homebrew/bin'];
+      ? [env.APPDATA && path.win32.join(env.APPDATA, 'npm'), ...goBin, env.USERPROFILE && path.win32.join(env.USERPROFILE, 'go', 'bin'), env.USERPROFILE && path.win32.join(env.USERPROFILE, '.cargo', 'bin'), env.ProgramFiles && path.win32.join(env.ProgramFiles, 'LLVM', 'bin')]
+      : [
+          path.join(home, '.local', 'bin'),
+          path.join(home, '.npm-global', 'bin'),
+          '/usr/local/bin',
+          '/opt/homebrew/bin',
+          ...goBin,
+          path.join(home, 'go', 'bin'),
+          path.join(home, '.cargo', 'bin'),
+          ...(platform === 'darwin' ? ['/opt/homebrew/opt/llvm/bin', '/usr/local/opt/llvm/bin', '/Library/Developer/CommandLineTools/usr/bin'] : []),
+        ];
   const dirs = [...String(env.PATH ?? env.Path ?? '').split(sep), ...String(extra || '').split(sep), ...places].filter(Boolean);
   const out = { ...env, PATH: [...new Set(dirs)].join(sep) };
   if (platform === 'win32' && env.Path !== undefined) delete out.Path;
@@ -263,10 +481,10 @@ function serverEnv(env) {
  * Looks for the server for a file's project: { entry, root, found, env } (found null when
  * missing). `login: false` looks only on `env`'s PATH (the tests).
  */
-async function locate(file, { stop = '', env = process.env, platform = process.platform, login = true } = {}) {
-  const entry = catalogFor(file);
+async function locate(file, { stop = '', env = process.env, platform = process.platform, login = true, entries = CATALOG, nodePath = process.execPath, run = execFile } = {}) {
+  const entry = catalogFor(file, entries);
   if (!entry) return null;
-  const root = findRoot(file, entry.markers, { stop });
+  const root = rootFor(entry, file, { stop });
   const searchIn = searchEnv(env, login ? await shellPath({ env, platform }) : '', platform, login);
   const binIn = (dir, name) => {
     const bin = path.join(dir, 'node_modules', '.bin', name);
@@ -278,6 +496,13 @@ async function locate(file, { stop = '', env = process.env, platform = process.p
     projectBin: (name) => binIn(root, name),
     onPath: async (name) => searchPath(name, { env: searchIn, platform }),
     runnable: (found) => runnable(found, { platform }),
+    // Whether a program found runs at all (`args`: something quick, like --version).
+    works: (found, args) =>
+      new Promise((resolve) => {
+        const how = runnable(found, { platform });
+        const [command, argv, extra] = how.script ? [nodePath, [how.script, ...args], { ELECTRON_RUN_AS_NODE: '1' }] : [how.command, args, {}];
+        run(command, argv, { timeout: 8000, windowsHide: true, shell: Boolean(how.shell), env: { ...serverEnv(searchIn), ...extra } }, (err) => resolve(!err));
+      }),
     typescriptIn: (dir) => typescriptIn(dir),
     // `tsc` found on PATH → the TypeScript package it belongs to.
     typescriptOf: (tsc) => {
@@ -297,7 +522,7 @@ async function locate(file, { stop = '', env = process.env, platform = process.p
 
 // ---- Running them ----
 
-const MAX_SERVERS = 4;
+const MAX_SERVERS = 6;
 const STDERR_LINES = 200;
 const CRASH_WINDOW = 5 * 60 * 1000;
 
@@ -306,7 +531,7 @@ const CRASH_WINDOW = 5 * 60 * 1000;
  * `nodePath` (the program that runs Node scripts: Electron with ELECTRON_RUN_AS_NODE) stand in
  * for the real ones in the tests.
  */
-function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath, env = process.env, platform = process.platform, now = Date.now, locateServer = locate } = {}) {
+function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath, env = process.env, platform = process.platform, now = Date.now, locateServer = locate, catalog = () => CATALOG } = {}) {
   const servers = new Map(); // id → server
   let nextId = 1;
 
@@ -406,10 +631,11 @@ function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath
   }
 
   async function start(sender, file, { stop: stopDir = '' } = {}) {
-    const entry = catalogFor(file);
+    const entries = catalog();
+    const entry = catalogFor(file, entries);
     if (!entry) return { none: true };
     const languageId = entry.languageIds[path.extname(file).toLowerCase()];
-    const root = findRoot(file, entry.markers, { stop: stopDir });
+    const root = rootFor(entry, file, { stop: stopDir });
     for (const s of servers.values()) {
       if (s.entry.id === entry.id && s.root === root && s.sender === sender && !s.removed) {
         s.used = now();
@@ -417,8 +643,8 @@ function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath
         return info(s, languageId);
       }
     }
-    const located = await locateServer(file, { stop: stopDir, env, platform });
-    if (!located?.found) return { missing: { id: entry.id, language: entry.label, install: entry.install, root } };
+    const located = await locateServer(file, { stop: stopDir, env, platform, entries, nodePath });
+    if (!located?.found) return { missing: { id: entry.id, language: entry.label, install: installFor(entry, platform), note: entry.note ?? '', custom: Boolean(entry.custom), command: entry.command ?? '', root } };
     makeRoom();
     const s = { id: `lsp${nextId++}`, entry, root, name: located.found.name, found: located.found, env: located.env ?? env, sender, stderr: [], crashes: [], used: now(), state: 'starting', message: '' };
     servers.set(s.id, s);
@@ -426,7 +652,18 @@ function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath
     return info(s, languageId);
   }
 
-  const info = (s, languageId) => ({ id: s.id, server: s.name, language: s.entry.label, root: s.root, languageId, init: s.found.init ?? null, settings: s.entry.settings ?? null, state: s.state, message: s.message, generation: s.generation ?? 0 });
+  const info = (s, languageId) => ({
+    id: s.id,
+    server: s.name,
+    language: s.entry.label,
+    root: s.root,
+    languageId,
+    init: s.entry.init || s.found.init ? { ...s.entry.init, ...s.found.init } : null,
+    settings: s.entry.settings ?? null,
+    state: s.state,
+    message: s.message,
+    generation: s.generation ?? 0,
+  });
 
   // `sender` (the page asking): only its own servers.
   const own = (id, sender) => {
@@ -479,8 +716,12 @@ function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath
   const stopAll = (sender) => {
     for (const s of [...servers.values()]) if (!sender || s.sender === sender) stop(s.id);
   };
+  /** Stops the servers of a catalog entry (a custom server changed or was removed). */
+  const stopEntry = (entryId, message = '') => {
+    for (const s of [...servers.values()]) if (s.entry.id === entryId) stop(s.id, message);
+  };
 
-  return { start, write, stop, restart, list, stopAll };
+  return { start, write, stop, restart, list, stopAll, stopEntry };
 }
 
-module.exports = { frame, createReader, CATALOG, catalogFor, findRoot, searchPath, runnable, typescriptIn, searchEnv, serverEnv, shellPath, locate, createLspHost, MAX_SERVERS };
+module.exports = { frame, createReader, CATALOG, JSON_SCHEMAS, catalogFor, installFor, findRoot, rootFor, searchPath, runnable, typescriptIn, searchEnv, serverEnv, shellPath, locate, createLspHost, parseArgs, cleanCustom, customEntry, MAX_SERVERS };

@@ -1,7 +1,7 @@
 // Language servers, the page's pure part (lspTools.js): file URIs, problems, places, edits.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyTextEdits, editsByFile, fileUri, locations, offsetOf, pathKey, progressText, serverLabel, textChanges, toProblems, uriPath } from '../app/js/lspTools.js';
+import { applyTextEdits, changedLines, codeActionRows, editPlan, editsByFile, fileUri, locations, offsetOf, pathKey, progressText, rangesTouch, serverLabel, symbolRows, textChanges, toProblems, uriPath, withWorkspaceFolder } from '../app/js/lspTools.js';
 
 test('paths as file URIs, the way servers write them, and back', () => {
   assert.equal(fileUri('/home/me/my app/x.ts'), 'file:///home/me/my%20app/x.ts');
@@ -73,4 +73,80 @@ test('what the status bar says', () => {
   assert.equal(serverLabel({ server: 'TypeScript 7.0.2', state: 'running' }), 'TypeScript 7.0.2 · ready');
   assert.equal(serverLabel({ server: 'Pyright', state: 'running', progress: 'Indexing 40%' }), 'Pyright · Indexing 40%');
   assert.equal(serverLabel({ server: 'Pyright', state: 'starting' }), 'Pyright · starting…');
+});
+
+const range = (l1, c1, l2, c2) => ({ start: { line: l1, character: c1 }, end: { line: l2, character: c2 } });
+
+test('a workspace edit: its files, new files, and what the editor does not do', () => {
+  const plan = editPlan({
+    documentChanges: [
+      { kind: 'create', uri: 'file:///w/new.ts', options: { ignoreIfExists: true } },
+      { textDocument: { uri: 'file:///w/new.ts', version: null }, edits: [{ range: range(0, 0, 0, 0), newText: 'export {};\n' }] },
+      { textDocument: { uri: 'file:///w/a.ts', version: 3 }, edits: [] },
+    ],
+  });
+  assert.deepEqual(plan.creates, [{ uri: 'file:///w/new.ts', overwrite: false, ignoreIfExists: true }]);
+  assert.deepEqual(plan.files.map((f) => f.uri), ['file:///w/new.ts']);
+  assert.deepEqual(plan.unsupported, []);
+  assert.deepEqual(editPlan({ documentChanges: [{ kind: 'rename', oldUri: 'file:///a', newUri: 'file:///b' }, { kind: 'delete', uri: 'file:///c' }] }).unsupported, ['rename', 'delete']);
+  assert.deepEqual(editPlan({ changes: { 'file:///w/b.ts': [{ range: range(0, 0, 0, 1), newText: 'x' }] } }).files.length, 1);
+  assert.deepEqual(editPlan(null), { files: [], creates: [], unsupported: [] });
+});
+
+test('the lines a change touches, before and after (for the preview)', () => {
+  const text = 'import a\nconst helper = 1\nuse(helper, helper)\nend\n';
+  const rows = changedLines(text, [
+    { range: range(1, 6, 1, 12), newText: 'assist' },
+    { range: range(2, 4, 2, 10), newText: 'assist' },
+    { range: range(2, 12, 2, 18), newText: 'assist' },
+  ]);
+  assert.deepEqual(rows, [
+    { line: 2, before: ['const helper = 1'], after: ['const assist = 1'] },
+    { line: 3, before: ['use(helper, helper)'], after: ['use(assist, assist)'] },
+  ]);
+  // A change across lines, and one adding lines.
+  assert.deepEqual(changedLines('a\nb\nc', [{ range: range(0, 1, 2, 0), newText: '+' }]), [{ line: 1, before: ['a', 'b', 'c'], after: ['a+c'] }]);
+  assert.deepEqual(changedLines('x\n', [{ range: range(0, 0, 0, 0), newText: 'import y\n' }]), [{ line: 1, before: [], after: ['import y'] }]);
+  // A line removed; a new file's text: only what changes shows.
+  assert.deepEqual(changedLines('a\nb\nc\n', [{ range: range(1, 0, 2, 0), newText: '' }]), [{ line: 2, before: ['b'], after: [] }]);
+  assert.deepEqual(changedLines('', [{ range: range(0, 0, 0, 0), newText: 'print(1)\n' }]), [{ line: 1, before: [], after: ['print(1)'] }]);
+  assert.equal(changedLines('x', [{ range: range(5, 0, 5, 1), newText: '' }]), null);
+});
+
+test('the workspace folder goes with initialize', () => {
+  const init = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { rootUri: 'file:///home/me/my%20app', capabilities: {} } });
+  assert.deepEqual(JSON.parse(withWorkspaceFolder(init)).params.workspaceFolders, [{ uri: 'file:///home/me/my%20app', name: 'my app' }]);
+  const other = JSON.stringify({ jsonrpc: '2.0', method: 'initialized', params: {} });
+  assert.equal(withWorkspaceFolder(other), other);
+});
+
+test('code actions: quick fixes first, the preferred on top, disabled ones last', () => {
+  const rows = codeActionRows([
+    { title: 'Extract to function', kind: 'refactor.extract.function' },
+    { title: 'Organize imports', kind: 'source.organizeImports' },
+    { title: 'Add import from "./util"', kind: 'quickfix', edit: {} },
+    { title: 'Ignore this error', kind: 'quickfix', disabled: { reason: 'Not here' } },
+    { title: 'Fix spelling', kind: 'quickfix', isPreferred: true },
+    { title: 'Run the linter', command: 'lint.run', arguments: [] },
+  ]);
+  assert.deepEqual(rows.map((r) => r.title), ['Fix spelling', 'Add import from "./util"', 'Ignore this error', 'Extract to function', 'Organize imports', 'Run the linter']);
+  assert.deepEqual(rows.map((r) => r.group), ['Quick fix', 'Quick fix', 'Quick fix', 'Refactor', 'Source', 'Other']);
+  assert.equal(rows[2].disabled, 'Not here');
+  assert.equal(rows[5].item.command, 'lint.run');
+  assert.deepEqual(codeActionRows(null), []);
+  // Diagnostics that touch a range (an empty range at their edge too).
+  assert.equal(rangesTouch(range(1, 0, 1, 5), range(1, 5, 1, 5)), true);
+  assert.equal(rangesTouch(range(1, 0, 1, 5), range(2, 0, 2, 1)), false);
+});
+
+test('workspace symbols as rows', () => {
+  const rows = symbolRows([
+    { name: 'helper', kind: 12, containerName: 'util', location: { uri: 'file:///w/util.ts', range: range(4, 16, 4, 22) } },
+    { name: 'Store', kind: 5, location: { uri: 'file:///w/store.ts' } },
+    { name: 'broken' },
+  ]);
+  assert.deepEqual(rows, [
+    { title: 'helper', kind: 'function', container: 'util', uri: 'file:///w/util.ts', line: 5, column: 17 },
+    { title: 'Store', kind: 'class', container: '', uri: 'file:///w/store.ts', line: 1, column: 1 },
+  ]);
 });

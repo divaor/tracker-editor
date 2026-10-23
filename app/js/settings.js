@@ -61,6 +61,8 @@ export const DEFAULT_SETTINGS = {
   bracketColors: true,
   stickyScroll: true,
   fileIcons: true,
+  // Format document: 'server' (a language server's formatter first) or 'builtin' (Prettier and the editor's own first).
+  formatter: 'server',
   // Tabs gathered by group (project, folder, notes) in the tab bar, each group foldable.
   groupTabs: false,
   // Tab views (tabGroups.js): pinned tabs show in every view; a line in each tab's group color

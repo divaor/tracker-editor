@@ -5,7 +5,14 @@
 //   answered to textDocument/diagnostic when FAKE_LSP_PULL=1 (as TypeScript 7 does);
 // - hover, completion (after "." it offers fakeMember), signature help after "name(";
 // - definition: the line declaring the word (function/def/const/let/class), in any file;
-//   references and rename: every whole-word use, in any file;
+//   references and rename: every whole-word use, in any file (prepareRename refuses "print");
+// - code actions: on an ERROR line, "Replace ERROR with OK" (an edit, preferred); everywhere
+//   "Uppercase this line" (its edit filled in by codeAction/resolve), "Add a comment above"
+//   (a command: the edit comes back as workspace/applyEdit) and "Move this line to a new file"
+//   (creates moved.py); source.organizeImports sorts the import lines at the top;
+// - formatting: trailing spaces go, " = " around assignments (the selection only, for a range);
+// - workspace symbols: the declarations whose name contains the query;
+// - files changed on disk (didChangeWatchedFiles) and settings received are written to stderr;
 // - "Indexing" progress after start; CRASH_NOW in a file ends the process (code 3).
 const fs = require('node:fs');
 const path = require('node:path');
@@ -98,7 +105,11 @@ const checkCrash = (text) => {
 
 function handle(msg) {
   const { id, method, params } = msg;
-  if (method === undefined) return; // an answer to one of ours
+  if (method === undefined) {
+    // An answer to one of ours (workspace/applyEdit): noted for the tests.
+    if (id === 'apply1') process.stderr.write(`fake-lsp: applyEdit answered ${JSON.stringify(msg.result ?? msg.error)}\n`);
+    return;
+  }
   const reply = (result) => send({ id, result });
   switch (method) {
     case 'initialize':
@@ -112,7 +123,12 @@ function handle(msg) {
           signatureHelpProvider: { triggerCharacters: ['(', ','] },
           definitionProvider: true,
           referencesProvider: true,
-          renameProvider: true,
+          renameProvider: { prepareProvider: true },
+          codeActionProvider: { codeActionKinds: ['quickfix', 'refactor', 'source.organizeImports'], resolveProvider: true },
+          executeCommandProvider: { commands: ['fake.addComment'] },
+          documentFormattingProvider: true,
+          documentRangeFormattingProvider: true,
+          workspaceSymbolProvider: true,
           ...(pull ? { diagnosticProvider: { interFileDependencies: false, workspaceDiagnostics: false } } : {}),
         },
         serverInfo: { name: 'fake-lsp', version: '1.0' },
@@ -184,6 +200,98 @@ function handle(msg) {
       for (const { uri, range } of word ? occurrences(word) : []) (changes[uri] ??= []).push({ range, newText: params.newName });
       return reply({ changes });
     }
+    case 'textDocument/prepareRename': {
+      const text = docs.get(params.textDocument.uri) ?? '';
+      const word = wordAt(text, params.position);
+      if (!word || word === 'print') return reply(null);
+      const at = offsetAt(text, params.position);
+      let from = at;
+      while (from > 0 && /\w/.test(text[from - 1])) from--;
+      return reply({ range: { start: positionAt(text, from), end: positionAt(text, from + word.length) }, placeholder: word });
+    }
+    case 'textDocument/codeAction': {
+      const { uri } = params.textDocument;
+      const text = docs.get(uri) ?? '';
+      const n = params.range.start.line;
+      const line = text.split('\n')[n] ?? '';
+      const lineRange = { start: { line: n, character: 0 }, end: { line: n, character: line.length } };
+      const only = params.context?.only;
+      if (only?.some((k) => k.startsWith('source.organizeImports'))) {
+        const lines = text.split('\n');
+        let end = 0;
+        while (end < lines.length && /^(import|from) /.test(lines[end])) end++;
+        const sorted = lines.slice(0, end).sort();
+        const edit = { changes: { [uri]: [{ range: { start: { line: 0, character: 0 }, end: { line: end, character: 0 } }, newText: sorted.map((l) => `${l}\n`).join('') }] } };
+        return reply(end ? [{ title: 'Organize imports', kind: 'source.organizeImports', edit }] : []);
+      }
+      const actions = [];
+      const at = line.indexOf('ERROR');
+      if (at >= 0) {
+        const diagnostics = (params.context?.diagnostics ?? []).filter((d) => d.range.start.line === n);
+        actions.push({ title: 'Replace ERROR with OK', kind: 'quickfix', isPreferred: true, diagnostics, edit: { changes: { [uri]: [{ range: { start: { line: n, character: at }, end: { line: n, character: at + 5 } }, newText: 'OK' }] } } });
+      }
+      if (line.trim()) {
+        actions.push({ title: 'Uppercase this line', kind: 'refactor.rewrite', data: { uri, line: n } });
+        actions.push({ title: 'Add a comment above', kind: 'refactor', command: { title: 'Add a comment above', command: 'fake.addComment', arguments: [uri, n] } });
+        const moved = new URL('moved.py', uri).href;
+        actions.push({
+          title: 'Move this line to a new file',
+          kind: 'refactor.move',
+          edit: {
+            documentChanges: [
+              { kind: 'create', uri: moved, options: { ignoreIfExists: false } },
+              { textDocument: { uri: moved, version: null }, edits: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, newText: `${line}\n` }] },
+              { textDocument: { uri, version: null }, edits: [{ range: { start: { line: n, character: 0 }, end: { line: n + 1, character: 0 } }, newText: '' }] },
+            ],
+          },
+        });
+      }
+      return reply(actions);
+    }
+    case 'codeAction/resolve': {
+      if (!params.data) return reply(params);
+      const { uri, line: n } = params.data;
+      const line = (docs.get(uri) ?? '').split('\n')[n] ?? '';
+      return reply({ ...params, edit: { changes: { [uri]: [{ range: { start: { line: n, character: 0 }, end: { line: n, character: line.length } }, newText: line.toUpperCase() }] } } });
+    }
+    case 'workspace/executeCommand': {
+      if (params.command !== 'fake.addComment') return send({ id, error: { code: -32601, message: 'Unknown command' } });
+      const [uri, n] = params.arguments;
+      reply(null);
+      // The edit comes back as a request; the answer is noted for the tests.
+      return send({ id: 'apply1', method: 'workspace/applyEdit', params: { label: 'Add a comment', edit: { changes: { [uri]: [{ range: { start: { line: n, character: 0 }, end: { line: n, character: 0 } }, newText: '# added by the fake server\n' }] } } } });
+    }
+    case 'textDocument/formatting':
+    case 'textDocument/rangeFormatting': {
+      const text = docs.get(params.textDocument.uri) ?? '';
+      const lines = text.split('\n');
+      const from = params.range?.start.line ?? 0;
+      const to = params.range?.end.line ?? lines.length - 1;
+      const edits = [];
+      for (let n = from; n <= to && n < lines.length; n++) {
+        const tidy = lines[n].replace(/\s+$/, '').replace(/^(\s*\w+)\s*=\s*/, '$1 = ');
+        if (tidy !== lines[n]) edits.push({ range: { start: { line: n, character: 0 }, end: { line: n, character: lines[n].length } }, newText: tidy });
+      }
+      return reply(edits);
+    }
+    case 'workspace/symbol': {
+      const found = [];
+      const decl = /\b(function|def|const|let|class)\s+(\w+)/g;
+      for (const [uri, text] of allFiles()) {
+        for (const m of text.matchAll(decl)) {
+          if (!m[2].toLowerCase().includes(String(params.query).toLowerCase())) continue;
+          const at = m.index + m[0].length - m[2].length;
+          found.push({ name: m[2], kind: m[1] === 'class' ? 5 : m[1] === 'def' || m[1] === 'function' ? 12 : 13, containerName: 'fake', location: { uri, range: { start: positionAt(text, at), end: positionAt(text, at + m[2].length) } } });
+        }
+      }
+      return reply(found);
+    }
+    case 'workspace/didChangeWatchedFiles':
+      for (const c of params.changes) process.stderr.write(`fake-lsp: ${c.type === 1 ? 'created' : 'changed'} ${path.basename(fileURLToPath(c.uri))}\n`);
+      return;
+    case 'workspace/didChangeConfiguration':
+      process.stderr.write(`fake-lsp: settings ${JSON.stringify(params.settings)}\n`);
+      return;
     case 'shutdown':
       return reply(null);
     case 'exit':

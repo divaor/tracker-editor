@@ -589,6 +589,8 @@ const lspHost = lsp.createLspHost({
   send: (sender, channel, payload) => {
     if (!sender.isDestroyed()) sender.send(channel, payload);
   },
+  // The person's own servers (prefs.json) come before the catalog's.
+  catalog: () => [...(prefs?.lspCustom ?? []).map(lsp.customEntry), ...lsp.CATALOG],
 });
 const lspPages = new WeakSet();
 ipcMain.handle('lsp:start', guard(async (event, file) => {
@@ -610,6 +612,49 @@ ipcMain.on('lsp:send', (event, id, message) => {
 ipcMain.handle('lsp:stop', guard((event, id) => lspHost.stop(id, '', event.sender)));
 ipcMain.handle('lsp:restart', guard((event, id) => lspHost.restart(id, event.sender)));
 ipcMain.handle('lsp:list', guard((event) => lspHost.list(event.sender)));
+// Servers the person adds (Settings → Language servers). The page describes one; this process
+// finds the program, asks in a native dialog naming exactly what will run, and only then keeps
+// it (prefs.json, with the program's full path, so a different one found later never runs).
+ipcMain.handle('lsp:custom-list', guard(() => prefs.lspCustom));
+ipcMain.handle('lsp:custom-save', guard(async (event, def) => {
+  const clean = lsp.cleanCustom(def);
+  const program = path.isAbsolute(clean.command) ? clean.command : lsp.searchPath(clean.command, { env: lsp.searchEnv(process.env, await lsp.shellPath()) });
+  let isProgram = false;
+  try {
+    isProgram = Boolean(program) && fs.statSync(program).isFile();
+  } catch {
+    // missing
+  }
+  if (!isProgram) throw new Error(`${clean.command} was not found${path.isAbsolute(clean.command) ? '' : ' on this computer (PATH)'}. Give its full path.`);
+  const editing = prefs.lspCustom.find((c) => c.id === def?.id);
+  const others = prefs.lspCustom.filter((c) => c !== editing);
+  let id = editing?.id ?? clean.id;
+  for (let n = 2; !editing && others.some((c) => c.id === id); n++) id = `${clean.id}-${n}`;
+  const { response } = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender) ?? mainWindow, {
+    type: 'warning',
+    buttons: ['Cancel', 'Allow it'],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+    title: 'Language server',
+    message: `Run ${path.basename(program)} as the language server for ${clean.exts.join(', ')} files?`,
+    detail: `${[program, ...clean.args].join(' ')}\n\nTracker Editor will start it whenever you open one of these files from Folders. It runs as you and can read and change your files, like any program you run: allow only one you trust.`,
+  });
+  if (response !== 1) return { cancelled: true, list: prefs.lspCustom };
+  const saved = { ...clean, id, command: program };
+  prefs.lspCustom = editing ? prefs.lspCustom.map((c) => (c === editing ? saved : c)) : [...prefs.lspCustom, saved];
+  writeJson('prefs.json', prefs);
+  lspHost.stopEntry(`custom:${id}`, `${clean.label} changed: it starts again with the next file.`);
+  return { list: prefs.lspCustom };
+}));
+ipcMain.handle('lsp:custom-remove', guard((_e, id) => {
+  const gone = prefs.lspCustom.find((c) => c.id === id);
+  if (!gone) return prefs.lspCustom;
+  prefs.lspCustom = prefs.lspCustom.filter((c) => c !== gone);
+  writeJson('prefs.json', prefs);
+  lspHost.stopEntry(`custom:${id}`, `${gone.label} was removed.`);
+  return prefs.lspCustom;
+}));
 app.on('before-quit', () => lspHost.stopAll());
 
 // A file on a server is checked now and then while the server is connected (never
@@ -1823,6 +1868,14 @@ function loadPrefs() {
     toldAboutTray: Boolean(saved.toldAboutTray),
     // Windows: Open with / Edit with Tracker Editor (on by default where installed; the portable app asks).
     shell: { enabled: saved.shell?.enabled ?? !process.env.PORTABLE_EXECUTABLE_FILE, applied: saved.shell?.applied ?? '' },
+    // Language servers the person added (lsp:custom-save); ones that no longer check out are dropped.
+    lspCustom: (Array.isArray(saved.lspCustom) ? saved.lspCustom : []).flatMap((c) => {
+      try {
+        return [lsp.cleanCustom(c)];
+      } catch {
+        return [];
+      }
+    }),
   };
 }
 const prefsState = () => ({
@@ -2450,7 +2503,9 @@ function buildMenu() {
           submenu: [
             shown('Go to Declaration', 'F12', 'goto-definition'),
             shown('Find Usages', 'Shift+F12', 'find-usages'),
-            shown('Rename in This File', 'F2', 'rename-symbol'),
+            shown('Rename Everywhere It Is Used', 'F2', 'rename-symbol'),
+            shown('Quick Fix…', 'CmdOrCtrl+.', 'quick-fix'),
+            shown('Organize Imports', 'Shift+Alt+O', 'organize-imports'),
             item('Go to Function or Section…', undefined, 'goto-symbol'),
             shown('Go to Function or Section in Any File…', 'CmdOrCtrl+T', 'goto-symbol-all'),
             shown('Go to Matching Bracket', 'CmdOrCtrl+Shift+\\', 'matchingBracket'),

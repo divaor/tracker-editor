@@ -80,6 +80,123 @@ export function editsByFile(edit) {
 }
 
 /**
+ * What a WorkspaceEdit asks for: { files: [{ uri, edits }] (only those with edits), creates:
+ * [{ uri, overwrite, ignoreIfExists }], unsupported: ['rename' | 'delete'] }. The editor makes
+ * new files but does not rename or delete them (it says so the client cannot).
+ */
+export function editPlan(edit) {
+  const creates = [];
+  const unsupported = new Set();
+  for (const change of edit?.documentChanges ?? []) {
+    if (change.kind === 'create') creates.push({ uri: change.uri, overwrite: Boolean(change.options?.overwrite), ignoreIfExists: Boolean(change.options?.ignoreIfExists) });
+    else if (change.kind === 'rename' || change.kind === 'delete') unsupported.add(change.kind);
+  }
+  return { files: editsByFile(edit).filter((f) => f.edits.length), creates, unsupported: [...unsupported] };
+}
+
+/**
+ * The lines an edit changes, for a preview: [{ line (1-based), before: [lines], after: [lines] }],
+ * neighbouring edits on the same lines together. Null when an edit does not fit the text.
+ */
+export function changedLines(text, edits, { max = 200 } = {}) {
+  const spans = textChanges(text, edits);
+  if (!spans) return null;
+  const lineStarts = [0];
+  for (let i = text.indexOf('\n'); i >= 0; i = text.indexOf('\n', i + 1)) lineStarts.push(i + 1);
+  const lineAt = (offset) => {
+    let lo = 0;
+    let hi = lineStarts.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (lineStarts[mid] <= offset) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo;
+  };
+  const lineEnd = (n) => (n + 1 < lineStarts.length ? lineStarts[n + 1] - 1 : text.length);
+  // Groups of spans that touch the same lines.
+  const groups = [];
+  for (const s of spans) {
+    const first = lineAt(s.from);
+    const last = lineAt(s.to);
+    const g = groups.at(-1);
+    if (g && first <= g.last) {
+      g.last = Math.max(g.last, last);
+      g.spans.push(s);
+    } else groups.push({ first, last, spans: [s] });
+  }
+  return groups.slice(0, max).map((g) => {
+    const from = lineStarts[g.first];
+    const to = lineEnd(g.last);
+    let after = '';
+    let at = from;
+    for (const s of g.spans) {
+      after += text.slice(at, s.from) + s.insert;
+      at = s.to;
+    }
+    after += text.slice(at, to);
+    // Lines the same before and after (a change ending at a line start) are not shown.
+    const was = text.slice(from, to).split('\n');
+    const now = after.split('\n');
+    let lead = 0;
+    while (lead < was.length && lead < now.length && was[lead] === now[lead]) lead++;
+    let tail = 0;
+    while (tail < was.length - lead && tail < now.length - lead && was[was.length - 1 - tail] === now[now.length - 1 - tail]) tail++;
+    return { line: g.first + 1 + lead, before: was.slice(lead, was.length - tail), after: now.slice(lead, now.length - tail) };
+  });
+}
+
+/** The initialize message with the project folder as the workspace folder (some servers want one). */
+export function withWorkspaceFolder(message, name = '') {
+  // (Text in a file sent along has its quotes escaped, so it never matches.)
+  if (!message.includes('"method":"initialize"')) return message;
+  try {
+    const msg = JSON.parse(message);
+    if (msg.method !== 'initialize' || !msg.params?.rootUri || msg.params.workspaceFolders) return message;
+    msg.params.workspaceFolders = [{ uri: msg.params.rootUri, name: name || decodeURIComponent(msg.params.rootUri.split('/').filter(Boolean).pop() ?? '') }];
+    return JSON.stringify(msg);
+  } catch {
+    return message;
+  }
+}
+
+/** Two LSP ranges overlap (an empty one touching the other counts). */
+const isBefore = (a, b) => a.line < b.line || (a.line === b.line && a.character < b.character);
+export const rangesTouch = (a, b) => !isBefore(a.end, b.start) && !isBefore(b.end, a.start);
+
+// Code actions by kind: quick fixes first, then refactorings, then the file's own (imports…).
+const KIND_ORDER = ['quickfix', 'refactor', 'source'];
+const KIND_LABELS = { quickfix: 'Quick fix', refactor: 'Refactor', source: 'Source' };
+/**
+ * A codeAction answer (CodeAction or Command items) as rows to pick from: { title, kind,
+ * group, preferred, disabled (its reason), item } — the preferred first in each group.
+ */
+export function codeActionRows(result) {
+  const rows = (result ?? []).filter(Boolean).map((item, i) => {
+    const command = typeof item.command === 'string';
+    const kind = command ? '' : String(item.kind ?? '');
+    const top = kind.split('.')[0];
+    return { title: item.title, kind, group: KIND_LABELS[top] ?? 'Other', preferred: Boolean(item.isPreferred), disabled: item.disabled?.reason ?? '', item, i, order: KIND_ORDER.includes(top) ? KIND_ORDER.indexOf(top) : KIND_ORDER.length };
+  });
+  rows.sort((a, b) => a.order - b.order || Boolean(a.disabled) - Boolean(b.disabled) || b.preferred - a.preferred || a.i - b.i);
+  return rows.map(({ i, order, ...row }) => row);
+}
+
+export const SYMBOL_KINDS = ['', 'file', 'module', 'namespace', 'package', 'class', 'method', 'property', 'field', 'constructor', 'enum', 'interface', 'function', 'variable', 'constant', 'string', 'number', 'boolean', 'array', 'object', 'key', 'null', 'enum member', 'struct', 'event', 'operator', 'type parameter'];
+/**
+ * A workspace/symbol answer as rows: [{ title, kind, container, uri, line, column }] (1-based;
+ * a symbol without a range is at line 1).
+ */
+export function symbolRows(result) {
+  return (result ?? [])
+    .filter((s) => s?.name && s.location?.uri)
+    .map((s) => {
+      const start = s.location.range?.start ?? { line: 0, character: 0 };
+      return { title: s.name, kind: SYMBOL_KINDS[s.kind] ?? '', container: s.containerName ?? '', uri: s.location.uri, line: start.line + 1, column: start.character + 1 };
+    });
+}
+
+/**
  * LSP text edits as CodeMirror changes over `text` ([{ from, to, insert }], in order). Null
  * when one does not fit the text or two overlap.
  */

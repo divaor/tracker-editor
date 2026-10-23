@@ -9,9 +9,9 @@
 // - completion, hover and signature help are the client's; F12, Shift+F12 and F2 ask here
 //   (definition, references, rename) and app.js shows the answers.
 import DOMPurify from '../vendor/purify.js';
-import { EditorView, keymap, languages, LanguageDescription, StateEffect, StateField, ViewPlugin } from '../vendor/cm/codemirror.js';
+import { Decoration, EditorView, keymap, languages, LanguageDescription, StateEffect, StateField, ViewPlugin, WidgetType } from '../vendor/cm/codemirror.js';
 import { serverProblems } from './editor.js';
-import { fileUri, locations, pathKey, progressText, toProblems } from './lspTools.js';
+import { fileUri, locations, pathKey, progressText, rangesTouch, symbolRows, toProblems, uriPath, withWorkspaceFolder } from './lspTools.js';
 
 let lib = null; // the client's module, once loaded
 const loadLib = async () => (lib ??= await import('../vendor/cm/lsp.js'));
@@ -44,21 +44,88 @@ const escapeSignature = [
   ]),
 ];
 
-// Requests from the server the client does not answer itself.
+// Requests from the server the client does not answer itself (workspace/configuration,
+// workspace/workspaceFolders, workspace/applyEdit and workspace/diagnostic/refresh are answered
+// in deliver).
 const ANSWERS = {
   'client/registerCapability': () => null,
   'client/unregisterCapability': () => null,
   'window/workDoneProgress/create': () => null,
   'window/showMessageRequest': () => null,
-  'workspace/applyEdit': () => ({ applied: false, failureReason: 'Not supported yet' }),
+  'workspace/codeLens/refresh': () => null,
+  'workspace/semanticTokens/refresh': () => null,
+  'workspace/inlayHint/refresh': () => null,
 };
+
+// What this client can do beyond the library's own: edits across files (new files too, not
+// renames or deletions), code actions, workspace symbols, settings, progress.
+const CAPABILITIES = {
+  window: { workDoneProgress: true },
+  workspace: {
+    configuration: true,
+    workspaceFolders: true,
+    didChangeConfiguration: { dynamicRegistration: true },
+    didChangeWatchedFiles: { dynamicRegistration: false },
+    applyEdit: true,
+    workspaceEdit: { documentChanges: true, resourceOperations: ['create'], failureHandling: 'abort' },
+    symbol: { symbolKind: { valueSet: Array.from({ length: 26 }, (_, i) => i + 1) } },
+    executeCommand: {},
+    diagnostics: { refreshSupport: true },
+  },
+  textDocument: {
+    publishDiagnostics: { versionSupport: true },
+    rangeFormatting: {},
+    rename: { prepareSupport: true },
+    codeAction: {
+      codeActionLiteralSupport: { codeActionKind: { valueSet: ['', 'quickfix', 'refactor', 'refactor.extract', 'refactor.inline', 'refactor.rewrite', 'source', 'source.organizeImports', 'source.fixAll'] } },
+      isPreferredSupport: true,
+      disabledSupport: true,
+      dataSupport: true,
+      resolveSupport: { properties: ['edit'] },
+    },
+  },
+};
+
+const lspPosition = (doc, pos) => {
+  const line = doc.lineAt(pos);
+  return { line: line.number - 1, character: pos - line.from };
+};
+
+// A 💡 at the end of the cursor's line when the server reported a problem there: a click (or
+// Ctrl+.) lists its quick fixes.
+class BulbWidget extends WidgetType {
+  constructor(onClick) {
+    super();
+    this.onClick = onClick;
+  }
+  eq() {
+    return true;
+  }
+  toDOM(view) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'cm-lightbulb';
+    button.title = 'Quick fixes (Ctrl+.)';
+    button.setAttribute('aria-label', 'Quick fixes');
+    button.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18h6M10 21.5h4"/><path d="M12 2.5a6.5 6.5 0 0 0-3.9 11.7c.6.5.9 1.1.9 1.8v.5h6V16c0-.7.3-1.3.9-1.8A6.5 6.5 0 0 0 12 2.5z"/></svg>';
+    button.addEventListener('mousedown', (e) => e.preventDefault());
+    button.addEventListener('click', (e) => {
+      e.preventDefault();
+      this.onClick(view);
+    });
+    return button;
+  }
+  ignoreEvent() {
+    return true;
+  }
+}
 
 /**
  * The language servers of the open disk tabs. `host`: the editor host; `onChange()`: their
  * state changed (the status bar, the panel); `onMessage(text, kind)`: a server's message
  * worth a toast; `openPath(path)`: shows a file (a definition in another file).
  */
-export function createLanguageServers({ host, bridge = window.desktop?.lsp, onChange = () => {}, onMessage = () => {}, openPath }) {
+export function createLanguageServers({ host, bridge = window.desktop?.lsp, onChange = () => {}, onMessage = () => {}, openPath, applyEdit, onQuickFix }) {
   const servers = new Map(); // id → server
   const connecting = new Map(); // id → Promise<server>
   const tabs = new Map(); // key → { path, id, uri, languageId } | { path, pending } | { path, none } | { path, missing } | { path, stopped }
@@ -103,6 +170,8 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
         if (s.generation !== generation) return;
         s.ready = true;
         s.failed = '';
+        // Settings for servers that read them when told (the JSON server); the others ask again.
+        if (s.info.settings) s.client.notification('workspace/didChangeConfiguration', { settings: s.info.settings });
         // Problems for the files open now, when the server is asked for them.
         for (const file of s.client.workspace.files) pull(s, file);
         onChange();
@@ -122,8 +191,9 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
     const { LSPClient, Workspace, ChangeSet } = await loadLib();
     const s = { id: info.id, info, state: info.state, message: info.message, generation: info.generation, ready: false, failed: '', tasks: new Map(), diags: new Map(), log: [], idle: null };
     const handlers = new Set();
+    const folderName = String(info.root).split(/[\\/]/).filter(Boolean).pop() ?? '';
     s.transport = {
-      send: (message) => bridge.send(s.id, message),
+      send: (message) => bridge.send(s.id, withWorkspaceFolder(message, folderName)),
       subscribe: (h) => handlers.add(h),
       unsubscribe: (h) => handlers.delete(h),
     };
@@ -137,11 +207,22 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
           return;
         }
         // Settings the server asks for: the catalog's for its sections (lsp.cjs), else none.
-        if (msg.id != null && msg.method === 'workspace/configuration') {
-          const result = (msg.params?.items ?? []).map((item) => info.settings?.[item.section] ?? null);
-          return bridge.send(s.id, JSON.stringify({ jsonrpc: '2.0', id: msg.id, result }));
+        const answer = (result) => bridge.send(s.id, JSON.stringify({ jsonrpc: '2.0', id: msg.id, result }));
+        if (msg.id != null && msg.method === 'workspace/configuration') return answer((msg.params?.items ?? []).map((item) => info.settings?.[item.section] ?? null));
+        if (msg.id != null && msg.method === 'workspace/workspaceFolders') return answer([{ uri: fileUri(info.root), name: folderName }]);
+        // Its knowledge changed (another file did): the files' problems are asked for again.
+        if (msg.id != null && msg.method === 'workspace/diagnostic/refresh') {
+          for (const file of s.client.workspace.files) pull(s, file);
+          return answer(null);
         }
-        if (msg.id != null && ANSWERS[msg.method]) return bridge.send(s.id, JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: ANSWERS[msg.method](msg.params) }));
+        // Edits the server wants made (after a command, or a code action it carries out itself).
+        if (msg.id != null && msg.method === 'workspace/applyEdit') {
+          Promise.resolve(applyEdit ? applyEdit(msg.params?.edit, { label: msg.params?.label ?? '', server: info.server }) : { applied: false, failureReason: 'Not supported' })
+            .catch((err) => ({ applied: false, failureReason: err?.message ?? String(err) }))
+            .then((result) => answer(result ?? { applied: false }));
+          return;
+        }
+        if (msg.id != null && ANSWERS[msg.method]) return answer(ANSWERS[msg.method](msg.params));
       }
       for (const h of handlers) h(text);
     };
@@ -260,7 +341,7 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
           return true;
         },
       },
-      extensions: [{ clientCapabilities: { window: { workDoneProgress: true }, workspace: { configuration: true }, textDocument: { publishDiagnostics: { versionSupport: true } } } }],
+      extensions: [{ clientCapabilities: CAPABILITIES }],
     });
     s.client.connect(s.transport);
     watchInit(s);
@@ -309,6 +390,27 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
       },
     );
 
+  // The 💡 on the cursor's line when the server reported a problem on it.
+  const bulb = (s, uri) =>
+    ViewPlugin.fromClass(
+      class {
+        constructor(view) {
+          this.decorations = this.find(view);
+        }
+        update(u) {
+          if (u.docChanged || u.selectionSet || u.transactions.length) this.decorations = this.find(u.view);
+        }
+        find(view) {
+          if (!onQuickFix || !s.client.serverCapabilities?.codeActionProvider) return Decoration.none;
+          const line = view.state.doc.lineAt(view.state.selection.main.head);
+          const n = line.number - 1;
+          const here = (s.diags.get(uri) ?? []).some((d) => d.range.start.line <= n && n <= d.range.end.line && (d.severity ?? 1) <= 3);
+          return here ? Decoration.set([Decoration.widget({ widget: new BulbWidget(onQuickFix), side: 1 }).range(line.to)]) : Decoration.none;
+        }
+      },
+      { decorations: (v) => v.decorations },
+    );
+
   const extensionFor = (s, uri, languageId) => [
     s.client.plugin(uri, languageId),
     lib.serverCompletion(),
@@ -316,6 +418,7 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
     lib.signatureHelp(),
     escapeSignature,
     autoSync(s, uri),
+    bulb(s, uri),
     serverProblems.of((state) => {
       const items = s.diags.get(uri);
       return items ? toProblems(items, state.doc.toString()) : [];
@@ -426,6 +529,82 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
       return found.s.client.request(method, { textDocument: { uri: found.t.uri }, position: { line: line.number - 1, character: pos - line.from }, ...extra });
     },
     locations,
+
+    /** A request about a whole file (formatting…): `params` go beside its textDocument. Null without a server or the capability. */
+    async requestFile(key, method, params = {}, capability = '') {
+      const found = serverOf(key);
+      if (!found?.s?.ready || !host.stateOf(key) || (capability && !found.s.client.serverCapabilities?.[capability])) return null;
+      found.s.client.sync();
+      return found.s.client.request(method, { textDocument: { uri: found.t.uri }, ...params });
+    },
+    /** A tab's server capability (`name`), or null when it has no server ready. */
+    capability(key, name) {
+      const found = serverOf(key);
+      return found?.s?.ready ? (found.s.client.serverCapabilities?.[name] ?? null) : null;
+    },
+    /** The name of a tab's server ("gopls"), or ''. */
+    serverName: (key) => serverOf(key)?.s?.info.server ?? '',
+
+    /** The code actions for from–to in a tab (`only`: kinds), with the server's problems there: [CodeAction | Command], or null. */
+    async codeActions(key, from, to, only = null) {
+      const found = serverOf(key);
+      const state = host.stateOf(key);
+      if (!found?.s?.ready || !state || !found.s.client.serverCapabilities?.codeActionProvider) return null;
+      found.s.client.sync();
+      const range = { start: lspPosition(state.doc, from), end: lspPosition(state.doc, to) };
+      const diagnostics = (found.s.diags.get(found.t.uri) ?? []).filter((d) => rangesTouch(d.range, range));
+      return found.s.client.request('textDocument/codeAction', { textDocument: { uri: found.t.uri }, range, context: { diagnostics, triggerKind: 1, ...(only ? { only } : {}) } });
+    },
+    /** A code action with its edit filled in, when the server leaves that for later (codeAction/resolve). */
+    async resolveCodeAction(key, action) {
+      const found = serverOf(key);
+      if (!found?.s?.ready || action.edit || !found.s.client.serverCapabilities?.codeActionProvider?.resolveProvider) return action;
+      return (await found.s.client.request('codeAction/resolve', action)) ?? action;
+    },
+    /** Runs a server's command (a code action's, or one on its own); its edits come back as workspace/applyEdit. */
+    async executeCommand(key, command) {
+      const found = serverOf(key);
+      if (!found?.s?.ready) return null;
+      return found.s.client.request('workspace/executeCommand', { command: command.command, arguments: command.arguments ?? [] });
+    },
+
+    /**
+     * Symbols named like `query` from every server ready that searches its project
+     * (workspace/symbol): [{ title, kind, container, path, line, column, server }].
+     */
+    async workspaceSymbols(query) {
+      const ready = [...servers.values()].filter((s) => s.ready && s.client.serverCapabilities?.workspaceSymbolProvider);
+      const asked = ready.map(async (s) => {
+        // A slow server is not waited for (its late answer, or its timeout, goes nowhere).
+        const asking = s.client.request('workspace/symbol', { query }).catch(() => null);
+        const result = await Promise.race([asking, new Promise((resolve) => setTimeout(() => resolve(null), 4000))]);
+        return symbolRows(result)
+          .slice(0, 300)
+          .map((r) => ({ ...r, path: uriPath(r.uri, { windows: /^[A-Za-z]:[\\/]|^\\\\/.test(s.info.root) }), server: s.info.server }))
+          .filter((r) => r.path);
+      });
+      return (await Promise.allSettled(asked)).flatMap((r) => (r.status === 'fulfilled' ? r.value : []));
+    },
+
+    /**
+     * Files the editor wrote or made on disk (an edit to files not open): each server whose
+     * folder holds one is told (workspace/didChangeWatchedFiles; `created` for new ones).
+     */
+    filesChanged(paths, { created = [] } = {}) {
+      const inside = (root, p) => pathKey(p).startsWith(`${pathKey(root).replace(/[\\/]+$/, '')}${/^[A-Za-z]:|^\\\\/.test(root) ? '\\' : '/'}`);
+      for (const s of servers.values()) {
+        if (!s.ready) continue;
+        const changes = [...created.map((p) => ({ p, type: 1 })), ...paths.map((p) => ({ p, type: 2 }))].filter(({ p }) => inside(s.info.root, p)).map(({ p, type }) => ({ uri: fileUri(p), type }));
+        if (changes.length) s.client.notification('workspace/didChangeWatchedFiles', { changes });
+      }
+    },
+
+    /** Servers set up again (a custom one added or removed): tabs without one look again (`key`, shown, at once). */
+    refresh(key, path) {
+      for (const [k, t] of [...tabs]) if (!t.id) tabs.delete(k);
+      onChange();
+      if (key && path && !tabs.has(key)) return this.attach(key, path);
+    },
 
     /** The open tab showing a file:// URI, if any. */
     keyOfUri(uri) {

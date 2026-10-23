@@ -2,7 +2,7 @@
 
 Tracker Editor is a Notepad++-style editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs. Everything is saved the moment you paste or type, on this computer with the tracker, or, once you turn on sync, in the same private GitHub data repo as the tracker, so your files are on your computers and your phone.
 
-Version 0.18.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.18.0 · Web app: https://divaor.github.io/tracker-editor/
+Version 0.19.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.19.0 · Web app: https://divaor.github.io/tracker-editor/
 
 ---
 
@@ -14,9 +14,9 @@ Download from **https://github.com/divaor/tracker-editor/releases/latest**:
 
 | System | File |
 | --- | --- |
-| Windows | `Tracker Editor Setup 0.18.0.exe` (installer) or `Tracker Editor-0.18.0-portable.exe` (no install, no admin rights) |
-| macOS | `Tracker Editor-0.18.0-arm64.dmg` |
-| Linux | `Tracker Editor-0.18.0.AppImage` |
+| Windows | `Tracker Editor Setup 0.19.0.exe` (installer) or `Tracker Editor-0.19.0-portable.exe` (no install, no admin rights) |
+| macOS | `Tracker Editor-0.19.0-arm64.dmg` |
+| Linux | `Tracker Editor-0.19.0.AppImage` |
 
 The builds are not code-signed, so the first launch warns you. On Windows, choose *More info → Run anyway*. On macOS, right-click the app → *Open*. Installing the desktop app also registers `tracker-editor://` links, so the tracker's **Open in editor** opens files straight in it.
 
@@ -85,7 +85,7 @@ On an iPhone, apps added to the home screen each keep their own storage: the edi
 
 ### Editing tools
 
-- **Format document** (`Shift+Alt+F`, ⋯ menu, or **Edit → Format Document**): tidies the file, or only the selection (for example the JSON inside a log line). **JSON** on one line becomes one value per line (numbers and text exactly as written, comments kept); also **XML**, **SQL** (by dialect: pick PostgreSQL, MySQL, MS SQL… in the status bar), **JavaScript**, **TypeScript**, **CSS/SCSS/Less**, **HTML**, **Vue**, **Markdown**, **YAML** and **GraphQL**. It uses the file's name or the language picked in the status bar; text with no name is formatted when it looks like JSON or XML. Something it cannot read says what and where; `Ctrl+Z` takes a format back.
+- **Format document** (`Shift+Alt+F`, ⋯ menu, or **Edit → Format Document**): tidies the file, or only the selection (for example the JSON inside a log line). **JSON** on one line becomes one value per line (numbers and text exactly as written, comments kept); also **XML**, **SQL** (by dialect: pick PostgreSQL, MySQL, MS SQL… in the status bar), **JavaScript**, **TypeScript**, **CSS/SCSS/Less**, **HTML**, **Vue**, **Markdown**, **YAML** and **GraphQL**. It uses the file's name or the language picked in the status bar; text with no name is formatted when it looks like JSON or XML. A file with a language server that formats (Go, C, Rust…) uses the server's (see Language servers). Something it cannot read says what and where; `Ctrl+Z` takes a format back.
 - **Text tools** (⋯ → **Text tools**, **Edit → Text**, or Help): UPPER and lower case, sort lines, remove duplicate lines, trim trailing spaces, duplicate or delete a line, comment lines.
 - **Indentation**: each file keeps its own, tabs or spaces and how many: from its text, or from an `.editorconfig` next to a file on disk or on a server. The status bar shows it (**Spaces: 2**, **Tab size: 4**); click it to indent with tabs or spaces, pick the width, **convert** the whole file, or go back to what the text uses. What you pick is remembered for the file. Files that say nothing use **Settings → Editor → Indentation**.
 - **Edit several lines at once**: `Shift+Alt+↓` (or `↑`) puts a cursor on each line as you go (as in Notepad++; `Ctrl+Shift+Alt+arrows` as in VS Code; on a Mac `Cmd+Shift+Option+arrows`); `Shift+Alt+→` / `←` widen or narrow the column, so you select a rectangle. Type, paste or delete and every line changes. Shorter lines get their cursor at the end. `Ctrl+Alt+↑` / `↓` (Mac `Cmd+Option+↑` / `↓`) add one cursor above or below. With the mouse: `Alt+drag` draws the rectangle, `Ctrl+click` (Mac `Cmd+click`) adds a cursor. `Escape` goes back to one cursor.
@@ -112,20 +112,40 @@ Not a full IDE, but enough to find your way in a code file (**Edit → Code** on
 
 ### Language servers (desktop): code that knows its types
 
-For **TypeScript, JavaScript and Python** files opened from **Folders** on this computer, the editor uses a **language server**, the same kind of program VS Code uses, when one is installed. The status bar names it (**TypeScript 7.0.2 · ready**, **Pyright · Indexing 40%**). Then:
+For code files opened from **Folders** on this computer, the editor uses a **language server**, the same kind of program VS Code uses, when one is installed:
 
-- **Type errors** are underlined as you type, with the compiler's own message, and the **Problems** list says where each one comes from (`ts`, `Pyright`).
+| Files | Server | Install it with |
+| --- | --- | --- |
+| TypeScript, JavaScript | TypeScript 7 (its own), or typescript-language-server | `npm install -g typescript` |
+| Python | Pyright (or basedpyright) | `npm install -g pyright` or `pip install pyright` |
+| Go | gopls | `go install golang.org/x/tools/gopls@latest` |
+| Rust | rust-analyzer | `rustup component add rust-analyzer` |
+| C, C++ | clangd | `winget install LLVM.LLVM`, `brew install llvm`, `sudo apt install clangd` |
+| JSON, CSS/SCSS/Less, HTML | vscode-langservers-extracted | `npm install -g vscode-langservers-extracted` |
+| YAML | yaml-language-server | `npm install -g yaml-language-server` |
+| Bash | bash-language-server (problems from ShellCheck) | `npm install -g bash-language-server` |
+
+The status bar names it (**TypeScript 7.0.2 · ready**, **gopls · ready**, **Pyright · Indexing 40%**). Then:
+
+- **Problems** are underlined as you type, with the server's own message, and the **Problems** list says where each one comes from (`ts`, `Pyright`, `compiler`…).
 - **Completion** lists members, with their types and docs (`Math.` shows `abs`, `floor`…).
 - **Hover** a name for its type and documentation.
 - **Typing `(`** shows the parameters, the current one in bold; `Ctrl+Shift+Space` shows them again, `Escape` hides them.
-- **`F12`** goes to the declaration in any file of the project, **`Shift+F12`** lists the uses across files (click one to go there), and **`F2`** renames the name everywhere it is used: a dialog asks for the new name. Open files change as an edit `Ctrl+Z` takes back; files that were not open open as tabs with the change, not saved yet, so you check and save them (`Ctrl+S`).
+- **Quick fixes** (`Ctrl+.`): on a line with a problem, a 💡 shows at its end; click it, or press `Ctrl+.` anywhere, for what the server offers: add a missing import, fix a problem, extract a function… A problem's tooltip has **Quick fix…** too. **Organize imports** (`Shift+Alt+O`) sorts them and drops the unused ones.
+- **`F12`** goes to the declaration in any file of the project, **`Shift+F12`** lists the uses across files (click one to go there), and **`F2`** renames the name everywhere it is used: a dialog asks for the new name.
+- **Changes to other files** (a rename, a quick fix that moves code to a new file) are **shown first**: each file with its changed lines, ticked to take part. **Apply** changes the open files as an edit `Ctrl+Z` takes back (not saved yet), and **saves** the files that are not open, each only if it did not change since it was read; new files are made inside the folder you opened. **Undo**, in the message afterwards, takes it all back.
+- **Format document** (`Shift+Alt+F`) uses the server's formatter (gofmt for Go, clangd's for C…) when it has one; **Settings → Language servers** can put Prettier and the editor's own first. When the one chosen cannot format a file, the other does.
+- **`Ctrl+T`** also lists the servers' symbols for the projects they run for (classes, functions…, with their kind).
+- **JSON** files are checked against their schema: `package.json`, `tsconfig.json`, `.eslintrc`, `appsettings.json` and other well-known files, or any file with a `"$schema"`. **YAML**: GitHub Actions workflows, Compose files and many others by their schema; Kubernetes files in `k8s/`, `kubernetes/` or `manifests/` folders, or named `*.k8s.yaml`; a first line `# yaml-language-server: $schema=<url>` picks one for any file.
 - A file with no server, or a name the server does not know, works as before.
 
-**Setting one up.** When a file has none, the status bar says **Set up TypeScript…** (or Python): it shows the command to install one, `npm install -g typescript` (TypeScript 7 has its language server built in) or `npm install -g pyright` / `pip install pyright`, and **Type it in a terminal** opens a terminal with the command typed in, for you to press Enter. Nothing is downloaded or run behind your back. Then **It is installed: start it**. A project with its own TypeScript in `node_modules` uses that one.
+**Setting one up.** When a file has none, the status bar says **Set up Go…** (or the language): it shows the command to install one, and **Type it in a terminal** opens a terminal with the command typed in, for you to press Enter. Nothing is downloaded or run behind your back. Then **It is installed: start it**. A project with its own copy in `node_modules` uses that one.
 
-- Each server runs for one **project folder** (the nearest folder with a `package.json`, `tsconfig.json`, `pyproject.toml`…, never above the folder you opened in Folders); at most four run at once, and one stops 10 minutes after its last file is closed.
+**Servers of your own** (Settings → **Language servers** → **Add a server…**): for another language (Lua, Ruby, PHP, Kotlin…), give a name, the file extensions, the program (its name, found on PATH, or its full path) and its arguments (most want `--stdio`). Before it is kept, the app shows the exact program it found and asks you to allow it; it runs only that one. **Change** and **Remove** are next to it.
+
+- Each server runs for one **project folder** (the nearest folder with a `package.json`, `go.mod`, `Cargo.toml`, `pyproject.toml`…, never above the folder you opened in Folders); JSON, CSS, HTML, YAML and Bash run once for the whole folder you opened. At most six run at once, and one stops 10 minutes after its last file is closed.
 - Click the server in the status bar for the **Language servers** panel: what runs for which folder, **Restart**, **Stop**, and **Show its messages** for when something goes wrong. A server that keeps crashing stops after three times; the status bar then offers **Start**.
-- Turn them off in **Settings → Editor → Language servers**.
+- Turn them off in **Settings → Language servers**.
 
 ---
 
@@ -533,6 +553,8 @@ Turn them on in **Settings → Desktop**.
 | `Ctrl+G` | Go to line |
 | `Ctrl+Shift+M` / `F8` / `Shift+F8` | Problems in this file / the next one / the one before |
 | `F12` / `Shift+F12` / `F2` | In code: go to the declaration / its usages / rename it (with a language server: across the project) |
+| `Ctrl+.` | Quick fixes and refactorings here (language server) |
+| `Shift+Alt+O` | Organize imports (language server) |
 | `Ctrl+Shift+Space` | With a language server: the parameters of the call at the cursor |
 | `Ctrl+P`, then `@` | Go to a function, class or section of this file |
 | `Ctrl+T` (or `Ctrl+P`, then `#`) | Go to a function, class or section in any file (desktop: also the folders open in Folders) |
