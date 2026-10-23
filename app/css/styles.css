@@ -1726,6 +1726,107 @@ button.project-chip:hover {
   background: transparent !important;
 }
 
+/* Several folders side by side in the folders view (each a root of the tree): a header
+   in the color of where it is (this computer, a server), sticky while its files scroll. */
+.root-section {
+  margin: 0 0 6px;
+  border-left: 3px solid color-mix(in srgb, var(--kc) 45%, transparent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.root-section.current {
+  border-left-color: var(--kc);
+}
+
+.root-head {
+  position: sticky;
+  top: -6px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  margin-bottom: 2px;
+  padding: 3px 4px 3px 2px;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: color-mix(in srgb, var(--kc) 9%, var(--bg));
+  cursor: pointer;
+  user-select: none;
+}
+
+.root-head:hover {
+  background: color-mix(in srgb, var(--kc) 15%, var(--bg));
+}
+
+.root-section.current > .root-head {
+  background: color-mix(in srgb, var(--kc) 20%, var(--bg));
+}
+
+.root-head-icon {
+  flex: none;
+  color: var(--kc);
+}
+
+.root-head-name {
+  flex: none;
+  max-width: 62%;
+  overflow: hidden;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.root-section.current .root-head-name {
+  color: color-mix(in srgb, var(--kc) 70%, var(--text));
+  font-weight: 750;
+}
+
+.root-head-where {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.root-head .conn-dot {
+  flex: none;
+  color: var(--kc);
+}
+
+.root-head-count {
+  flex: none;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 18px;
+  text-align: center;
+}
+
+.root-head-close {
+  flex: none;
+  opacity: 0;
+}
+
+.root-head:hover .root-head-close,
+.root-head:focus-within .root-head-close {
+  opacity: 1;
+}
+
+.root-head.drop-target {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.folder-list.details .root-head {
+  top: 24px;
+}
+
 /* The folders view's filter: what it found in the folders inside. */
 .filter-deep {
   margin: 4px 2px 0;
@@ -1985,6 +2086,16 @@ button.project-chip:hover {
 .crumb-sep {
   flex-shrink: 0;
   color: var(--text-3);
+}
+
+/* With several folders side by side: the path of the one worked in, in its color. */
+.crumbs.of-section {
+  padding-left: 6px;
+  border-left: 3px solid var(--kc);
+}
+
+.crumbs.of-section .crumb.current {
+  color: color-mix(in srgb, var(--kc) 70%, var(--text));
 }
 
 .folders-new {
@@ -2955,16 +3066,66 @@ button.where-chip:hover {
 /* The strip scrolls sideways (the mouse wheel too) without a scrollbar; hints at
    its edges say how many tabs are past them (ui/tabs.js). */
 .tabbar-wrap {
-  position: relative;
+  display: flex;
   flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.tabbar-strip {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+/* All open tabs, in a list (when they do not all fit). */
+.tab-list-btn {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+  height: 37px;
+  padding: 0 8px 0 7px;
+  border: 0;
+  border-left: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 11.5px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.tab-list-btn:hover,
+.tab-list-btn[aria-expanded='true'] {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.tab-list-btn.has-active {
+  color: var(--accent);
+}
+
+/* The open tab is past this edge: the hint stands out, and a click brings the tab back. */
+.tab-hint.has-active {
+  color: var(--accent);
+}
+
+.tab-hint-active {
+  margin: 0 3px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
 }
 
 .tabbar {
   display: flex;
-  height: 38px;
+  height: 37px;
   overflow-x: auto;
   overflow-y: hidden;
-  border-bottom: 1px solid var(--border);
   background: var(--surface-2);
   scroll-padding-inline: 34px;
   scrollbar-width: none;
@@ -4233,10 +4394,36 @@ mark {
 
 .modal-foot {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   padding: 12px 16px;
   border-top: 1px solid var(--border);
+}
+
+/* Footer buttons never spill out of a dialog: they wrap, and a long file name in one is cut short. */
+.modal-foot .btn {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.modal-foot .btn-text {
+  display: inline-flex;
+  min-width: 0;
+  gap: 0.3em;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.ocr-dialog .modal-foot {
+  justify-content: flex-end;
+}
+
+.modal-foot .btn-clip {
+  min-width: 0;
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .field-grid {
@@ -4497,6 +4684,8 @@ mark {
   z-index: 70;
   display: flex;
   flex-direction: column;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
   min-width: 190px;
   max-width: min(320px, calc(100vw - 16px));
   padding: 5px;

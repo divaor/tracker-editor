@@ -146,7 +146,7 @@ export function OcrDialog({ images, saveTo, actions, onClose }) {
       <button type="button" class="btn" disabled=${empty} onClick=${() => done(() => actions.newFile({ text: `${text.trim()}\n` }))}><${Icon} name="file" size=${15} />New file</button>
       ${saveTo
         ? html`<button type="button" class="btn" disabled=${empty} onClick=${() => done(() => actions.insertText(text))}><${Icon} name="filePlus" size=${15} />Insert at the cursor</button>
-          <button type="button" class="btn primary" disabled=${empty} title=${`A text file in ${saveTo}, not synced`} onClick=${() => done(() => actions.saveTextInFolder(saveTo, textNameFor(images), `${text.trim()}\n`))}><${Icon} name="save" size=${15} />Save as ${textNameFor(images)} here</button>`
+          <button type="button" class="btn primary" disabled=${empty} title=${`${textNameFor(images)}, a text file in ${saveTo} (not synced)`} onClick=${() => done(() => actions.saveTextInFolder(saveTo, textNameFor(images), `${text.trim()}\n`))}><${Icon} name="save" size=${15} /><span class="btn-text">Save here as <span class="btn-clip">${textNameFor(images)}</span></span></button>`
         : html`<button type="button" class="btn primary" disabled=${empty} onClick=${() => done(() => actions.insertText(text))}><${Icon} name="filePlus" size=${15} />Insert at the cursor</button>`}`}>
     <div class="ocr-body">
       <div class="ocr-image">${preview && html`<img src=${preview} alt=${images[0].name} />`}${images.length > 1 && html`<span class="muted small">+${images.length - 1} more</span>`}</div>

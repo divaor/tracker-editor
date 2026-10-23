@@ -21,6 +21,50 @@ export function isWithin(dir, root) {
   return d.length >= r.length && r.every((name, i) => sameName(name, d[i], sep));
 }
 
+// ---- Several folders side by side (each a root of the tree) ----
+
+const overlaps = (a, b) => isWithin(a, b) || isWithin(b, a);
+
+/** The open folders with `from` showing `to` instead, in its place; others it holds or is inside of close (a path shows once). */
+export function replaceSection(list, from, to) {
+  const out = [];
+  let placed = false;
+  for (const s of list) {
+    if (s === from || s === to) {
+      if (!placed) out.push(to);
+      placed = true;
+    } else if (!overlaps(s, to)) out.push(s);
+  }
+  if (!placed) out.push(to);
+  return out;
+}
+
+/**
+ * The folders open side by side in the folders view, with `current` among them: a new
+ * current one takes the place of the open one it is in (or holds), else of `previous`
+ * (the one shown before), else comes at the end.
+ */
+export function withCurrent(list = [], current = '', previous = '') {
+  const open = [...new Set((list ?? []).filter(Boolean))];
+  if (!current || open.includes(current)) return open.length ? open : current ? [current] : [];
+  const holder = open.find((s) => overlaps(s, current));
+  return replaceSection(open, holder ?? (open.includes(previous) ? previous : ''), current);
+}
+
+/**
+ * Settings that open `path` beside the folders open in the tree: { folder, folderSections,
+ * folderCollapsed }. A folder inside one that is open shows that one (`already`); a folder
+ * holding open ones takes their place.
+ */
+export function besideSettings(settings, path) {
+  const open = withCurrent(settings.folderSections, settings.folder);
+  const collapsedWithout = (p) => (settings.folderCollapsed ?? []).filter((c) => c !== p);
+  const holder = open.find((s) => isWithin(path, s));
+  if (holder) return { folder: holder, folderCollapsed: collapsedWithout(holder), already: holder };
+  const inside = open.find((s) => isWithin(s, path));
+  return { folder: path, folderSections: inside ? replaceSection(open, inside, path) : [...open, path], folderCollapsed: collapsedWithout(path) };
+}
+
 /** The picked folder that holds `dir` (the deepest when they nest), or null. */
 export function rootOf(dir, roots) {
   return roots.filter((r) => isWithin(dir, r)).sort((a, b) => b.length - a.length)[0] ?? null;

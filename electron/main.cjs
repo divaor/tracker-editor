@@ -1097,12 +1097,10 @@ ipcMain.handle('folder:read-image', guard((_e, file) => {
   return fs.readFileSync(file);
 }));
 // The folder shown is watched, so the list follows changes made elsewhere ('folder:changed').
-const folderWatches = new Map(); // webContents id → fs.FSWatcher
-ipcMain.handle('folder:watch', guard((event, dir) => {
-  const sender = event.sender;
-  folderWatches.get(sender.id)?.close();
-  folderWatches.delete(sender.id);
-  if (!dir) return false;
+const folderWatches = new Map(); // webContents id → { close } of its watched folders
+const watchedSenders = new Set();
+// The folders shown (one, or several side by side): each watched here, polled on a server.
+function watchFolder(sender, dir) {
   if (isRemote(dir)) {
     // A folder on a server: listed again now and then while connected.
     const { id } = remoteFiles.parseUri(dir);
@@ -1121,9 +1119,7 @@ ipcMain.handle('folder:watch', guard((event, dir) => {
         busy = false;
       }
     }, 4000);
-    folderWatches.set(sender.id, { close: () => clearInterval(poll) });
-    sender.once('destroyed', () => clearInterval(poll));
-    return true;
+    return { close: () => clearInterval(poll) };
   }
   checkDir(dir);
   let timer = null;
@@ -1133,12 +1129,37 @@ ipcMain.handle('folder:watch', guard((event, dir) => {
       timer = setTimeout(() => !sender.isDestroyed() && sender.send('folder:changed', { dir }), 250);
     });
     watcher.on('error', () => watcher.close());
-    folderWatches.set(sender.id, watcher);
-    sender.once('destroyed', () => watcher.close());
+    return watcher;
   } catch {
-    return false; // some network folders cannot be watched; Refresh still works
+    return null; // some network folders cannot be watched; Refresh still works
   }
-  return true;
+}
+ipcMain.handle('folder:watch', guard((event, dirs) => {
+  const sender = event.sender;
+  folderWatches.get(sender.id)?.close();
+  folderWatches.delete(sender.id);
+  const list = (Array.isArray(dirs) ? dirs : [dirs]).filter((d) => typeof d === 'string' && d).slice(0, 20);
+  if (!list.length) return false;
+  const watches = [];
+  for (const dir of list) {
+    try {
+      const w = watchFolder(sender, dir);
+      if (w) watches.push(w);
+    } catch {
+      // not allowed or gone: the others are still watched
+    }
+  }
+  folderWatches.set(sender.id, { close: () => watches.forEach((w) => w.close()) });
+  // Closed with the window (hooked once per window, not once per call).
+  if (!watchedSenders.has(sender.id)) {
+    watchedSenders.add(sender.id);
+    sender.once('destroyed', () => {
+      folderWatches.get(sender.id)?.close();
+      folderWatches.delete(sender.id);
+      watchedSenders.delete(sender.id);
+    });
+  }
+  return watches.length > 0;
 }));
 // Find in a folder (and the folders inside it), here or on a server: each file
 // with matches goes to the page as soon as it is read ('folder:found').
@@ -2041,6 +2062,7 @@ function buildMenu() {
         item('Open a File…', 'CmdOrCtrl+P', 'quick-open'),
         item('Open File (Edit in Place)…', 'CmdOrCtrl+O', 'disk-open'),
         item('Open Folder…', undefined, 'folder-open'),
+        item('Open Folder Beside the Others…', undefined, 'folder-beside'),
         item('Connect to a Server…', undefined, 'server-add'),
         item('Servers from the SSH Config…', undefined, 'servers-ssh'),
         item('Import Files…', undefined, 'open-disk'),
@@ -2133,6 +2155,8 @@ function buildMenu() {
         { type: 'separator' },
         item('Next Tab', 'Ctrl+Tab', 'next-tab'),
         item('Previous Tab', 'Ctrl+Shift+Tab', 'prev-tab'),
+        item('Show the Open Tab', undefined, 'reveal-tab'),
+        item('All Open Tabs…', undefined, 'tab-list'),
         { type: 'separator' },
         { role: 'resetZoom' },
         { role: 'zoomIn' },

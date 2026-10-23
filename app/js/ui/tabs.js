@@ -76,16 +76,21 @@ const LONG_PRESS_MS = 500;
 /**
  * How many tabs are cut off at each edge of the scrolled strip, and whether to hint at
  * that edge ({ left, right, moreLeft, moreRight }): for a hidden tab, or more than the
- * width of the + button out of sight.
+ * width of the + button out of sight. `activeSide` is the edge the open tab is past
+ * (less than half of it shows), or null.
  */
-function hiddenTabs(view, tabs) {
-  const out = { left: 0, right: 0 };
+export function hiddenTabs(view, tabs, active = null) {
+  const out = { left: 0, right: 0, activeSide: null };
   for (const t of tabs) {
     if (t.left < view.left - 1) out.left++;
     else if (t.right > view.right + 1) out.right++;
   }
   out.moreLeft = out.left > 0 || view.scrollLeft > 40;
   out.moreRight = out.right > 0 || view.scrollWidth - view.scrollLeft - view.width > 40;
+  if (active) {
+    const shown = Math.min(active.right, view.right) - Math.max(active.left, view.left);
+    if (shown < (active.right - active.left) / 2) out.activeSide = active.left < view.left ? 'left' : 'right';
+  }
   return out;
 }
 
@@ -93,14 +98,17 @@ function hiddenTabs(view, tabs) {
 function measureTabs(el) {
   const box = el.getBoundingClientRect();
   const tabs = [...el.querySelectorAll('.tab')].map((t) => t.getBoundingClientRect());
-  return hiddenTabs({ left: box.left, right: box.right, width: el.clientWidth, scrollLeft: el.scrollLeft, scrollWidth: el.scrollWidth }, tabs);
+  const active = el.querySelector('.tab.active')?.getBoundingClientRect() ?? null;
+  return hiddenTabs({ left: box.left, right: box.right, width: el.clientWidth, scrollLeft: el.scrollLeft, scrollWidth: el.scrollWidth }, tabs, active);
 }
 
 export function TabBar({ session, projects, settings, actions }) {
   const strip = useRef(null);
   const [dragging, setDragging] = useState(null);
   const [menu, setMenu] = useState(null); // { key, at }
-  const [edges, setEdges] = useState({ left: 0, right: 0, moreLeft: false, moreRight: false });
+  const [edges, setEdges] = useState({ left: 0, right: 0, moreLeft: false, moreRight: false, activeSide: null });
+  const [list, setList] = useState(null); // the menu of all the open tabs: { at }
+  const listButton = useRef(null);
   const press = useRef(null); // a finger held on a tab: { timer, x, y, fired }
   const touch = touchScreen();
   useEffect(() => {
@@ -145,6 +153,20 @@ export function TabBar({ session, projects, settings, actions }) {
     };
   }, []);
   const scrollBy = (dir) => strip.current?.scrollBy({ left: dir * Math.max(120, strip.current.clientWidth * 0.7), behavior: 'smooth' });
+  /** Brings the open tab back into view (it may have been scrolled away). */
+  const reveal = () => strip.current?.querySelector('.tab.active')?.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' });
+  const openList = () => {
+    const r = (listButton.current ?? strip.current)?.getBoundingClientRect();
+    if (r) setList({ at: { x: r.right, y: r.bottom + 4, right: true } });
+  };
+  // From Help and the View menu (actions.command): 'tabs:reveal', 'tabs:list'.
+  useEffect(() => {
+    const onReveal = () => reveal();
+    const onList = () => openList();
+    window.addEventListener('tabs:reveal', onReveal);
+    window.addEventListener('tabs:list', onList);
+    return () => (window.removeEventListener('tabs:reveal', onReveal), window.removeEventListener('tabs:list', onList));
+  }, []);
   const openMenu = (key, at) => setMenu({ key, at });
   const endPress = () => {
     clearTimeout(press.current?.timer);
@@ -283,18 +305,35 @@ export function TabBar({ session, projects, settings, actions }) {
     </div>`;
   };
 
+  // At an edge with tabs past it: how many, and a click scrolls that way; when the open tab
+  // is one of them, the hint stands out and a click brings it back.
   const hint = (side) => {
     const count = edges[side];
     const more = side === 'left' ? edges.moreLeft : edges.moreRight;
     if (!more) return null;
-    const label = count ? `${count} more ${count === 1 ? 'tab' : 'tabs'} to the ${side}` : `More to the ${side}`;
-    return html`<button type="button" class="tab-hint ${side}" aria-label=${label} title=${`${label} (or scroll with the mouse wheel)`} tabindex="-1"
-      onClick=${() => scrollBy(side === 'left' ? -1 : 1)}>
-      ${side === 'left' && html`<${Icon} name="chevronRight" size=${14} class="flip" />`}${count > 0 && html`<span class="tab-hint-count">${count}</span>`}${side === 'right' && html`<${Icon} name="chevronRight" size=${14} />`}
+    const hasActive = edges.activeSide === side;
+    const label = hasActive
+      ? `Your open tab is to the ${side}: show it`
+      : count
+        ? `${count} more ${count === 1 ? 'tab' : 'tabs'} to the ${side}`
+        : `More to the ${side}`;
+    return html`<button type="button" class="tab-hint ${side} ${hasActive ? 'has-active' : ''}" aria-label=${label} title=${`${label} (or scroll with the mouse wheel)`} tabindex="-1"
+      onClick=${() => (hasActive ? reveal() : scrollBy(side === 'left' ? -1 : 1))}>
+      ${side === 'left' && html`<${Icon} name="chevronRight" size=${14} class="flip" />`}${hasActive && html`<span class="tab-hint-active" aria-hidden="true">open tab</span>`}${count > 0 && html`<span class="tab-hint-count">${count}</span>`}${side === 'right' && html`<${Icon} name="chevronRight" size=${14} />`}
     </button>`;
   };
+  // Every open tab in a list, the open one checked; with tabs out of sight.
+  const listItems = () => [
+    { label: 'Show the open tab', icon: 'eye', disabled: !session.active, run: reveal },
+    { separator: true },
+    ...session.open.map((key) => {
+      const info = tabInfo(key);
+      return info && { key, label: info.name, icon: pinned.includes(key) ? 'pin' : KINDS[info.kind].icon, hint: info.project || KINDS[info.kind].label, checked: key === session.active, run: () => actions.activate(key) };
+    }),
+  ];
+  const overflowing = edges.moreLeft || edges.moreRight;
 
-  return html`<div class="tabbar-wrap">${hint('left')}<div class="tabbar" role="tablist" aria-label="Open files" ref=${strip}
+  return html`<div class="tabbar-wrap"><div class="tabbar-strip">${hint('left')}<div class="tabbar" role="tablist" aria-label="Open files" ref=${strip}
       onDblClick=${(e) => e.target === e.currentTarget && actions.newFile()}>
     ${pinned.map(tab)}
     ${groups.map((g) => {
@@ -312,7 +351,14 @@ export function TabBar({ session, projects, settings, actions }) {
     })}
     <button type="button" class="tab-new" aria-label="New file" title="New file (Alt+N)" onClick=${() => actions.newFile()}><${Icon} name="plus" size=${16} /></button>
     ${menu && session.open.includes(menu.key) && html`<${Menu} items=${menuItems(menu.key)} at=${menu.at} label="Tab" onClose=${() => setMenu(null)} />`}
-  </div>${hint('right')}</div>`;
+  </div>${hint('right')}</div>
+    ${overflowing &&
+    html`<button type="button" class="tab-list-btn ${edges.activeSide ? 'has-active' : ''}" ref=${listButton} aria-label="All open tabs" title=${`All open tabs (${session.open.length})${edges.activeSide ? ' · your open tab is out of sight' : ''}`}
+      aria-haspopup="menu" aria-expanded=${Boolean(list)} onClick=${() => (list ? setList(null) : openList())}>
+      <${Icon} name="chevronDown" size=${15} /><span class="tab-list-count">${session.open.length}</span>
+    </button>`}
+    ${list && html`<${Menu} items=${listItems()} at=${list.at} label="Open tabs" owner=${listButton} onClose=${() => setList(null)} />`}
+  </div>`;
 }
 
 /** Project, tags and actions for the file in the active tab. */

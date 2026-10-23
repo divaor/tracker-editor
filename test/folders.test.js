@@ -395,3 +395,30 @@ test('the reply is kept as the text, without fences or lead-ins', () => {
   assert.equal(ocr.looksLikeVisionModel('llama3.2'), false);
   assert.equal(ocr.looksLikeVisionModel('nomic-embed-text'), false);
 });
+
+test('several folders side by side: replacing, adding, never one inside another', async () => {
+  const { replaceSection, withCurrent, besideSettings } = await import('../app/js/folders.js');
+  // Going into a folder: it takes the place of the one shown.
+  assert.deepEqual(replaceSection(['/a', '/b'], '/a', '/a/x'), ['/a/x', '/b']);
+  assert.deepEqual(replaceSection(['/a', '/b'], '/b', '/c'), ['/a', '/c']);
+  // Up to a folder that holds another open one: that one closes (a path shows once).
+  assert.deepEqual(replaceSection(['/w/a', '/w/b', '/z'], '/w/a', '/w'), ['/w', '/z']);
+  assert.deepEqual(replaceSection([], '', '/a'), ['/a']);
+  // Servers and this computer never overlap.
+  assert.deepEqual(replaceSection(['remote://s1/home', '/home'], '/home', '/home/me'), ['remote://s1/home', '/home/me']);
+  // The current folder is always among them.
+  assert.deepEqual(withCurrent([], '/a'), ['/a']);
+  assert.deepEqual(withCurrent(['/a', '/b'], '/b'), ['/a', '/b']);
+  assert.deepEqual(withCurrent(['/a', '/b'], '/c', '/a'), ['/c', '/b']);
+  assert.deepEqual(withCurrent(['/a', '/b'], '/c', '/gone'), ['/a', '/b', '/c']);
+  // Shown from elsewhere (a found file's folder): it takes the place of the open one it is in.
+  assert.deepEqual(withCurrent(['/a', '/b'], '/b/sub', '/a'), ['/a', '/b/sub']);
+  assert.deepEqual(withCurrent(['/a', '/a', ''], ''), ['/a']);
+  assert.deepEqual(withCurrent(undefined, ''), []);
+  // Opening one beside the others.
+  const settings = { folder: '/a', folderSections: ['/a', 'remote://s1/srv'], folderCollapsed: ['/b'] };
+  assert.deepEqual(besideSettings(settings, '/b'), { folder: '/b', folderSections: ['/a', 'remote://s1/srv', '/b'], folderCollapsed: [] });
+  assert.deepEqual(besideSettings(settings, '/a/inside'), { folder: '/a', folderCollapsed: ['/b'], already: '/a' });
+  assert.deepEqual(besideSettings({ folder: '/w/a', folderSections: ['/w/a', '/z'] }, '/w'), { folder: '/w', folderSections: ['/w', '/z'], folderCollapsed: [] });
+  assert.deepEqual(besideSettings({ folder: 'C:\\Work', folderSections: [] }, 'c:\\work\\Proj').already, 'C:\\Work');
+});

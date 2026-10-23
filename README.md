@@ -8,7 +8,7 @@ It is the companion of [Tracker](https://github.com/divaor/tracking_app) and sha
 
 ## Features
 
-- **Many files open at once**: tabs you can reorder, reopen closed tabs (`Ctrl+Shift+T`), untitled `new 1`, `new 2`… files like Notepad++. Your tabs and their text come back exactly as you left them, including untitled ones.
+- **Many files open at once**: tabs you can reorder, reopen closed tabs (`Ctrl+Shift+T`), untitled `new 1`, `new 2`… files like Notepad++. Your tabs and their text come back exactly as you left them, including untitled ones. With many tabs, the edge of the tab bar shows which way the open tab is and brings it back, and **▾** lists them all.
   - Right-click a tab (on a phone: its ⋯, or a long press) to **pin** it, open it **to the side**, see its history, compare it, or close others, those to the right, a project's tabs or all. Double-click a tab to pin it, middle-click to close it.
   - Many tabs: the mouse wheel scrolls the tab bar (no scrollbar), and an arrow with a count at each end says how many tabs are past it.
   - **Group tabs by project**, each group with a header that folds it.
@@ -222,6 +222,7 @@ The sidebar has two views on the desktop: **My files** (synced) and **Folders** 
 - **Opening**: double-click or `Enter`. Folders open in the view (`Backspace` or ↑ goes back, the path at the top jumps). Text files open as files on disk (as with `Ctrl+O`): saving, reloading and **Follow** work the same, and they are not synced. PDFs, pictures, Office files and other formats open with their own program. Programs, scripts and shortcuts (`.exe`, `.bat`, `.ps1`, `.lnk`…) are never started: scripts open as text, the rest only with **Show in the file explorer**.
 - **A tree**: the chevron next to a folder (or `→` / `←`) opens it in place, with what is inside under it; select, copy and move across the folders you opened. New file, paste, duplicate, zip and text from images work in the folder of what you picked, not the top of the tree.
 - **Filter**: what matches shows as you type, also in the folders inside (closed ones too, and on servers), under its folders; `*.yml` patterns work.
+- **Side by side**: open several folders at once, here and on servers, each a root of the tree under a header in the color of where it is. Collapse one to look at another (or **Show only this one**), move and copy files between them, and the one you work in always stands out.
 - **Details** (the columns button): name, size and date modified in columns (permissions too on servers); click a header to sort by it, again to turn it around.
 - **Favorites and recent folders**: the ☆ in the folder's bar (or right-click a folder) adds it to the favorites under it, one click away and a place to drop files on; the 🕘 menu lists the folders you visited last.
 - **Preview** (the eye button): the file you pick, under the list: pictures, PDFs, Markdown, HTML, CSV and JSON as they look, the start of other text files. Drag its top edge to resize it. **Space** shows the file large over the window, `←` / `→` go through the folder, `Enter` opens it, `Esc` closes it.

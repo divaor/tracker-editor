@@ -47,6 +47,10 @@ export const DEFAULT_SETTINGS = {
   // the folder shown, whether dot files are listed, and the order (folders.js FOLDER_SORTS).
   sidebarMode: 'files',
   folder: '',
+  // Folders open side by side in the folders view, each a root of the tree (`folder` is among
+  // them), and the ones collapsed to their header.
+  folderSections: [],
+  folderCollapsed: [],
   showHidden: false,
   folderSort: 'name',
   folderSortReverse: false,

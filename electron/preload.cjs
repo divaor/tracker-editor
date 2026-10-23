@@ -120,7 +120,8 @@ contextBridge.exposeInMainWorld('desktop', {
     // For the preview: a picture's or PDF's bytes; the start of a text file ({ text, more }).
     peekBytes: (file) => ipcRenderer.invoke('folder:peek-bytes', file),
     peekText: (file) => ipcRenderer.invoke('folder:peek-text', file),
-    watch: (dir) => ipcRenderer.invoke('folder:watch', dir),
+    // The folders shown (a path, or several side by side; null stops): 'folder:changed' tells.
+    watch: (dirs) => ipcRenderer.invoke('folder:watch', dirs),
     onChanged(callback) {
       const listener = (_event, change) => callback(change);
       ipcRenderer.on('folder:changed', listener);

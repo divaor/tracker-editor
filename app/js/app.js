@@ -23,7 +23,7 @@ import { lastSyncText, mirror as mirrorById, onMirrors, watchMirrors as watchMir
 import { MirrorDeletesDialog, MirrorDialog, MirrorsDialog } from './ui/mirrors.js';
 import { onTransfers, watchTransfers } from './transfers.js';
 import { TransfersCard } from './ui/transfers.js';
-import { claudeText, opensInEditor, remapPath } from './folders.js';
+import { besideSettings, claudeText, opensInEditor, remapPath } from './folders.js';
 import { draggedPaths, draggedTab, dropped, isOwnDrop } from './dragOut.js';
 import { getSyncState, onSyncResult, onSyncState, syncClient, syncNow } from './syncManager.js';
 import { matchesScope, projectList } from './tracker-model.js';
@@ -609,11 +609,10 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         }
       },
       /** Opens a server in the folders view. */
-      async openServer(id) {
+      async openServer(id, { beside = false } = {}) {
         try {
           const { root } = await window.desktop.remote.connect(id);
-          saveSettings({ sidebarMode: 'folders', folder: root });
-          setSidebar(true);
+          actions.showInFolders(root, { beside });
         } catch (err) {
           toast(ipcMessage(err), { kind: 'error', timeout: 8000 });
         }
@@ -702,13 +701,21 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         }
       },
       /** Picks a folder in the system dialog (starting at `defaultPath`) and shows it in the folders view. */
-      async openFolder(defaultPath) {
+      /** Picks a folder in the system dialog and shows it (`beside`: next to the folders open in the tree). */
+      async openFolder(defaultPath, { beside = false } = {}) {
         if (!window.desktop?.folders) return toast('Folders work in the desktop app.', { kind: 'error' });
         const picked = await window.desktop.folders.pick(defaultPath);
         if (!picked) return null;
-        saveSettings({ sidebarMode: 'folders', folder: picked });
-        setSidebar(true);
+        actions.showInFolders(picked, { beside });
         return picked;
+      },
+      /** A folder in the folders view: in place of the one shown, or beside the others (`beside`). */
+      showInFolders(path, { beside = false } = {}) {
+        const patch = beside ? besideSettings(getSettings(), path) : { folder: path };
+        if (patch.already) toast(`${path === patch.already ? 'That folder is' : 'It is inside a folder that is'} open in the tree already.`);
+        delete patch.already;
+        saveSettings({ sidebarMode: 'folders', ...patch });
+        setSidebar(true);
       },
       /** Ctrl+Shift+E: the folders view (a folder is picked first when there is none yet). */
       async showFolders() {
@@ -1717,11 +1724,14 @@ export function App() {
       'next-tab': () => actions.cycleTab(1),
       'prev-tab': () => actions.cycleTab(-1),
       'quick-open': () => setDialog({ type: 'quickOpen' }),
+      'reveal-tab': () => window.dispatchEvent(new CustomEvent('tabs:reveal')),
+      'tab-list': () => window.dispatchEvent(new CustomEvent('tabs:list')),
       trash: () => setDialog({ type: 'trash' }),
       split: () => actions.toggleSplit(),
       'type-out': () => actions.typeOut(),
       'disk-open': () => actions.openDiskFiles(),
       'folder-open': () => actions.openFolder(),
+      'folder-beside': () => actions.openFolder(undefined, { beside: true }),
       'server-add': () => actions.editServer(),
       'servers-ssh': () => actions.importSshConfig(),
       terminal: () => actions.toggleTerminal(),
