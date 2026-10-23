@@ -2,7 +2,7 @@
 
 Tracker Editor is a Notepad++-style editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs. Everything is saved the moment you paste or type, on this computer with the tracker, or, once you turn on sync, in the same private GitHub data repo as the tracker, so your files are on your computers and your phone.
 
-Version 0.17.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.17.0 · Web app: https://divaor.github.io/tracker-editor/
+Version 0.17.1 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.17.1 · Web app: https://divaor.github.io/tracker-editor/
 
 ---
 
@@ -14,9 +14,9 @@ Download from **https://github.com/divaor/tracker-editor/releases/latest**:
 
 | System | File |
 | --- | --- |
-| Windows | `Tracker Editor Setup 0.17.0.exe` (installer) or `Tracker Editor-0.17.0-portable.exe` (no install, no admin rights) |
-| macOS | `Tracker Editor-0.17.0-arm64.dmg` |
-| Linux | `Tracker Editor-0.17.0.AppImage` |
+| Windows | `Tracker Editor Setup 0.17.1.exe` (installer) or `Tracker Editor-0.17.1-portable.exe` (no install, no admin rights) |
+| macOS | `Tracker Editor-0.17.1-arm64.dmg` |
+| Linux | `Tracker Editor-0.17.1.AppImage` |
 
 The builds are not code-signed, so the first launch warns you. On Windows, choose *More info → Run anyway*. On macOS, right-click the app → *Open*. Installing the desktop app also registers `tracker-editor://` links, so the tracker's **Open in editor** opens files straight in it.
 
@@ -440,6 +440,7 @@ Working there:
 - A server file opens in a **pink tab**. The file bar shows the server's name and **Saved on the server** or **Not saved to the server**; the status bar shows `SFTP · user@host:/path` and a dot (filled: connected).
 - **Ctrl+S** saves it to the server. Or turn on **Save to the server automatically** in the server's settings (⋯ next to its name → Edit), and it saves a moment after you stop typing.
 - **Changed on the server?** Tabs you haven't edited update by themselves. With your edits, you get **Compare**, **Reload** or **Keep mine and save over it**. **Follow** shows lines added to a log on the server.
+- **The server hung up?** FTP servers close a connection left idle for a few minutes (and networks drop them): the next thing you do (open a folder, Refresh, open or save a file) connects again by itself.
 - **Server unreachable?** Your edits stay on this device, even if you close the app; the tab says **Not connected · not saved**. **Reconnect** (in the file bar) and then **Ctrl+S**.
 - Pictures and PDFs show large here, as on this computer; other files (and pictures and PDFs with **Open with its program**) open with their program from a downloaded copy (changes made there are not sent back). Pictures can also have their text read (see 13).
 - Your password and key passphrase are kept in this computer's keychain and never shown again; the editor only uses key files you choose (or the ones your SSH config names).

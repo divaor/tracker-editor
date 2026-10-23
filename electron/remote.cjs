@@ -297,8 +297,16 @@ class SftpSession {
     client.removeAllListeners('close');
     client.on('error', () => {});
     this.sftp = await new Promise((resolve, reject) => client.sftp((err, sftp) => (err ? reject(err) : resolve(sftp))));
-    client.on('close', () => this.onClose());
+    client.on('close', () => {
+      this.closed = true;
+      this.onClose();
+    });
     return this;
+  }
+
+  /** Whether the connection still works. */
+  get alive() {
+    return Boolean(this.client) && !this.closed;
   }
 
   close() {
@@ -574,8 +582,23 @@ class FtpSession {
         if (password === undefined) throw err;
       }
     }
-    this.client.ftp.socket.on('close', () => this.onClose());
+    this.client.ftp.socket.on('close', () => this.lost());
     return this;
+  }
+
+  /**
+   * Whether the control connection still works. basic-ftp closes it by itself on a timeout or
+   * when the server hangs up (an idle timeout), and removes our listeners first: so it is asked.
+   */
+  get alive() {
+    return Boolean(this.client) && !this.client.closed;
+  }
+
+  // Gone (the server hung up, a timeout): the session is given up, once.
+  lost() {
+    if (this.gone) return;
+    this.gone = true;
+    this.onClose();
   }
 
   close() {
@@ -584,9 +607,16 @@ class FtpSession {
 
   // One command at a time on an FTP control connection.
   run(fn) {
-    const next = this.queue.then(() => {
-      if (this.client.closed) throw Object.assign(new Error('The connection was closed.'), { code: 'ECONNRESET' });
-      return fn(this.client);
+    const next = this.queue.then(async () => {
+      if (!this.alive) {
+        this.lost();
+        throw Object.assign(new Error('The connection was closed.'), { code: 'ECONNRESET' });
+      }
+      try {
+        return await fn(this.client);
+      } finally {
+        if (!this.alive) this.lost();
+      }
     });
     this.queue = next.catch(() => {});
     return next;
@@ -839,8 +869,17 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
     }
   }
 
+  /** A session that died without a word (an FTP server's idle timeout) is given up, and the page told. */
+  function checkAlive(id) {
+    const l = live.get(id);
+    if (!l?.session || l.state !== 'connected' || l.session.alive !== false) return;
+    live.set(id, { state: 'disconnected', error: '' });
+    onStatus({ id, state: 'disconnected', error: '' });
+  }
+
   /** The open session of a server, connecting when needed (one attempt at a time). */
   async function session(id, { depth = 0 } = {}) {
+    checkAlive(id);
     const l = live.get(id);
     if (l?.session && l.state === 'connected') return l.session;
     if (l?.opening) return l.opening;
@@ -869,15 +908,23 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
     return opening;
   }
 
-  /** Runs `fn(session, path)` for a remote:// path, with friendly errors. */
-  async function withPath(uri, fn) {
+  /**
+   * Runs `fn(session, path)` for a remote:// path, with friendly errors. With `again` (reads
+   * only), a connection found dead on the way is replaced and `fn` runs once more.
+   */
+  async function withPath(uri, fn, { again = false } = {}) {
     const { id, path: p } = parseUri(uri);
     const conn = find(id);
     const s = await session(id);
     try {
       return await fn(s, p, id);
     } catch (err) {
-      throw friendlyError(err, conn);
+      if (!again || s.alive !== false) throw friendlyError(err, conn);
+      try {
+        return await fn(await session(id), p, id);
+      } catch (retried) {
+        throw friendlyError(retried, conn);
+      }
     }
   }
 
@@ -1057,7 +1104,7 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
     disconnectAll() {
       for (const id of [...live.keys()]) api.disconnect(id);
     },
-    isConnected: (id) => live.get(id)?.state === 'connected',
+    isConnected: (id) => (checkAlive(id), live.get(id)?.state === 'connected'),
     /** Whether a path is on an FTP or FTPS server (one command at a time there). */
     isFtp: (uri) => data.connections.find((c) => c.id === parseUri(uri).id)?.protocol !== 'sftp',
     /** A readable name for a path: "name: /path". */
@@ -1090,7 +1137,7 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
         const decoded = disk.decode(buf);
         if (truncated) decoded.text = decoded.text.slice(decoded.text.indexOf('\n') + 1);
         return { path: uri, name: posix.basename(p), ...decoded, mtimeMs: st.mtimeMs, size: st.size, truncated };
-      }),
+      }, { again: true }),
     write: (uri, text, { eol, bom, encoding, expectedMtime, expectedSize, force = false } = {}) =>
       withPath(uri, async (s, p) => {
         if (!force && expectedMtime !== undefined) {
@@ -1106,7 +1153,7 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
       withPath(uri, async (s, p) => {
         const st = await s.stat(p);
         return st && { mtimeMs: st.mtimeMs, size: st.size };
-      }),
+      }, { again: true }),
     readAppended: (uri, offset, { encoding = 'utf-8' } = {}) =>
       withPath(uri, async (s, p) => {
         const st = await s.stat(p);
@@ -1131,7 +1178,7 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
       withPath(uri, async (s, p, id) => {
         const entries = await s.list(p);
         return { dir: uri, entries: entries.map((e) => ({ ...e, path: toUri(id, e.path), hidden: e.name.startsWith('.') })), truncated: false };
-      }),
+      }, { again: true }),
     newFile: (dirUri, name, { text = '', unique = false } = {}) =>
       withPath(dirUri, async (s, dir, id) => {
         const clean = checkName(name);
