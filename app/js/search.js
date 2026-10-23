@@ -112,15 +112,18 @@ export function fuzzyScore(target, query) {
   return score - (t.length - q.length) * 0.05;
 }
 
-/** Files ranked for quick open; ties keep the given order (most recent first). */
+/**
+ * Files ranked for quick open; ties keep the given order (most recent first). Files in
+ * folders (with `rel`, their path inside the folder) also match by that path ("lib/util").
+ */
 export function quickOpen(files, query, limit = 60) {
   if (!query.trim()) return files.slice(0, limit);
+  const scoreOf = (file) =>
+    file.rel !== undefined
+      ? Math.max(fuzzyScore(file.name, query), fuzzyScore(file.rel, query) - 3)
+      : Math.max(fuzzyScore(file.name, query), fuzzyScore(`${file.project} ${file.name}`, query) - 5, file.item ? fuzzyScore(`${file.item} ${file.name}`, query) - 5 : -1);
   return files
-    .map((file, i) => ({
-      file,
-      i,
-      score: Math.max(fuzzyScore(file.name, query), fuzzyScore(`${file.project} ${file.name}`, query) - 5, file.item ? fuzzyScore(`${file.item} ${file.name}`, query) - 5 : -1),
-    }))
+    .map((file, i) => ({ file, i, score: scoreOf(file) }))
     .filter((r) => r.score >= 0)
     .sort((a, b) => b.score - a.score || a.i - b.i)
     .slice(0, limit)

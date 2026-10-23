@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('desktop', {
   disk: {
     open: () => ipcRenderer.invoke('disk:open'),
     read: (path) => ipcRenderer.invoke('disk:read', path),
+    editorConfig: (path) => ipcRenderer.invoke('disk:editorconfig', path),
     readAppended: (path, offset, opts) => ipcRenderer.invoke('disk:read-appended', path, offset, opts),
     write: (path, text, opts) => ipcRenderer.invoke('disk:write', path, text, opts),
     stat: (path) => ipcRenderer.invoke('disk:stat', path),
@@ -67,6 +68,7 @@ contextBridge.exposeInMainWorld('desktop', {
     stopFind: (searchId) => ipcRenderer.invoke('folder:find-stop', searchId),
     // The filter in the folders inside `dir`: { found: [{ entry, parent }], folders, truncated, stopped }.
     findNames: (searchId, dir, query, opts) => ipcRenderer.invoke('folder:find-names', searchId, dir, query, opts),
+    index: (dir, opts) => ipcRenderer.invoke('folder:index', dir, opts),
     onFound(callback) {
       const found = (_event, data) => callback({ type: 'found', ...data });
       const progress = (_event, data) => callback({ type: 'progress', ...data });

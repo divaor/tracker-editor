@@ -14,6 +14,8 @@ import { isRemotePath, KINDS, kindOfKey, protocolName, remoteAddress, remotePart
 import { server, serverStatus } from '../servers.js';
 import { mirrorOf } from '../mirrors.js';
 import { mirrorState } from './mirrors.js';
+import { indentLabel } from '../indent.js';
+import { problemsSummary } from './problems.js';
 
 /** The server of a file on one ({ conn, status }), or null. */
 const serverOf = (path) => {
@@ -549,7 +551,37 @@ export function SyncBadge({ sync, compact = false }) {
   </button>`;
 }
 
-export function StatusBar({ recording, big, cursor, language, file, repo, disk, settings, actions }) {
+const INDENT_SOURCES = {
+  detected: 'From the text',
+  editorconfig: 'From .editorconfig',
+  chosen: 'Picked for this file',
+  default: 'The default (Settings → Editor)',
+};
+
+// The status bar's "Spaces: 4" / "Tab size: 4": tabs or spaces, the width, converting.
+function IndentButton({ indent, actions }) {
+  const [at, setAt] = useState(null);
+  const button = useRef(null);
+  const items = () => [
+    { label: 'Indent with spaces', run: () => actions.setIndent({ tabs: false }), checked: !indent.tabs },
+    { label: 'Indent with tabs', run: () => actions.setIndent({ tabs: true }), checked: indent.tabs },
+    { separator: true },
+    ...[2, 4, 8].map((n) => ({ label: `${n} ${indent.tabs ? 'columns per tab' : 'spaces'}`, key: `w${n}`, run: () => actions.setIndent({ size: n }), checked: indent.size === n })),
+    { separator: true },
+    { label: 'Convert the indentation to spaces', icon: 'replace', run: () => actions.convertIndent(false) },
+    { label: 'Convert the indentation to tabs', icon: 'replace', run: () => actions.convertIndent(true) },
+    { label: 'From the text again', icon: 'rotate', hint: INDENT_SOURCES[indent.source], run: () => actions.setIndent(null) },
+  ];
+  return html`<button type="button" ref=${button} class="status-item status-btn-text status-indent hide-narrow" aria-haspopup="menu" aria-expanded=${Boolean(at)}
+      title=${`Indentation: ${INDENT_SOURCES[indent.source] ?? ''}. Click to change it or convert the file.`}
+      onClick=${(e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        setAt(at ? null : { x: r.right, y: r.top - 4, right: true, above: true });
+      }}>${indentLabel(indent)}</button>
+    ${at && html`<${Menu} items=${items()} at=${at} label="Indentation" owner=${button} onClose=${() => setAt(null)} />`}`;
+}
+
+export function StatusBar({ recording, big, cursor, language, file, repo, disk, settings, actions, problems, problemsOpen }) {
   const setLanguage = (value) => file && actions.patch(file.id, { language: value === 'auto' ? '' : value });
   let state = '';
   const kind = file ? 'synced' : repo ? 'doc' : disk ? (isRemotePath(disk.path) ? 'remote' : 'disk') : null;
@@ -568,6 +600,12 @@ export function StatusBar({ recording, big, cursor, language, file, repo, disk, 
     <span class="status-item status-state" title=${file ? `${formatBytes(store.text(file.id).length)}` : ''}>${state}</span>
     ${recording && html`<button type="button" class="status-item status-btn-text status-recording" title="Recording a macro: Ctrl+Shift+R stops" onClick=${actions.toggleRecording}>● Recording macro</button>`}
     ${big && html`<span class="status-item status-big" title="A very large file: highlighting, wrapping and completion are off to keep it fast">Large file</span>`}
+    ${problems &&
+    html`<button type="button" class="status-item status-btn-text status-problems ${problems.list.some((p) => p.severity === 'error') ? 'has-errors' : problems.list.length ? 'has-warnings' : ''}"
+      aria-pressed=${Boolean(problemsOpen)} title=${`${problemsSummary(problems.list)} (Ctrl+Shift+M; F8 goes to the next)`} onClick=${actions.toggleProblems}>
+      <${Icon} name="xCircle" size=${13} /><span>${problems.list.filter((p) => p.severity === 'error').length}</span>
+      <${Icon} name="alert" size=${13} /><span>${problems.list.filter((p) => p.severity !== 'error').length}</span>
+    </button>`}
     <span class="spacer" />
     ${cursor?.scope && html`<button type="button" class="status-item status-btn-text status-scope hide-narrow" title=${`In ${cursor.scope} · Ctrl+P then @ goes to another`} onClick=${() => actions.gotoSymbol()}>
       <${Icon} name="code" size=${13} /><span>${cursor.scope}</span>
@@ -582,7 +620,7 @@ export function StatusBar({ recording, big, cursor, language, file, repo, disk, 
       </select>
     </label>`}
     ${(repo || disk) && html`<span class="status-item">${language || PLAIN_TEXT}</span>`}
-    <button type="button" class="status-item status-btn-text hide-narrow" title="Tab size" onClick=${() => saveSettings({ tabSize: settings.tabSize === 4 ? 2 : 4 })}>Spaces: ${settings.tabSize}</button>
+    ${cursor?.indent && html`<${IndentButton} indent=${cursor.indent} actions=${actions} />`}
     <button type="button" class="status-item status-btn-text ${settings.wordWrap ? 'on' : ''}" title="Word wrap (Alt+Z)" aria-pressed=${settings.wordWrap} onClick=${() => saveSettings({ wordWrap: !getSettings().wordWrap })}>
       <${Icon} name="wrap" size=${14} /><span class="hide-narrow">Wrap</span>
     </button>

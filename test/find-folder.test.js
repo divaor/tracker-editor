@@ -147,3 +147,38 @@ test('the folders filter: text anywhere in the name, or a pattern', async () => 
   });
   assert.deepEqual(rows.map((r) => r.entry.path), ['/r/app', '/r/app/c.yml', '/r/b.yml']);
 });
+
+// Ctrl+P: every file in the folders open in Folders, by its path inside them.
+test('files in a folder for quick open: nearest first, paths inside, the usual folders left out', async () => {
+  const { listFiles } = require('../electron/findInFolder.cjs');
+  const tree = {
+    '/w/a.txt': '',
+    '/w/src/': null,
+    '/w/src/main.js': '',
+    '/w/src/lib/': null,
+    '/w/src/lib/util.js': '',
+    '/w/.git/': null,
+    '/w/.git/HEAD': '',
+    '/w/.env': '',
+    '/w/node_modules/': null,
+    '/w/node_modules/x.js': '',
+    '/w/link/': null,
+    '/w/link/far.js': '',
+  };
+  const lister = async (dir) =>
+    Object.keys(tree)
+      .filter((p) => p.startsWith(`${dir}/`) && p !== `${dir}/` && !p.slice(dir.length + 1).replace(/\/$/, '').includes('/'))
+      .map((p) => ({ name: p.slice(dir.length + 1).replace(/\/$/, ''), path: p.replace(/\/$/, ''), dir: p.endsWith('/'), link: p === '/w/link/', size: 1, mtimeMs: 5 }));
+  const res = await listFiles({ root: '/w', list: lister });
+  assert.deepEqual(res.files.map((f) => f.rel), ['a.txt', 'src/main.js', 'src/lib/util.js']);
+  assert.deepEqual(res.files[2], { path: '/w/src/lib/util.js', name: 'util.js', rel: 'src/lib/util.js', size: 1, mtimeMs: 5 });
+  assert.equal(res.truncated, false);
+  const withHidden = await listFiles({ root: '/w/', list: async (d) => lister(d.replace(/\/$/, '')), hidden: true });
+  assert.deepEqual(withHidden.files.map((f) => f.rel), ['a.txt', '.env', 'src/main.js', 'src/lib/util.js']);
+  const few = await listFiles({ root: '/w', list: lister, maxFiles: 2 });
+  assert.deepEqual(few.files.map((f) => f.rel), ['a.txt', 'src/main.js']);
+  assert.equal(few.truncated, true);
+  // Windows paths come out with "/".
+  const win = await listFiles({ root: 'C:\\w', list: async (d) => (d === 'C:\\w' ? [{ name: 'd', path: 'C:\\w\\d', dir: true }] : [{ name: 'x.md', path: 'C:\\w\\d\\x.md', dir: false }]) });
+  assert.deepEqual(win.files.map((f) => f.rel), ['d/x.md']);
+});

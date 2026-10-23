@@ -26,7 +26,7 @@ It is the companion of [Tracker](https://github.com/divaor/tracking_app) and sha
   - The tracker's documents (proposals, artifacts and other attached files) are listed with your files, under the name of their item. They are downloaded on each sync, so you can read them offline and find them with `Ctrl+P`, Find in files and the local model.
   - The tracker shows **Open in editor** on those items and **Edit in editor** on attached files; your edits are saved back to the tracker.
 - **Search that knows where things are**:
-  - `Ctrl+P` opens a file by (fuzzy) name or project.
+  - `Ctrl+P` opens a file by (fuzzy) name or project; on the desktop also the files in the folders open in Folders (here and on servers), by name or by path (`lib/util`), opened in place.
   - `Ctrl+Shift+F` finds text in all files, the filtered ones or the open tabs, with case, whole-word and regex options. Tick the files found and open them together, or open all of them, each at its first match.
 - **Outline, `[[links]]` and backlinks** (`Ctrl+Shift+O`): the headings of a Markdown file or the classes, functions and tables of code, to jump to. Write `[[another note]]` to link notes (Ctrl+click opens it, or offers to create it); the panel lists the links and the files that link here.
 - **Snippets with fields** (`Alt+I`): mark files as snippets and insert them with their `{{fields}}` filled in, plus `{{date}}`, `{{clipboard}}`, `{{selection}}` and `{{cursor}}`. Insert, copy or type them into another window.
@@ -58,6 +58,8 @@ It is the companion of [Tracker](https://github.com/divaor/tracking_app) and sha
 - **Help** (`F1`): every command and its shortcut in a searchable cheat sheet you can run commands from (or print), and the full guide.
 - **Editing tools**: go to line, multiple cursors, select next occurrence, comment lines, duplicate/delete/sort lines, remove duplicates, trim trailing spaces, upper/lower case, format JSON, word wrap, visible whitespace, bracket matching.
 - **Code tools** (not a full IDE): fold and unfold blocks, everything at once (`Alt+0` / `Alt+Shift+0`) or by level (`Alt+1`–`Alt+3`: classes, then their methods); **go to the declaration** (`F12`), **usages** (`Shift+F12`) and **rename** (`F2`) of a name in the file; **go to a function or section** (`Ctrl+P`, then `@`); the status bar names the function you are in; the name under the cursor is highlighted where else it is used. YAML and plain text fold by indentation.
+- **Problems as you type**: mistakes are underlined in JSON (comments allowed in `tsconfig.json`, `.jsonc` and the like), YAML (also a key twice, tabs, an open quote), XML, HTML, CSS and code (JavaScript, TypeScript, Python, Go, Java, PHP, C/C++, Rust); the status bar counts them, `Ctrl+Shift+M` lists them, `F8` / `Shift+F8` go to the next / previous one.
+- **Indentation per file**: tabs or spaces and how many, from the file's text or its `.editorconfig` (files on disk and on servers); the status bar shows it (`Spaces: 2`), changes it and converts the file. Indentation guides, brackets colored by depth, and sticky scroll (the lines of the class and function you are in stay at the top), each one can be turned off in Settings → Editor.
 - **Preview**: a reading view next to the text (instead of it on phones):
   - Markdown, with clickable checklists
   - HTML pages, in a sandbox with scripts and links off
@@ -327,6 +329,7 @@ All three are in **Settings → Desktop**, off until you turn them on.
 | In the terminal | `Ctrl+Shift+C` / `Ctrl+Shift+V` copy / paste (`Ctrl+C` copies when text is selected, `Ctrl+V` pastes) |
 | `Ctrl+F` / `Ctrl+H` | Find / replace in this file |
 | `Ctrl+G` | Go to line |
+| `Ctrl+Shift+M` / `F8` / `Shift+F8` | Problems in this file / next one / previous one |
 | `Ctrl+D` | Select the next occurrence |
 | `Ctrl+/` | Comment lines |
 | `Alt+Z` | Word wrap |

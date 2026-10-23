@@ -91,6 +91,8 @@ const PATHS = {
   widen: () => html`<path d="M8 7 3 12l5 5M16 7l5 5-5 5M3 12h18" />`,
   narrow: () => html`<path d="M3 12h7M7 8l4 4-4 4M21 12h-7M17 8l-4 4 4 4" />`,
   fullscreen: () => html`<path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" />`,
+  xCircle: () => html`<circle cx="12" cy="12" r="9" /><path d="m15 9-6 6M9 9l6 6" />`,
+  indent: () => html`<path d="M3 5h18M11 10h10M11 15h10M3 20h18M3 9.5l3 2.5-3 2.5" />`,
 };
 
 export function Icon({ name, size = 18, class: cls = '' }) {

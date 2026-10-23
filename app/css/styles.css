@@ -25,6 +25,10 @@
   --done: #23845f;
   --danger: #c23b3b;
   --warn: #b7791f;
+  /* Brackets by depth (editor.js bracketColors). */
+  --bracket-0: #b58407;
+  --bracket-1: #a43fa8;
+  --bracket-2: #1f72c4;
   /* Where a file lives (where.js): my files, a tracker document, this computer, a server. */
   --kind-synced: #1c8f55;
   --kind-doc: #2f6fd6;
@@ -66,6 +70,9 @@
     --done: #4fbf91;
     --danger: #ef6b6b;
     --warn: #e0a94a;
+    --bracket-0: #ffd700;
+    --bracket-1: #da70d6;
+    --bracket-2: #87cefa;
     --kind-synced: #4fc58a;
     --kind-doc: #6ea2f2;
     --kind-disk: #eba94a;
@@ -100,6 +107,9 @@
   --done: #4fbf91;
   --danger: #ef6b6b;
   --warn: #e0a94a;
+  --bracket-0: #ffd700;
+  --bracket-1: #da70d6;
+  --bracket-2: #87cefa;
   --kind-synced: #4fc58a;
   --kind-doc: #6ea2f2;
   --kind-disk: #eba94a;
@@ -4386,6 +4396,36 @@ mark {
   padding: 10px;
 }
 
+/* Files in the folders open in Folders: the kind's color, the folder inside, and which folder. */
+.quick-disk .quick-kind {
+  flex: none;
+  color: var(--kc);
+}
+
+.quick-rel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-where {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--kc) 14%, transparent);
+  color: var(--text-2);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quick-note {
+  padding: 4px 10px 8px;
+}
+
 /* ---- Dialogs, settings ---------------------------------------------------------- */
 .modal-body {
   padding: 4px 22px 16px;
@@ -6704,4 +6744,160 @@ button.help-command:focus-visible {
   body.printing-help .app {
     height: auto;
   }
+}
+
+/* ---- Problems as you type (ui/problems.js, editor.js) ---- */
+.status-problems {
+  gap: 4px;
+  color: var(--text-3);
+}
+
+.status-problems span {
+  margin-right: 4px;
+}
+
+.status-problems.has-errors {
+  color: var(--danger);
+}
+
+.status-problems.has-warnings {
+  color: var(--warn);
+}
+
+.status-problems[aria-pressed='true'] {
+  background: var(--surface-2);
+}
+
+.problem-row {
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.problem-row .problem-icon {
+  flex: none;
+  margin-top: 2px;
+}
+
+.problem-row.error .problem-icon {
+  color: var(--danger);
+}
+
+.problem-row.warning .problem-icon {
+  color: var(--warn);
+}
+
+.problem-message {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.problem-where {
+  flex: none;
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.problems-none {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--done);
+}
+
+.cm-editor .cm-tooltip-lint {
+  padding: 0;
+  font-family: var(--font);
+  font-size: 13px;
+}
+
+.cm-editor .cm-diagnostic {
+  padding: 4px 10px;
+}
+
+.cm-editor .cm-diagnostic-error {
+  border-left-color: var(--danger);
+}
+
+.cm-editor .cm-diagnostic-warning {
+  border-left-color: var(--warn);
+}
+
+.cm-editor .cm-gutter-lint {
+  width: 1em;
+}
+
+/* ---- Indentation guides, bracket colors, sticky scroll (editor.js) ---- */
+.cm-editor {
+  --guide: color-mix(in srgb, var(--text-3) 30%, transparent);
+}
+
+.cm-line.cm-indent-guides {
+  background-image: repeating-linear-gradient(to right, var(--guide) 0 1px, transparent 1px calc(var(--unit) * 1ch));
+  background-position: 6px 0;
+  background-repeat: no-repeat;
+  background-size: calc(var(--guides) * var(--unit) * 1ch) 100%;
+}
+
+.cm-bracket-0,
+.cm-bracket-0 * {
+  color: var(--bracket-0) !important;
+}
+
+.cm-bracket-1,
+.cm-bracket-1 * {
+  color: var(--bracket-1) !important;
+}
+
+.cm-bracket-2,
+.cm-bracket-2 * {
+  color: var(--bracket-2) !important;
+}
+
+.cm-sticky {
+  position: absolute;
+  left: 0;
+  z-index: 3;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: 0 3px 6px -4px rgba(0, 0, 0, 0.25);
+  font-family: var(--mono);
+  line-height: 1.55;
+}
+
+.cm-sticky[hidden] {
+  display: none;
+}
+
+.cm-sticky-line {
+  display: flex;
+  height: var(--sticky-line, 21px);
+  align-items: center;
+  cursor: pointer;
+  white-space: pre;
+}
+
+.cm-sticky-line:hover {
+  background: var(--surface-2);
+}
+
+.cm-sticky-num {
+  flex: none;
+  box-sizing: border-box;
+  width: var(--sticky-gutter, 0);
+  padding-right: 18px;
+  color: var(--text-3);
+  text-align: right;
+}
+
+.cm-sticky-text {
+  min-width: 0;
+  overflow: hidden;
+  padding-left: calc(var(--sticky-text, 0px) - var(--sticky-gutter, 0px) + 6px);
+  text-overflow: ellipsis;
+  tab-size: 4;
 }

@@ -40,6 +40,13 @@ import {
   unfoldCode,
   unfoldEffect,
   ensureSyntaxTree,
+  syntaxTree,
+  getIndentUnit,
+  linter,
+  lintGutter,
+  nextDiagnostic,
+  previousDiagnostic,
+  RangeSetBuilder,
   cursorMatchingBracket,
   Facet,
   StreamLanguage,
@@ -83,6 +90,8 @@ import { compileFilter, hiddenRuns, isBigText } from './logtools.js';
 import { currentEntry, outline, parseLinks } from './outline.js';
 import { isOwnDrop } from './dragOut.js';
 import { createSearchPanel, openReplacePanel } from './searchPanel.js';
+import { SYNTAX_LANGUAGES, problemsFor, treeErrors } from './problems.js';
+import { convertIndent, detectIndent } from './indent.js';
 
 export { languages };
 
@@ -262,28 +271,268 @@ const outlineOf = (state) => {
  * last heading above.
  */
 function scopeAt(state, pos) {
+  const name = state.facet(languageName);
+  const path = scopeEntries(state, pos);
+  // Text: the last heading above (the status bar has little room).
+  if (name === 'Markdown' || name === '') return path.length ? path[path.length - 1].title : '';
+  return path.map((e) => e.title).join(' › ');
+}
+/** The outline entries around `pos`, outermost first ([{ title, line, level }]): headings in text. */
+function scopeEntries(state, pos) {
   const entries = outlineOf(state);
-  if (!entries.length) return '';
+  if (!entries.length) return [];
   const lineNo = state.doc.lineAt(pos).number;
   const name = state.facet(languageName);
-  if (name === 'Markdown' || name === '') {
-    const at = currentEntry(entries, lineNo);
-    return at === -1 ? '' : entries[at].title;
-  }
   const path = [];
   let level = Infinity;
   for (let i = currentEntry(entries, lineNo), looked = 0; i >= 0 && looked < 400; i--, looked++) {
     const e = entries[i];
     if (e.level >= level) continue;
-    const line = state.doc.line(e.line);
-    const block = line.number === lineNo ? { to: line.to } : foldable(state, line.from, line.to);
-    if (!block || block.to < pos) continue;
-    path.unshift(e.title);
+    if (name !== 'Markdown' && name !== '') {
+      const line = state.doc.line(e.line);
+      const block = line.number === lineNo ? { to: line.to } : foldable(state, line.from, line.to);
+      if (!block || block.to < pos) continue;
+    }
+    path.unshift(e);
     level = e.level;
     if (level <= 1) break;
   }
-  return path.join(' › ');
+  return path;
 }
+
+// ---- Problems as you type ----
+
+// The file's name, for checks that depend on it (JSON with comments).
+const fileName = Facet.define({ combine: (values) => values[0] ?? '' });
+
+// The parser's syntax errors (problems.js treeErrors), and how far it read.
+function parserErrors(state) {
+  const tree = ensureSyntaxTree(state, state.doc.length, 400) ?? syntaxTree(state);
+  return { errors: treeErrors(tree, (from, to) => state.sliceDoc(from, to)), parsed: tree.length };
+}
+
+/**
+ * The linter for one tab: problemsFor (problems.js) with the parser's errors; `onProblems(key,
+ * list, language)` hears each result ([{ from, to, line, column, severity, message }]).
+ */
+const problemsLinter = (key, onProblems) =>
+  linter(
+    (view) => {
+      const { state } = view;
+      const language = state.facet(languageName);
+      let list = [];
+      if (language === 'JSON' || SYNTAX_LANGUAGES.has(language)) {
+        const { errors, parsed } = language === 'JSON' ? { errors: [], parsed: state.doc.length } : parserErrors(state);
+        list = problemsFor(state.doc.toString(), { language, name: state.facet(fileName), errors }).filter((p) => p.from <= parsed);
+      }
+      const end = state.doc.length;
+      const found = list.map((p) => {
+        const from = Math.min(p.from, end);
+        const line = state.doc.lineAt(from);
+        return { from, to: Math.min(Math.max(p.to, from), end), severity: p.severity, message: p.message, line: line.number, column: from - line.from + 1 };
+      });
+      onProblems?.(key, found, language);
+      return found.map(({ from, to, severity, message }) => ({ from, to, severity, message }));
+    },
+    // Again when the language has loaded (the first look was before).
+    { delay: 600, needsRefresh: (update) => update.startState.facet(languageName) !== update.state.facet(languageName) },
+  );
+
+// ---- Indentation guides, bracket colors, the enclosing lines on top ----
+
+// A guide at each indentation level of a line; empty lines take the smaller of their neighbors'.
+const guideLine = (count, unit) => Decoration.line({ attributes: { class: 'cm-indent-guides', style: `--guides: ${count}; --unit: ${unit}` } });
+function guideDecorations(view) {
+  const { state } = view;
+  const unit = Math.max(1, getIndentUnit(state));
+  const builder = new RangeSetBuilder();
+  const indentAt = (n) => {
+    const text = state.doc.line(n).text;
+    return text.trim() ? indentOf(text, state.tabSize) : null;
+  };
+  const near = (n, step) => {
+    for (let k = n + step, seen = 0; k >= 1 && k <= state.doc.lines && seen < 200; k += step, seen++) {
+      const i = indentAt(k);
+      if (i !== null) return i;
+    }
+    return 0;
+  };
+  for (const { from, to } of view.visibleRanges) {
+    for (let pos = from; pos <= to; ) {
+      const line = state.doc.lineAt(pos);
+      let cols = indentAt(line.number);
+      if (cols === null) cols = Math.min(near(line.number, -1), near(line.number, 1));
+      const count = Math.ceil(cols / unit);
+      if (count > 0) builder.add(line.from, line.from, guideLine(count, unit));
+      pos = line.to + 1;
+    }
+  }
+  return builder.finish();
+}
+const indentGuides = ViewPlugin.fromClass(
+  class {
+    constructor(view) {
+      this.decorations = guideDecorations(view);
+    }
+    update(u) {
+      if (u.docChanged || u.viewportChanged || getIndentUnit(u.startState) !== getIndentUnit(u.state) || u.startState.tabSize !== u.state.tabSize) this.decorations = guideDecorations(u.view);
+    }
+  },
+  { decorations: (v) => v.decorations },
+);
+
+// Brackets colored by how deep they are (three colors in turn), from the syntax tree, so
+// those in strings and comments do not count; plain text counts characters.
+const BRACKET_MARKS = [0, 1, 2].map((n) => Decoration.mark({ class: `cm-bracket-${n}` }));
+const OPENERS = '([{';
+const bracketDepths = new WeakMap(); // tree (or doc) → [[pos, depth]] in order
+function bracketsOf(state) {
+  const tree = syntaxTree(state);
+  const plain = !state.facet(languageName) || tree.length === 0;
+  const keyOf = plain ? state.doc : tree;
+  if (bracketDepths.has(keyOf)) return bracketDepths.get(keyOf);
+  const out = [];
+  const stack = [];
+  const visit = (pos, ch) => {
+    if (OPENERS.includes(ch)) {
+      out.push([pos, stack.length % 3]);
+      stack.push(ch);
+    } else if (stack.length) {
+      stack.pop();
+      out.push([pos, stack.length % 3]);
+    }
+  };
+  if (state.doc.length <= 400_000) {
+    if (plain) {
+      const text = state.doc.toString();
+      for (let i = 0; i < text.length; i++) if ('()[]{}'.includes(text[i])) visit(i, text[i]);
+    } else {
+      tree.iterate({
+        enter(n) {
+          if (n.to - n.from === 1 && '()[]{}'.includes(n.name)) visit(n.from, n.name);
+        },
+      });
+    }
+  }
+  bracketDepths.set(keyOf, out);
+  return out;
+}
+function bracketDecorations(view) {
+  const list = bracketsOf(view.state);
+  const builder = new RangeSetBuilder();
+  for (const { from, to } of view.visibleRanges) {
+    let lo = 0;
+    let hi = list.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (list[mid][0] < from) lo = mid + 1;
+      else hi = mid;
+    }
+    for (let i = lo; i < list.length && list[i][0] < to; i++) builder.add(list[i][0], list[i][0] + 1, BRACKET_MARKS[list[i][1]]);
+  }
+  return builder.finish();
+}
+const bracketColors = ViewPlugin.fromClass(
+  class {
+    constructor(view) {
+      this.decorations = bracketDecorations(view);
+    }
+    update(u) {
+      if (u.docChanged || u.viewportChanged || syntaxTree(u.startState) !== syntaxTree(u.state)) this.decorations = bracketDecorations(u.view);
+    }
+  },
+  { decorations: (v) => v.decorations },
+);
+
+// Sticky scroll: the lines that start the class, function or sections around the top of
+// the view stay over it (up to three); click one to go there.
+const STICKY_MAX = 3;
+const stickyScroll = ViewPlugin.fromClass(
+  class {
+    constructor(view) {
+      this.view = view;
+      this.dom = document.createElement('div');
+      this.dom.className = 'cm-sticky';
+      this.dom.hidden = true;
+      this.dom.addEventListener('mousedown', (e) => {
+        const row = e.target.closest('[data-line]');
+        if (!row) return;
+        e.preventDefault();
+        const line = view.state.doc.line(Number(row.dataset.line));
+        view.dispatch({ selection: { anchor: line.from + (line.text.length - line.text.trimStart().length) }, effects: EditorView.scrollIntoView(line.from, { y: 'start', yMargin: 4 }) });
+        view.focus();
+      });
+      view.dom.appendChild(this.dom);
+      this.shown = '';
+      this.onScroll = () => this.schedule();
+      view.scrollDOM.addEventListener('scroll', this.onScroll, { passive: true });
+      this.schedule();
+    }
+    update(u) {
+      if (u.docChanged || u.geometryChanged || u.viewportChanged) this.schedule();
+    }
+    schedule() {
+      this.view.requestMeasure({ key: this, read: () => this.read(), write: (m) => this.write(m) });
+    }
+    read() {
+      const { view } = this;
+      const scroller = view.scrollDOM.getBoundingClientRect();
+      const box = view.dom.getBoundingClientRect();
+      const lineHeight = view.defaultLineHeight;
+      const top = scroller.top - view.documentTop;
+      if (top <= 1) return { lines: [] };
+      // The scopes at the line just under the sticky lines themselves.
+      let lines = [];
+      for (let rows = 0; rows <= STICKY_MAX; rows++) {
+        const block = view.lineBlockAtHeight(top + rows * lineHeight + 1);
+        const firstShown = view.state.doc.lineAt(block.from).number;
+        const scopes = scopeEntries(view.state, block.from).filter((e) => e.line < firstShown).slice(-STICKY_MAX);
+        lines = scopes;
+        if (scopes.length <= rows) break;
+      }
+      const gutters = view.dom.querySelector('.cm-gutters');
+      const content = view.contentDOM.getBoundingClientRect();
+      return { lines, top: scroller.top - box.top, width: view.scrollDOM.clientWidth, gutter: gutters ? gutters.getBoundingClientRect().width : 0, textLeft: content.left - scroller.left, lineHeight };
+    }
+    write({ lines, top, width, gutter, textLeft, lineHeight }) {
+      const key = lines.map((e) => e.line).join(',');
+      if (!lines.length) {
+        this.dom.hidden = true;
+        this.shown = '';
+        return;
+      }
+      this.dom.hidden = false;
+      Object.assign(this.dom.style, { top: `${top}px`, width: `${width}px` });
+      this.dom.style.setProperty('--sticky-gutter', `${gutter}px`);
+      this.dom.style.setProperty('--sticky-text', `${textLeft}px`);
+      this.dom.style.setProperty('--sticky-line', `${lineHeight}px`);
+      const doc = this.view.state.doc;
+      const signature = `${key}|${lines.map((e) => doc.line(e.line).text).join('\n')}`;
+      if (signature === this.shown) return;
+      this.shown = signature;
+      this.dom.replaceChildren(
+        ...lines.map((e) => {
+          const row = document.createElement('div');
+          row.className = 'cm-sticky-line';
+          row.dataset.line = String(e.line);
+          row.title = `Line ${e.line}: go there`;
+          const num = document.createElement('span');
+          num.className = 'cm-sticky-num';
+          num.textContent = String(e.line);
+          const text = document.createElement('span');
+          text.className = 'cm-sticky-text';
+          text.textContent = doc.line(e.line).text.slice(0, 300);
+          row.append(num, text);
+          return row;
+        }),
+      );
+    }
+    destroy() {
+      this.view.scrollDOM.removeEventListener('scroll', this.onScroll);
+      this.dom.remove();
+    }
+  },
+);
 
 /** Editing commands beyond CodeMirror's keymaps (menus and the command list). */
 export const COMMANDS = {
@@ -309,6 +558,8 @@ export const COMMANDS = {
   foldLevel3: foldLevel(3),
   unfoldAll,
   matchingBracket: cursorMatchingBracket,
+  nextProblem: nextDiagnostic,
+  previousProblem: previousDiagnostic,
   // (Format document is actions.formatDocument: formatter.js, which loads its parts when needed.)
 };
 
@@ -432,7 +683,7 @@ function linkAt(state, pos) {
  * `openSide(key, el, …)` shows a second tab next to it (the split view); a tab's
  * state, with its undo history, moves between the panes.
  */
-export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpenLink, onImage, linkTargets, settings }) {
+export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpenLink, onImage, onProblems, linkTargets, settings }) {
   const states = new Map(); // key → EditorState
   const scroll = new Map(); // key → scroll position
   const pending = new Map(); // key → timer for onChange
@@ -443,6 +694,9 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
   const tabs = new Compartment();
   const gutter = new Compartment();
   const readOnly = new Compartment();
+  const checks = new Compartment(); // problems as you type
+  const aids = new Compartment(); // indentation guides, bracket colors, sticky scroll
+  const indents = new Map(); // key → { tabs, size, source: 'detected' | 'editorconfig' | 'chosen' }
   let options = settings;
   let active = null;
   let side = null; // { key, view } of the split view's second pane
@@ -486,13 +740,32 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
   const viewOf = (key) => (key && key === active ? view : key && key === side?.key ? side.view : null);
   const current = () => (focused === 'side' && side ? side : { key: active, view });
 
-  const configFor = (o) => ({
-    theme: [baseTheme(o.dark), syntaxHighlighting(o.dark ? DARK_STYLE : LIGHT_STYLE, { fallback: true })],
-    wrap: o.wordWrap ? EditorView.lineWrapping : [],
-    whitespace: o.showWhitespace ? [highlightWhitespace(), highlightTrailingWhitespace()] : [],
-    tabs: [EditorState.tabSize.of(o.tabSize), indentUnit.of(' '.repeat(o.tabSize))],
-    gutter: [o.lineNumbers ? lineNumbers() : [], foldGutter()],
-  });
+  // A tab's indentation: its own (detected, from .editorconfig, or picked), else the default.
+  const indentFor = (key, o = options) => {
+    const own = indents.get(key);
+    return { tabs: own?.tabs ?? false, size: own?.size || o.tabSize, source: own?.source ?? 'default' };
+  };
+  const configFor = (o, key) => {
+    const indent = indentFor(key, o);
+    const big = bigKeys.has(key);
+    return {
+      theme: [baseTheme(o.dark), syntaxHighlighting(o.dark ? DARK_STYLE : LIGHT_STYLE, { fallback: true })],
+      wrap: o.wordWrap && !big ? EditorView.lineWrapping : [],
+      whitespace: o.showWhitespace ? [highlightWhitespace(), highlightTrailingWhitespace()] : [],
+      tabs: [EditorState.tabSize.of(indent.size), indentUnit.of(indent.tabs ? '\t' : ' '.repeat(indent.size))],
+      gutter: [o.lineNumbers ? lineNumbers() : [], foldGutter()],
+      checks: o.problems !== false && !big ? [problemsLinter(key, onProblems), lintGutter()] : [],
+      aids: big ? [] : [o.indentGuides !== false ? indentGuides : [], o.bracketColors !== false ? bracketColors : [], o.stickyScroll !== false ? stickyScroll : []],
+    };
+  };
+  // A new tab's indentation: the one picked for it, else what its text uses (`fresh`: not the pick).
+  const settleIndent = (key, text, { fresh = false } = {}) => {
+    const chosen = !fresh && options.indentChosen?.[key];
+    if (chosen) return void indents.set(key, { tabs: Boolean(chosen.tabs), size: chosen.size, source: 'chosen' });
+    if (indents.has(key) || options.detectIndent === false) return;
+    const found = detectIndent(text);
+    if (found) indents.set(key, { tabs: found.tabs, size: found.size ?? options.tabSize, source: 'detected' });
+  };
 
   const flush = (key, urgent = false) => {
     if (!pending.has(key)) return;
@@ -520,17 +793,18 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
     };
   };
 
-  const report = (state) => {
+  const report = (state, key) => {
     const sel = state.selection.main;
     const line = state.doc.lineAt(sel.head);
-    onCursor?.({ line: line.number, column: sel.head - line.from + 1, selected: state.selection.ranges.reduce((n, r) => n + (r.to - r.from), 0), lines: state.doc.lines, cursors: state.selection.ranges.length, scope: scopeAt(state, sel.head) });
+    onCursor?.({ key, line: line.number, column: sel.head - line.from + 1, selected: state.selection.ranges.reduce((n, r) => n + (r.to - r.from), 0), lines: state.doc.lines, cursors: state.selection.ranges.length, scope: scopeAt(state, sel.head), indent: indentFor(key) });
   };
 
   function extensions(key, text) {
-    const config = configFor(options);
     // A very large file gets a lighter editor: no wrapping, matching, completion or highlighting.
     const big = isBigText(text);
     if (big) bigKeys.add(key);
+    settleIndent(key, text);
+    const config = configFor(options, key);
     return [
       readOnly.of([]),
       recorder,
@@ -568,6 +842,9 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
         { key: 'Alt-1', run: COMMANDS.foldTop, preventDefault: true },
         { key: 'Alt-2', run: COMMANDS.foldLevel2, preventDefault: true },
         { key: 'Alt-3', run: COMMANDS.foldLevel3, preventDefault: true },
+        // Problems: the next and the one before (as in VS Code; the list is the window's Ctrl+Shift+M).
+        { key: 'F8', run: nextDiagnostic, preventDefault: true },
+        { key: 'Shift-F8', run: previousDiagnostic, preventDefault: true },
         { key: 'Mod-Shift-d', run: copyLineDown },
         { key: 'Mod-Shift-k', run: deleteLine },
         ...closeBracketsKeymap,
@@ -580,9 +857,11 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       ]),
       lang.of([]),
       theme.of(config.theme),
-      wrap.of(big ? [] : config.wrap),
+      wrap.of(config.wrap),
       whitespace.of(config.whitespace),
       tabs.of(config.tabs),
+      checks.of(config.checks),
+      aids.of(config.aids),
       EditorView.updateListener.of((update) => {
         if (update.docChanged && !update.transactions.some((tr) => tr.annotation(remote))) {
           clearTimeout(pending.get(key));
@@ -592,7 +871,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
             flush(key, true);
           } else pending.set(key, setTimeout(() => flush(key), 250));
         }
-        if (update.docChanged || update.selectionSet) report(update.state);
+        if (update.docChanged || update.selectionSet) report(update.state, key);
       }),
       EditorView.contentAttributes.of({ spellcheck: 'false', autocorrect: 'off', autocapitalize: 'off' }),
       EditorView.domEventHandlers({
@@ -650,7 +929,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
     const support = desc ? (desc.support ?? (await desc.load().catch(() => null))) : null;
     // Older modes (and plain text) fold by indentation.
     const ownFolding = support && !(support.language instanceof StreamLanguage);
-    const effects = lang.reconfigure([support ?? [], languageName.of(desc?.name ?? ''), ownFolding ? [] : indentFolding]);
+    const effects = lang.reconfigure([support ?? [], languageName.of(desc?.name ?? ''), fileName.of(name ?? ''), ownFolding ? [] : indentFolding]);
     if (viewOf(key)) viewOf(key).dispatch({ effects });
     else if (states.has(key)) states.set(key, states.get(key).update({ effects }).state);
     return desc?.name ?? PLAIN_TEXT;
@@ -678,7 +957,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       setVisible(true);
       view.setState(states.get(key));
       requestAnimationFrame(() => view.scrollDOM.scrollTo({ top: scroll.get(key) ?? 0 }));
-      report(view.state);
+      report(view.state, key);
       if (created) return loadLanguage(key, name, language);
       return Promise.resolve(null);
     },
@@ -894,19 +1173,72 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
     setLanguage: loadLanguage,
 
     applySettings(next) {
+      const before = options;
       options = next;
-      const config = configFor(next);
-      const effects = [theme.reconfigure(config.theme), wrap.reconfigure(config.wrap), whitespace.reconfigure(config.whitespace), tabs.reconfigure(config.tabs), gutter.reconfigure(config.gutter)];
-      // Large files keep wrapping off.
-      const effectsFor = (key) => (bigKeys.has(key) ? effects.map((e, i) => (i === 1 ? wrap.reconfigure([]) : e)) : effects);
+      // Indentation picked elsewhere (another window) or no longer detected.
+      for (const [key, state] of states) {
+        const chosen = next.indentChosen?.[key];
+        const was = indents.get(key)?.source;
+        if (chosen) indents.set(key, { tabs: Boolean(chosen.tabs), size: chosen.size, source: 'chosen' });
+        else if (was === 'chosen' || (was === 'detected' && next.detectIndent === false)) indents.delete(key);
+        if (!indents.has(key)) settleIndent(key, (viewOf(key)?.state ?? state).doc.toString());
+      }
+      // Only what changed is set again (a new linter would check every tab again).
+      const same = (k) => before?.[k] === next[k];
+      const effectsFor = (key) => {
+        const config = configFor(next, key);
+        const effects = [theme.reconfigure(config.theme), wrap.reconfigure(config.wrap), whitespace.reconfigure(config.whitespace), tabs.reconfigure(config.tabs), gutter.reconfigure(config.gutter)];
+        if (!same('problems')) effects.push(checks.reconfigure(config.checks));
+        if (!same('indentGuides') || !same('bracketColors') || !same('stickyScroll')) effects.push(aids.reconfigure(config.aids));
+        return effects;
+      };
       for (const [key, state] of states) if (!viewOf(key)) states.set(key, state.update({ effects: effectsFor(key) }).state);
       if (active) view.dispatch({ effects: effectsFor(active) });
       if (side) side.view.dispatch({ effects: effectsFor(side.key) });
+      if (active) report(view.state, active);
+    },
+
+    /** A tab's indentation: { tabs, size, source } (source: 'detected', 'editorconfig', 'chosen' or 'default'). */
+    indentation: (key) => indentFor(key),
+
+    /** Sets a tab's indentation ({ tabs, size, source }), or (null) goes back to what its text uses. */
+    setIndentation(key, indent) {
+      if (indent) indents.set(key, { tabs: Boolean(indent.tabs), size: indent.size || options.tabSize, source: indent.source ?? 'chosen' });
+      else {
+        indents.delete(key);
+        const state = viewOf(key)?.state ?? states.get(key);
+        if (state) settleIndent(key, state.doc.toString(), { fresh: true });
+      }
+      const effects = tabs.reconfigure(configFor(options, key).tabs);
+      const v = viewOf(key);
+      if (v) v.dispatch({ effects });
+      else if (states.has(key)) states.set(key, states.get(key).update({ effects }).state);
+      if (key === active) report(view.state, key);
+      return indentFor(key);
+    },
+
+    /** Changes a shown tab's line indentation to tabs or spaces (the tab's size), as an edit you can undo. */
+    convertIndentation(key, toTabs) {
+      const v = viewOf(key);
+      if (!v) return false;
+      const { size } = indentFor(key);
+      const changes = [];
+      for (let n = 1; n <= v.state.doc.lines; n++) {
+        const line = v.state.doc.line(n);
+        const lead = /^[ \t]*/.exec(line.text)[0];
+        if (!lead) continue;
+        const next = convertIndent(lead, { toTabs, size });
+        if (next !== lead) changes.push({ from: line.from, to: line.from + lead.length, insert: next });
+      }
+      if (changes.length) v.dispatch({ changes, userEvent: 'input' });
+      this.setIndentation(key, { tabs: toTabs, size, source: indents.get(key)?.source === 'editorconfig' ? 'editorconfig' : 'chosen' });
+      return changes.length;
     },
 
     drop(key) {
       flush(key);
       bigKeys.delete(key);
+      indents.delete(key);
       // hide() keeps the active tab's state, so hide first, then forget it.
       if (key === active) this.hide();
       if (key === side?.key) this.closeSide();

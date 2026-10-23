@@ -37,6 +37,16 @@ export const DEFAULT_SETTINGS = {
   wordWrap: typeof matchMedia === 'function' && matchMedia('(max-width: 860px)').matches,
   showWhitespace: false,
   lineNumbers: true,
+  // Each file's indentation from its text (tabs or spaces, how many) or its .editorconfig;
+  // `tabSize` is for files that do not say. The ones picked in the status bar: key → { tabs, size }.
+  detectIndent: true,
+  indentChosen: {},
+  // Problems as you type (JSON, YAML, XML, HTML, code), a guide at each indentation level,
+  // brackets colored by how deep they are, and the enclosing function or section kept at the top.
+  problems: true,
+  indentGuides: true,
+  bracketColors: true,
+  stickyScroll: true,
   // Tabs gathered by project in the tab bar, each group foldable.
   groupTabs: false,
   // A frame around the editor in the color of where the file lives (my files, tracker, this computer, a server).

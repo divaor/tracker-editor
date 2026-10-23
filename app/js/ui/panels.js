@@ -3,6 +3,8 @@ import { findInFiles, quickOpen } from '../search.js';
 import { matchSymbols } from '../codeNav.js';
 import { timeAgo } from '../format.js';
 import { fileKey, repoKey, store } from '../store.js';
+import { folderFiles, onFolderIndex } from '../folderIndex.js';
+import { KINDS } from '../where.js';
 import { Icon } from './icons.js';
 import { ClearButton, Segmented } from './components.js';
 
@@ -127,11 +129,18 @@ export function SearchPanel({ files, docs, allFiles, allDocs, openKeys, actions,
   </aside>`;
 }
 
-/** Ctrl+P: open a file by (fuzzy) name; also matches the project. */
-/** Ctrl+P. With onPick, it picks a file instead of opening it (e.g. "Compare with…"). */
-export function QuickOpen({ files, docs, actions, onClose, onPick, title = 'Open a file', exclude = '', initial = '', symbols = null, onSymbol }) {
+/**
+ * Ctrl+P: open a file by (fuzzy) name; also matches the project, and the files in the
+ * folders open in Folders (`roots`: [{ dir, label, kind }]) by their path.
+ * With onPick, it picks a file instead of opening it (e.g. "Compare with…").
+ */
+export function QuickOpen({ files, docs, actions, onClose, onPick, title = 'Open a file', exclude = '', initial = '', symbols = null, onSymbol, roots = [], hidden = false }) {
   const [query, setQuery] = useState(initial);
   const [index, setIndex] = useState(0);
+  // Files in the folders: listed in the background, the list grows when they come.
+  const [, setListed] = useState(0);
+  useEffect(() => onFolderIndex(() => setListed((n) => n + 1)), []);
+  const inFolders = onPick ? { files: [], loading: false, truncated: false } : folderFiles(roots, { hidden });
   // "@…": the classes, functions and sections of the open file.
   const symbolMode = Boolean(symbols) && query.startsWith('@');
   const symbolList = useMemo(() => (symbolMode ? matchSymbols(symbols(), query.slice(1)).slice(0, 300) : []), [symbolMode, query]);
@@ -142,12 +151,13 @@ export function QuickOpen({ files, docs, actions, onClose, onPick, title = 'Open
         .sort((a, b) => (b.modifiedAt > a.modifiedAt ? 1 : -1)),
     [files, docs],
   );
-  const list = quickOpen(recent, query, 60);
+  const list = quickOpen(query.trim() ? [...recent, ...inFolders.files] : recent, query, 60);
   const input = useRef(null);
   const choose = (file) => {
     onClose();
     if (symbolMode) onSymbol?.(file);
     else if (onPick) onPick(file);
+    else if (file.path) actions.openDiskPath(file.path);
     else actions.openFile(file.id);
   };
   const rows = symbolMode ? symbolList : list;
@@ -168,7 +178,7 @@ export function QuickOpen({ files, docs, actions, onClose, onPick, title = 'Open
   return html`<div class="modal-backdrop top" onPointerDown=${(e) => e.target === e.currentTarget && onClose()}>
     <div class="quick-open" role="dialog" aria-label=${title}>
       ${onPick && html`<div class="quick-title">${title}</div>`}
-      <input value=${query} placeholder=${symbols ? 'Type part of a file or project name, or @ for this file’s functions and sections…' : 'Type part of a file or project name…'} aria-label="File name" ref=${input}
+      <input value=${query} placeholder=${symbols ? `Type part of a file${roots.length && !onPick ? ', folder' : ''} or project name, or @ for this file’s functions and sections…` : 'Type part of a file or project name…'} aria-label="File name" ref=${input}
         onInput=${(e) => setQuery(e.currentTarget.value)}
         onKeyDown=${(e) => {
           if (e.key === 'ArrowDown') {
@@ -197,16 +207,25 @@ export function QuickOpen({ files, docs, actions, onClose, onPick, title = 'Open
         )}
         ${symbolMode && !symbolList.length && html`<p class="muted small quick-empty">${symbols().length ? 'No function or section matches.' : 'No functions or sections found in this file (classes, functions and headings show here).'}</p>`}
         ${!symbolMode &&
-        list.map(
-          (f, i) => html`<button type="button" key=${f.id} role="option" aria-selected=${i === index} class="quick-row ${i === index ? 'active' : ''}"
-            onMouseEnter=${() => setIndex(i)} onClick=${() => choose(f)}>
-            <${Icon} name=${f.item ? 'doc' : 'file'} size=${15} /><span class="quick-name">${f.name}</span>
-            ${f.item && html`<span class="muted small quick-item">${f.item}</span>`}
-            ${f.project && html`<span class="muted small">${f.project}</span>`}
-            <span class="spacer" /><span class="muted small">${timeAgo(f.modifiedAt)}</span>
-          </button>`,
+        list.map((f, i) =>
+          f.path
+            ? html`<button type="button" key=${f.id} role="option" aria-selected=${i === index} class="quick-row quick-disk kind-${f.kind} ${i === index ? 'active' : ''}"
+                title=${f.path} onMouseEnter=${() => setIndex(i)} onClick=${() => choose(f)}>
+                <${Icon} name=${KINDS[f.kind].icon} size=${15} class="quick-kind" /><span class="quick-name">${f.name}</span>
+                ${f.rel.includes('/') && html`<span class="muted small quick-rel">${f.rel.slice(0, f.rel.lastIndexOf('/'))}</span>`}
+                <span class="spacer" /><span class="quick-where">${f.where}</span>
+              </button>`
+            : html`<button type="button" key=${f.id} role="option" aria-selected=${i === index} class="quick-row ${i === index ? 'active' : ''}"
+                onMouseEnter=${() => setIndex(i)} onClick=${() => choose(f)}>
+                <${Icon} name=${f.item ? 'doc' : 'file'} size=${15} /><span class="quick-name">${f.name}</span>
+                ${f.item && html`<span class="muted small quick-item">${f.item}</span>`}
+                ${f.project && html`<span class="muted small">${f.project}</span>`}
+                <span class="spacer" /><span class="muted small">${timeAgo(f.modifiedAt)}</span>
+              </button>`,
         )}
-        ${!symbolMode && !list.length && html`<p class="muted small quick-empty">${query.trim() ? (onPick ? 'No file matches.' : html`No file matches. Press <kbd>Enter</kbd> to create “${query.trim()}”.`) : 'No files yet.'}</p>`}
+        ${!symbolMode && !list.length && html`<p class="muted small quick-empty">${query.trim() ? (onPick ? 'No file matches.' : html`No file matches${inFolders.loading ? ' yet (still looking in your folders)' : ''}. Press <kbd>Enter</kbd> to create “${query.trim()}”.`) : 'No files yet.'}</p>`}
+        ${!symbolMode && query.trim() && roots.length > 0 && !onPick && (inFolders.loading || inFolders.truncated) &&
+        html`<p class="muted small quick-note">${inFolders.loading ? 'Looking in your folders…' : 'Some folders have too many files: only the nearest ones are searched by name.'}</p>`}
       </div>
     </div>
   </div>`;

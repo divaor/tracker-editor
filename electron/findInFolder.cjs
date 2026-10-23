@@ -155,4 +155,45 @@ async function findNames({ root, list, matches, hidden = false, signal, maxResul
   return { found, folders: [...folders.values()], listed, truncated: truncated && !signal?.aborted, stopped: Boolean(signal?.aborted) };
 }
 
-module.exports = { findInFolder, findNames, nameFilter, SKIP_DIRS };
+/**
+ * Every file under `root`, for opening by name (Ctrl+P): { files: [{ path, name, rel, size,
+ * mtimeMs }], truncated } (rel: the path inside `root`, with "/"), the nearest first.
+ * Folders like .git are skipped, links are not followed, and hidden names are left out
+ * unless `hidden`. It stops at `maxFiles`, `maxFolders` or `timeLimit` (truncated).
+ */
+async function listFiles({ root, list, hidden = false, signal, maxFiles = 20000, maxFolders = 5000, timeLimit = 8000, concurrency = 4, now = Date.now }) {
+  const ends = now() + timeLimit;
+  const files = [];
+  const pending = [root];
+  const base = root.replace(/[\\/]+$/, '');
+  const relOf = (p) => p.slice(base.length).replace(/^[\\/]+/, '').replace(/\\/g, '/');
+  let listed = 0;
+  let truncated = false;
+  const visit = async (dir) => {
+    let entries = [];
+    try {
+      entries = await list(dir);
+    } catch {
+      return; // unreadable: left out
+    }
+    listed++;
+    for (const entry of entries) {
+      if (!hidden && entry.name.startsWith('.')) continue;
+      if (entry.dir) {
+        if (!entry.link && !SKIP_DIRS.has(entry.name)) pending.push(entry.path);
+      } else if (files.length < maxFiles) {
+        files.push({ path: entry.path, name: entry.name, rel: relOf(entry.path), size: entry.size ?? 0, mtimeMs: entry.mtimeMs ?? (entry.mtime ? Date.parse(entry.mtime) : 0) });
+      } else truncated = true;
+    }
+  };
+  while (pending.length && !signal?.aborted) {
+    if (files.length >= maxFiles || listed >= maxFolders || now() > ends) {
+      truncated = true;
+      break;
+    }
+    await Promise.all(pending.splice(0, concurrency).map(visit));
+  }
+  return { files, truncated: truncated && !signal?.aborted, stopped: Boolean(signal?.aborted) };
+}
+
+module.exports = { findInFolder, findNames, listFiles, nameFilter, SKIP_DIRS };

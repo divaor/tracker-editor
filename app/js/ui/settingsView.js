@@ -116,11 +116,19 @@ function EditorCard({ settings }) {
           ${[12, 13, 14, 15, 16, 18, 20].map((n) => html`<option key=${n} value=${n}>${n} px</option>`)}
         </select>
       </${Field}>
-      <${Field} label="Tab size">
+      <${Field} label="Indentation" hint="For files whose text or .editorconfig does not say">
         <select value=${String(settings.tabSize)} onChange=${(e) => saveSettings({ tabSize: Number(e.currentTarget.value) })}>
           ${[2, 4, 8].map((n) => html`<option key=${n} value=${n}>${n} spaces</option>`)}
         </select>
       </${Field}>
+      <${Check} checked=${settings.detectIndent !== false} label="Each file's indentation from its text or its .editorconfig" hint="Tabs or spaces, and how many: the status bar shows it and changes it"
+        onChange=${(v) => saveSettings({ detectIndent: v })} />
+      <${Check} checked=${settings.problems !== false} label="Show problems as you type" hint="JSON, YAML, XML, HTML, CSS and code: Ctrl+Shift+M lists them, F8 goes to the next"
+        onChange=${(v) => saveSettings({ problems: v })} />
+      <${Check} checked=${settings.indentGuides !== false} label="Indentation guides" onChange=${(v) => saveSettings({ indentGuides: v })} />
+      <${Check} checked=${settings.bracketColors !== false} label="Color bracket pairs by depth" onChange=${(v) => saveSettings({ bracketColors: v })} />
+      <${Check} checked=${settings.stickyScroll !== false} label="Sticky scroll" hint="The lines that start the function or section you are in stay at the top"
+        onChange=${(v) => saveSettings({ stickyScroll: v })} />
       <${Check} checked=${settings.wordWrap} label="Word wrap" hint="Alt+Z" onChange=${(v) => saveSettings({ wordWrap: v })} />
       <${Check} checked=${settings.lineNumbers} label="Line numbers and folding" onChange=${(v) => saveSettings({ lineNumbers: v })} />
       <${Check} checked=${settings.showWhitespace} label="Show spaces and trailing whitespace" onChange=${(v) => saveSettings({ showWhitespace: v })} />

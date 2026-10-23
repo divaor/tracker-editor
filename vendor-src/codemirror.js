@@ -69,6 +69,9 @@ export {
   foldedRanges,
   foldService,
   ensureSyntaxTree,
+  syntaxTree,
+  syntaxTreeAvailable,
+  getIndentUnit,
   StreamLanguage,
   indentOnInput,
   indentUnit,
@@ -78,6 +81,7 @@ export {
   HighlightStyle,
   LanguageDescription,
 } from '@codemirror/language';
+export { linter, lintGutter, forEachDiagnostic, diagnosticCount, nextDiagnostic, previousDiagnostic, forceLinting } from '@codemirror/lint';
 export { tags } from '@lezer/highlight';
 export { languages } from '@codemirror/language-data';
 export { oneDark, oneDarkHighlightStyle } from '@codemirror/theme-one-dark';

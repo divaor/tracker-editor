@@ -57,7 +57,7 @@ The editor uses the tracker's repo, token and projects. Its own files go to `edi
 
 ### Finding things
 
-- `Ctrl+P` **Open a file**: type part of a name or project (fuzzy). Enter on a name that doesn't exist creates it.
+- `Ctrl+P` **Open a file**: type part of a name or project (fuzzy). Enter on a name that doesn't exist creates it. In the desktop app it also finds the files in the folders open in **Folders** (on this computer and on connected servers), by name or by path (`lib/util`); they show the folder they are in and open in place.
 - `Ctrl+Shift+F` **Find in files**: in all files, the filtered ones or the open tabs, with case, whole word and regex options. Tick the files found and press **Open N selected**, or **Open all**: each opens at its first match, the first one in front. The ↗ button opens one file; the list button folds the results to file names. On a phone the panel closes so you see the file.
 - `Ctrl+F` **Find in this file**: a bar over the text. **Aa** (match case), **ab** (whole word) and **.\*** (regular expression) are toggles inside the field; next to it, how many matches there are and which one you are on ("3 of 12"). `Enter` / `Shift+Enter` (or ↓ / ↑) go to the next / previous one, the third button selects them all (`Alt+Enter`), × or `Escape` closes it.
 - `Ctrl+H` **Replace** (macOS: `Cmd+Alt+F`), or the chevron at the left of the bar: a second line with the replacement. **Replace** changes the next match in one click (`Enter` in the field), **Replace all** every one (`Ctrl+Enter`). The line stays open next time until you close it with the chevron.
@@ -80,6 +80,7 @@ The editor uses the tracker's repo, token and projects. Its own files go to `edi
 
 - **Format document** (`Shift+Alt+F`, ⋯ menu, or **Edit → Format Document**): tidies the file, or only the selection (for example the JSON inside a log line). **JSON** on one line becomes one value per line (numbers and text exactly as written, comments kept); also **XML**, **SQL** (by dialect: pick PostgreSQL, MySQL, MS SQL… in the status bar), **JavaScript**, **TypeScript**, **CSS/SCSS/Less**, **HTML**, **Vue**, **Markdown**, **YAML** and **GraphQL**. It uses the file's name or the language picked in the status bar; text with no name is formatted when it looks like JSON or XML. Something it cannot read says what and where; `Ctrl+Z` takes a format back.
 - **Text tools** (⋯ → **Text tools**, **Edit → Text**, or Help): UPPER and lower case, sort lines, remove duplicate lines, trim trailing spaces, duplicate or delete a line, comment lines.
+- **Indentation**: each file keeps its own, tabs or spaces and how many: from its text, or from an `.editorconfig` next to a file on disk or on a server. The status bar shows it (**Spaces: 2**, **Tab size: 4**); click it to indent with tabs or spaces, pick the width, **convert** the whole file, or go back to what the text uses. What you pick is remembered for the file. Files that say nothing use **Settings → Editor → Indentation**.
 - Multiple cursors, `Ctrl+D` select the next occurrence, `Ctrl+/` comment lines, bracket matching, `Alt+Z` word wrap, visible whitespace. Syntax highlighting for 140+ languages, from the file name, from pasted text, or picked in the status bar.
 - **Help** (`F1`, or the **?** at the top): every command with its shortcut, searchable (type "sort" or "Ctrl+K"); click one, or press `Enter`, to run it. **Print** gives a one-page cheat sheet. The **Guide** tab is this guide.
 
@@ -94,6 +95,8 @@ Not a full IDE, but enough to find your way in a code file (**Edit → Code** on
 - **Go to a function or section**: `Ctrl+P`, then type `@` and part of its name. The outline (`Ctrl+Shift+O`) lists them too.
 - **Where you are**: the status bar names the class and function the cursor is in (`Store › save`), or the YAML key or Markdown section; click it to go to another.
 - The name under the cursor is highlighted wherever else it appears. `Ctrl+Shift+\` jumps to the matching bracket.
+- **Problems as you type**: mistakes are underlined, with a mark next to the line; hover one to read it. In JSON (comments are fine in `tsconfig.json`, `.jsonc` and other files that allow them), YAML (also a key written twice in the same place, tabs in the indentation, a quote left open), XML, HTML, CSS, and code: JavaScript, TypeScript, Python, Go, Java, PHP, C, C++, Rust. The status bar counts errors and warnings; click it (or `Ctrl+Shift+M`) for the **Problems** list, click one to go there. `F8` goes to the next one, `Shift+F8` to the one before.
+- **Easier to read**: thin **guides** at each indentation level, **brackets colored** by how deep they are (strings and comments aside), and **sticky scroll**: when you scroll inside a long function, the lines that start it (and its class) stay at the top; click one to go there. Each can be turned off in **Settings → Editor** (or the **View** menu).
 
 ---
 
@@ -413,6 +416,7 @@ Turn them on in **Settings → Desktop**.
 | `Shift+Alt+F` | Format document (or the selection) |
 | `Ctrl+F` / `Ctrl+H` | Find / replace in this file (`Enter` next, `Shift+Enter` previous, `Alt+Enter` select all; in the replace field `Enter` replaces, `Ctrl+Enter` replaces all) |
 | `Ctrl+G` | Go to line |
+| `Ctrl+Shift+M` / `F8` / `Shift+F8` | Problems in this file / the next one / the one before |
 | `F12` / `Shift+F12` / `F2` | In code: go to the declaration / its usages / rename it in this file |
 | `Ctrl+P`, then `@` | Go to a function, class or section of this file |
 | `Alt+0` / `Alt+Shift+0` | Fold everything / unfold everything (`Alt+1`, `Alt+2`, `Alt+3`: fold one level) |

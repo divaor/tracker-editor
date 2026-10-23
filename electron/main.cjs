@@ -587,6 +587,49 @@ ipcMain.handle('disk:open', guard(async () => {
 }));
 
 ipcMain.handle('disk:read', guard((_e, file) => (isRemote(file) ? remote.read(file) : disk.readTextFile(checkFile(file)))));
+// The indentation the .editorconfig files above a file give it ({ tabs, size } or null):
+// its folder's and the ones above (on a server, the nearest few), up to one with root = true.
+// The page gets only that, never their text.
+ipcMain.handle('disk:editorconfig', guard(async (_e, file) => {
+  const configs = [];
+  const isRoot = (text) => /^\s*root\s*=\s*true\s*$/im.test(text.split(/^\s*\[/m)[0]);
+  let target;
+  if (isRemote(file)) {
+    const { id, path: p } = remoteFiles.parseUri(file);
+    target = p;
+    let dir = path.posix.dirname(p);
+    for (let i = 0; i < 8; i++) {
+      try {
+        const text = (await remote.readBytes(remoteFiles.toUri(id, path.posix.join(dir, '.editorconfig')), 65536)).toString('utf8');
+        configs.push({ text, dir: dir.replace(/\/$/, '') });
+        if (isRoot(text)) break;
+      } catch {
+        // none here
+      }
+      const up = path.posix.dirname(dir);
+      if (up === dir) break;
+      dir = up;
+    }
+  } else {
+    target = checkFile(file).replace(/\\/g, '/');
+    let dir = path.dirname(checkFile(file));
+    for (let i = 0; i < 40; i++) {
+      try {
+        const text = fs.readFileSync(path.join(dir, '.editorconfig'), 'utf8').slice(0, 65536);
+        configs.push({ text, dir: dir.replace(/\\/g, '/').replace(/\/$/, '') });
+        if (isRoot(text)) break;
+      } catch {
+        // none here
+      }
+      const up = path.dirname(dir);
+      if (up === dir) break;
+      dir = up;
+    }
+  }
+  if (!configs.length) return null;
+  const { indent } = await loadAppModules();
+  return indent.editorConfigIndent(configs, target);
+}));
 ipcMain.handle('disk:read-appended', guard((_e, file, offset, opts) =>
   isRemote(file) ? remote.readAppended(file, Number(offset) || 0, opts) : disk.readAppended(checkFile(file), Number(offset) || 0, opts),
 ));
@@ -1163,13 +1206,14 @@ ipcMain.handle('folder:watch', guard((event, dirs) => {
 }));
 // Find in a folder (and the folders inside it), here or on a server: each file
 // with matches goes to the page as soon as it is read ('folder:found').
-const { findInFolder, findNames } = require('./findInFolder.cjs');
+const { findInFolder, findNames, listFiles } = require('./findInFolder.cjs');
 const folderSearches = new Map(); // search id → AbortController
 let appModules = null;
 const loadAppModules = async () =>
   (appModules ??= {
     search: await import(pathToFileURL(path.join(APP_DIR, 'js', 'search.js')).href),
     folders: await import(pathToFileURL(path.join(APP_DIR, 'js', 'folders.js')).href),
+    indent: await import(pathToFileURL(path.join(APP_DIR, 'js', 'indent.js')).href),
   });
 // The matching runs in a worker thread, so a pattern that takes very long (or a huge
 // minified file) never freezes the window; Stop, or 15 s on one file, ends the worker.
@@ -1291,6 +1335,23 @@ ipcMain.handle('folder:find-names', guard(async (_e, searchId, dir, query, opts 
   } finally {
     if (folderSearches.get(searchId) === controller) folderSearches.delete(searchId);
   }
+}));
+// Every file in a folder and the ones inside it, for opening by name (Ctrl+P).
+ipcMain.handle('folder:index', guard(async (_e, dir, opts = {}) => {
+  const onServer = isRemote(dir);
+  if (!onServer) checkDir(dir);
+  else if (!remote.isConnected(remoteFiles.parseUri(dir).id)) return { files: [], truncated: false, offline: true };
+  return listFiles({
+    root: dir,
+    list: onServer
+      ? async (d) => (await remote.list(d)).entries
+      : async (d) => folders.listFolder(d).entries.map((e) => (e.dir && fs.lstatSync(e.path).isSymbolicLink() ? { ...e, link: true } : e)),
+    hidden: Boolean(opts.hidden),
+    maxFiles: onServer ? 5000 : 20000,
+    maxFolders: onServer ? 800 : 20000,
+    timeLimit: onServer ? 10000 : 6000,
+    concurrency: onServer ? (remote.isFtp(dir) ? 1 : 4) : 8,
+  });
 }));
 ipcMain.handle('folder:find-stop', guard((_e, searchId) => {
   folderSearches.get(searchId)?.abort();
@@ -2124,6 +2185,16 @@ function buildMenu() {
             shown('Fold the Outer Blocks', 'Alt+1', 'foldTop'),
             shown('Fold One Level In', 'Alt+2', 'foldLevel2'),
             shown('Fold Two Levels In', 'Alt+3', 'foldLevel3'),
+            { type: 'separator' },
+            shown('Problems', 'CmdOrCtrl+Shift+M', 'problems'),
+            shown('Next Problem', 'F8', 'nextProblem'),
+            shown('Previous Problem', 'Shift+F8', 'previousProblem'),
+            { type: 'separator' },
+            item('Indent This File with Spaces', undefined, 'indent-spaces'),
+            item('Indent This File with Tabs', undefined, 'indent-tabs'),
+            item('Convert the Indentation to Spaces', undefined, 'indent-to-spaces'),
+            item('Convert the Indentation to Tabs', undefined, 'indent-to-tabs'),
+            item('Indentation from the Text', undefined, 'indent-detect'),
           ],
         },
         { type: 'separator' },
@@ -2152,6 +2223,10 @@ function buildMenu() {
         item('Local Model', 'CmdOrCtrl+Shift+A', 'assistant'),
         shown('Outline and Links', 'CmdOrCtrl+Shift+O', 'outline'),
         shown('Terminal', 'Ctrl+`', 'terminal'),
+        { type: 'separator' },
+        item('Indentation Guides', undefined, 'indent-guides'),
+        item('Colored Bracket Pairs', undefined, 'bracket-colors'),
+        item('Sticky Scroll', undefined, 'sticky-scroll'),
         { type: 'separator' },
         item('Next Tab', 'Ctrl+Tab', 'next-tab'),
         item('Previous Tab', 'Ctrl+Shift+Tab', 'prev-tab'),

@@ -23,7 +23,7 @@ import { lastSyncText, mirror as mirrorById, onMirrors, watchMirrors as watchMir
 import { MirrorDeletesDialog, MirrorDialog, MirrorsDialog } from './ui/mirrors.js';
 import { onTransfers, watchTransfers } from './transfers.js';
 import { TransfersCard } from './ui/transfers.js';
-import { besideSettings, claudeText, inPlaceSettings, opensInEditor, remapPath } from './folders.js';
+import { baseName, besideSettings, claudeText, inPlaceSettings, opensInEditor, remapPath, withCurrent } from './folders.js';
 import { draggedPaths, draggedTab, dropped, isOwnDrop } from './dragOut.js';
 import { getSyncState, onSyncResult, onSyncState, syncClient, syncNow } from './syncManager.js';
 import { matchesScope, projectList } from './tracker-model.js';
@@ -44,6 +44,8 @@ import { AssistBubble, AssistPanel } from './ui/askSelection.js';
 import { resultExtension } from './selectionAsk.js';
 import { OutlinePanel } from './ui/outline.js';
 import { UsagesPanel } from './ui/usages.js';
+import { ProblemsPanel } from './ui/problems.js';
+import { SYNTAX_LANGUAGES } from './problems.js';
 import { DASHED_LANGUAGES, findDefinition, lineStart, occurrences, wordAt } from './codeNav.js';
 import { FilterBar } from './ui/filterBar.js';
 import { MacroDialog } from './ui/macro.js';
@@ -101,6 +103,14 @@ function download(name, text) {
 }
 
 /** Everything the components need, in one place. */
+// The folders open in Folders, for quick open: [{ dir, label, kind }] (desktop only).
+const folderRoots = (settings) =>
+  window.desktop?.folders
+    ? withCurrent(settings.folderSections, settings.folder).map((dir) =>
+        isRemotePath(dir) ? { dir, kind: 'remote', label: server(remoteParts(dir).id)?.name ?? 'Server' } : { dir, kind: 'disk', label: baseName(dir) },
+      )
+    : [];
+
 function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setCompare, setUsagesOf, setSearchSeed }) {
   return useMemo(() => {
     const activeFile = () => {
@@ -1097,6 +1107,8 @@ export function App() {
   const [view, setView] = useState('editor');
   const [panel, setPanel] = useState(null);
   const [usagesOf, setUsagesOf] = useState(null); // { word }: the Usages panel
+  // Problems as you type, per tab: key → { list, language } (only for the languages checked).
+  const [problems, setProblems] = useState({});
   const [searchSeed, setSearchSeed] = useState(null); // what Find in files starts with
   const [dialog, setDialog] = useState(null);
   const [sidebar, setSidebar] = useState(() => !isNarrow());
@@ -1240,6 +1252,15 @@ export function App() {
         }
       },
       onCursor: setCursor,
+      onProblems(key, list, language) {
+        const checked = language === 'JSON' || SYNTAX_LANGUAGES.has(language);
+        setProblems((all) => {
+          const was = all[key];
+          if (!checked) return was ? (({ [key]: _gone, ...rest }) => rest)(all) : all;
+          if (was && was.language === language && JSON.stringify(was.list) === JSON.stringify(list)) return all;
+          return { ...all, [key]: { list, language } };
+        });
+      },
       onShortcut(name) {
         // Ctrl+S is handled by the window's key handler (saveOrSync), which sees it too.
         if (name === 'toggleWrap') actions.toggleWrap?.();
@@ -1251,7 +1272,10 @@ export function App() {
       },
     });
   }, []);
-  useEffect(() => hostRef.current?.applySettings(editorOptions(settings)), [settings.theme, settings.wordWrap, settings.showWhitespace, settings.tabSize, settings.lineNumbers]);
+  useEffect(
+    () => hostRef.current?.applySettings(editorOptions(settings)),
+    [settings.theme, settings.wordWrap, settings.showWhitespace, settings.tabSize, settings.lineNumbers, settings.problems, settings.indentGuides, settings.bracketColors, settings.stickyScroll, settings.detectIndent, settings.indentChosen],
+  );
   useEffect(() => {
     const media = matchMedia('(prefers-color-scheme: dark)');
     const onChange = () => hostRef.current?.applySettings(editorOptions(getSettings()));
@@ -1296,6 +1320,55 @@ export function App() {
   }, [activeKey, view, Boolean(activeFile || activeRepo || activeDisk), activeSealed]);
 
   actions.toggleWrap = () => saveSettings({ wordWrap: !getSettings().wordWrap });
+  actions.toggleProblems = () => setPanel((p) => (p === 'problems' ? null : 'problems'));
+  // ---- Indentation of the open tab ----
+  const rememberIndent = (key, indent) => {
+    const chosen = { ...getSettings().indentChosen };
+    delete chosen[key];
+    if (indent) chosen[key] = indent;
+    // The last 300 picked are kept.
+    saveSettings({ indentChosen: Object.fromEntries(Object.entries(chosen).slice(-300)) });
+  };
+  /** Tabs or spaces, or a width ({ tabs?, size? }) for the open tab; null: from its text again. */
+  actions.setIndent = (patch) => {
+    const key = store.session.active;
+    const host = hostRef.current;
+    if (!key || !host) return;
+    if (patch === null) {
+      rememberIndent(key, null);
+      host.setIndentation(key, null);
+      editorConfigs.current.delete(key);
+      lookUpEditorConfig(key);
+      return;
+    }
+    const now = host.indentation(key);
+    const next = { tabs: patch.tabs ?? now.tabs, size: patch.size ?? now.size };
+    rememberIndent(key, next);
+    host.setIndentation(key, { ...next, source: 'chosen' });
+  };
+  /** Changes the open tab's indentation to tabs or spaces (an edit Ctrl+Z takes back). */
+  actions.convertIndent = (toTabs) => {
+    const key = store.session.active;
+    const host = hostRef.current;
+    if (!key || !host) return;
+    const changed = host.convertIndentation(key, toTabs);
+    rememberIndent(key, { tabs: toTabs, size: host.indentation(key).size });
+    toast(changed ? `${changed.toLocaleString()} line${changed === 1 ? '' : 's'} now indented with ${toTabs ? 'tabs' : 'spaces'}` : `It is indented with ${toTabs ? 'tabs' : 'spaces'} already`);
+  };
+  // Files on disk and on servers: the indentation their .editorconfig gives them (looked up
+  // once per file; given again to a tab opened anew).
+  const editorConfigs = useRef(new Map()); // key → Promise of { tabs, size } or null
+  const lookUpEditorConfig = (key) => {
+    if (!key?.startsWith('d:') || !window.desktop?.disk?.editorConfig) return;
+    if (!editorConfigs.current.has(key)) editorConfigs.current.set(key, window.desktop.disk.editorConfig(key.slice(2)).catch(() => null));
+    editorConfigs.current.get(key).then((found) => {
+      const host = hostRef.current;
+      const now = host?.indentation(key);
+      if (!found || !now || now.source === 'chosen' || now.source === 'editorconfig') return;
+      host.setIndentation(key, { tabs: found.tabs ?? now.tabs, size: found.size ?? now.size, source: 'editorconfig' });
+    });
+  };
+  useEffect(() => lookUpEditorConfig(activeKey), [activeKey]);
   actions.togglePreview = () => {
     hostRef.current?.flushAll();
     // The preview takes the side view's place.
@@ -1680,6 +1753,9 @@ export function App() {
       } else if (mod && e.shiftKey && k === 'o') {
         e.preventDefault();
         actions.toggleOutline();
+      } else if (mod && e.shiftKey && k === 'm') {
+        e.preventDefault();
+        actions.toggleProblems();
       } else if (mod && !e.shiftKey && !e.altKey && k === 'k') {
         e.preventDefault();
         actions.askSelection();
@@ -1753,6 +1829,15 @@ export function App() {
       'find-usages': () => actions.findUsages(),
       'rename-symbol': () => actions.renameSymbol(),
       'goto-symbol': () => actions.gotoSymbol(),
+      problems: () => actions.toggleProblems(),
+      'indent-spaces': () => actions.setIndent({ tabs: false }),
+      'indent-tabs': () => actions.setIndent({ tabs: true }),
+      'indent-to-spaces': () => actions.convertIndent(false),
+      'indent-to-tabs': () => actions.convertIndent(true),
+      'indent-detect': () => actions.setIndent(null),
+      'indent-guides': () => saveSettings({ indentGuides: getSettings().indentGuides === false }),
+      'bracket-colors': () => saveSettings({ bracketColors: getSettings().bracketColors === false }),
+      'sticky-scroll': () => saveSettings({ stickyScroll: getSettings().stickyScroll === false }),
       assistant: () => setPanel((p) => (p === 'assistant' ? null : 'assistant')),
       sync: () => {
         hostRef.current?.flushAll();
@@ -1904,12 +1989,14 @@ export function App() {
         </div>
         ${terminalShown && html`<${TerminalPanel} settings=${settings} actions=${actions} onHide=${() => (setTerminalShown(false), hostRef.current?.focus())} />`}
         <${ReadAloudBar} />
-        <${StatusBar} recording=${recording} big=${big && Boolean(activeKey)} cursor=${activeKey ? cursor : null} language=${languageName} file=${activeFile} repo=${activeRepo} disk=${activeDisk} settings=${settings} sync=${sync} actions=${actions} />
+        <${StatusBar} recording=${recording} big=${big && Boolean(activeKey)} cursor=${activeKey ? cursor : null} language=${languageName} file=${activeFile} repo=${activeRepo} disk=${activeDisk} settings=${settings} sync=${sync} actions=${actions}
+          problems=${settings.problems !== false && activeKey ? problems[activeKey] : null} problemsOpen=${panel === 'problems'} />
       </div>
     </main>
 
     ${panel === 'folderSearch' && folderSearchDir && window.desktop?.folders && html`<${FolderSearchPanel} key=${folderSearchDir} dir=${folderSearchDir} actions=${actions} onClose=${() => setPanel(null)} />`}
     ${panel === 'usages' && usagesOf && activeKey && !activeSealed && html`<${UsagesPanel} word=${usagesOf.word} name=${activeName} fileKey=${activeKey} text=${activeText()} actions=${actions} onClose=${() => setPanel(null)} />`}
+    ${panel === 'problems' && activeKey && !activeSealed && html`<${ProblemsPanel} name=${activeName} fileKey=${activeKey} problems=${settings.problems !== false ? problems[activeKey] : null} actions=${actions} onClose=${() => setPanel(null)} />`}
     ${panel === 'search' && html`<${SearchPanel} key=${searchSeed?.at ?? 0} seed=${searchSeed} files=${scoped} docs=${scopedDocs} allFiles=${store.live()} allDocs=${docs} openKeys=${store.session.open} settings=${settings} actions=${actions} onClose=${() => setPanel(null)} />`}
     ${panel === 'history' && activeKey && (activeFile || activeRepo) && html`<${HistoryPanel} key=${activeKey} selected=${compare?.sha}
       target=${{ key: activeKey, kind: activeFile ? 'file' : 'repo', id: activeFile?.id, path: activeRepo?.path, name: activeName, dirty: activeFile?.dirty || activeRepo?.dirty }}
@@ -1924,7 +2011,7 @@ export function App() {
       ? html`<${QuickOpen} files=${store.live()} docs=${docs} actions=${actions} title=${`Compare ${activeName} with…`} exclude=${activeFile ? activeFile.id : activeRepo ? `r:${activeRepo.path}` : ''}
           onPick=${(entry) => actions.compareWithEntry(entry)} onClose=${() => setDialog(null)} />`
       : html`<${QuickOpen} files=${store.live()} docs=${docs} actions=${actions} initial=${dialog.query ?? ''} symbols=${() => (activeKey ? (hostRef.current?.codeContext()?.symbols ?? []) : [])}
-          onSymbol=${(entry) => actions.revealSymbol(entry)} onClose=${() => setDialog(null)} />`)}
+          roots=${folderRoots(settings)} hidden=${Boolean(settings.showHidden)} onSymbol=${(entry) => actions.revealSymbol(entry)} onClose=${() => setDialog(null)} />`)}
     ${dialog?.type === 'ocr' && html`<${OcrDialog} images=${dialog.images} saveTo=${dialog.saveTo} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'server' && html`<${ServerDialog} conn=${dialog.conn} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'sshImport' && html`<${SshImportDialog} onClose=${() => setDialog(null)} />`}

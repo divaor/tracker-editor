@@ -3,7 +3,7 @@ import { Icon } from './icons.js';
 
 /**
  * A small menu at a point: { x, y }, or { x, y, right: true } to end at x
- * (under a button at the window's edge). Fixed, so bars that scroll sideways
+ * (under a button at the window's edge), `above: true` to end at y (over the status bar). Fixed, so bars that scroll sideways
  * do not clip it. Items: { label, icon?, run, disabled?, danger?, checked?, hint?, key? }
  * or { separator: true }. Closes on a choice, a click elsewhere or Escape.
  */
@@ -15,7 +15,8 @@ export function Menu({ items, at, onClose, label = 'Menu', owner }) {
     // Inside the window.
     const r = el.getBoundingClientRect();
     const x = at.right ? at.x - r.width : at.x;
-    setPos({ left: Math.max(8, Math.min(x, innerWidth - r.width - 8)), top: Math.max(8, Math.min(at.y, innerHeight - r.height - 8)) });
+    const y = at.above ? at.y - r.height : at.y;
+    setPos({ left: Math.max(8, Math.min(x, innerWidth - r.width - 8)), top: Math.max(8, Math.min(y, innerHeight - r.height - 8)) });
     el?.querySelector('button:not(:disabled)')?.focus();
     // A press on the button that opened it is left to the button, which toggles.
     const onDown = (e) => !el.contains(e.target) && !owner?.current?.contains(e.target) && onClose();

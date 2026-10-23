@@ -54,6 +54,14 @@ test('quick open ranks fuzzy matches on names', () => {
   assert.deepEqual(quickOpen(list, 'notes').map((f) => f.name), ['notes.md', 'meeting notes.md']);
   assert.deepEqual(quickOpen(list, 'plat').map((f) => f.name), ['server.py'], 'matches on the project too');
   assert.deepEqual(quickOpen(list, 'caching').map((f) => f.name), ['proposal.md'], 'and on a tracker document’s item');
+  // Files in folders also match by their path inside the folder.
+  const disk = [
+    { id: 'd:/w/src/lib/util.js', name: 'util.js', rel: 'src/lib/util.js' },
+    { id: 'd:/w/test/util.test.js', name: 'util.test.js', rel: 'test/util.test.js' },
+  ];
+  assert.deepEqual(quickOpen(disk, 'lib/util').map((f) => f.rel), ['src/lib/util.js']);
+  assert.deepEqual(quickOpen(disk, 'util').map((f) => f.rel), ['src/lib/util.js', 'test/util.test.js']);
+  assert.deepEqual(quickOpen(disk, 'tst util').map((f) => f.rel), ['test/util.test.js']);
 });
 
 test('chunks keep line ranges and stay near the size limit', () => {
