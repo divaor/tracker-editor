@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, realpathSync, writeFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,15 +38,18 @@ test('messages are read whatever chunks they come in', () => {
 });
 
 test('the project folder: the nearest marker up to the folder picked', () => {
-  const files = new Set(['/w/app/package.json', '/w/.git', '/w/app/src/x/.keep', '/w/py/pyproject.toml']);
+  // Absolute paths in this system's form (C:\w\… on Windows).
+  const w = (...p) => path.resolve('/w', ...p);
+  const files = new Set([w('app', 'package.json'), w('.git'), w('app', 'src', 'x', '.keep'), w('py', 'pyproject.toml')]);
   const exists = (p) => files.has(p);
-  assert.equal(lsp.findRoot('/w/app/src/x/a.ts', ['tsconfig.json', 'package.json'], { stop: '/w', exists }), '/w/app');
+  const file = w('app', 'src', 'x', 'a.ts');
+  assert.equal(lsp.findRoot(file, ['tsconfig.json', 'package.json'], { stop: w(), exists }), w('app'));
   // Never above the folder picked: there, the .git found on the way, else the file's folder.
-  assert.equal(lsp.findRoot('/w/app/src/x/a.ts', ['tsconfig.json', 'package.json'], { stop: '/w/app/src', exists }), '/w/app/src/x');
-  assert.equal(lsp.findRoot('/w/lib/a.py', ['pyproject.toml'], { stop: '/w', exists }), '/w');
-  assert.equal(lsp.findRoot('/w/py/sub/a.py', ['pyproject.toml'], { stop: '/w', exists }), '/w/py');
+  assert.equal(lsp.findRoot(file, ['tsconfig.json', 'package.json'], { stop: w('app', 'src'), exists }), w('app', 'src', 'x'));
+  assert.equal(lsp.findRoot(w('lib', 'a.py'), ['pyproject.toml'], { stop: w(), exists }), w());
+  assert.equal(lsp.findRoot(w('py', 'sub', 'a.py'), ['pyproject.toml'], { stop: w(), exists }), w('py'));
   // A file opened alone (no folder picked): its own folder unless a marker is right there.
-  assert.equal(lsp.findRoot('/w/app/src/x/a.ts', ['package.json'], { exists }), '/w/app/src/x');
+  assert.equal(lsp.findRoot(file, ['package.json'], { exists }), w('app', 'src', 'x'));
 });
 
 test('servers are found on PATH (with Windows extensions) and run on Electron’s Node when they are scripts', () => {
@@ -78,7 +81,8 @@ test('the catalog: TypeScript and Python files, with what to install', () => {
 });
 
 test('a project’s own servers: TypeScript 7 in node_modules, Pyright in node_modules/.bin', async () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'lsp-proj-'));
+  // The real path (macOS's temporary folder is behind a link), as the main process resolves them.
+  const dir = realpathSync(mkdtempSync(path.join(tmpdir(), 'lsp-proj-')));
   const ts = path.join(dir, 'node_modules', 'typescript');
   mkdirSync(path.join(ts, 'lib'), { recursive: true });
   writeFileSync(path.join(ts, 'package.json'), JSON.stringify({ name: 'typescript', version: '7.1.0' }));
@@ -93,7 +97,9 @@ test('a project’s own servers: TypeScript 7 in node_modules, Pyright in node_m
   const bin = path.join(dir, 'node_modules', '.bin');
   mkdirSync(bin);
   writeFileSync(path.join(dir, 'server.js'), '#!/usr/bin/env node\n');
-  symlinkSync(path.join(dir, 'server.js'), path.join(bin, 'pyright-langserver'));
+  // npm links the program on macOS and Linux, and writes a .cmd that names the script on Windows.
+  if (process.platform === 'win32') writeFileSync(path.join(bin, 'pyright-langserver.cmd'), '@ECHO off\r\n"%_prog%"  "%dp0%\\..\\..\\server.js" %*\r\n');
+  else symlinkSync(path.join(dir, 'server.js'), path.join(bin, 'pyright-langserver'));
   const py = await lsp.locate(path.join(dir, 'tool.py'), { stop: dir, env: { PATH: '' }, login: false });
   assert.deepEqual(py.found, { name: 'Pyright', script: path.join(dir, 'server.js'), args: ['--stdio'] });
   const none = await lsp.locate(path.join(mkdtempSync(path.join(tmpdir(), 'lsp-empty-')), 'a.py'), { env: { PATH: '' }, login: false });
