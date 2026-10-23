@@ -16,9 +16,10 @@ import { diskAvailable, openDiskFiles, recheckServerTabs, reloadDiskTab, saveDis
 import { isRemotePath, kindOfKey, remoteAddress, remoteParts, remoteRoot, toRemoteUri } from './where.js';
 import { onServers, server, watchServers } from './servers.js';
 import { HostKeyDialog, PromptDialog, ServerDialog, SshImportDialog } from './ui/servers.js';
-import { activeTerminal, focusTerminal, openTerminal, retheme, runInTerminal, setRefHandler, setToggleHandler, terminals, terminalsAvailable } from './terminals.js';
+import { activeTerminal, focusTerminal, openTerminal, retheme, runInTerminal, setRefHandler, setToggleHandler, terminals, terminalsAvailable, terminalText } from './terminals.js';
 import { parseRunCommands, runCommandFor, runLine } from './runFile.js';
-import { resolveRef } from './fileRefs.js';
+import { findFileRefs, resolveRef } from './fileRefs.js';
+import { claudeAppPrompt, claudeAppUrl, codeAround, errorContextText, EXPLAIN_ERROR, explainProblemAction, fixForErrorAction, fixProblemsAction } from './errorHelp.js';
 import { TerminalPanel } from './ui/terminal.js';
 import { FolderSearchPanel } from './ui/folderSearch.js';
 import { PropertiesDialog } from './ui/properties.js';
@@ -82,7 +83,7 @@ function filingChoices() {
   return { projects, tags: [...counts].sort((a, b) => b[1] - a[1]).map(([t]) => t) };
 }
 
-/** Asks the local model to file a text: { name, project, tags } (name only when `name`), or null. */
+/** Asks the model to file a text: { name, project, tags } (name only when `name`), or null. */
 async function askFiling(text, { ext = '', name = true } = {}) {
   const { llm } = getSettings();
   const choices = filingChoices();
@@ -460,14 +461,14 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       activeFile,
       activeInfo,
 
-      /** The local model suggests a project and tags for the active file (Undo puts back what it had). */
+      /** The model suggests a project and tags for the active file (Undo puts back what it had). */
       async suggestFiling() {
         const now = activeInfo();
         if (now?.kind !== 'file') return;
         const { llm } = getSettings();
-        if (!llm.enabled || !llm.chatModel) return toast('Turn on the local model in Settings first.', { kind: 'error' });
+        if (!llm.enabled || !llm.chatModel) return toast('Turn on the model in Settings first.', { kind: 'error' });
         if (!now.text.trim()) return toast('Write something first: the model files a note by what it says.');
-        toast('Asking the local model…', { timeout: 2500 });
+        toast('Asking the model…', { timeout: 2500 });
         let filing;
         try {
           filing = await askFiling(now.text, { ext: findLanguage(now.name, now.language)?.extensions?.[0] ?? '', name: false });
@@ -1324,6 +1325,8 @@ export function App() {
         actions.openRef(ref, base);
       },
       onSuggest: (request) => actions.suggestText(request),
+      // A problem's tooltip: the model explains it, or fixes the file's problems.
+      onProblemAction: (kind, key, problem) => (kind === 'fix' ? actions.fixProblems(key) : actions.explainProblem(problem, key)),
       // An image pasted or dropped into the text: read its text.
       onImage: (file) => actions.readImages([{ blob: file, name: file.name || 'Pasted image' }]),
       linkTargets: () => store.live().map((f) => linkName(f.name)),
@@ -1522,12 +1525,80 @@ export function App() {
   };
   actions.toggleSplit = () => (store.session.side ? actions.closeSide() : actions.openSide());
 
-  // The model panel (the bubble, or Ctrl+K): about the selection, or the whole file.
+  // The model panel (the bubble, or Ctrl+K): about the selection, or the whole file. `assistStart`
+  // opens it already asking (a problem, an error from the terminal: errorHelp.js).
   const [assist, setAssist] = useState(false);
+  const [assistStart, setAssistStart] = useState(null);
   actions.askSelection = () => {
     if (assist) return setAssist(false);
     if (!activeKey || view !== 'editor') return toast('Open a file first.');
+    setAssistStart(null);
     setAssist(true);
+  };
+  actions.openAssist = (start) => {
+    setView('editor');
+    setAssistStart({ ...start, id: Date.now() });
+    setAssist(true);
+  };
+  /** A tab's whole text as the model panel's context (the file it is about). */
+  const wholeFile = (key) => {
+    hostRef.current?.flushAll();
+    const k = parseKey(key);
+    const file = k?.kind === 'file' ? store.get(k.id) : null;
+    const tab = k?.kind === 'disk' ? store.diskTab(k.path) : k?.kind === 'repo' ? store.repoTab(k.path) : null;
+    const text = file ? store.text(file.id) : (tab?.text ?? '');
+    const name = file?.name ?? tab?.name ?? '';
+    return { key, from: 0, to: text.length, text, whole: true, name, language: findLanguage(name, file?.language)?.name ?? '' };
+  };
+  /** The problems the editor found in a tab, fixed by the model (a version to compare and accept). */
+  actions.fixProblems = (key = activeKey) => {
+    const list = problems[key]?.list ?? [];
+    if (!list.length) return toast('No problems found in this file.');
+    actions.openAssist({ action: fixProblemsAction(list), context: wholeFile(key) });
+  };
+  actions.explainProblem = (problem, key = activeKey) => actions.openAssist({ action: explainProblemAction(problem), context: wholeFile(key) });
+  /**
+   * The terminal's error (its selection, or the last output) explained by the model, with the
+   * code around the places it names (files open here, or readable on disk).
+   */
+  actions.explainTerminalError = async () => {
+    const s = activeTerminal();
+    const output = terminalText(s);
+    if (!output) return toast('Nothing in the terminal to ask about yet.');
+    const base = s.connId === 'local' ? s.cwd : toRemoteUri(s.connId, s.cwd || '/');
+    const seen = new Set();
+    const snippets = [];
+    let fixTarget = '';
+    for (const ref of output.split('\n').flatMap((line) => findFileRefs(line))) {
+      if (snippets.length >= 3) break;
+      const target = isRemotePath(base) ? (ref.path.startsWith('/') ? toRemoteUri(remoteParts(base).id, ref.path) : resolveRef(ref.path, base)) : resolveRef(ref.path, base);
+      if (!target || seen.has(target) || /node_modules|[\\/]internal[\\/]|^node:/.test(target)) continue;
+      seen.add(target);
+      hostRef.current?.flushAll();
+      const text = store.diskTab(target)?.text ?? (await window.desktop?.disk?.read(target).then((r) => r.text, () => null));
+      if (text == null) continue;
+      snippets.push({ path: ref.path, line: ref.line, code: codeAround(text, ref.line) });
+      fixTarget ||= target;
+    }
+    actions.openAssist({ action: EXPLAIN_ERROR, context: { label: 'The terminal’s output', name: 'terminal output', text: errorContextText(output, snippets), whole: false, errorText: output, fixTarget } });
+  };
+  /** Opens the file an error points to and proposes a fixed version (compare, accept). */
+  actions.fixForError = async (path, errorText) => {
+    if (await actions.openDiskPath(path)) return;
+    setTimeout(() => actions.openAssist({ action: fixForErrorAction(errorText), context: wholeFile(diskKey(path)) }), 120);
+  };
+  /**
+   * The question in the Claude app (with the person's Claude subscription): copied, and opened in
+   * a new chat with it filled in when it fits in a link. Encrypted files are never sent.
+   */
+  actions.openInClaude = async ({ action, context }) => {
+    const k = parseKey(context?.key ?? '');
+    const file = k?.kind === 'file' ? store.get(k.id) : null;
+    if (file?.encrypted) return toast('Encrypted files are not sent anywhere: copy the part you want to ask about instead.');
+    const prompt = claudeAppPrompt({ action, context, editorFile: file?.name ?? '' });
+    await navigator.clipboard.writeText(prompt).catch(() => {});
+    window.open(claudeAppUrl(prompt), '_blank', 'noopener');
+    toast('Opening Claude. The question is on the clipboard too: paste it if it is not there.', { timeout: 8000 });
   };
   const modelReady = Boolean(settings.llm.enabled && settings.llm.chatModel);
   const assistScope = cursor?.selected ? `Selection · ${cursor.selected.toLocaleString()} character${cursor.selected === 1 ? '' : 's'}` : `Whole file · ${activeName}`;
@@ -1997,6 +2068,12 @@ export function App() {
       'servers-ssh': () => actions.importSshConfig(),
       terminal: () => actions.toggleTerminal(),
       'run-file': () => actions.runFile(),
+      'explain-error': () => actions.explainTerminalError(),
+      'fix-problems': () => actions.fixProblems(),
+      'open-in-claude': () => {
+        const context = actions.assistContext();
+        if (context) actions.openInClaude({ action: { prompt: 'Help me with this.' }, context });
+      },
       folders: () => actions.showFolders(),
       'clipboard-history': () => actions.openClipboardHistory(),
       captures: () => actions.takeCaptures(),
@@ -2124,7 +2201,7 @@ export function App() {
       ${dictationSupported() && html`<button type="button" class="icon-btn ${dictating ? 'on' : ''}" aria-label="Voice note" title=${dictating ? 'Stop dictating' : 'Dictate: into this file, or a new note'} aria-pressed=${Boolean(dictating)}
         onClick=${() => (dictating ? actions.stopDictation() : actions.startDictation())}><${Icon} name="mic" /></button>`}
       <button type="button" class="icon-btn" aria-label="Find in files" title="Find in files (Ctrl+Shift+F)" aria-pressed=${panel === 'search'} onClick=${() => actions.togglePanel('search')}><${Icon} name="search" /></button>
-      ${settings.llm.enabled && html`<button type="button" class="icon-btn" aria-label="Assistant" title="Local model (Ctrl+Shift+A)" aria-pressed=${panel === 'assistant'} onClick=${() => actions.togglePanel('assistant')}><${Icon} name="sparkle" /></button>`}
+      ${settings.llm.enabled && html`<button type="button" class="icon-btn" aria-label="Assistant" title="The model (Ctrl+Shift+A)" aria-pressed=${panel === 'assistant'} onClick=${() => actions.togglePanel('assistant')}><${Icon} name="sparkle" /></button>`}
       <${SyncBadge} sync=${sync} compact=${narrow} />
       <button type="button" class="icon-btn help-btn" aria-label="Help" title="Help: commands, shortcuts and the guide (F1)" onClick=${() => actions.command('help')}><${Icon} name="help" /></button>
       <button type="button" class="icon-btn" aria-label="Settings" title="Settings" aria-pressed=${view === 'settings'} onClick=${() => setView(view === 'settings' ? 'editor' : 'settings')}><${Icon} name="settings" /></button>
@@ -2146,7 +2223,7 @@ export function App() {
         <div class="editor-area ${showPreview ? 'split' : ''} ${showPreview && previewFull ? 'preview-full' : ''} ${showSide ? 'side-split' : ''} ${compare ? 'comparing' : ''} ${settings.whereFrame && activeKey ? 'framed' : ''}"
           data-kind=${kindOfKey(activeKey) ?? undefined} ref=${areaEl} style=${{ '--split': `${((settings.splitRatio || 0.5) * 100).toFixed(2)}%` }}>
           <div class="editor-host" ref=${editorEl} />
-          ${assist && activeKey && view === 'editor' && !compare && !activeSealed && html`<${AssistPanel} key=${activeKey} scope=${assistScope} actions=${actions} onClose=${() => (setAssist(false), hostRef.current?.focus())} />`}
+          ${assist && (activeKey || assistStart) && view === 'editor' && !compare && !activeSealed && html`<${AssistPanel} key=${`${activeKey}:${assistStart?.id ?? 0}`} scope=${assistScope} start=${assistStart} actions=${actions} onClose=${() => (setAssist(false), setAssistStart(null), hostRef.current?.focus())} />`}
           ${!assist && modelReady && settings.assistBubble && activeKey && !compare && !activeSealed && !typingJob && html`<${AssistBubble} onOpen=${() => setAssist(true)} />`}
           ${showSide && splitHandle('Resize the side view')}
           ${showSide &&

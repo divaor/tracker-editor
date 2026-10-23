@@ -89,6 +89,7 @@ export function TerminalPanel({ settings, actions, onHide }) {
       </div>
       <${MenuButton} label="New terminal" icon="plus" items=${newItems} />
       <span class="spacer" />
+      <button type="button" class="icon-btn sm" aria-label="Ask about the error" title="Ask the model about the error: the selection, or the last output (with the code it points to)" disabled=${!current} onClick=${() => actions.explainTerminalError()}><${Icon} name="sparkle" size=${15} /></button>
       <button type="button" class="icon-btn sm" aria-label="Clear" title="Clear the screen" disabled=${!current} onClick=${() => (clearTerminal(), focusTerminal())}><${Icon} name="eraser" size=${15} /></button>
       <button type="button" class="icon-btn sm" aria-label="Hide the terminal" title="Hide (Ctrl+\`); the shells keep running" onClick=${onHide}><${Icon} name="chevronDown" size=${16} /></button>
     </div>
@@ -114,6 +115,7 @@ export function TerminalPanel({ settings, actions, onHide }) {
       items=${[
         { label: 'Copy (Ctrl+Shift+C)', icon: 'copy', disabled: !terminalHasSelection(), run: () => copyFromTerminal() },
         { label: 'Paste (Ctrl+Shift+V)', icon: 'clipboard', run: () => pasteIntoTerminal() },
+        { label: 'Ask the model about the error', icon: 'sparkle', run: () => actions.explainTerminalError() },
         { label: 'Clear', icon: 'eraser', run: () => clearTerminal() },
         { separator: true },
         { label: 'Close this terminal', icon: 'x', danger: true, run: () => closeTerminal(current) },

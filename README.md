@@ -33,8 +33,10 @@ It is the companion of [Tracker](https://github.com/divaor/tracking_app) and sha
 - **Log tools**: **Filter lines** (`Alt+L`) shows only the lines that match (or hides them), with regex; copy them or make a file of them. Very large files open in a lighter mode that stays fast.
 - **Macros**: `Ctrl+Shift+R` records your edits, `Alt+Shift+P` plays them back, or run them many times or to the end of the file.
 - **Compare with the clipboard**, and **send a checklist to the tracker**: the open `- [ ]` items of a file or the selection become tasks that link back to it.
-- **A local model on your computer** (Ollama, LM Studio or any OpenAI-compatible server): summarize a file, ask questions about one or all of your files with sources, and **find by meaning** when you don't remember the words. Nothing leaves your machine.
-  - **Help with the text**: the ✦ bubble at the bottom right (or `Ctrl+K`) works on the selection, or the whole file. Fix, rewrite, shorten or expand it; change the tone; **advanced replace** (say what to change: "every date to YYYY-MM-DD"); tidy it, **make it Markdown**, **convert it** to JSON, YAML, CSV, a table…; **check the syntax** of a query, find problems, add comments, rewrite it in another language or SQL dialect, write a regex; translate it; or ask anything and follow up. New versions open as a comparison to accept, keep as a new file or copy.
+- **A model, if you want one**: on your computer (Ollama, LM Studio or any OpenAI-compatible server; nothing leaves your machine), or an **AI provider with your own API key** (Claude through Anthropic's SDK, OpenAI, Google Gemini, OpenRouter, Mistral, Groq or another OpenAI-compatible one), which works on the phone too. Summarize a file, ask questions about one or all of your files with sources, and **find by meaning** when you don't remember the words.
+  - **Help with the text**: the ✦ bubble at the bottom right (or `Ctrl+K`) works on the selection, or the whole file. Fix, rewrite, shorten or expand it; change the tone; **advanced replace** (say what to change: "every date to YYYY-MM-DD"); tidy it, **make it Markdown**, **convert it** to JSON, YAML, CSV, a table…; **check the syntax** of a query, find problems, **explain an error** (a pasted stack trace), add comments, rewrite it in another language or SQL dialect, write a regex; translate it; or ask anything and follow up. New versions open as a comparison to accept, keep as a new file or copy.
+  - **Help with errors**: **Explain** or **Fix with the model** on a problem the editor underlines, or all of them from the Problems list; in the terminal, ✦ explains why a program failed (with the code it points to) and offers to fix that file.
+  - **With your Claude subscription**: a subscription cannot be connected to other apps, so **Ask in the Claude app** opens Claude with the question and the text ready (also copied); with the tracker's connector there, Claude can save the fix back to the file.
   - Or a **model service that answers later** (submit a request, get the answer from a status call or a webhook), described by a connection profile; see [4. Model](#4-model-optional).
 - **Type into another window** (desktop): for remote desktops and consoles that do not take pasted text. `Alt+T` types the selection, or the whole file, as key presses into the window you click into before a short countdown ends.
 - **Files on disk** (desktop): **File → Open File (Edit in Place)** (`Ctrl+O`) edits a file where it is, keeping its line endings and encoding. It reloads when the file changes elsewhere, warns before saving over someone else's change, and **Follow** shows new lines as they are written, like `tail -f`. Huge logs open by their last part.
@@ -57,7 +59,7 @@ It is the companion of [Tracker](https://github.com/divaor/tracking_app) and sha
 - **Format document** (`Shift+Alt+F`): one-line JSON becomes readable (numbers and text kept exactly), and XML, SQL, JavaScript, TypeScript, CSS, HTML, Markdown, YAML and GraphQL are tidied too; the whole file or just the selection.
 - **Help** (`F1`): every command and its shortcut in a searchable cheat sheet you can run commands from (or print), and the full guide. `Ctrl+Shift+P` (or `Ctrl+P` then `>`) runs a command by name, as in VS Code.
 - **Run this file** (desktop, `F5`): saved, then run in a terminal in its folder (Python, Node, shell, PowerShell, Go, Ruby, PHP, TypeScript with tsx…; your own commands in Settings), on this computer or on its server over SSH. `file:line` in the output (and Ctrl+clicked in the text, like a pasted stack trace) opens the file at that line.
-- **Suggestions as you type** (optional, with a model on your computer): grey text after the cursor, `Tab` takes it, `Ctrl+→` one word. Best with a small code model that fills in the middle (`qwen2.5-coder:1.5b` in Ollama); others are asked like a chat. Never for encrypted files.
+- **Suggestions as you type** (optional, with a model that answers at once): grey text after the cursor, `Tab` takes it, `Ctrl+→` one word. Best with a small code model that fills in the middle (`qwen2.5-coder:1.5b` in Ollama); others are asked like a chat. Never for encrypted files.
 - **HTML, XML and JSX**: Emmet abbreviations on `Tab` (`ul>li*3`, `div.card#main`, `a[href=#]{Home}`, `!` for a page), tags closed as you type, and renaming a tag renames its other end.
 - **Editing tools**: go to line, multiple cursors, select next occurrence, comment lines, duplicate/delete/sort lines, remove duplicates, trim trailing spaces, upper/lower case, format JSON, word wrap, visible whitespace, bracket matching.
 - **Code tools** (not a full IDE): fold and unfold blocks, everything at once (`Alt+0` / `Alt+Shift+0`) or by level (`Alt+1`–`Alt+3`: classes, then their methods); **go to the declaration** (`F12`), **usages** (`Shift+F12`) and **rename** (`F2`) of a name in the file; **go to a function or section** (`Ctrl+P`, then `@`); the status bar names the function you are in; the name under the cursor is highlighted where else it is used. YAML and plain text fold by indentation.
@@ -143,6 +145,15 @@ The tracker's **Open in editor** links point at this address. If you host the ed
 The desktop app talks to the model through its main process, so no extra setup is needed. In the browser, Ollama must allow the site's origin: set `OLLAMA_ORIGINS=https://divaor.github.io` and restart Ollama. LM Studio works too (its server runs on `http://localhost:1234/v1`).
 
 Finding by meaning keeps an index of your files on the device and only re-reads files that changed.
+
+### An AI provider with your API key (desktop, browser and phone)
+
+**Settings → Model → AI provider**: pick **Claude (Anthropic)**, **OpenAI**, **Google Gemini**, **OpenRouter**, **Mistral**, **Groq** or another OpenAI-compatible service, paste an API key (**Get a key** opens the provider's page), **Test and list models**, pick a model and **Save and turn on**.
+
+- The key stays on the device (the keychain on desktop, the browser's storage on the web) and is never synced or written to the settings. You pay the provider per use.
+- Claude goes through the official [Anthropic TypeScript SDK](https://github.com/anthropics/anthropic-sdk-typescript), streamed, with the request falling back to another Claude model when the one picked is overloaded. The others go through the same OpenAI-compatible client as a local server.
+- Finding by meaning needs an embedding model: OpenAI, Gemini and Mistral have them; Claude, OpenRouter and Groq don't (keyword search stays).
+- **A Claude Pro or Max subscription** cannot be used here: Anthropic allows its sign-in only in its own apps. **Ask in the Claude app** hands the question over to Claude instead, and the tracker's connector lets Claude read your files and save fixes back.
 
 ### A model service that answers later
 
@@ -401,7 +412,7 @@ npm start         # run the desktop app
 npm run vendor    # re-bundle CodeMirror and xterm.js, copy Preact/htm, marked, DOMPurify and tesseract.js into app/vendor/
 ```
 
-The web app is plain ES modules with no build step. CodeMirror 6 and its languages are bundled once by `npm run vendor` (esbuild, one chunk per language) into `app/vendor/cm/`; [xterm.js](https://xtermjs.org/) with its fit add-on into `app/vendor/xterm/` (the terminal, loaded when one opens); text recognition (tesseract.js, its WebAssembly core and the English and Spanish models) is copied into `app/vendor/ocr/`.
+The web app is plain ES modules with no build step. CodeMirror 6 and its languages are bundled once by `npm run vendor` (esbuild, one chunk per language) into `app/vendor/cm/`; the [Anthropic SDK](https://github.com/anthropics/anthropic-sdk-typescript) into `app/vendor/anthropic.js` (loaded when Claude is first asked); [xterm.js](https://xtermjs.org/) with its fit add-on into `app/vendor/xterm/` (the terminal, loaded when one opens); text recognition (tesseract.js, its WebAssembly core and the English and Spanish models) is copied into `app/vendor/ocr/`.
 
 The desktop app's runtime dependencies are [ssh2](https://github.com/mscdex/ssh2) (SFTP) and [basic-ftp](https://github.com/patrickjuchli/basic-ftp) (FTP, FTPS), both plain JavaScript, [fflate](https://github.com/101arrowz/fflate) (zip) and [@lydell/node-pty](https://github.com/lydell/node-pty) (the terminal on this computer: node-pty with prebuilt binaries for Windows, macOS and Linux on x64 and arm64, unpacked from the asar by `build.asarUnpack`). ssh2's optional native speed-ups are left out of the installers (`build.files` in package.json), so builds need no compiler; it uses its JavaScript and WebAssembly code instead.
 
@@ -414,7 +425,9 @@ app/                  the web app (also loaded by Electron)
   js/store.js         local store (IndexedDB): files, text, open tabs
   js/editor.js        CodeMirror setup, one editor state per tab
   js/search.js        find in files, quick open
-  js/llm.js, ai.js, semantic.js   local model client, prompts, the meaning index
+  js/llm.js, ai.js, semantic.js   OpenAI-compatible model client, prompts, the meaning index
+  js/claude.js, providers.js      Claude through Anthropic's SDK; the connections (this computer, AI providers)
+  js/errorHelp.js     help with errors: problem prompts, terminal output, the question for the Claude app
   js/asyncLlm.js      client for model services that answer later (profiles, polling, webhooks)
   js/versions.js      file history from the data repo's commits
   js/crypto.js, vault.js          encrypted files: AES-GCM, the vault, the key on this device
@@ -454,7 +467,7 @@ test/                 unit tests
 - **Markdown preview** is sanitized with DOMPurify, and the page runs under a strict Content Security Policy.
 - **Desktop app**: the window is sandboxed with context isolation; the model proxy only accepts `http(s)` requests, and outside links open in your default browser.
 - **Encrypted files**: AES-GCM with a 256-bit key derived from your passphrase (PBKDF2-SHA256, 600,000 rounds). The key is kept on unlocked devices as a non-extractable key; the passphrase is never stored.
-- **Model service secrets**: the API key and webhook secret are kept in the keychain (desktop) and never written to the settings or the data repo. The webhook receiver refuses events whose signature does not match when a secret is set.
+- **Model secrets**: API keys (one per provider) and the webhook secret are kept in the keychain (desktop) or the browser's storage (web), and never written to the settings or the data repo. Claude is called from the page with your own key (the SDK's `dangerouslyAllowBrowser`, meant for exactly this: a key that belongs to the person using the app, on their device). **Ask in the Claude app** sends nothing by itself: it opens claude.ai with the question in the link and copies it; encrypted files are never handed over. The webhook receiver refuses events whose signature does not match when a secret is set.
 - **Files on disk**: the page can read and write only files you picked in the desktop app's open dialog, and files inside folders you picked there (symbolic links resolved, so they cannot lead outside). A forgotten folder is out of reach again. Renaming, moving, copying and deleting stay inside the picked folders, deleting goes to the Recycle Bin, and files pasted or dropped from other apps are copied in without becoming reachable themselves.
 - **Other programs**: files open with their default program only when they are not programs, scripts or shortcuts, so a page can never start one.
 - **Servers**: passwords and key passphrases are kept by the main process in the keychain store and never sent to the page; key files can only be ones picked in the file dialog, or named by `IdentityFile` in your SSH config (read by the main process; the page only picks hosts by name). Answers to the server's questions go to the server only: one-time codes are never kept, passwords only when you tick **Remember**. SSH host keys are checked against the fingerprint you trusted (for each server, also those reached through a jump host), and a changed key stops the connection unless you accept it. FTPS checks the server's certificate unless you allow a self-signed one; FTP is marked as unencrypted.

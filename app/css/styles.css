@@ -6783,6 +6783,43 @@ button.help-command:focus-visible {
   font-size: 13px;
 }
 
+/* A problem and its ✦ (the model explains it), shown on hover or focus. */
+.problem-item {
+  display: flex;
+  align-items: flex-start;
+}
+
+.problem-item .problem-row {
+  flex: 1;
+  min-width: 0;
+}
+
+.problem-explain {
+  flex: none;
+  margin-top: 4px;
+  color: var(--accent);
+  opacity: 0;
+}
+
+.problem-item:hover .problem-explain,
+.problem-explain:focus-visible {
+  opacity: 1;
+}
+
+@media (pointer: coarse) {
+  .problem-explain {
+    opacity: 1;
+  }
+}
+
+/* "Ask in the Claude app" under the model panel's actions. */
+.assist-claude {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
 .problem-row .problem-icon {
   flex: none;
   margin-top: 2px;

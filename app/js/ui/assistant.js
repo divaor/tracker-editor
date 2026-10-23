@@ -33,7 +33,7 @@ function Sources({ passages, actions }) {
   </div>`;
 }
 
-/** The local model (Ollama, LM Studio, …): ask about your files, find by meaning, summarize. */
+/** The model (on this computer, an AI provider, or a service): ask about your files, find by meaning, summarize. */
 export function AssistantPanel({ files, docs, activeFile, activeRepo, settings, actions, onClose }) {
   const { llm } = settings;
   // The open tab: one of the editor's files or a tracker document.
@@ -159,15 +159,15 @@ export function AssistantPanel({ files, docs, activeFile, activeRepo, settings, 
   };
 
   if (!llm.enabled || !llm.chatModel) {
-    return html`<aside class="panel assistant-panel" aria-label="Local model">
-      <div class="panel-head"><h2><${Icon} name="sparkle" size=${16} />Local model</h2><span class="spacer" />
+    return html`<aside class="panel assistant-panel" aria-label="The model">
+      <div class="panel-head"><h2><${Icon} name="sparkle" size=${16} />The model</h2><span class="spacer" />
         <button type="button" class="icon-btn sm" aria-label="Close" onClick=${onClose}><${Icon} name="x" size=${16} /></button></div>
       <div class="panel-body"><p class="muted">Connect a model running on this computer (Ollama or LM Studio) to summarize files, ask about them and find things by meaning.</p>
         <button type="button" class="btn primary" onClick=${() => (onClose(), actions.showSettings())}>Set up in Settings</button></div>
     </aside>`;
   }
 
-  const title = llm.provider === 'async' ? 'Model' : 'Local model';
+  const title = 'The model';
   return html`<aside class="panel assistant-panel" aria-label=${title}>
     <div class="panel-head">
       <h2><${Icon} name="sparkle" size=${16} />${title}</h2>

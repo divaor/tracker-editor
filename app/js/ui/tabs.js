@@ -507,7 +507,7 @@ export function FileBar({ file, repo, disk, sealed, projects, canPreview, previe
     ${previewButton}
     ${listenButton}
     ${shareButton}
-    ${settings.llm.enabled && html`<button type="button" class="btn ghost sm" title="Summarize with the local model" onClick=${actions.summarize}><${Icon} name="sparkle" size=${15} /><span class="label">Summarize</span></button>`}
+    ${settings.llm.enabled && html`<button type="button" class="btn ghost sm" title="Summarize with the model" onClick=${actions.summarize}><${Icon} name="sparkle" size=${15} /><span class="label">Summarize</span></button>`}
     <button type="button" class="btn ghost sm" title=${linked.length ? `On the tracker: ${linked.map((i) => i.title).join(', ')}` : 'Add to the tracker as a task, idea or doc to read'}
       onClick=${() => actions.openDialog({ type: 'send', id: file.id })}>
       <${Icon} name="send" size=${15} /><span class="label">${linked.length ? 'On tracker' : 'Send to tracker'}</span>

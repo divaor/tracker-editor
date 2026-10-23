@@ -7,6 +7,8 @@
 //   lists them so the service worker can cache all of them for offline use.
 // - xterm.js (with its fit add-on) is bundled into app/vendor/xterm/xterm.js, next
 //   to its stylesheet: the terminal on servers in the desktop app.
+// - Anthropic's SDK for the Claude API is bundled into app/vendor/anthropic.js (claude.js
+//   loads it the first time Claude is the model). The tracker keeps a copy of the file.
 // - Text recognition (tesseract.js) goes to app/vendor/ocr/: the library, its
 //   worker, the WebAssembly core (SIMD, LSTM only) and the English and Spanish
 //   models. About 9 MB, so they are cached when first used, not precached.
@@ -102,6 +104,21 @@ await build({
 });
 await writeFile(path.join(formatDir, 'files.json'), `${JSON.stringify([...prettierFiles.map((f) => `${f}.js`), 'sql-formatter.js'], null, 2)}\n`);
 console.log(`app/vendor/format/ <- prettier@${prettierVersion}, sql-formatter@${sqlVersion}`);
+
+const { version: sdkVersion, license: sdkLicense } = await pkgInfo('@anthropic-ai/sdk');
+await build({
+  entryPoints: [path.join(root, 'vendor-src', 'anthropic.js')],
+  bundle: true,
+  format: 'esm',
+  platform: 'browser',
+  minify: true,
+  target: 'es2022',
+  outfile: path.join(outDir, 'anthropic.js'),
+  banner: { js: `/* @anthropic-ai/sdk@${sdkVersion} (${sdkLicense}) - bundled by scripts/vendor.js */` },
+  legalComments: 'none',
+  logLevel: 'warning',
+});
+console.log(`app/vendor/anthropic.js <- @anthropic-ai/sdk@${sdkVersion}`);
 
 const ocrDir = path.join(outDir, 'ocr');
 await rm(ocrDir, { recursive: true, force: true });

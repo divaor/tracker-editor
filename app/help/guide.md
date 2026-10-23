@@ -99,7 +99,7 @@ Not a full IDE, but enough to find your way in a code file (**Edit → Code** on
 - **Where you are**: the status bar names the class and function the cursor is in (`Store › save`), or the YAML key or Markdown section; click it to go to another.
 - The name under the cursor is highlighted wherever else it appears. `Ctrl+Shift+\` jumps to the matching bracket.
 - **Run it** (`F5`, desktop) in a terminal in its folder, and click the `file:line` an error prints to go there (see [A terminal, and running a file](#a-terminal-and-running-a-file)). **Suggestions as you type** from the model: see [6](#suggestions-as-you-type).
-- **Problems as you type**: mistakes are underlined, with a mark next to the line; hover one to read it. In JSON (comments are fine in `tsconfig.json`, `.jsonc` and other files that allow them), YAML (also a key written twice in the same place, tabs in the indentation, a quote left open), XML, HTML, CSS, and code: JavaScript, TypeScript, Python, Go, Java, PHP, C, C++, Rust. The status bar counts errors and warnings; click it (or `Ctrl+Shift+M`) for the **Problems** list, click one to go there. `F8` goes to the next one, `Shift+F8` to the one before.
+- **Problems as you type**: mistakes are underlined, with a mark next to the line; hover one to read it. In JSON (comments are fine in `tsconfig.json`, `.jsonc` and other files that allow them), YAML (also a key written twice in the same place, tabs in the indentation, a quote left open), XML, HTML, CSS, and code: JavaScript, TypeScript, Python, Go, Java, PHP, C, C++, Rust. The status bar counts errors and warnings; click it (or `Ctrl+Shift+M`) for the **Problems** list, click one to go there. `F8` goes to the next one, `Shift+F8` to the one before. With a model connected, it can explain them or fix them for you: see [Help with errors](#help-with-errors).
 - **Easier to read**: thin **guides** at each indentation level, **brackets colored** by how deep they are (strings and comments aside), and **sticky scroll**: when you scroll inside a long function, the lines that start it (and its class) stay at the top; click one to go there. Each can be turned off in **Settings → Editor** (or the **View** menu).
 
 ---
@@ -171,6 +171,8 @@ History comes from your data repo, so it needs sync set up and shows only versio
 
 ## 6. The model
 
+The model is optional. Connect one in **Settings → Model**, in one of three ways: [on this computer](#option-a-a-model-on-this-computer-ollama-lm-studio) (free, nothing leaves it), [an AI provider with your API key](#option-b-an-ai-provider-with-your-api-key-claude-openai-gemini) (Claude, OpenAI, Gemini…; works on the phone too) or [a service that answers later](#option-c-a-model-service-that-answers-later). With a [Claude subscription](#your-claude-subscription) you can also ask in the Claude app.
+
 ### The ✦ bubble: help with the text
 
 With a model connected, a round ✦ button sits at the bottom right of the editor (or press `Ctrl+K`). It works on **the selection**, or **the whole file** when nothing is selected; the chip at the top says which.
@@ -178,15 +180,22 @@ With a model connected, a round ✦ button sits at the bottom right of the edito
 - **Understand**: Explain, Summarize, Action items.
 - **Edit**: Fix mistakes, Rewrite clearly, Shorten, Expand, **Change the tone…**, **Advanced replace…** (say what to change: "every date to YYYY-MM-DD", "rename userId to customerId outside strings", "prices +10%").
 - **Format and convert**: Tidy / format, **Make it Markdown** (a plain text file becomes headings, lists and tables), **Convert to…** JSON, YAML, CSV, a Markdown table, XML, HTML, a bullet list or SQL INSERTs.
-- **Code and queries**: **Check the syntax** (problems by line, then the corrected version), Find problems, Add comments, Optimize, **Rewrite in…** another language or SQL dialect (Python, PowerShell, T-SQL, PostgreSQL…), **Write a regex…**.
+- **Code and queries**: **Check the syntax** (problems by line, then the corrected version), Find problems, **Explain an error** (a pasted message, stack trace or console output), Add comments, Optimize, **Rewrite in…** another language or SQL dialect (Python, PowerShell, T-SQL, PostgreSQL…), **Write a regex…**.
 - **Translate**: To English, To Spanish, To another language….
 - **Or ask anything**: type in the box at the bottom. **Answer** replies in the panel; **Change the text** applies it ("make this a table", "sort by date"). After an answer you can **ask a follow-up**.
 
 What comes back:
 - **A new version of the text** opens as a comparison: **Accept** replaces the selection (Undo takes it back), **As a new file** keeps it separately with the right extension (`.json`, `.md`, `.ps1`…), or **Copy**.
 - **An answer** can be copied, **inserted below** the text, **saved as a note**, or, when it has a code block (like a corrected query), used with **Use the code**.
+- **Ask in the Claude app**: the same question in Claude instead (see [Your Claude subscription](#your-claude-subscription)).
 
 Turn the bubble off in **Settings → Model**; `Ctrl+K` still works.
+
+### Help with errors
+
+- **Problems the editor finds** (the underlines, see [Code tools](#code-tools)): hover one and choose **Explain** (what is wrong and how to fix it, with the corrected lines) or **Fix with the model**. The **Problems** list (`Ctrl+Shift+M`) has a ✦ next to each problem and **Fix with the model** at the top for all of them. A fix opens as a comparison, changing only what the problems need: **Accept** puts it in (`Ctrl+Z` takes it back).
+- **Errors in the terminal** (desktop): when a program fails, press ✦ (**Ask about the error**) in the terminal's bar, or right-click → **Ask the model about the error**. It sends the selection, or the last output, with the lines of code the error points to (files in your folders). The answer says what went wrong and why; **Fix app.js** (the file the error names) opens it with a fixed version to compare and accept. Then `F5` to run it again.
+- **An error from somewhere else** (a log, a CI run, a message someone sent): paste it into a file, select it, `Ctrl+K` → **Explain an error**.
 
 ### The assistant
 
@@ -203,19 +212,39 @@ With the model on, **new notes are named and filed**: one call names an untitled
 Turn on **Settings → Editor → Suggest the rest as you type**: a moment after you stop typing at the end of a line, the model's guess appears in grey after the cursor. `Tab` takes it, `Ctrl+→` takes one word, `Escape` (or typing something else) drops it; typing what it says keeps the rest. A bracket or quote closed for you after the cursor is taken care of: the suggestion replaces it.
 
 - It works best with a small code model that **fills in the middle** (it also reads what comes after the cursor): in Ollama for example `ollama pull qwen2.5-coder:1.5b`, then pick it in **Settings → Model → Model for suggestions**. Other models are asked like a chat, which is slower.
-- It needs a model that answers at once (Option A below), not a service that answers later. Encrypted files are never sent.
+- It needs a model that answers at once (options A and B below), not a service that answers later. Encrypted files are never sent. With an AI provider, every suggestion is a paid request: pick a fast, cheap model for it (for Claude, `claude-haiku-5-5`).
 
-### Option A: a local model (Ollama, LM Studio)
+### Option A: a model on this computer (Ollama, LM Studio)
 
 1. Install Ollama (ollama.com) and start it.
 2. `ollama pull llama3.2` (chat) and `ollama pull nomic-embed-text` (find by meaning).
-3. **Settings → Model → OpenAI-compatible server → Ollama → Test and list models**, pick both, **Save and turn on**.
+3. **Settings → Model → This computer → Ollama → Test and list models**, pick both, **Save and turn on**.
 
-Nothing leaves your computer. The desktop app needs no extra setup; in a browser, Ollama must allow the site (`OLLAMA_ORIGINS=https://divaor.github.io`).
+Nothing leaves your computer. The desktop app needs no extra setup; in a browser, Ollama must allow the site (`OLLAMA_ORIGINS=https://divaor.github.io`). On a phone, a model on your computer is out of reach: use option B there.
 
-### Option B: a model service that answers later
+### Option B: an AI provider with your API key (Claude, OpenAI, Gemini…)
 
-For services where a request gives back a task id and the answer comes later, from a status call or a webhook. **Settings → Model → Service that answers later**:
+Works everywhere, the phone included, without installing anything. **Settings → Model → AI provider**:
+
+1. Pick the provider: **Claude (Anthropic)**, **OpenAI**, **Google Gemini**, **OpenRouter** (many models with one key), **Mistral**, **Groq**, or **Another one** (any OpenAI-compatible address).
+2. **Get a key** opens the provider's page for API keys; paste it in **API key**.
+3. **Test and list models**, pick the chat model (and optionally the ones for images and suggestions), **Save and turn on**.
+
+- The key stays on the device: in the keychain on desktop, in the browser's storage on the web and the phone. It is never synced, never in the settings, never in the data repo. Set it up once on each device.
+- You pay the provider per use, on their own terms. Their prices and limits apply, and the text you ask about goes to them.
+- **Claude** goes through Anthropic's official SDK. Finding by meaning needs an embedding model, which Claude, OpenRouter and Groq do not offer: keyword search stays, or use OpenAI, Gemini or Mistral (or option A) for it.
+
+### Your Claude subscription
+
+A Claude Pro or Max subscription cannot be connected to the editor: Anthropic allows signing in with it only in its own apps (Claude, Claude Code). The Claude API (option B) is billed separately, per use, with a key from the Claude Console. To use your subscription instead:
+
+- **Ask in the Claude app**: in the ✦ panel (also without a model connected), after an answer, or in Help (`F1`). It opens a new chat in Claude with the question and the text filled in, and copies them too: if the question is too long for a link, or the app opens instead of the browser, paste it. On the phone it opens Claude in the browser, or in the Claude app when the phone sends claude.ai links there.
+- **With the Tracker connector in Claude**: Claude can read your editor files and save a fixed version back (the question names the file). Say "fix it and save it to my editor": the fix comes back with the next sync.
+- Encrypted files are never handed over.
+
+### Option C: a model service that answers later
+
+For services where a request gives back a task id and the answer comes later, from a status call or a webhook. **Settings → Model → Answers later**:
 
 1. **Connection profile (JSON)**: describes the service; **Start from the example** shows the shape. The profile says:
    - `submit`: the address, method and body that send a question, and `taskId`, where the task id is in the answer (e.g. `data.0.id`).
@@ -227,7 +256,7 @@ For services where a request gives back a task id and the answer comes later, fr
 4. **Send a test question**, then **Save and turn on**.
 5. Optional, desktop: **Receive answers by webhook**. Choose a port and the address the service can reach this computer at (it fills `{{webhook_url}}`), and set the **webhook secret**. Events must then carry the HMAC-SHA256 of their body in the header the profile's `webhook.signatureHeader` names; anything else is refused. The app keeps checking the status now and then anyway, since deliveries can be lost.
 
-Requests go through the desktop app's main process with your system's certificates and proxy, so services on the company network work. Find by meaning needs an embedding model, so it stays with option A.
+Requests go through the desktop app's main process with your system's certificates and proxy, so services on the company network work (option B's providers too). Find by meaning needs an embedding model, so it stays with options A or B.
 
 ---
 
@@ -299,6 +328,7 @@ It types real key presses into whichever window has the focus when the countdown
 - `` Ctrl+` `` (or **View → Terminal**) opens a terminal in a panel under the editor: on this computer (your usual shell: PowerShell on Windows, zsh or bash on Mac and Linux) in the folder of the open file or the one shown in Folders, or on the server when the open file is on one. Right-click a folder → **Open a terminal here** opens one there; **+** in the panel opens more (this computer or a server). See [Terminal on a server](#terminal-on-a-server) for the keys.
 - **Run this file** (`F5`, or **View → Run This File**): saves it, then runs it in a terminal of its own (**Run · …**), in the file's folder: `python3` for `.py` (`python` on Windows), `node` for `.js`, `bash` for `.sh`, PowerShell for `.ps1`, `go run`, `ruby`, `php`, `npx tsx` for `.ts` and more; `.html` opens in the browser. On a server it runs there, over SSH. Change or add commands in **Settings → Editor → Run commands**, one per line: `py: uv run {file}` (`{file}` the file, `{dir}` its folder, `{name}` its name; `js:` with nothing after turns a type off).
 - **`file:line` opens the file there**: in a terminal, the places programs print (`src/app.js:12:5`, `File "main.py", line 7`, `Foo.cs:line 42`, `a.ts(12,5)`) are links; click one. In the text (a log, a pasted stack trace), `Ctrl+click` one. Relative paths start from the terminal's folder, or the file's. Files outside the folders you opened in Folders do not open (open their folder first).
+- **When it fails**, ✦ in the terminal's bar asks the model about the error, and offers to fix the file it points to: see [Help with errors](#help-with-errors).
 
 ### Folders: a file explorer
 
@@ -416,6 +446,7 @@ Turn them on in **Settings → Desktop**.
 - In the tracker, items show **Open in editor** and attachments **Edit in editor**.
 - **Send to tracker** turns a file into a task, idea or doc linked to it.
 - **Claude** (through the tracker's connector) can list, search, read and save your editor files: "save this as a note in my editor", "what's in my deploy notes?". It can't read or change encrypted files.
+- **Asking Claude with your subscription**: **Ask in the Claude app** in the ✦ panel opens Claude with the question ready; with the connector, Claude can save its fix back to the file. See [Your Claude subscription](#your-claude-subscription).
 - **Giving a file to Claude yourself**: drag its tab (or files from the Folders view) into Claude Code's terminal (it gets the path) or the Claude app (it gets the file), or right-click → **Copy for Claude** and paste: the path of a file on disk, or the name and text of the others.
 
 ---
@@ -485,6 +516,9 @@ Turn them on in **Settings → Desktop**.
 - **Dictation says to allow the microphone**: allow it for the site or app in the browser's settings. "Needs a connection": the speech service is online.
 - **Text from an image reads badly**: crop to the text, choose one language, or use a sharper photo.
 - **No ✦ bubble**: connect a model in Settings → Model and check *Model button at the bottom right*.
+- **"Claude did not accept the API key"**: copy it again from the Claude Console (it starts with `sk-ant-`), paste it in Settings → Model → AI provider and **Test and list models**. "Too many requests… or its spending limit": wait a minute, or raise the limit in the Console.
+- **Can I sign in with my Claude Pro or Max subscription?** No: Anthropic allows it only in its own apps. Use **Ask in the Claude app**, or an API key (paid separately). See [Your Claude subscription](#your-claude-subscription).
+- **Ask in the Claude app opened an empty chat**: the question was too long for a link; it is on the clipboard, paste it.
 - **A folder says "That file was not opened here"**: it is a link to a place outside the folder you picked, or the folder was forgotten. Open that place with **Open another folder…**.
 - **Dragging a tab out does nothing**: encrypted files are never written out (their tabs only move within the bar); use **Copy for Claude** or copy the text instead.
 - **"A program or a script; the editor does not start those"**: open it from your file explorer (**Show in the file explorer**).
@@ -511,5 +545,5 @@ Turn them on in **Settings → Desktop**.
 - `editor/files/<id>/<name>` holds each file's text, readable on github.com, except encrypted files, which start with `TRACKER-EDITOR-ENCRYPTED v1`.
 - `editor/vault.json` holds the encryption salt and a check value, never the passphrase.
 - Each device also keeps a full copy in the app's storage, so everything works offline.
-- Settings, the GitHub token, the model's API key and webhook secret stay on each device (the keychain on desktop).
+- Settings, the GitHub token, the model's API keys (one per provider) and webhook secret stay on each device (the keychain on desktop).
 - Files opened from disk, from the Folders view or from a server stay where they are and are never synced. Mirrors (which folders, not your files) are listed in the app's folder on this computer, with what each side looked like at the last sync. Servers you set up (not their passwords) are listed in the app's own folder on this computer; passwords and key passphrases are in its keychain. The clipboard history stays on the computer, encrypted. Images for text recognition never leave the device, unless you choose your model to read them.

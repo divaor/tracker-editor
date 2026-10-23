@@ -6,16 +6,16 @@
 import { asyncClient } from './asyncConnection.js';
 import { chunkText, rankBySimilarity } from './ai.js';
 import { kvGet, kvSet } from './kv.js';
-import { createLlmClient } from './llm.js';
+import { createModelClient } from './providers.js';
 import { localFetch } from './localFetch.js';
 import { gitBlobSha } from './model.js';
 import { findInFiles } from './search.js';
-import { getSettings } from './settings.js';
+import { getSecret, getSettings } from './settings.js';
 import { store } from './store.js';
 
 export function llmClient(settings = getSettings()) {
   if (settings.llm.provider === 'async') return asyncClient(settings);
-  return createLlmClient({ baseUrl: settings.llm.baseUrl, apiKey: settings.llm.apiKey, fetchImpl: localFetch });
+  return createModelClient(settings.llm, { getSecret, fetchImpl: localFetch });
 }
 
 // What the model reads: { id, name, project, text }. Tracker documents have
@@ -52,7 +52,7 @@ let running = null;
 export function updateIndex({ onProgress, signal } = {}) {
   running ??= (async () => {
     const model = getSettings().llm.embedModel;
-    if (!model) throw new Error('Choose an embedding model in Settings → Local model.');
+    if (!model) throw new Error('Choose an embedding model in Settings → Model.');
     await load();
     const client = llmClient();
     const sources = allSources();

@@ -21,7 +21,8 @@ const APP_DIR = path.join(__dirname, '..', 'app');
 const APP_ORIGIN = 'app://editor';
 const LINK_SCHEME = 'tracker-editor';
 const REPO_URL = 'https://github.com/divaor/tracker-editor';
-const SECRET_KEYS = new Set(['github-token', 'llm-api-key', 'llm-webhook-secret']);
+// The model connections' keys are providers.js's LLM_KEY_SECRETS (test/providers.test.js checks the list).
+const SECRET_KEYS = new Set(['github-token', 'llm-api-key', 'llm-webhook-secret', 'llm-key-local', 'llm-key-anthropic', 'llm-key-openai', 'llm-key-gemini', 'llm-key-openrouter', 'llm-key-mistral', 'llm-key-groq', 'llm-key-custom']);
 const MAX_FILE = 5 * 1024 * 1024;
 
 protocol.registerSchemesAsPrivileged([
@@ -2393,7 +2394,7 @@ function buildMenu() {
         item('Word Wrap', 'Alt+Z', 'toggle-wrap'),
         item('Read Aloud', 'Alt+R', 'read-aloud'),
         shown('Split View', 'CmdOrCtrl+\\', 'split'),
-        item('Local Model', 'CmdOrCtrl+Shift+A', 'assistant'),
+        item('The Model', 'CmdOrCtrl+Shift+A', 'assistant'),
         shown('Outline and Links', 'CmdOrCtrl+Shift+O', 'outline'),
         shown('Terminal', 'Ctrl+`', 'terminal'),
         shown('Run This File', 'F5', 'run-file'),

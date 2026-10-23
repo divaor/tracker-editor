@@ -3,6 +3,7 @@
 // loaded the first time one opens. The sessions live here, outside the panel, so hiding
 // the panel keeps them; the panel attaches their screens (attach) and fits them to its size.
 // "file:line" in the output is a link (fileRefs.js) that the app opens (setRefHandler).
+import { outputTail } from './errorHelp.js';
 import { findFileRefs } from './fileRefs.js';
 import { getSettings, resolvedTheme } from './settings.js';
 
@@ -259,6 +260,22 @@ export async function runInTerminal(connId, { cwd = '', line, label = 'Run' }) {
   if (s.id && !s.starting) bridge().input(s.id, `${line}\r`);
   else s.typed += `${line}\r`;
   return s;
+}
+
+/** What to ask the model about in a terminal: its selection, else the last output (wrapped lines joined). */
+export function terminalText(s = active, max = 80) {
+  if (!s) return '';
+  if (s.term.hasSelection()) return s.term.getSelection().trim();
+  const buffer = s.term.buffer.active;
+  const lines = [];
+  for (let i = Math.max(0, buffer.length - 600); i < buffer.length; i++) {
+    const line = buffer.getLine(i);
+    if (!line) continue;
+    const text = line.translateToString(true);
+    if (line.isWrapped && lines.length) lines[lines.length - 1] += text;
+    else lines.push(text);
+  }
+  return outputTail(lines, max);
 }
 
 export const clearTerminal = (s = active) => s?.term.clear();

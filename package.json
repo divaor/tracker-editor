@@ -23,6 +23,7 @@
     "dist:linux": "electron-builder --linux --publish never"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "0.133.0",
     "@codemirror/lang-markdown": "^6.5.2",
     "@codemirror/language-data": "^6.5.2",
     "@codemirror/merge": "^6.12.3",

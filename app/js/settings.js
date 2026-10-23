@@ -1,6 +1,7 @@
 // User preferences (synchronous, localStorage) and the GitHub token (kept in
 // the OS keychain via Electron's safeStorage on desktop, localStorage on web).
 import { DEFAULT_LLM_URL } from './llm.js';
+import { keySecret, LLM_KEY_SECRETS } from './providers.js';
 
 const KEY = 'editor.settings.v1';
 const TOKEN_KEY = 'editor.token';
@@ -105,6 +106,8 @@ export const DEFAULT_SETTINGS = {
     embedModel: '',
     // For text from images (a model that reads pictures); '' = the chat model.
     visionModel: '',
+    // Which connection (providers.js): 'local' (a server on this computer) or an AI provider's id.
+    service: 'local',
     // For suggestions as you type (a code model that fills in the middle); '' = the chat model.
     completeModel: '',
     apiKey: '',
@@ -212,9 +215,9 @@ export async function setToken(value) {
   tokenCache = token;
 }
 
-// Other secrets (the model service's API key, its webhook secret): the
-// keychain on desktop, this browser's storage on the web.
-export const SECRET_NAMES = ['llm-api-key', 'llm-webhook-secret'];
+// Other secrets (the model service's API key and webhook secret, the API key of each model
+// connection: providers.js): the keychain on desktop, this browser's storage on the web.
+export const SECRET_NAMES = ['llm-api-key', 'llm-webhook-secret', ...LLM_KEY_SECRETS];
 const secretCache = new Map();
 
 export async function getSecret(name) {
@@ -255,4 +258,14 @@ export function parseSetupCode(code) {
     trackerPath: String(data.path ?? data.trackerPath ?? 'tracker.json'),
     token: typeof data.token === 'string' ? data.token : '',
   };
+}
+
+// Before, a local model server's API key was kept in the settings; it moves to the secrets
+// (the keychain on desktop), and the settings forget it.
+if (settings.llm.apiKey) {
+  const key = settings.llm.apiKey;
+  setSecret(keySecret('local'), key).then(
+    () => saveSettings({ llm: { apiKey: '' } }),
+    () => {},
+  );
 }

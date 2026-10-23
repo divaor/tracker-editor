@@ -17,7 +17,12 @@ const MODES = [
  * Answers show here and can be followed up; new versions of the text open as
  * a comparison to accept (actions.proposeReplacement).
  */
-export function AssistPanel({ scope, actions, onClose }) {
+/**
+ * `start` ({ action, context }) opens it already asking: a problem to explain or fix, an error
+ * from the terminal. Its context may have no `key` (the terminal's output): then there is no
+ * text to replace, and `fixTarget` (a file the error points to) offers to fix that file.
+ */
+export function AssistPanel({ scope, actions, onClose, start = null }) {
   const [question, setQuestion] = useState('');
   const [mode, setMode] = useState('answer');
   const [pending, setPending] = useState(null); // { action, value }: an action waiting for its value
@@ -43,11 +48,14 @@ export function AssistPanel({ scope, actions, onClose }) {
     return () => document.removeEventListener('keydown', onKey);
   }, []);
   useEffect(() => () => controller.current?.abort(), []);
+  useLayoutEffect(() => {
+    if (start && llm.enabled && llm.chatModel) ask(start.action, '', start.context);
+  }, []);
   useEffect(() => end.current?.scrollIntoView({ block: 'nearest' }), [conv?.turns.length, conv?.status]);
 
   // A follow-up continues the conversation about the same text.
-  const ask = async (action, followUp = '') => {
-    const context = followUp ? conv.context : actions.assistContext();
+  const ask = async (action, followUp = '', given = null) => {
+    const context = followUp ? conv.context : (given ?? actions.assistContext());
     if (!context) return;
     const turns = followUp ? conv.turns : [];
     const history = turns.flatMap((t, i) => [...(i > 0 ? [{ role: 'user', content: t.question }] : []), { role: 'assistant', content: t.answer }]).concat(followUp ? [{ role: 'user', content: followUp }] : []);
@@ -90,9 +98,17 @@ export function AssistPanel({ scope, actions, onClose }) {
   const choose = (action) => (action.param ? setPending({ action, value: '' }) : ask(action));
   const runPending = (value = pending.value) => value.trim() && ask(withParam(pending.action, value));
 
+  // The same question in the Claude app (your Claude subscription there; no key needed here).
+  const inClaude = (action) => {
+    const context = conv?.context ?? start?.context ?? actions.assistContext();
+    if (context) actions.openInClaude({ action: action ?? conv?.action ?? start?.action ?? { prompt: question.trim() || 'Help me with this.' }, context });
+  };
+  const claudeButton = (action) =>
+    html`<button type="button" class="btn sm" title="Opens Claude (the app on phones, claude.ai elsewhere) with this question; the question is also copied" onClick=${() => inClaude(action)}><${Icon} name="claude" size=${14} />Ask in the Claude app</button>`;
+  const contextLabel = (c) => c.label ?? (c.whole ? `Whole file · ${c.name}` : 'The selection');
   const head = html`<div class="assist-head">
     <span class="assist-title"><${Icon} name="sparkle" size=${16} />Model</span>
-    <span class="assist-scope" title="Select text in the file to ask about just that part">${conv ? (conv.context.whole ? `Whole file · ${conv.context.name}` : 'The selection') : scope}</span>
+    <span class="assist-scope" title="Select text in the file to ask about just that part">${conv ? contextLabel(conv.context) : start ? contextLabel(start.context) : scope}</span>
     <span class="spacer" />
     ${conv && html`<button type="button" class="btn ghost sm" title="Start over" onClick=${() => (controller.current?.abort(), setConv(null))}>New</button>`}
     <button type="button" class="icon-btn sm" aria-label="Close" title="Close (Esc)" onClick=${onClose}><${Icon} name="x" size=${16} /></button>
@@ -102,8 +118,11 @@ export function AssistPanel({ scope, actions, onClose }) {
     return html`<aside class="assist-panel" role="dialog" aria-label="Ask the model">
       ${head}
       <div class="assist-body">
-        <p>Connect a model first: a local one (Ollama, LM Studio) or a model service.</p>
-        <button type="button" class="btn primary sm" onClick=${() => (onClose(), actions.showSettings())}>Set up in Settings</button>
+        <p>Connect a model first: one on this computer (Ollama, LM Studio), an AI provider with your API key (Claude, OpenAI, Gemini…), or a model service. Or ask in the Claude app, with your Claude subscription.</p>
+        <div class="card-actions">
+          <button type="button" class="btn primary sm" onClick=${() => (onClose(), actions.showSettings())}>Set up in Settings</button>
+          ${claudeButton(start?.action)}
+        </div>
       </div>
     </aside>`;
   }
@@ -137,6 +156,7 @@ export function AssistPanel({ scope, actions, onClose }) {
             </form>`}
           </div>`,
         )}
+        <div class="assist-claude">${claudeButton()}</div>
       </div>`}
       ${conv &&
       html`<div class="assist-thread" aria-live="polite">
@@ -150,13 +170,16 @@ export function AssistPanel({ scope, actions, onClose }) {
           </div>`,
         )}
         ${conv.status === 'asking' && html`<button type="button" class="btn sm" onClick=${() => controller.current?.abort()}><${Icon} name="stop" size=${14} />Stop</button>`}
-        ${conv.status === 'error' && html`<p class="notice error"><${Icon} name="alert" size=${15} />${conv.error}</p>`}
+        ${conv.status === 'error' && html`<p class="notice error"><${Icon} name="alert" size=${15} />${conv.error}</p><div class="card-actions">${claudeButton()}</div>`}
         ${conv.status === 'done' &&
         html`<div class="card-actions assist-answer-actions">
-          ${code && html`<button type="button" class="btn primary sm" title="Compare the code in the answer with your text, then accept it" onClick=${() => (onClose(), actions.proposeReplacement(conv.context, cleanReplacement(code, conv.context.text), { label: 'The code from the answer' }))}><${Icon} name="check" size=${14} />Use the code</button>`}
+          ${conv.context.fixTarget &&
+          html`<button type="button" class="btn primary sm" title="Opens the file and proposes a fixed version to compare and accept" onClick=${() => (onClose(), actions.fixForError(conv.context.fixTarget, conv.context.errorText))}><${Icon} name="check" size=${14} />Fix ${conv.context.fixTarget.split(/[\\/]/).pop()}</button>`}
+          ${code && conv.context.key && html`<button type="button" class="btn primary sm" title="Compare the code in the answer with your text, then accept it" onClick=${() => (onClose(), actions.proposeReplacement(conv.context, cleanReplacement(code, conv.context.text), { label: 'The code from the answer' }))}><${Icon} name="check" size=${14} />Use the code</button>`}
           <button type="button" class="btn sm" onClick=${() => navigator.clipboard.writeText(last.answer).then(() => toast('Copied'))}><${Icon} name="copy" size=${14} />Copy</button>
-          <button type="button" class="btn sm" title="Below the text it is about" onClick=${() => actions.insertAfter(conv.context, last.answer)}><${Icon} name="filePlus" size=${14} />Insert below</button>
+          ${conv.context.key && html`<button type="button" class="btn sm" title="Below the text it is about" onClick=${() => actions.insertAfter(conv.context, last.answer)}><${Icon} name="filePlus" size=${14} />Insert below</button>`}
           <button type="button" class="btn sm" onClick=${() => (onClose(), actions.answerAsNote(conv.context, conv.action.label, conv.turns.map((t, i) => (i ? `**${t.question}**\n\n${t.answer}` : t.answer)).join('\n\n')))}><${Icon} name="file" size=${14} />Save as note</button>
+          ${claudeButton()}
         </div>`}
         <span ref=${end} />
       </div>`}

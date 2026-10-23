@@ -20,17 +20,21 @@ export function ProblemsPanel({ name, fileKey, problems, actions, onClose }) {
     <div class="panel-head">
       <h2><${Icon} name="alert" size=${16} />Problems</h2>
       <span class="spacer" />
+      ${list.length > 0 && html`<button type="button" class="btn sm" title="The model proposes a fixed file to compare and accept" onClick=${() => actions.fixProblems(fileKey)}><${Icon} name="sparkle" size=${14} />Fix with the model</button>`}
       <button type="button" class="icon-btn sm" aria-label="Close" onClick=${onClose}><${Icon} name="x" size=${16} /></button>
     </div>
     <div class="panel-body">
       <p class="muted small">${checked ? `${problemsSummary(list)} in ${name}${list.length ? ' · F8 goes to the next one, Shift+F8 to the one before' : ''}` : `${name} is not checked: problems show for JSON, YAML, XML, HTML, CSS and code (JavaScript, TypeScript, Python, Go, Java, PHP, C, C++, Rust).`}</p>
       <nav class="problems-list" aria-label=${`Problems in ${name}`}>
         ${list.map(
-          (p, i) => html`<button type="button" key=${`${p.from}-${i}`} class="outline-row problem-row ${p.severity}" onClick=${() => actions.revealRange(p.from, p.to, fileKey)} title=${`Line ${p.line}, column ${p.column}`}>
-            <${Icon} name=${p.severity === 'error' ? 'xCircle' : 'alert'} size=${14} class="problem-icon" />
-            <span class="problem-message">${p.message}</span>
-            <span class="problem-where">Ln ${p.line}, Col ${p.column}</span>
-          </button>`,
+          (p, i) => html`<div class="problem-item" key=${`${p.from}-${i}`}>
+            <button type="button" class="outline-row problem-row ${p.severity}" onClick=${() => actions.revealRange(p.from, p.to, fileKey)} title=${`Line ${p.line}, column ${p.column}`}>
+              <${Icon} name=${p.severity === 'error' ? 'xCircle' : 'alert'} size=${14} class="problem-icon" />
+              <span class="problem-message">${p.message}</span>
+              <span class="problem-where">Ln ${p.line}, Col ${p.column}</span>
+            </button>
+            <button type="button" class="icon-btn xs problem-explain" aria-label=${`Explain: ${p.message}`} title="Explain it (the model)" onClick=${() => actions.explainProblem(p, fileKey)}><${Icon} name="sparkle" size=${13} /></button>
+          </div>`,
         )}
         ${checked && !list.length && html`<p class="muted small problems-none"><${Icon} name="check" size=${14} />Nothing wrong found.</p>`}
       </nav>

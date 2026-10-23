@@ -319,7 +319,7 @@ function parserErrors(state) {
  * The linter for one tab: problemsFor (problems.js) with the parser's errors; `onProblems(key,
  * list, language)` hears each result ([{ from, to, line, column, severity, message }]).
  */
-const problemsLinter = (key, onProblems) =>
+const problemsLinter = (key, onProblems, onProblemAction) =>
   linter(
     (view) => {
       const { state } = view;
@@ -336,7 +336,15 @@ const problemsLinter = (key, onProblems) =>
         return { from, to: Math.min(Math.max(p.to, from), end), severity: p.severity, message: p.message, line: line.number, column: from - line.from + 1 };
       });
       onProblems?.(key, found, language);
-      return found.map(({ from, to, severity, message }) => ({ from, to, severity, message }));
+      // In the tooltip: the model explains this one, or fixes them all (the model panel).
+      const actions = (p) =>
+        onProblemAction
+          ? [
+              { name: 'Explain', apply: () => onProblemAction('explain', key, p) },
+              { name: 'Fix with the model', apply: () => onProblemAction('fix', key, p) },
+            ]
+          : undefined;
+      return found.map((p) => ({ from: p.from, to: p.to, severity: p.severity, message: p.message, actions: actions(p) }));
     },
     // Again when the language has loaded (the first look was before).
     { delay: 600, needsRefresh: (update) => update.startState.facet(languageName) !== update.state.facet(languageName) },
@@ -690,12 +698,13 @@ function fileRefAt(state, pos) {
  * Creates the editor in `parent`. `onChange(key, text, { urgent })` gets the text of the
  * tab after you type (debounced); `onCursor(info)` the cursor position.
  * `onOpenLink(target)` opens a [[link]]; `linkTargets()` lists names to complete after [[.
+ * `onProblemAction(kind, key, problem)` ('explain' or 'fix') comes from a problem's tooltip.
  * `onOpenRef(ref, key)` opens a Ctrl+clicked "file:line"; `onSuggest(request)` asks the
  * model for the text at the cursor (suggestions as you type, setting `inlineSuggest`).
  * `openSide(key, el, …)` shows a second tab next to it (the split view); a tab's
  * state, with its undo history, moves between the panes.
  */
-export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpenLink, onOpenRef, onSuggest, onImage, onProblems, linkTargets, settings }) {
+export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpenLink, onOpenRef, onSuggest, onImage, onProblems, onProblemAction, linkTargets, settings }) {
   const states = new Map(); // key → EditorState
   const scroll = new Map(); // key → scroll position
   const pending = new Map(); // key → timer for onChange
@@ -769,7 +778,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       whitespace: o.showWhitespace ? [highlightWhitespace(), highlightTrailingWhitespace()] : [],
       tabs: [EditorState.tabSize.of(indent.size), indentUnit.of(indent.tabs ? '\t' : ' '.repeat(indent.size))],
       gutter: [o.lineNumbers ? lineNumbers() : [], foldGutter()],
-      checks: o.problems !== false && !big ? [problemsLinter(key, onProblems), lintGutter()] : [],
+      checks: o.problems !== false && !big ? [problemsLinter(key, onProblems, onProblemAction), lintGutter()] : [],
       aids: big ? [] : [o.indentGuides !== false ? indentGuides : [], o.bracketColors !== false ? bracketColors : [], o.stickyScroll !== false ? stickyScroll : []],
     };
   };

@@ -1,7 +1,7 @@
 import { html, useEffect, useState } from '../../vendor/preact-htm.js';
 import { DEFAULT_LLM_URL } from '../llm.js';
+import { API_PROVIDERS, connectionOf, createModelClient, keySecret, providerOf } from '../providers.js';
 import { RUN_COMMANDS } from '../runFile.js';
-import { llmClient } from '../semantic.js';
 import { startReading, stopReading } from '../reader.js';
 import { isNaturalVoice, rankVoices } from '../speech.js';
 import { useVoices } from './readAloud.js';
@@ -146,9 +146,9 @@ function EditorCard({ settings }) {
       <div class="where-legend span-2" aria-label="Where files live">
         ${Object.entries(KINDS).map(([kind, k]) => html`<span key=${kind} class="where-chip kind-${kind} tone-ok" title=${k.hint}><${Icon} name=${k.icon} size=${14} /><span class="where-label">${k.label}</span><span class="where-state">${{ synced: 'synced', doc: 'synced with the tracker', disk: 'not synced', remote: 'not synced' }[kind]}</span></span>`)}
       </div>
-      <${Check} checked=${settings.autoName} label="Name new files from what is in them" hint="By the local model when it is on, otherwise from a heading on the first line"
+      <${Check} checked=${settings.autoName} label="Name new files from what is in them" hint="By the model when it is on, otherwise from a heading on the first line"
         onChange=${(v) => saveSettings({ autoName: v })} />
-      <${Check} checked=${settings.autoFile} label="File new notes under a project, with tags" hint="By the local model, from your projects and the tags you use. Undo is in the message."
+      <${Check} checked=${settings.autoFile} label="File new notes under a project, with tags" hint="By the model, from your projects and the tags you use. Undo is in the message."
         onChange=${(v) => saveSettings({ autoFile: v })} />
       ${window.desktop &&
       html`<${Field} label="Run commands (F5)" wide hint=${`One "type: command" per line, to change or add to the built-in ones (${Object.keys(RUN_COMMANDS).filter((e) => RUN_COMMANDS[e]).slice(0, 8).join(', ')}…). {file} is the file, {dir} its folder, {name} its name; an empty command turns a type off.`}>
@@ -296,18 +296,21 @@ const PRESETS = [
   { id: 'lmstudio', label: 'LM Studio', url: 'http://localhost:1234/v1' },
 ];
 
-const PROVIDERS = [
-  { id: 'openai', label: 'OpenAI-compatible server' },
-  { id: 'async', label: 'Service that answers later' },
+const CONNECTIONS = [
+  { id: 'local', label: 'This computer' },
+  { id: 'api', label: 'AI provider' },
+  { id: 'async', label: 'Answers later' },
 ];
 
 function ModelCard({ settings, actions }) {
-  const [provider, setProvider] = useState(settings.llm.provider || 'openai');
+  const [connection, setConnection] = useState(connectionOf(settings.llm));
   return html`<${Card} title="Model" icon="sparkle" id="model">
     <div class="field span-2 provider-choice"><span>Connection</span>
-      <${Segmented} options=${PROVIDERS} value=${provider} onChange=${setProvider} label="Connection" />
+      <${Segmented} options=${CONNECTIONS} value=${connection} onChange=${setConnection} label="Connection" />
     </div>
-    ${provider === 'async' ? html`<${AsyncModelForm} settings=${settings} actions=${actions} />` : html`<${OpenAiModelForm} settings=${settings} actions=${actions} />`}
+    ${connection === 'async' ? html`<${AsyncModelForm} settings=${settings} actions=${actions} />`
+    : connection === 'api' ? html`<${ApiModelForm} settings=${settings} actions=${actions} />`
+    : html`<${OpenAiModelForm} settings=${settings} actions=${actions} />`}
     <div class="field-grid">
       <${Check} checked=${settings.assistBubble} label="Model button at the bottom right of the editor" hint="Help with the selection, or the whole file: fix, convert, check the syntax, translate, ask. Ctrl+K opens it too." onChange=${(v) => saveSettings({ assistBubble: v })} />
     </div>
@@ -396,16 +399,50 @@ function AsyncModelForm({ settings, actions }) {
     </details>`;
 }
 
+/** Whether a key is saved for a connection (the field then says so instead of showing it). */
+function useSavedKey(service) {
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    let current = true;
+    getSecret(keySecret(service)).then((k) => current && setSaved(Boolean(k)), () => {});
+    return () => {
+      current = false;
+    };
+  }, [service]);
+  return [saved, setSaved];
+}
+
+/** The model pickers: a list once the connection was tested, else free text with an example. */
+function ModelFields({ form, set, models, examples, embeddings = true }) {
+  const options = (current) => [...new Set([current, ...(models ?? [])].filter(Boolean))];
+  const pick = (field, blank, example) =>
+    models
+      ? html`<select value=${form[field] ?? ''} onChange=${(e) => set({ [field]: e.currentTarget.value })}><option value="">${blank}</option>${options(form[field]).map((m) => html`<option key=${m} value=${m}>${m}</option>`)}</select>`
+      : html`<input value=${form[field] ?? ''} onInput=${(e) => set({ [field]: e.currentTarget.value })} placeholder=${example} spellcheck=${false} />`;
+  return html`
+    <${Field} label="Chat model" hint=${`For answers, fixes and summaries, e.g. ${examples.chat}`}>${pick('chatModel', 'Choose…', examples.chat.split(',')[0])}</${Field}>
+    ${embeddings && html`<${Field} label="Embedding model" hint=${`For finding by meaning, e.g. ${examples.embed}. Optional.`}>${pick('embedModel', 'None (keyword search)', examples.embed.split(',')[0])}</${Field}>`}
+    <${Field} label="Model for images" hint=${`Reads text from images when you choose it in Text from an image, e.g. ${examples.vision}. Blank: the chat model.`}>${pick('visionModel', 'The chat model', examples.vision.split(',')[0])}</${Field}>
+    <${Field} label="Model for suggestions" hint=${`For Suggest the rest as you type (Settings → Editor). ${examples.suggest} Blank: the chat model.`}>${pick('completeModel', 'The chat model', examples.suggestOne)}</${Field}>`;
+}
+
+const checkNotice = (check) =>
+  check && html`<p class="notice span-2 ${check.state === 'error' ? 'error' : ''}"><${Icon} name=${check.state === 'error' ? 'alert' : check.state === 'ok' ? 'check' : 'sync'} size=${15} />${check.text}</p>`;
+
+// A model server on this computer (Ollama, LM Studio…): the OpenAI API at localhost.
 function OpenAiModelForm({ settings, actions }) {
   const { llm } = settings;
-  const [form, setForm] = useState(llm);
+  const [form, setForm] = useState(() => ({ ...llm, ...(connectionOf(llm) === 'local' ? {} : { baseUrl: DEFAULT_LLM_URL, chatModel: '', embedModel: '', visionModel: '', completeModel: '' }) }));
+  const [key, setKey] = useState('');
+  const [savedKey, setSavedKey] = useSavedKey('local');
   const [models, setModels] = useState(null);
   const [check, setCheck] = useState(null);
   const set = (patch) => setForm({ ...form, ...patch });
+  const target = { ...form, provider: 'openai', service: 'local' };
   const test = async () => {
     setCheck({ state: 'busy', text: 'Connecting…' });
     try {
-      const list = await llmClient({ llm: { ...form, provider: 'openai' } }).listModels();
+      const list = await createModelClient(target, { getSecret, fetchImpl: localFetch, apiKey: key.trim() }).listModels();
       setModels(list);
       const guessEmbed = list.find((m) => /embed|bge|e5|minilm|nomic/i.test(m)) ?? '';
       const guessChat = list.find((m) => !/embed|bge|e5|minilm|nomic/i.test(m)) ?? '';
@@ -415,11 +452,16 @@ function OpenAiModelForm({ settings, actions }) {
       setCheck({ state: 'error', text: err.message });
     }
   };
-  const save = () => {
-    saveSettings({ llm: { ...form, provider: 'openai', webhook: llm.webhook, enabled: true } });
-    actions.toast('Local model saved. Open it with the ✦ button or Ctrl+Shift+A.');
+  const save = async () => {
+    if (key.trim()) {
+      await setSecret(keySecret('local'), key.trim());
+      setSavedKey(true);
+      setKey('');
+    }
+    const { apiKey: _old, ...rest } = target;
+    saveSettings({ llm: { ...rest, apiKey: '', webhook: llm.webhook, enabled: true } });
+    actions.toast('Model saved. Open it with the ✦ button or Ctrl+Shift+A.');
   };
-  const options = (current) => [...new Set([current, ...(models ?? [])].filter(Boolean))];
   return html`
     <p class="muted">Summarize files, ask questions about them and find things by meaning with a model running on this computer. Nothing leaves your machine. Works with <a href="https://ollama.com" target="_blank" rel="noopener">Ollama</a>, <a href="https://lmstudio.ai" target="_blank" rel="noopener">LM Studio</a> and other servers with an OpenAI-compatible API.</p>
     ${!window.desktop && html`<p class="notice"><${Icon} name="alert" size=${15} />In a browser this only reaches the model if the page runs on the same computer and the server allows it. The desktop app needs no extra setup.</p>`}
@@ -430,29 +472,17 @@ function OpenAiModelForm({ settings, actions }) {
           ${PRESETS.map((p) => html`<button type="button" key=${p.id} class="btn sm ${form.baseUrl === p.url ? 'primary' : ''}" onClick=${() => set({ baseUrl: p.url })}>${p.label}</button>`)}
         </div>
       </div>
-      <${Field} label="Chat model" hint="For summaries and answers, e.g. llama3.2, qwen2.5, mistral">
-        ${models ? html`<select value=${form.chatModel} onChange=${(e) => set({ chatModel: e.currentTarget.value })}><option value="">Choose…</option>${options(form.chatModel).map((m) => html`<option key=${m} value=${m}>${m}</option>`)}</select>`
-        : html`<input value=${form.chatModel} onInput=${(e) => set({ chatModel: e.currentTarget.value })} placeholder="llama3.2" spellcheck=${false} />`}
+      <${ModelFields} form=${form} set=${set} models=${models}
+        examples=${{ chat: 'llama3.2, qwen2.5, mistral', embed: 'nomic-embed-text', vision: 'llama3.2-vision, qwen2.5vl, gemma3', suggest: 'A code model that fills in the middle answers best, e.g. qwen2.5-coder:1.5b, starcoder2, codegemma.', suggestOne: 'qwen2.5-coder:1.5b' }} />
+      <${Field} label="API key" hint="Only if your server needs one. Kept on this device (the keychain in the desktop app), never in the settings.">
+        <input type="password" value=${key} onInput=${(e) => setKey(e.currentTarget.value)} autocomplete="off" placeholder=${savedKey ? 'Saved on this device (type to replace)' : ''} />
       </${Field}>
-      <${Field} label="Embedding model" hint="For finding by meaning, e.g. nomic-embed-text. Optional.">
-        ${models ? html`<select value=${form.embedModel} onChange=${(e) => set({ embedModel: e.currentTarget.value })}><option value="">None (keyword search)</option>${options(form.embedModel).map((m) => html`<option key=${m} value=${m}>${m}</option>`)}</select>`
-        : html`<input value=${form.embedModel} onInput=${(e) => set({ embedModel: e.currentTarget.value })} placeholder="nomic-embed-text" spellcheck=${false} />`}
-      </${Field}>
-      <${Field} label="Model for images" hint="Reads text from images when you choose it in Text from an image, e.g. llama3.2-vision, qwen2.5vl, gemma3. Blank: the chat model.">
-        ${models ? html`<select value=${form.visionModel ?? ''} onChange=${(e) => set({ visionModel: e.currentTarget.value })}><option value="">The chat model</option>${options(form.visionModel).map((m) => html`<option key=${m} value=${m}>${m}</option>`)}</select>`
-        : html`<input value=${form.visionModel ?? ''} onInput=${(e) => set({ visionModel: e.currentTarget.value })} placeholder="llama3.2-vision" spellcheck=${false} />`}
-      </${Field}>
-      <${Field} label="Model for suggestions" hint="For Suggest the rest as you type (Settings → Editor): a code model that fills in the middle, e.g. qwen2.5-coder:1.5b, starcoder2, codegemma. Blank: the chat model.">
-        ${models ? html`<select value=${form.completeModel ?? ''} onChange=${(e) => set({ completeModel: e.currentTarget.value })}><option value="">The chat model</option>${options(form.completeModel).map((m) => html`<option key=${m} value=${m}>${m}</option>`)}</select>`
-        : html`<input value=${form.completeModel ?? ''} onInput=${(e) => set({ completeModel: e.currentTarget.value })} placeholder="qwen2.5-coder:1.5b" spellcheck=${false} />`}
-      </${Field}>
-      <${Field} label="API key" hint="Only if your server needs one"><input type="password" value=${form.apiKey} onInput=${(e) => set({ apiKey: e.currentTarget.value })} autocomplete="off" /></${Field}>
       <div class="form-actions span-2">
         <button type="button" class="btn primary" disabled=${!form.chatModel} onClick=${save}>Save and turn on</button>
         <button type="button" class="btn" onClick=${test}>Test and list models</button>
-        ${llm.enabled && llm.provider !== 'async' && html`<button type="button" class="btn ghost" onClick=${() => saveSettings({ llm: { enabled: false } })}>Turn off</button>`}
+        ${llm.enabled && connectionOf(llm) === 'local' && html`<button type="button" class="btn ghost" onClick=${() => saveSettings({ llm: { enabled: false } })}>Turn off</button>`}
       </div>
-      ${check && html`<p class="notice span-2 ${check.state === 'error' ? 'error' : ''}"><${Icon} name=${check.state === 'error' ? 'alert' : check.state === 'ok' ? 'check' : 'sync'} size=${15} />${check.text}</p>`}
+      ${checkNotice(check)}
     </div>
     <details class="help"><summary>How do I set up Ollama?</summary>
       <ol>
@@ -463,6 +493,85 @@ function OpenAiModelForm({ settings, actions }) {
         html`<li>In the browser, Ollama must also allow this site: set the environment variable <code>OLLAMA_ORIGINS=${location.origin}</code> and restart it (LM Studio: turn on CORS in its server settings). The desktop app needs none of this.</li>`}
       </ol>
     </details>`;
+}
+
+// An AI provider reached with your own API key (providers.js): Claude through its SDK, the
+// others through their OpenAI-compatible API. The key stays on this device.
+function ApiModelForm({ settings, actions }) {
+  const { llm } = settings;
+  const mine = connectionOf(llm) === 'api';
+  const [service, setService] = useState(mine ? (llm.provider === 'anthropic' ? 'anthropic' : llm.service) : 'anthropic');
+  const provider = providerOf(service) ?? API_PROVIDERS[0];
+  const fresh = (p) => ({ baseUrl: p.baseUrl ?? '', chatModel: p.model ?? '', embedModel: '', visionModel: '', completeModel: '' });
+  const [form, setForm] = useState(() => (mine ? { ...llm } : fresh(provider)));
+  const [key, setKey] = useState('');
+  const [savedKey, setSavedKey] = useSavedKey(service);
+  const [models, setModels] = useState(null);
+  const [check, setCheck] = useState(null);
+  const set = (patch) => setForm({ ...form, ...patch });
+  const claude = provider.kind === 'anthropic';
+  const choose = (id) => {
+    const next = providerOf(id);
+    setService(id);
+    setForm(mine && (llm.provider === 'anthropic' ? 'anthropic' : llm.service) === id ? { ...llm } : fresh(next));
+    setModels(null);
+    setCheck(null);
+    setKey('');
+  };
+  const target = { ...form, provider: claude ? 'anthropic' : 'openai', service, baseUrl: claude ? '' : provider.id === 'custom' ? form.baseUrl : provider.baseUrl };
+  const test = async () => {
+    setCheck({ state: 'busy', text: 'Connecting…' });
+    try {
+      const list = await createModelClient(target, { getSecret, fetchImpl: localFetch, apiKey: key.trim() }).listModels();
+      setModels(list);
+      setForm((f) => ({ ...f, chatModel: f.chatModel || list.find((m) => !/embed/i.test(m)) || '', embedModel: provider.embeddings === false ? '' : f.embedModel || (list.find((m) => /embed/i.test(m)) ?? '') }));
+      setCheck({ state: 'ok', text: `Connected to ${provider.label}. ${list.length} model${list.length === 1 ? '' : 's'} available.` });
+    } catch (err) {
+      setCheck({ state: 'error', text: err.message });
+    }
+  };
+  const save = async () => {
+    if (key.trim()) {
+      await setSecret(keySecret(service), key.trim());
+      setSavedKey(true);
+      setKey('');
+    } else if (!savedKey) return setCheck({ state: 'error', text: `Paste your ${provider.label} API key first.` });
+    const { apiKey: _old, ...rest } = target;
+    saveSettings({ llm: { ...rest, apiKey: '', embedModel: provider.embeddings === false ? '' : rest.embedModel, webhook: llm.webhook, enabled: true } });
+    actions.toast(`${provider.label} saved. Open it with the ✦ button or Ctrl+Shift+A.`);
+  };
+  const forget = async () => {
+    await setSecret(keySecret(service), '');
+    setSavedKey(false);
+    if (mine && llm.enabled) saveSettings({ llm: { enabled: false } });
+    actions.toast('The key is gone from this device.');
+  };
+  const examples = claude
+    ? { chat: 'claude-opus-5-5, claude-sonnet-5-5', embed: '', vision: 'claude-opus-5-5', suggest: 'A faster model answers sooner and costs less, e.g. claude-haiku-5-5. Claude is asked like a chat (it does not fill in the middle).', suggestOne: 'claude-haiku-5-5' }
+    : { chat: 'a model from the list (Test and list models)', embed: 'an embedding model from the list', vision: 'a model that reads images', suggest: 'A small, fast model answers sooner and costs less.', suggestOne: '' };
+  return html`
+    <p class="muted">Use a model at an AI provider with your own API key: Claude, OpenAI, Gemini, OpenRouter (many models with one key), Mistral, Groq or another service with an OpenAI-compatible API. What you ask about (the selection or the file) is sent to that provider, and it bills your account for what you use. The key is kept on this device: the keychain in the desktop app, this browser's storage on the web and on phones. It is never synced or put in the settings.</p>
+    <div class="field-grid">
+      <${Field} label="Provider">
+        <select value=${service} onChange=${(e) => choose(e.currentTarget.value)}>${API_PROVIDERS.map((p) => html`<option key=${p.id} value=${p.id}>${p.label}</option>`)}</select>
+      </${Field}>
+      <${Field} label="API key" hint=${html`${provider.keyUrl ? html`<a href=${provider.keyUrl} target="_blank" rel="noopener">Get a key</a>. ` : ''}Stays on this device.`}>
+        <input type="password" value=${key} onInput=${(e) => setKey(e.currentTarget.value)} autocomplete="off" placeholder=${savedKey ? 'Saved on this device (type to replace)' : 'Paste it here'} />
+      </${Field}>
+      ${provider.id === 'custom' && html`<${Field} label="Address" wide hint="The API's base address, ending before /chat/completions, e.g. https://api.example.com/v1"><input value=${form.baseUrl} onInput=${(e) => set({ baseUrl: e.currentTarget.value })} placeholder="https://…/v1" spellcheck=${false} /></${Field}>`}
+      <${ModelFields} form=${form} set=${set} models=${models} examples=${examples} embeddings=${provider.embeddings !== false} />
+      <div class="form-actions span-2">
+        <button type="button" class="btn primary" disabled=${!form.chatModel || (provider.id === 'custom' && !form.baseUrl)} onClick=${save}>Save and turn on</button>
+        <button type="button" class="btn" disabled=${!key.trim() && !savedKey} onClick=${test}>Test and list models</button>
+        ${savedKey && html`<button type="button" class="btn ghost" onClick=${forget}>Forget the key</button>`}
+        ${llm.enabled && mine && html`<button type="button" class="btn ghost" onClick=${() => saveSettings({ llm: { enabled: false } })}>Turn off</button>`}
+      </div>
+      ${checkNotice(check)}
+    </div>
+    ${claude &&
+    html`<details class="help"><summary>Claude: an API key, not your Claude subscription</summary>
+      <p>The Claude API is paid per use with a key from the <a href="https://platform.claude.com/" target="_blank" rel="noopener">Claude Console</a>. A Claude Pro or Max subscription cannot be connected here: Anthropic allows its sign-in only in its own apps. To use your subscription, the ✦ panel has <strong>Ask in the Claude app</strong>, which opens Claude with the question ready; with the Tracker connector in Claude, it can read your files and save fixes back.</p>
+    </details>`}`;
 }
 
 const SPEECH_PRESETS = [

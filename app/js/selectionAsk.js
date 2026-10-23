@@ -2,6 +2,7 @@
 // Ctrl+K): actions that either answer (explain, check the syntax…) or propose
 // new text (fix, convert, translate…), plus free questions and follow-ups.
 // Pure, so the Node tests can import it.
+import { EXPLAIN_ERROR } from './errorHelp.js';
 
 export const ACTION_GROUPS = [
   { id: 'understand', label: 'Understand' },
@@ -44,6 +45,7 @@ export const SELECTION_ACTIONS = [
     prompt: 'Convert it into {param}. Keep all of the data.',
   },
 
+  { ...EXPLAIN_ERROR, group: 'code', label: 'Explain an error', icon: 'xCircle' },
   { id: 'syntax', group: 'code', label: 'Check the syntax', icon: 'check', kind: 'answer', prompt: 'Check its syntax. List each problem with its line and how to fix it; if it is valid, say so in one line. If there were problems, end with the whole corrected version in one code block.' },
   { id: 'review', group: 'code', label: 'Find problems', icon: 'alert', kind: 'answer', prompt: 'Review it for bugs, risks and edge cases (for a query: wrong results and slow parts). Be specific: the line, the problem and the fix.' },
   { id: 'comment', group: 'code', label: 'Add comments', icon: 'edit', kind: 'replace', prompt: 'Add short comments that explain the parts that are not obvious, in the comment syntax of its language. Change nothing else.' },
