@@ -1,4 +1,4 @@
-// Copy of tracking_app/app/js/model.js (Tracker 1.9.0): the tracker's data model.
+// Copy of tracking_app/app/js/model.js (Tracker 1.11.0): the tracker's data model.
 // The editor uses it to read projects and to write tracker.json (new projects,
 // "Send to tracker", files edited here), so both apps merge the same way.
 // Refresh it from the tracker when tracker.json's format changes.
@@ -297,7 +297,8 @@ export function matchesQuery(item, query, { tags: byTags = true } = {}) {
     .filter((term) => term && (byTags || !(term.startsWith('#') && term.length > 1)));
   if (!terms.length) return true;
   const tags = item.tags.map((t) => t.toLowerCase());
-  const haystack = [item.title, item.notes, item.feedback, item.project, item.url, kindLabel(item.type, item.kind), ...item.files.map((f) => f.name)]
+  // The id too, so an item can be found by the id Claude gives.
+  const haystack = [item.title, item.notes, item.feedback, item.project, item.url, kindLabel(item.type, item.kind), item.id, ...item.files.map((f) => f.name)]
     .join('\n')
     .toLowerCase();
   const project = compactName(item.project);
