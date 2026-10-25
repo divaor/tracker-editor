@@ -1,4 +1,4 @@
-// Copy of tracking_app/app/js/model.js (Tracker 1.3.2): the tracker's data model.
+// Copy of tracking_app/app/js/model.js (Tracker 1.9.0): the tracker's data model.
 // The editor uses it to read projects and to write tracker.json (new projects,
 // "Send to tracker", files edited here), so both apps merge the same way.
 // Refresh it from the tracker when tracker.json's format changes.
@@ -73,7 +73,7 @@ export function kindLabel(type, kind) {
 const EPOCH = '1970-01-01T00:00:00.000Z';
 const KNOWN_KEYS = [
   'id', 'type', 'title', 'status', 'priority', 'kind', 'project', 'tags', 'url', 'due', 'notes',
-  'files', 'decision', 'feedback', 'createdAt', 'updatedAt', 'updatedBy', 'startedAt', 'completedAt', 'deleted',
+  'files', 'decision', 'feedback', 'pinned', 'createdAt', 'updatedAt', 'updatedBy', 'startedAt', 'completedAt', 'deleted',
 ];
 
 // `updatedBy` value the Claude connector writes; the app writes its device name.
@@ -166,6 +166,9 @@ export function normalizeItem(raw) {
     files: cleanFiles(r.files),
     decision: DECISION_IDS.includes(r.decision) ? r.decision : '',
     feedback: text(r.feedback),
+    // Pinned items stay on top of their project in every view, whatever the filters.
+    // Only written when set, so older data files do not change.
+    ...(r.pinned === true ? { pinned: true } : {}),
     createdAt,
     updatedAt,
     updatedBy,
@@ -286,8 +289,12 @@ export function diffCounts(before, after) {
 
 // ---- Queries -------------------------------------------------------------
 
-export function matchesQuery(item, query) {
-  const terms = text(query).toLowerCase().split(/\s+/).filter(Boolean);
+/** `tags: false` leaves out the query's #tag terms (they filter, and pinned items show past filters). */
+export function matchesQuery(item, query, { tags: byTags = true } = {}) {
+  const terms = text(query)
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((term) => term && (byTags || !(term.startsWith('#') && term.length > 1)));
   if (!terms.length) return true;
   const tags = item.tags.map((t) => t.toLowerCase());
   const haystack = [item.title, item.notes, item.feedback, item.project, item.url, kindLabel(item.type, item.kind), ...item.files.map((f) => f.name)]
@@ -301,14 +308,29 @@ export function matchesQuery(item, query) {
   });
 }
 
-export function filterItems(items, { type = 'all', status = 'all', query = '' } = {}) {
+/**
+ * `keepPinned`: pinned items pass the type, status and #tag filters (a +project term and
+ * the words searched for still apply).
+ */
+export function filterItems(items, { type = 'all', status = 'all', query = '', keepPinned = false } = {}) {
   return items.filter(
     (i) =>
       !i.deleted &&
-      (type === 'all' || i.type === type) &&
-      (status === 'all' || i.status === status) &&
-      matchesQuery(i, query),
+      ((keepPinned && i.pinned && matchesQuery(i, query, { tags: false })) ||
+        ((type === 'all' || i.type === type) && (status === 'all' || i.status === status) && matchesQuery(i, query))),
   );
+}
+
+/**
+ * Pinned items first, grouped by project (by name; those without one last), each in the
+ * order given; then the rest as given.
+ */
+export function pinnedFirst(items) {
+  const pinned = items.filter((i) => i.pinned);
+  if (!pinned.length) return items;
+  const name = (i) => cleanProjectName(i.project);
+  pinned.sort((a, b) => Number(!a.project) - Number(!b.project) || name(a).localeCompare(name(b), undefined, { sensitivity: 'base' }));
+  return [...pinned, ...items.filter((i) => !i.pinned)];
 }
 
 export const SORTS = [
@@ -547,19 +569,20 @@ export function deleteProjectRecord(projects, name, now = nowIso(), updatedBy = 
 }
 
 /**
- * Every project in use or registered, with counts: registry entries plus
+ * Every project in use or registered, with counts (open, total, pinned): registry entries plus
  * project names found on items. Sorted by area (work, personal, none), then name.
  */
 export function projectList(items, projects = []) {
   const byKey = new Map();
-  for (const p of projects) if (!p.deleted) byKey.set(p.key, { ...p, open: 0, total: 0, registered: true });
+  for (const p of projects) if (!p.deleted) byKey.set(p.key, { ...p, open: 0, total: 0, pinned: 0, registered: true });
   for (const item of items) {
     if (item.deleted || !item.project) continue;
     const key = projectKey(item.project);
-    if (!byKey.has(key)) byKey.set(key, { key, name: cleanProjectName(item.project), area: '', color: '', description: '', open: 0, total: 0, registered: false });
+    if (!byKey.has(key)) byKey.set(key, { key, name: cleanProjectName(item.project), area: '', color: '', description: '', open: 0, total: 0, pinned: 0, registered: false });
     const entry = byKey.get(key);
     entry.total++;
     if (item.status !== 'done') entry.open++;
+    if (item.pinned) entry.pinned++;
   }
   const areaRank = (a) => (a === 'work' ? 0 : a === 'personal' ? 1 : 2);
   return [...byKey.values()]
