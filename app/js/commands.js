@@ -111,6 +111,7 @@ export const COMMAND_LIST = [
   { id: 'read-aloud', group: 'View', label: 'Read aloud, pause or resume', keys: 'Alt+R' },
   { id: 'assistant', group: 'View', label: 'The model', keys: 'Mod+Shift+A' },
   { id: 'help', group: 'View', label: 'Help: commands, shortcuts and the guide', keys: 'F1' },
+  { id: 'help-ask', group: 'View', label: 'Ask the model how to do something in the editor', hint: 'It answers from the guide. Also in the ✦ panel: Help with the editor' },
   { id: 'command-palette', group: 'View', label: 'Run a command by name (command palette)', keys: 'Mod+Shift+P', hint: 'Or Ctrl+P, then >' },
 
   { id: 'ask-selection', group: 'Tools', label: 'Ask the model about the selection or the file', keys: 'Mod+K' },

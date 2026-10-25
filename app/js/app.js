@@ -552,6 +552,14 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         if (!text.trim()) return toast('There is nothing to ask about yet.'), null;
         return { key: sel.key, from: whole ? 0 : sel.from, to: whole ? sel.docLength : sel.to, text, whole, name, language };
       },
+      /** The open file's name and language, for questions about the editor (nothing of its text), or null. */
+      openFileInfo() {
+        const k = parseKey(store.session.active ?? '');
+        if (!k) return null;
+        const file = k.kind === 'file' ? store.get(k.id) : null;
+        const name = file?.name ?? (k.kind === 'disk' ? store.diskTab(k.path) : store.repoTab(k.path))?.name ?? '';
+        return name ? { name, language: findLanguage(name, file?.language)?.name ?? '' } : null;
+      },
       /** The model's new version of the text (for `action`), as a comparison to accept, keep as a new file, or copy. */
       proposeReplacement(context, text, action) {
         const label = action.label;
@@ -2050,7 +2058,9 @@ export function App() {
   const [assistStart, setAssistStart] = useState(null);
   actions.askSelection = () => {
     if (assist) return setAssist(false);
-    if (!activeKey || view !== 'editor') return toast('Open a file first.');
+    // With no file open, it answers questions about the editor.
+    if (!activeKey) return actions.openAssist({ mode: 'help' });
+    if (view !== 'editor') return toast('Open a file first.');
     setAssistStart(null);
     setAssist(true);
   };
@@ -2108,13 +2118,14 @@ export function App() {
   };
   /**
    * The question in the Claude app (with the person's Claude subscription): copied, and opened in
-   * a new chat with it filled in when it fits in a link. Encrypted files are never sent.
+   * a new chat with it filled in when it fits in a link. Encrypted files are never sent. `prompt`
+   * is a question ready as it is (one about the editor, with the guide's passages).
    */
-  actions.openInClaude = async ({ action, context }) => {
+  actions.openInClaude = async ({ action, context, prompt: ready = '' }) => {
     const k = parseKey(context?.key ?? '');
     const file = k?.kind === 'file' ? store.get(k.id) : null;
     if (file?.encrypted) return toast('Encrypted files are not sent anywhere: copy the part you want to ask about instead.');
-    const prompt = claudeAppPrompt({ action, context, editorFile: file?.name ?? '' });
+    const prompt = ready || claudeAppPrompt({ action, context, editorFile: file?.name ?? '' });
     await navigator.clipboard.writeText(prompt).catch(() => {});
     window.open(claudeAppUrl(prompt), '_blank', 'noopener');
     toast('Opening Claude. The question is on the clipboard too: paste it if it is not there.', { timeout: 8000 });
@@ -2662,6 +2673,7 @@ export function App() {
       preview: () => actions.togglePreview(),
       help: () => setDialog((d) => (d?.type === 'help' ? null : { type: 'help' })),
       'help-guide': () => setDialog({ type: 'help', tab: 'guide' }),
+      'help-ask': () => actions.openAssist({ mode: 'help' }),
       'compare-clipboard': () => actions.compareWithClipboard(),
     };
     if (run[command]) return run[command]();
@@ -2760,7 +2772,7 @@ export function App() {
         <div class="editor-area ${showPreview ? 'split' : ''} ${showPreview && previewFull ? 'preview-full' : ''} ${showSide ? 'side-split' : ''} ${compare ? 'comparing' : ''} ${settings.whereFrame && activeKey ? 'framed' : ''}"
           data-kind=${kindOfKey(activeKey) ?? undefined} ref=${areaEl} style=${{ '--split': `${((settings.splitRatio || 0.5) * 100).toFixed(2)}%` }}>
           <div class="editor-host" ref=${editorEl} />
-          ${assist && (activeKey || assistStart) && view === 'editor' && !compare && !activeSealed && html`<${AssistPanel} key=${`${activeKey}:${assistStart?.id ?? 0}`} scope=${assistScope} start=${assistStart} actions=${actions} onClose=${() => (setAssist(false), setAssistStart(null), hostRef.current?.focus())} />`}
+          ${assist && (activeKey || assistStart) && view === 'editor' && !compare && !activeSealed && html`<${AssistPanel} key=${`${activeKey}:${assistStart?.id ?? 0}`} scope=${assistScope} start=${assistStart} hasFile=${Boolean(activeKey)} actions=${actions} onClose=${() => (setAssist(false), setAssistStart(null), hostRef.current?.focus())} />`}
           ${!assist && modelReady && settings.assistBubble && activeKey && !compare && !activeSealed && !typingJob && html`<${AssistBubble} onOpen=${() => setAssist(true)} />`}
           ${showSide && splitHandle('Resize the side view')}
           ${showSide &&

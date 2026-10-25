@@ -2,7 +2,7 @@
 
 Tracker Editor is a Notepad++-style editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs. Everything is saved the moment you paste or type, on this computer with the tracker, or, once you turn on sync, in the same private GitHub data repo as the tracker, so your files are on your computers and your phone.
 
-Version 0.19.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.19.0 · Web app: https://divaor.github.io/tracker-editor/
+Version 0.20.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.20.0 · Web app: https://divaor.github.io/tracker-editor/
 
 ---
 
@@ -91,7 +91,7 @@ On an iPhone, apps added to the home screen each keep their own storage: the edi
 - **Edit several lines at once**: `Shift+Alt+↓` (or `↑`) puts a cursor on each line as you go (as in Notepad++; `Ctrl+Shift+Alt+arrows` as in VS Code; on a Mac `Cmd+Shift+Option+arrows`); `Shift+Alt+→` / `←` widen or narrow the column, so you select a rectangle. Type, paste or delete and every line changes. Shorter lines get their cursor at the end. `Ctrl+Alt+↑` / `↓` (Mac `Cmd+Option+↑` / `↓`) add one cursor above or below. With the mouse: `Alt+drag` draws the rectangle, `Ctrl+click` (Mac `Cmd+click`) adds a cursor. `Escape` goes back to one cursor.
 - Multiple cursors, `Ctrl+D` select the next occurrence, `Ctrl+/` comment lines, bracket matching, `Alt+Z` word wrap, visible whitespace. Syntax highlighting for 140+ languages, from the file name, from pasted text, or picked in the status bar.
 - **HTML, XML and JSX**: type an **Emmet** abbreviation and press `Tab`: `ul>li*3` makes a list of three items, `div.card#main` a div with that class and id, `a[href=#]{Home}` a link with its text, `table>tr*2>td*3` a table, `!` (in an empty HTML file) a whole page; `>` goes inside, `+` next to it, `^` back up, `$` numbers the copies. Words that aren't tag names are left alone, and `Tab` indents as usual. **Tags close themselves** when you type the `>` of an opening tag (or `</`), and **renaming a tag renames its other end** (`<div>` … `</div>` → `<section>` … `</section>`; one `Ctrl+Z` takes both back). Both can be turned off in **Settings → Editor**.
-- **Help** (`F1`, or the **?** at the top): every command with its shortcut, searchable (type "sort" or "Ctrl+K"); click one, or press `Enter`, to run it. **Print** gives a one-page cheat sheet. The **Guide** tab is this guide.
+- **Help** (`F1`, or the **?** at the top): every command with its shortcut, searchable (type "sort" or "Ctrl+K"); click one, or press `Enter`, to run it. **Print** gives a one-page cheat sheet. The **Guide** tab is this guide. With a model, the ✦ panel answers questions about the editor from this guide (see [Help with the editor](#help-with-the-editor-ask-how-to-do-something)).
 - **Run a command by name** (`Ctrl+Shift+P`, or `Ctrl+P` then `>`), as in VS Code: type part of it ("wrap", "fold", "problems") and press `Enter`.
 
 ### Code tools
@@ -266,6 +266,20 @@ What comes back:
 - **Ask in the Claude app**: the same question in Claude instead (see [Your Claude subscription](#your-claude-subscription)).
 
 Turn the bubble off in **Settings → Model**; `Ctrl+K` still works.
+
+### Help with the editor: ask how to do something
+
+The ✦ panel also answers questions about the editor itself, from this guide (every feature, setting and fix, Troubleshooting included) and the list of commands with their keys on your computer. Its first section, **Help with the editor**:
+
+- **How do I…?**: say what you want to do ("compare two files", "edit a file on a server", "fold every function").
+- **Keys for…**: the keys (or the menu) for a command.
+- **Something isn't working…**: say what happens; the Troubleshooting part of the guide comes first.
+- **What can I do with this file?**: what the editor has for the kind of file open (preview, formatting, checks, code tools…).
+
+Or type the question in the box: **About the editor** asks about the editor, and in **Answer** a question like "how do I split the view?" goes to the guide by itself (**Ask about the text instead** asks about your text after all). With no file open, `Ctrl+K` (or **Ask the model how to do something in the editor** in Help or the command palette) opens the panel on these questions alone. Follow-ups work as usual, and the answer says the menu, button or keys to use.
+
+- **What is sent**: with an AI provider or a service, the whole guide goes with the question (about 20,000 tokens; Claude keeps it cached for a few minutes, so follow-ups cost much less); a model on this computer gets the parts of the guide that fit the question. None of your text is sent, only the open file's name and language.
+- **Without a model**: type the question and press **Find in the guide** for the passages that answer it, **Ask in the Claude app** (the question goes with those passages), or **Open the guide**.
 
 ### Help with errors
 
@@ -567,7 +581,7 @@ Turn them on in **Settings → Desktop**.
 | `Alt+Z` | Word wrap |
 | `Alt+R` | Read aloud, pause or resume |
 | `Alt+T` | Type the selection or file into another window (desktop) |
-| `Ctrl+K` | The ✦ model panel: about the selection or the file |
+| `Ctrl+K` | The ✦ model panel: about the selection or the file (no file open: how to do something in the editor) |
 | `Alt+I` | Insert a snippet |
 | `Alt+L` | Filter lines |
 | `Ctrl+Shift+O` | Outline and links |
@@ -601,6 +615,7 @@ Turn them on in **Settings → Desktop**.
 - **Dictation says to allow the microphone**: allow it for the site or app in the browser's settings. "Needs a connection": the speech service is online.
 - **Text from an image reads badly**: crop to the text, choose one language, or use a sharper photo.
 - **No ✦ bubble**: connect a model in Settings → Model and check *Model button at the bottom right*.
+- **The model's help answer says the guide does not cover it**: ask with other words (the names the editor uses: *split view*, *fold*, *server*), or open Help (`F1`) → **Guide** and search it.
 - **"Claude did not accept the API key"**: copy it again from the Claude Console (it starts with `sk-ant-`), paste it in Settings → Model → AI provider and **Test and list models**. "Too many requests… or its spending limit": wait a minute, or raise the limit in the Console.
 - **Can I sign in with my Claude Pro or Max subscription?** No: Anthropic allows it only in its own apps. Use **Ask in the Claude app**, or an API key (paid separately). See [Your Claude subscription](#your-claude-subscription).
 - **Ask in the Claude app opened an empty chat**: the question was too long for a link; it is on the clipboard, paste it.

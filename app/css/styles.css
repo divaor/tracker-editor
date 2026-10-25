@@ -6422,6 +6422,44 @@ svg.up {
   resize: vertical;
 }
 
+/* Help with the editor: its own section of the panel (the first), answered from the guide. */
+.assist-group.assist-help:not(:last-child) {
+  padding-bottom: 10px;
+  border-bottom: 1px dashed var(--border);
+}
+
+.assist-help .assist-group-label,
+.assist-help-find .assist-group-label {
+  color: var(--accent);
+}
+
+.assist-help-find {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.assist-help-find .assist-input {
+  align-items: center;
+}
+
+.assist-help-find input {
+  flex: 1;
+  min-width: 0;
+}
+
+.assist-found {
+  margin-top: 10px;
+}
+
+.assist-source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 6px 0 0;
+}
+
 @media (max-width: 860px) {
   .assist-bubble {
     right: 12px;
