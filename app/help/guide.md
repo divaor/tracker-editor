@@ -14,9 +14,9 @@ Download from **https://github.com/divaor/tracker-editor/releases/latest**:
 
 | System | File |
 | --- | --- |
-| Windows | `Tracker Editor Setup 0.19.0.exe` (installer) or `Tracker Editor-0.19.0-portable.exe` (no install, no admin rights) |
-| macOS | `Tracker Editor-0.19.0-arm64.dmg` |
-| Linux | `Tracker Editor-0.19.0.AppImage` |
+| Windows | `Tracker Editor Setup 0.20.0.exe` (installer) or `Tracker Editor-0.20.0-portable.exe` (no install, no admin rights) |
+| macOS | `Tracker Editor-0.20.0-arm64.dmg` |
+| Linux | `Tracker Editor-0.20.0.AppImage` |
 
 The builds are not code-signed, so the first launch warns you. On Windows, choose *More info → Run anyway*. On macOS, right-click the app → *Open*. Installing the desktop app also registers `tracker-editor://` links, so the tracker's **Open in editor** opens files straight in it.
 
