@@ -96,7 +96,7 @@ import { convertIndent, detectIndent } from './indent.js';
 import { gitGutter, gitInfo, setGitBase } from './gitGutter.js';
 import { emmetOnTab, linkedTags } from './htmlTools.js';
 import { inlineSuggestions } from './inlineSuggest.js';
-import { findFileRefs } from './fileRefs.js';
+import { findFileRefs, pastedPath } from './fileRefs.js';
 import { addCursorAbove, addCursorBelow, columnBox, columnKeymap } from './columnSelect.js';
 
 export { languages };
@@ -726,7 +726,7 @@ function fileRefAt(state, pos) {
  * `openSide(key, el, …)` shows a second tab next to it (the split view); a tab's
  * state, with its undo history, moves between the panes.
  */
-export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpenLink, onOpenRef, onSuggest, onImage, onProblems, onProblemAction, onDrop, linkTargets, settings }) {
+export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpenLink, onOpenRef, onSuggest, onImage, onPasteFiles, onPastePath, onProblems, onProblemAction, onDrop, linkTargets, settings }) {
   const states = new Map(); // key → EditorState
   const scroll = new Map(); // key → scroll position
   const pending = new Map(); // key → timer for onChange
@@ -932,13 +932,26 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       EditorView.contentAttributes.of({ spellcheck: 'false', autocorrect: 'off', autocapitalize: 'off' }),
       EditorView.domEventHandlers({
         scroll: (_e, v) => scroll.set(key, v.scrollDOM.scrollTop),
-        // An image (and no text) pasted or dropped: `onImage` reads its text instead of inserting bytes.
+        // Files copied in another app (Explorer, Finder): `onPasteFiles` may open them where they
+        // are (true: taken). An image (and no text) pasted or dropped: `onImage` reads its text
+        // instead of inserting bytes. A path alone is pasted as text, and `onPastePath` offers it.
         paste(e) {
-          const image = imageIn(e.clipboardData);
-          if (!image || !onImage || e.clipboardData.getData('text/plain')) return false;
-          e.preventDefault();
-          onImage(image);
-          return true;
+          const data = e.clipboardData;
+          const files = [...(data?.files ?? [])];
+          if (files.length && onPasteFiles?.(files)) {
+            e.preventDefault();
+            return true;
+          }
+          const text = data?.getData('text/plain') ?? '';
+          const image = imageIn(data);
+          if (image && onImage && !text) {
+            e.preventDefault();
+            onImage(image);
+            return true;
+          }
+          const path = onPastePath && pastedPath(text);
+          if (path) setTimeout(() => onPastePath(path), 0);
+          return false;
         },
         drop(e, v) {
           // A tab dropped on the text (dragged out and back, or within the page) is not inserted.

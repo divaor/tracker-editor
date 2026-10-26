@@ -8,8 +8,9 @@ const NARROW = '(max-width: 860px)';
 /**
  * Two texts compared, in place of the editor: side by side on wide screens,
  * one text with the changes marked on phones. `compare` is { left, right,
- * name, language, actions }, where left/right are { label, text } and actions
- * [{ label, icon, run, primary? }] sit in the bar (e.g. "Restore this version").
+ * name, language, actions }, where left/right are { label, text, detail? } (`detail`:
+ * where the file is, e.g. its folder) and actions [{ label, icon, run, primary? }]
+ * sit in the bar (e.g. "Restore this version").
  */
 export function CompareView({ compare, settings, onClose }) {
   const el = useRef(null);
@@ -47,8 +48,12 @@ export function CompareView({ compare, settings, onClose }) {
       <button type="button" class="icon-btn sm" aria-label="Close the comparison" title="Close" onClick=${onClose}><${Icon} name="x" size=${16} /></button>
     </div>
     <div class="compare-heads">
-      <span class="compare-side old" title=${compare.left.label}><span class="compare-mark" aria-hidden="true">−</span><span class="compare-label">${compare.left.label}</span></span>
-      <span class="compare-side new" title=${compare.right.label}><span class="compare-mark" aria-hidden="true">+</span><span class="compare-label">${compare.right.label}</span></span>
+      ${[['old', '−', compare.left], ['new', '+', compare.right]].map(
+        ([side, mark, s]) => html`<span class="compare-side ${side}" key=${side} title=${s.detail ? `${s.label}\n${s.detail}` : s.label}>
+          <span class="compare-mark" aria-hidden="true">${mark}</span><span class="compare-label">${s.label}</span>
+          ${s.detail && html`<span class="compare-detail"><bdi>${s.detail}</bdi></span>`}
+        </span>`,
+      )}
     </div>
     <div class="compare-body" ref=${el} />
   </div>`;

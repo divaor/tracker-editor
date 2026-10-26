@@ -16,9 +16,9 @@ import { diskAvailable, openDiskFiles, recheckServerTabs, reloadDiskTab, saveDis
 import { isRemotePath, kindOfKey, remoteAddress, remoteParts, remoteRoot, toRemoteUri } from './where.js';
 import { onServers, server, watchServers } from './servers.js';
 import { HostKeyDialog, PromptDialog, ServerDialog, SshImportDialog } from './ui/servers.js';
-import { activeTerminal, focusTerminal, openTerminal, retheme, runInTerminal, setRefHandler, setToggleHandler, terminals, terminalsAvailable, terminalText } from './terminals.js';
+import { activeTerminal, focusTerminal, openTerminal, retheme, runInTerminal, setActiveTerminal, setRefHandler, setToggleHandler, terminals, terminalsAvailable, terminalText } from './terminals.js';
 import { parseRunCommands, runCommandFor, runLine } from './runFile.js';
-import { findFileRefs, resolveRef } from './fileRefs.js';
+import { findFileRefs, pastedPath, resolveRef } from './fileRefs.js';
 import { claudeAppPrompt, claudeAppUrl, codeAround, errorContextText, EXPLAIN_ERROR, explainProblemAction, fixForErrorAction, fixProblemsAction } from './errorHelp.js';
 import { TerminalPanel } from './ui/terminal.js';
 import { createLanguageServers } from './lsp.js';
@@ -31,10 +31,11 @@ import { lastSyncText, mirror as mirrorById, onMirrors, watchMirrors as watchMir
 import { MirrorDeletesDialog, MirrorDialog, MirrorsDialog } from './ui/mirrors.js';
 import { onTransfers, watchTransfers } from './transfers.js';
 import { TransfersCard } from './ui/transfers.js';
-import { baseName, besideSettings, claudeText, inPlaceSettings, opensInEditor, remapPath, withCurrent } from './folders.js';
+import { baseName, besideSettings, claudeText, inPlaceSettings, isImageName, opensInEditor, remapPath, withCurrent } from './folders.js';
+import { folderOfPath, nearestTabs } from './comparePick.js';
 import { draggedPaths, draggedTab, dropped, isOwnDrop } from './dragOut.js';
 import { dataClient, getSyncState, movedTo, onSyncResult, onSyncState, syncNow } from './syncManager.js';
-import { matchesScope, projectList } from './tracker-model.js';
+import { matchesScope, projectKey, projectList } from './tracker-model.js';
 import { AssistantPanel } from './ui/assistant.js';
 import { dismissToast, Toasts, toast } from './ui/components.js';
 import { ChecklistDialog, FileDialog, SendDialog } from './ui/dialogs.js';
@@ -43,6 +44,8 @@ import { QuickOpen, SearchPanel } from './ui/panels.js';
 import { Preview } from './ui/preview.js';
 import { HelpDialog } from './ui/help.js';
 import { CompareView } from './ui/compare.js';
+import { ComparePicker } from './ui/comparePicker.js';
+import { revealInFolders } from './ui/folders.js';
 import { HistoryPanel } from './ui/history.js';
 import { TrashDialog } from './ui/trash.js';
 import { LockedFile } from './ui/encryption.js';
@@ -128,6 +131,20 @@ const folderRoots = (settings) =>
 const relInFolders = (path, settings) => {
   const root = folderRoots(settings).find((r) => path.startsWith(`${r.dir.replace(/[\\/]+$/, '')}/`) || path.startsWith(`${r.dir.replace(/[\\/]+$/, '')}\\`));
   return root ? `${root.label}/${path.slice(root.dir.replace(/[\\/]+$/, '').length + 1).replace(/\\/g, '/')}` : path;
+};
+// Where a file is, under its name in Compare with… and the comparison: its folder (on a
+// server, with the server's name), "My files · project", "Tracker · item".
+const placeOfPath = (path) => {
+  if (!isRemotePath(path)) return folderOfPath(path);
+  const { id, path: inside } = remoteParts(path);
+  return `${server(id)?.name ?? 'Server'}: ${folderOfPath(inside)}`;
+};
+const placeOfKey = (key) => {
+  const k = parseKey(key);
+  if (k?.kind === 'disk') return placeOfPath(k.path);
+  if (k?.kind === 'file') return ['My files', store.get(k.id)?.project].filter(Boolean).join(' · ');
+  if (k?.kind === 'repo') return ['Tracker', store.doc(k.path)?.item.title].filter(Boolean).join(' · ');
+  return '';
 };
 
 function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setCompare, setUsagesOf, setSearchSeed }) {
@@ -714,6 +731,36 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
           toast(ipcMessage(err), { kind: 'error', timeout: 10000 });
         }
       },
+      /**
+       * Files copied in another app (Explorer, Finder) and pasted here (desktop): opened where
+       * they are, as tabs (folders in the folders view; pictures are left to `onImage`).
+       * True when they were taken.
+       */
+      openPastedFiles(files) {
+        const disk = window.desktop?.disk;
+        if (!disk?.openPasted) return false;
+        const given = files.filter((f) => disk.pathOf(f) && !isImageName(f.name));
+        if (!given.length) return false;
+        disk
+          .openPasted(given)
+          .then((n) => !n && toast('Nothing to open: the files pasted are not on this computer any more.', { kind: 'error' }))
+          .catch((err) => toast(ipcMessage(err), { kind: 'error' }));
+        return true;
+      },
+      /** A path pasted into the text (desktop): it stays pasted, and opening it is offered. */
+      offerPastedPath(path) {
+        if (!window.desktop?.disk?.openTyped) return;
+        toast(`You pasted a path. Open ${baseName(path)}?`, { action: { label: 'Open', run: () => actions.openTypedPath(path) }, timeout: 8000 });
+      },
+      /** A path pasted or typed: the file as a tab, a folder in the folders view (asked first when new here). */
+      async openTypedPath(path) {
+        try {
+          const result = await window.desktop.disk.openTyped(path);
+          if (result?.missing) toast(`Not found: ${path}`, { kind: 'error' });
+        } catch (err) {
+          toast(ipcMessage(err), { kind: 'error' });
+        }
+      },
       /** A folder here or on a server in the folders view (connecting to the server first). */
       async showFolder(path) {
         try {
@@ -831,6 +878,33 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         delete patch.already;
         saveSettings({ sidebarMode: 'folders', ...patch });
         setSidebar(true);
+      },
+      /**
+       * The folder of a file open on disk or a server in the folders view, beside the others
+       * (or the folder shown that holds it), with the file picked in the tree. A folder on this
+       * computer that was not picked yet is asked about first (a native dialog).
+       */
+      async showFolderOf(path) {
+        if (!window.desktop?.folders) return;
+        let dir;
+        try {
+          if (isRemotePath(path)) {
+            const { id, path: inside } = remoteParts(path);
+            const parent = inside.slice(0, inside.lastIndexOf('/'));
+            dir = parent ? toRemoteUri(id, parent) : remoteRoot(id);
+            await window.desktop.remote.connect(id);
+          } else {
+            const allowed = await window.desktop.folders.allowParent(path);
+            if (!allowed?.dir) return;
+            dir = allowed.dir;
+          }
+        } catch (err) {
+          return toast(ipcMessage(err), { kind: 'error', timeout: 8000 });
+        }
+        const { already, ...patch } = besideSettings(getSettings(), dir);
+        saveSettings({ sidebarMode: 'folders', ...patch });
+        setSidebar(true);
+        revealInFolders(path);
       },
       /** The folders shown side by side: their order, and adding or closing some (a dialog). */
       sideBySide() {
@@ -1123,22 +1197,67 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         });
       },
       compareWith() {
+        if (!store.session.active) return;
         hostRef.current?.flushAll();
-        setDialog({ type: 'quickOpen', pick: 'compare' });
+        setDialog({ type: 'compare' });
       },
+      /**
+       * The open file compared with `entry`: a picker row (`id` a tab key: my files, a
+       * tracker document, a file on disk or a server, open or not) or a file picked with
+       * Browse… ({ browsed: true, name, text, detail }).
+       */
       async compareWithEntry(entry) {
         const now = activeInfo();
         if (!now) return;
-        let other = entry.id.startsWith('r:') ? store.docText(entry.id.slice(2)) : store.text(entry.id);
-        if (other === null) {
-          try {
-            const { client, branch } = await syncedClient();
-            other = (await client.getFile(entry.id.slice(2), branch))?.text ?? '';
-          } catch (err) {
-            return toast(err.message, { kind: 'error' });
+        const k = entry.browsed ? null : parseKey(entry.id);
+        let other = entry.browsed ? entry.text : null;
+        try {
+          if (k?.kind === 'file') other = store.text(k.id);
+          else if (k?.kind === 'disk') {
+            const tab = store.diskTab(k.path);
+            other = tab && !tab.stale ? tab.text : ((await window.desktop.disk.read(k.path))?.text ?? '');
+          } else if (k?.kind === 'repo') {
+            other = store.docText(k.path);
+            if (other === null) {
+              const { client, branch } = await syncedClient();
+              other = (await client.getFile(k.path, branch))?.text ?? '';
+            }
           }
+        } catch (err) {
+          return toast(err.message, { kind: 'error' });
         }
-        setCompare({ key: now.key, name: now.name, language: now.language, left: { label: entry.name, text: other }, right: { label: now.name, text: now.text }, actions: [] });
+        if (other === null) return;
+        const openIt = k && entry.id !== now.key ? [{ label: `Open ${entry.name}`, icon: 'file', run: () => (setCompare(null), k.kind === 'disk' && !store.diskTab(k.path) ? actions.openDiskPath(k.path) : store.open(entry.id)) }] : [];
+        setCompare({
+          key: now.key,
+          name: now.name,
+          language: now.language,
+          left: { label: entry.name, detail: entry.detail ?? (k ? placeOfKey(entry.id) : ''), text: other },
+          right: { label: now.name, detail: placeOfKey(now.key), text: now.text },
+          actions: openIt,
+        });
+      },
+      /** Compare with… any file: the open dialog (desktop), else the browser's file picker. */
+      async compareBrowse() {
+        if (!store.session.active) return;
+        if (window.desktop?.disk) {
+          const [file] = await window.desktop.disk.open({ title: 'Compare with…', single: true });
+          if (!file) return;
+          if (file.error) return toast(`${file.name}: ${file.error}`, { kind: 'error' });
+          return actions.compareWithEntry({ browsed: true, name: file.name, text: file.text, detail: placeOfPath(file.path) });
+        }
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.onchange = async () => {
+          const file = input.files?.[0];
+          if (!file) return;
+          try {
+            actions.compareWithEntry({ browsed: true, name: file.name, text: (await file.text()).replace(/\r\n?/g, '\n'), detail: 'Picked from this device' });
+          } catch (err) {
+            toast(err.message, { kind: 'error' });
+          }
+        };
+        input.click();
       },
       /** Puts `text` into a tab as your own edit (saved at once; Undo or Ctrl+Z takes it back). */
       restoreText(key, text, label, message = `Restored the version from ${label}`) {
@@ -1451,6 +1570,8 @@ export function App() {
       onProblemAction: (kind, key, problem) => (kind === 'quickfix' ? actions.quickFix({ key, from: problem.from, to: problem.to }) : kind === 'fix' ? actions.fixProblems(key) : actions.explainProblem(problem, key)),
       // An image pasted or dropped into the text: read its text.
       onImage: (file) => actions.readImages([{ blob: file, name: file.name || 'Pasted image' }]),
+      onPasteFiles: (files) => actions.openPastedFiles(files),
+      onPastePath: (path) => actions.offerPastedPath(path),
       linkTargets: () => store.live().map((f) => linkName(f.name)),
       // A tab's editor state is gone (closed, or made again under a new path): its server forgets it.
       onDrop: (key) => lspRef.current?.forget(key),
@@ -1539,6 +1660,57 @@ export function App() {
         return d && { id: key, name: d.name, path: d.path, rel: d.name, kind: kindOfKey(key), where: g?.name ?? '' };
       })
       .filter(Boolean);
+  // Compare with…: the open tabs nearest the open one first, my files and tracker documents,
+  // each with where it is and the color of its project or folder group.
+  const compareSources = () => {
+    const projects = projectList(store.live(), store.projects());
+    const projectGroup = (name) => {
+      const p = name && projects.find((x) => x.key === projectKey(name));
+      return p ? { name: p.name, color: p.color } : null;
+    };
+    const tabGroup = (key) => {
+      const g = viewNow.groups.find((x) => x.id === viewNow.groupOfKey(key));
+      return g && (g.kind === 'project' || g.kind === 'folder') ? { name: g.name, color: g.color } : null;
+    };
+    const tabRow = ({ key, near }) => {
+      const k = parseKey(key);
+      const kind = kindOfKey(key);
+      if (k.kind === 'file') {
+        const f = store.get(k.id);
+        return f && { id: key, name: f.name, kind, project: f.project, language: f.language, near, detail: placeOfKey(key), group: tabGroup(key) };
+      }
+      if (k.kind === 'disk') {
+        const d = store.diskTab(k.path);
+        return d && { id: key, name: d.name, kind, path: k.path, rel: relInFolders(k.path, settings), near, detail: placeOfPath(k.path), group: tabGroup(key) };
+      }
+      const doc = store.doc(k.path);
+      const name = store.repoTab(k.path)?.name ?? doc?.name;
+      return name && { id: key, name, kind, project: doc?.project ?? '', item: doc?.item.title, near, detail: placeOfKey(key), group: tabGroup(key) };
+    };
+    const nameOfKey = (key) => {
+      const k = parseKey(key);
+      return k?.kind === 'file' ? store.get(k.id)?.name : k?.kind === 'disk' ? store.diskTab(k.path)?.name : store.repoTab(k?.path)?.name;
+    };
+    const tabs = nearestTabs([...viewNow.keys, ...viewNow.guests], activeKey, nameOfKey, store.session.open).map(tabRow).filter(Boolean);
+    const files = store
+      .live()
+      .filter((f) => fileKey(f.id) !== activeKey)
+      .sort((a, b) => (b.modifiedAt > a.modifiedAt ? 1 : -1))
+      .map((f) => ({ id: fileKey(f.id), name: f.name, kind: 'synced', project: f.project, language: f.language, modifiedAt: f.modifiedAt, detail: ['My files', f.project].filter(Boolean).join(' · '), group: projectGroup(f.project) }));
+    const docRows = docs
+      .filter((d) => repoKey(d.path) !== activeKey)
+      .sort((a, b) => (b.modifiedAt > a.modifiedAt ? 1 : -1))
+      .map((d) => ({ id: repoKey(d.path), name: d.name, kind: 'doc', project: d.project, item: d.item.title, modifiedAt: d.modifiedAt, detail: `Tracker · ${d.item.title}`, group: projectGroup(d.project) }));
+    const rootGroups = new Map();
+    const groupOfRoot = (dir) => {
+      if (!rootGroups.has(dir)) {
+        const g = folderGroupOf(dir, settings);
+        rootGroups.set(dir, g && (g.kind === 'project' || g.kind === 'folder') ? { name: g.name, color: g.color } : null);
+      }
+      return rootGroups.get(dir);
+    };
+    return { current: { name: activeName, detail: placeOfKey(activeKey) }, tabs, files, docs: docRows, groupOfRoot };
+  };
   const active = parseKey(activeKey);
   const activeFile = active?.kind === 'file' ? store.get(active.id) : null;
   const activeRepo = active?.kind === 'repo' ? store.repoTab(active.path) : null;
@@ -2202,6 +2374,22 @@ export function App() {
     setTerminalShown(true);
     requestAnimationFrame(() => focusTerminal(activeTerminal()));
   };
+  /**
+   * The status bar's Terminal: one in the open file's folder (on its server for a file there),
+   * the one open there already when there is one; for other files, where Ctrl+` opens one.
+   */
+  actions.terminalForFile = () => {
+    if (!terminalsAvailable()) return;
+    const k = parseKey(store.session.active);
+    const dir = k?.kind === 'disk' ? parentDir(k.path) : actions.localTerminalDir();
+    const connId = isRemotePath(dir) ? remoteParts(dir).id : 'local';
+    const cwd = isRemotePath(dir) ? remoteParts(dir).path : dir;
+    const there = terminals().find((s) => !s.exited && !s.runner && s.connId === connId && s.cwd === cwd);
+    if (!there) return actions.openTerminal(connId, cwd);
+    setActiveTerminal(there);
+    setTerminalShown(true);
+    requestAnimationFrame(() => focusTerminal(there));
+  };
   /** A folder: a terminal there in the editor (on a server, or this computer). */
   actions.terminalHere = (dir) => (isRemotePath(dir) ? actions.openTerminal(remoteParts(dir).id, remoteParts(dir).path) : actions.openTerminal('local', dir));
   /** A folder on this computer in the system's own terminal app. */
@@ -2494,6 +2682,23 @@ export function App() {
     };
   }, []);
 
+  // Desktop: a paste outside any text (no tab open, the tab bar…) opens files copied in another
+  // app, or a path; the editor and the folders view take their own pastes first.
+  useEffect(() => {
+    if (!window.desktop?.disk?.openPasted) return;
+    const onPaste = (e) => {
+      if (e.defaultPrevented || e.target?.closest?.('input, textarea, select, [contenteditable], .cm-editor, .terminal-panel')) return;
+      const files = [...(e.clipboardData?.files ?? [])];
+      if (files.length && actions.openPastedFiles(files)) return e.preventDefault();
+      const path = pastedPath(e.clipboardData?.getData('text/plain'));
+      if (!path) return;
+      e.preventDefault();
+      actions.openTypedPath(path);
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, []);
+
   // Keyboard shortcuts that work in the browser too (the desktop menu adds Ctrl+N, Ctrl+W, …).
   useEffect(() => {
     const onKey = (e) => {
@@ -2674,6 +2879,7 @@ export function App() {
       help: () => setDialog((d) => (d?.type === 'help' ? null : { type: 'help' })),
       'help-guide': () => setDialog({ type: 'help', tab: 'guide' }),
       'help-ask': () => actions.openAssist({ mode: 'help' }),
+      'compare-with': () => actions.compareWith(),
       'compare-clipboard': () => actions.compareWithClipboard(),
     };
     if (run[command]) return run[command]();
@@ -2828,11 +3034,11 @@ export function App() {
     ${panel === 'assistant' && html`<${AssistantPanel} files=${scoped} docs=${scopedDocs} activeFile=${activeFile} activeRepo=${activeRepo} settings=${settings} actions=${actions} onClose=${() => setPanel(null)} />`}
 
     ${dialog?.type === 'quickOpen' &&
-    (dialog.pick === 'compare'
-      ? html`<${QuickOpen} files=${store.live()} docs=${docs} actions=${actions} title=${`Compare ${activeName} with…`} exclude=${activeFile ? activeFile.id : activeRepo ? `r:${activeRepo.path}` : ''}
-          onPick=${(entry) => actions.compareWithEntry(entry)} onClose=${() => setDialog(null)} />`
-      : html`<${QuickOpen} files=${store.live()} docs=${docs} openTabs=${openDiskTabs()} actions=${actions} initial=${dialog.query ?? ''} symbols=${() => (activeKey ? (hostRef.current?.codeContext()?.symbols ?? []) : [])}
-          roots=${folderRoots(settings)} hidden=${Boolean(settings.showHidden)} onSymbol=${(entry) => actions.revealSymbol(entry)} onClose=${() => setDialog(null)} />`)}
+    html`<${QuickOpen} files=${store.live()} docs=${docs} openTabs=${openDiskTabs()} actions=${actions} initial=${dialog.query ?? ''} symbols=${() => (activeKey ? (hostRef.current?.codeContext()?.symbols ?? []) : [])}
+      roots=${folderRoots(settings)} hidden=${Boolean(settings.showHidden)} onSymbol=${(entry) => actions.revealSymbol(entry)} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'compare' && activeKey &&
+    html`<${ComparePicker} ...${compareSources()} roots=${folderRoots(settings)} hidden=${Boolean(settings.showHidden)} detailOf=${placeOfPath} plainIcons=${settings.fileIcons === false}
+      onPick=${(entry) => actions.compareWithEntry(entry)} onBrowse=${() => actions.compareBrowse()} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'palette' && html`<${CommandPalette} initial=${dialog.query ?? ''} onRun=${(c) => setTimeout(() => actions.command(c.id), 0)} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'symbols' && html`<${SymbolSearch} files=${store.live()} roots=${folderRoots(settings)} servers=${settings.languageServers !== false ? lspRef.current : null} initial=${dialog.query ?? ''} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'workspaceEdit' && html`<${WorkspaceEditDialog} title=${dialog.title} entries=${dialog.entries} rel=${(p) => relInFolders(p, settings)} onDone=${dialog.onDone} />`}

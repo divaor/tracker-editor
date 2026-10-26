@@ -4,6 +4,8 @@ import { matchSymbols } from '../codeNav.js';
 import { timeAgo } from '../format.js';
 import { fileKey, repoKey, store } from '../store.js';
 import { folderFiles, onFolderIndex } from '../folderIndex.js';
+import { pastedPath } from '../fileRefs.js';
+import { baseName } from '../folders.js';
 import { KINDS } from '../where.js';
 import { Icon } from './icons.js';
 import { ClearButton, Segmented } from './components.js';
@@ -132,34 +134,35 @@ export function SearchPanel({ files, docs, allFiles, allDocs, openKeys, actions,
 /**
  * Ctrl+P: open a file by (fuzzy) name; also matches the project, and the files in the
  * folders open in Folders (`roots`: [{ dir, label, kind }]) by their path.
- * With onPick, it picks a file instead of opening it (e.g. "Compare with…").
  */
-export function QuickOpen({ files, docs, actions, onClose, onPick, title = 'Open a file', exclude = '', initial = '', symbols = null, onSymbol, roots = [], hidden = false, openTabs = [] }) {
+export function QuickOpen({ files, docs, actions, onClose, initial = '', symbols = null, onSymbol, roots = [], hidden = false, openTabs = [] }) {
   const [query, setQuery] = useState(initial);
   const [index, setIndex] = useState(0);
   // Files in the folders: listed in the background, the list grows when they come.
   const [, setListed] = useState(0);
   useEffect(() => onFolderIndex(() => setListed((n) => n + 1)), []);
-  const inFolders = onPick ? { files: [], loading: false, truncated: false } : folderFiles(roots, { hidden });
+  const inFolders = folderFiles(roots, { hidden });
   // "@…": the classes, functions and sections of the open file.
   const symbolMode = Boolean(symbols) && query.startsWith('@');
   const symbolList = useMemo(() => (symbolMode ? matchSymbols(symbols(), query.slice(1)).slice(0, 300) : []), [symbolMode, query]);
   const recent = useMemo(
     () =>
       [...files, ...docs.map((d) => ({ id: `r:${d.path}`, name: d.name, project: d.project, modifiedAt: d.modifiedAt, item: d.item.title }))]
-        .filter((f) => f.id !== exclude)
         .sort((a, b) => (b.modifiedAt > a.modifiedAt ? 1 : -1)),
     [files, docs],
   );
   // Tabs open on disk or a server come first (the tab bar's view may hide them); folder files once each.
   const tabPaths = new Set(openTabs.map((t) => t.path));
-  const all = [...openTabs.filter((t) => t.id !== exclude), ...recent];
-  const list = quickOpen(query.trim() ? [...all, ...inFolders.files.filter((f) => !tabPaths.has(f.path))] : all, query, 60);
+  const all = [...openTabs, ...recent];
+  // A whole path typed or pasted (desktop): opening it comes first.
+  const typed = !symbolMode && window.desktop?.disk?.openTyped ? pastedPath(query) : null;
+  const found = quickOpen(query.trim() ? [...all, ...inFolders.files.filter((f) => !tabPaths.has(f.path))] : all, query, 60);
+  const list = typed ? [{ id: `typed:${typed}`, typed, name: baseName(typed) }, ...found] : found;
   const input = useRef(null);
   const choose = (file) => {
     onClose();
     if (symbolMode) onSymbol?.(file);
-    else if (onPick) onPick(file);
+    else if (file.typed) actions.openTypedPath(file.typed);
     else if (file.path) actions.openDiskPath(file.path);
     else actions.openFile(file.id);
   };
@@ -179,17 +182,16 @@ export function QuickOpen({ files, docs, actions, onClose, onPick, title = 'Open
     return () => document.removeEventListener('keydown', onKey);
   }, []);
   return html`<div class="modal-backdrop top" onPointerDown=${(e) => e.target === e.currentTarget && onClose()}>
-    <div class="quick-open" role="dialog" aria-label=${title}>
-      ${onPick && html`<div class="quick-title">${title}</div>`}
-      <input value=${query} placeholder=${symbols ? `Type part of a file${roots.length && !onPick ? ', folder' : ''} or project name; @ for this file’s functions and sections, # for any file’s…` : 'Type part of a file or project name…'} aria-label="File name" ref=${input}
+    <div class="quick-open" role="dialog" aria-label="Open a file">
+      <input value=${query} placeholder=${symbols ? `Type part of a file${roots.length ? ', folder' : ''} or project name; @ for this file’s functions and sections, # for any file’s…` : 'Type part of a file or project name…'} aria-label="File name" ref=${input}
         onInput=${(e) => {
           const value = e.currentTarget.value;
           // "#…": a symbol in any file (Ctrl+T); ">…": a command (Ctrl+Shift+P).
-          if (value.startsWith('#') && !onPick && actions.gotoSymbolAll) {
+          if (value.startsWith('#') && actions.gotoSymbolAll) {
             onClose();
             return actions.gotoSymbolAll(value.slice(1));
           }
-          if (value.startsWith('>') && !onPick && actions.commandPalette) {
+          if (value.startsWith('>') && actions.commandPalette) {
             onClose();
             return actions.commandPalette(value.slice(1).trimStart());
           }
@@ -205,7 +207,7 @@ export function QuickOpen({ files, docs, actions, onClose, onPick, title = 'Open
           } else if (e.key === 'Enter' && rows[index]) {
             e.preventDefault();
             choose(rows[index]);
-          } else if (e.key === 'Enter' && query.trim() && !onPick && !symbolMode) {
+          } else if (e.key === 'Enter' && query.trim() && !symbolMode) {
             e.preventDefault();
             onClose();
             actions.newFile({ name: query.trim() });
@@ -223,7 +225,13 @@ export function QuickOpen({ files, docs, actions, onClose, onPick, title = 'Open
         ${symbolMode && !symbolList.length && html`<p class="muted small quick-empty">${symbols().length ? 'No function or section matches.' : 'No functions or sections found in this file (classes, functions and headings show here).'}</p>`}
         ${!symbolMode &&
         list.map((f, i) =>
-          f.path
+          f.typed
+            ? html`<button type="button" key=${f.id} role="option" aria-selected=${i === index} class="quick-row quick-disk kind-disk ${i === index ? 'active' : ''}"
+                title=${f.typed} onMouseEnter=${() => setIndex(i)} onClick=${() => choose(f)}>
+                <${Icon} name="disk" size=${15} class="quick-kind" /><span class="quick-name">Open ${f.name}</span>
+                <span class="muted small quick-rel">${f.typed}</span>
+              </button>`
+            : f.path
             ? html`<button type="button" key=${f.id} role="option" aria-selected=${i === index} class="quick-row quick-disk kind-${f.kind} ${i === index ? 'active' : ''}"
                 title=${f.path} onMouseEnter=${() => setIndex(i)} onClick=${() => choose(f)}>
                 <${Icon} name=${KINDS[f.kind].icon} size=${15} class="quick-kind" /><span class="quick-name">${f.name}</span>
@@ -238,8 +246,8 @@ export function QuickOpen({ files, docs, actions, onClose, onPick, title = 'Open
                 <span class="spacer" /><span class="muted small">${timeAgo(f.modifiedAt)}</span>
               </button>`,
         )}
-        ${!symbolMode && !list.length && html`<p class="muted small quick-empty">${query.trim() ? (onPick ? 'No file matches.' : html`No file matches${inFolders.loading ? ' yet (still looking in your folders)' : ''}. Press <kbd>Enter</kbd> to create “${query.trim()}”.`) : 'No files yet.'}</p>`}
-        ${!symbolMode && query.trim() && roots.length > 0 && !onPick && (inFolders.loading || inFolders.truncated) &&
+        ${!symbolMode && !list.length && html`<p class="muted small quick-empty">${query.trim() ? html`No file matches${inFolders.loading ? ' yet (still looking in your folders)' : ''}. Press <kbd>Enter</kbd> to create “${query.trim()}”.` : 'No files yet.'}</p>`}
+        ${!symbolMode && query.trim() && roots.length > 0 && (inFolders.loading || inFolders.truncated) &&
         html`<p class="muted small quick-note">${inFolders.loading ? 'Looking in your folders…' : 'Some folders have too many files: only the nearest ones are searched by name.'}</p>`}
       </div>
     </div>

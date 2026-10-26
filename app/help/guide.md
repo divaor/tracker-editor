@@ -189,7 +189,7 @@ The **switcher at the left end of the tab bar** (it appears once there are two g
 | Open to the side | Shows the tab in a second pane next to the current one (wide screens). |
 | History, Compare with… | See section 5. |
 | Copy for Claude | A file on disk: its path, which Claude Code reads where it is. Other files: the name and the text in a code block, to paste into a chat. |
-| Copy path, Show in folder | Files on disk and on servers (a server file's folder opens in Folders; its path is `user@host:/path`). |
+| Copy path, Show its folder in Folders, Show in the file explorer, Open a terminal in its folder | Files on disk and on servers (desktop). **Show its folder in Folders** puts the file's folder in the Folders view next to the others (or opens the folders down to it in one shown already) with the file picked; a folder you have not opened here before is asked about first. A server file's path is `user@host:/path`. |
 | Close, Close others, Close tabs to the right, Close the *Project* tabs, Close all | Pinned tabs are kept, except by Close. In a view, they work on the tabs showing. |
 | Only the *…* tabs, All tabs, Move to group… | Tab views, above. |
 | Group headers in the tab bar | One header per group in the tab bar; click a header to fold its tabs. |
@@ -201,7 +201,7 @@ The **switcher at the left end of the tab bar** (it appears once there are two g
   - **Desktop or a folder**: a copy (a synced file is copied under its tab name). The original is never moved.
   - **A terminal with Claude Code**: its path is typed in (for a synced file, the path of a copy), so Claude reads it.
   - **The Claude app**: attached to the message.
-  - A drop can't make Explorer open the folder where a file lives: use **Show in folder** instead.
+  - A drop can't make Explorer open the folder where a file lives: use **Show in the file explorer** instead.
   - Encrypted files are never written out; their tabs only move within the bar. Copies of synced files go to a temporary folder and are removed after a week.
   - In the web app, a dragged tab carries its text: drop it into a chat box to paste it.
 - **Split view** (`Ctrl+\`, or *View → Split View*): two files side by side, both editable. The side pane's header can **swap** the panes or close the split. A tab moves between panes with its undo history. Clicking the side tab in the tab bar takes you to the side pane.
@@ -237,7 +237,13 @@ History comes from your data repo, so it needs sync set up and shows only versio
 
 ### Compare two files
 
-**⋯ → Compare with…** and pick the other file. Close the comparison with ✕.
+**⋯ → Compare with…** (also the tab menu, or **Compare with another file…** in `Ctrl+Shift+P`) and pick the other file. The list is in sections:
+
+- **Open tabs** first, the tabs right next to this one at the top (marked **next to it**): put the two files side by side in the tab bar and the other one is the first row, so `Enter` compares them. Then the tabs further away, and the ones the tab bar's view hides.
+- **In your folders** (desktop), as you type: files in the folders open in Folders, like `Ctrl+P`.
+- **My files** and **Tracker documents**, the latest first.
+
+Each row shows the whole name, the folder it is in under it in grey (for a file on disk, the full path; for my files, the project), and the color of its project or folder, as in the tab bar. Type to narrow every section down (part of the name, a folder, a project); `↑` `↓` and `Enter`. Nothing there? **Browse…** picks any file (on a computer, also when nothing matches: `Enter`). The comparison's headers say where each file is; **Open *name*** opens the other file. Close the comparison with ✕.
 
 ### Trash
 
@@ -411,11 +417,13 @@ It types real key presses into whichever window has the focus when the countdown
 - **Follow** (like `tail -f`): new lines appear as they are written and the view stays at the end; the tab is read-only meanwhile. A rotated log is read again.
 - **Huge files** (over 20 MB) open by their last 5 MB, read-only.
 - **Filter lines** (`Alt+L`): show only the lines that match, or hide them; with match case and regex (`ERROR|WARN`). **Copy** or **New file** with the lines shown. Files over 3 MB or 60,000 lines open in a lighter mode (no highlighting or wrapping) that stays fast.
-- ⋯ → **Show in folder**, **Copy path**, **Copy into my files** (a synced copy). Closing a tab with unsaved edits asks first.
+- **Paste a file to open it**: copy a file in Explorer or Finder (`Ctrl+C`) and paste it here (`Ctrl+V`, in a file or anywhere in the window): it opens where it is, as a tab of its own (a guest in a view of one group), not as a copy. Pictures are read as text instead (see 13). A folder pasted opens in Folders.
+- **Paste a path**: paste `C:\folder\file.txt` (Explorer's **Copy as path** too, with its quotes) or `/home/me/file.txt` into a file and it is pasted as text, with **Open** in the message to open that file. Or paste it into `Ctrl+P` and press `Enter`. Outside a file (no tab open), pasting a path opens it at once. A file or folder not opened here before is asked about first, in a window of your system.
+- ⋯ → **Show its folder in Folders**, **Show in the file explorer**, **Copy path**, **Copy into my files** (a synced copy). Closing a tab with unsaved edits asks first.
 
 ### A terminal, and running a file
 
-- `` Ctrl+` `` (or **View → Terminal**) opens a terminal in a panel under the editor: on this computer (your usual shell: PowerShell on Windows, zsh or bash on Mac and Linux) in the folder of the open file or the one shown in Folders, or on the server when the open file is on one. Right-click a folder → **Open a terminal here** opens one there; **+** in the panel opens more (this computer or a server). See [Terminal on a server](#terminal-on-a-server) for the keys.
+- `` Ctrl+` `` (or **View → Terminal**) opens a terminal in a panel under the editor: on this computer (your usual shell: PowerShell on Windows, zsh or bash on Mac and Linux) in the folder of the open file or the one shown in Folders, or on the server when the open file is on one. **Terminal** at the right of the status bar opens one in the open file's folder (or brings back the one already there). Right-click a folder → **Open a terminal here**, or a file → **Open a terminal in its folder** (in Folders, or on a tab); **+** in the panel opens more (this computer or a server). See [Terminal on a server](#terminal-on-a-server) for the keys.
 - **Run this file** (`F5`, or **View → Run This File**): saves it, then runs it in a terminal of its own (**Run · …**), in the file's folder: `python3` for `.py` (`python` on Windows), `node` for `.js`, `bash` for `.sh`, PowerShell for `.ps1`, `go run`, `ruby`, `php`, `npx tsx` for `.ts` and more; `.html` opens in the browser. On a server it runs there, over SSH. Change or add commands in **Settings → Editor → Run commands**, one per line: `py: uv run {file}` (`{file}` the file, `{dir}` its folder, `{name}` its name; `js:` with nothing after turns a type off).
 - **`file:line` opens the file there**: in a terminal, the places programs print (`src/app.js:12:5`, `File "main.py", line 7`, `Foo.cs:line 42`, `a.ts(12,5)`) are links; click one. In the text (a log, a pasted stack trace), `Ctrl+click` one. Relative paths start from the terminal's folder, or the file's. Files outside the folders you opened in Folders do not open (open their folder first).
 - **When it fails**, ✦ in the terminal's bar asks the model about the error, and offers to fix the file it points to: see [Help with errors](#help-with-errors).
@@ -451,7 +459,7 @@ The sidebar has two views on the desktop: **My files** (synced) and **Folders** 
 | Replace in files | In Find in this folder, the arrow at the left of the field shows **Replace with**: each line found shows what it becomes (old struck out, new in green). Untick the files to leave alone, then **Replace in N files** (or `Enter`). With `.*` (a regular expression), `$1` puts back a group and `\n` a new line. The message has **Undo** (it puts back only files nobody changed since). Files open with unsaved edits are left out; open tabs show the new text. On servers too. |
 | Git | In a folder that is a Git repository (on this computer), the branch shows next to the folder's name, and files show what changed since the last commit: **M** changed, **U** new, **A** added, **R** renamed, **C** in conflict; folders with changes inside have a dot. Hover the branch for how many files changed and what is to push or pull. Right-click a changed file → **Compare with the last commit**. It uses the `git` program installed on the computer and only reads. |
 | Properties | `Alt+Enter` or right-click → **Properties**: where it is, size (**Count what is inside** for a folder), dates, owner, permissions. On Mac/Linux tick Read/Write/Run for Owner/Group/Others or type `644`, **Save permissions**; for a folder, **Also for everything inside**. On Windows: **Read-only**. |
-| Terminal | Right-click → **Open a terminal here**: a terminal in the panel under the editor, in that folder. **Open in the system’s terminal** opens your system's own (Windows Terminal or PowerShell, Terminal, …) there instead. |
+| Terminal | Right-click a folder → **Open a terminal here** (a file: **Open a terminal in its folder**), near the top of the menu: a terminal in the panel under the editor, in that folder. **Open in the system’s terminal** opens your system's own (Windows Terminal or PowerShell, Terminal, …) there instead. |
 
 - **Files in a Git repository**: lines changed since the last commit have a bar next to their number (green added, blue changed, a red mark where lines were removed), and the status bar shows the branch with how many lines changed (**main ±3**); click it to compare with the last commit (also **Edit → Code → Compare with the Last Commit**).
 - **Open tabs follow**: rename or move a file (or its folder) and its tab follows, unsaved edits included. Deleting a file closes its tab, unless it has unsaved edits.
@@ -619,6 +627,8 @@ Turn them on in **Settings → Desktop**.
 - **"Claude did not accept the API key"**: copy it again from the Claude Console (it starts with `sk-ant-`), paste it in Settings → Model → AI provider and **Test and list models**. "Too many requests… or its spending limit": wait a minute, or raise the limit in the Console.
 - **Can I sign in with my Claude Pro or Max subscription?** No: Anthropic allows it only in its own apps. Use **Ask in the Claude app**, or an API key (paid separately). See [Your Claude subscription](#your-claude-subscription).
 - **Ask in the Claude app opened an empty chat**: the question was too long for a link; it is on the clipboard, paste it.
+- **Pasting a file copied in Explorer or Finder pastes nothing (web app)**: the browser can't open files where they are. Use the desktop app, or drop the file on the window to add a copy to my files.
+- **Compare with… doesn't list a file on disk**: type part of its name (files in the folders open in Folders show as you type), or use **Browse…**.
 - **A folder says "That file was not opened here"**: it is a link to a place outside the folder you picked, or the folder was forgotten. Open that place with **Open another folder…**.
 - **Dragging a tab out does nothing**: encrypted files are never written out (their tabs only move within the bar); use **Copy for Claude** or copy the text instead.
 - **"A program or a script; the editor does not start those"**: open it from your file explorer (**Show in the file explorer**).

@@ -1,7 +1,7 @@
 // "file:line" in program output and logs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { findFileRefs, resolveRef } from '../app/js/fileRefs.js';
+import { findFileRefs, pastedPath, resolveRef } from '../app/js/fileRefs.js';
 
 const refs = (text) => findFileRefs(text).map((r) => `${r.path}@${r.line}:${r.column}`);
 
@@ -31,4 +31,21 @@ test('relative references from the folder they were printed in', () => {
   assert.equal(resolveRef('f.cs', 'D:\\y'), 'D:\\y\\f.cs');
   assert.equal(resolveRef('~/g.txt', '/w'), null);
   assert.equal(resolveRef('h.txt', ''), null);
+});
+
+test('a pasted path: a whole path alone, as Explorer copies it, or a file:// URL', () => {
+  assert.equal(pastedPath('C:\\Users\\me\\notes.txt'), 'C:\\Users\\me\\notes.txt');
+  assert.equal(pastedPath('  "C:\\Program Files\\App\\config.ini"  '), 'C:\\Program Files\\App\\config.ini', 'Copy as path puts it in quotes');
+  assert.equal(pastedPath('C:/www/site/index.php'), 'C:/www/site/index.php');
+  assert.equal(pastedPath('\\\\server\\share\\report.csv'), '\\\\server\\share\\report.csv');
+  assert.equal(pastedPath('/var/www/html/index.php'), '/var/www/html/index.php');
+  assert.equal(pastedPath('/var/www/'), '/var/www/', 'a folder too');
+  assert.equal(pastedPath('~/notes.md'), '~/notes.md');
+  assert.equal(pastedPath('file:///C:/My%20Files/a.txt'), 'C:/My Files/a.txt');
+  assert.equal(pastedPath('file:///home/me/a.txt'), '/home/me/a.txt');
+  assert.equal(pastedPath('file://server/share/a.txt'), '\\\\server\\share\\a.txt');
+  // Anything else is just text.
+  for (const text of ['notes.txt', './src/app.js', 'see /var/www', '/a\n/b', 'https://example.com/a.txt', '//cdn.example.com/x.js', '/', 'C:\\', '~/', '', null, 'C:\\a|b.txt', 'x'.repeat(2000)]) {
+    assert.equal(pastedPath(text), null, JSON.stringify(text).slice(0, 40));
+  }
 });

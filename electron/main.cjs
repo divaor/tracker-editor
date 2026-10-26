@@ -171,6 +171,42 @@ function takeLaunch(items) {
   showWindow();
 }
 ipcMain.handle('disk:take-launched', guard(() => launched.splice(0)));
+// Files and folders pasted from another app (copied in Explorer or Finder): the preload takes
+// their paths from the File objects of the paste (webUtils), so the page cannot name a path
+// here. Like files opened with the app, files open as tabs and folders in the folders view.
+ipcMain.handle('disk:take-pasted', guard((_e, paths) => {
+  if (!Array.isArray(paths)) return 0;
+  const items = shellIntegration.launchedPaths(paths.filter((p) => typeof p === 'string' && path.isAbsolute(p)).slice(0, 50), { skip: 0, scheme: LINK_SCHEME });
+  takeLaunch(items);
+  return items.length;
+}));
+// A path pasted as text or typed in quick open: the page names it, so a file or folder it
+// cannot reach yet opens only after the person says so in a native dialog naming it.
+ipcMain.handle('disk:open-typed', guard(async (event, typed) => {
+  if (typeof typed !== 'string' || !typed.trim() || typed.length > 1024) throw new Error('That is not a path.');
+  const given = typed.trim();
+  const full = /^~(?=$|[\\/])/.test(given) ? path.join(os.homedir(), given.slice(1)) : given;
+  if (!path.isAbsolute(full)) throw new Error('Give the whole path (C:\\… or /…).');
+  const [item] = shellIntegration.launchedPaths([full], { skip: 0, scheme: LINK_SCHEME });
+  if (!item) return { missing: true };
+  const reachable = folders.allowedBy(allowedFolders, item.path) || (!item.dir && allowedFiles.has(item.path));
+  if (!reachable) {
+    const name = path.basename(item.path) || item.path;
+    const { response } = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender) ?? mainWindow, {
+      type: 'question',
+      buttons: ['Cancel', item.dir ? 'Show it' : 'Open it'],
+      defaultId: 1,
+      cancelId: 0,
+      noLink: true,
+      title: item.dir ? 'Show a folder' : 'Open a file',
+      message: item.dir ? `Show the folder ${name} in Folders?` : `Open ${name} here?`,
+      detail: `${item.path}\n\n${item.dir ? 'Tracker Editor will be able to open and change the files in it, as with a folder you pick.' : 'It opens where it is: what you save goes to this file.'}`,
+    });
+    if (response !== 1) return { cancelled: true };
+  }
+  takeLaunch([item]);
+  return { opened: item.dir ? 'folder' : 'file', path: item.path };
+}));
 
 // ---- Files on servers (SFTP, FTP, FTPS) -----------------------------------------
 // remote.cjs; files there are remote://<id>/<path>, and the disk:* and folder:*
@@ -690,8 +726,9 @@ function watchRemote(sender, uri, on) {
   return true;
 }
 
-ipcMain.handle('disk:open', guard(async () => {
-  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, { title: 'Open a file to edit in place', properties: ['openFile', 'multiSelections'] });
+ipcMain.handle('disk:open', guard(async (_e, opts = {}) => {
+  const title = typeof opts?.title === 'string' && opts.title.trim() ? opts.title.trim().slice(0, 80) : 'Open a file to edit in place';
+  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, { title, properties: opts?.single ? ['openFile'] : ['openFile', 'multiSelections'] });
   if (canceled) return [];
   const out = [];
   for (const file of filePaths) {
@@ -807,6 +844,28 @@ ipcMain.handle('folder:pick', guard(async (_e, defaultPath) => {
   return picked;
 }));
 ipcMain.handle('folder:roots', guard(() => allowedFolders.filter((f) => fs.existsSync(f))));
+// The folder of a file open here, for the folders view: one not inside a folder picked
+// already is added only after the person says so in a native dialog naming it.
+ipcMain.handle('folder:allow-parent', guard(async (event, file) => {
+  const dir = path.dirname(checkFile(file));
+  if (folders.allowedBy(allowedFolders, dir)) return { dir };
+  const { response } = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender) ?? mainWindow, {
+    type: 'question',
+    buttons: ['Cancel', 'Show it'],
+    defaultId: 1,
+    cancelId: 0,
+    noLink: true,
+    title: 'Show a folder',
+    message: `Show the folder ${path.basename(dir) || dir} in Folders?`,
+    detail: `${dir}\n\nTracker Editor will be able to open and change the files in it, as with a folder you pick.`,
+  });
+  if (response !== 1) return { cancelled: true };
+  if (!allowedFolders.includes(dir)) {
+    allowedFolders.push(dir);
+    saveFolders();
+  }
+  return { dir };
+}));
 ipcMain.handle('folder:forget', guard((_e, folder) => {
   const at = allowedFolders.indexOf(folder);
   if (at !== -1) allowedFolders.splice(at, 1);

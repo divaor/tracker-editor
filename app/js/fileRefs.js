@@ -54,3 +54,29 @@ export function resolveRef(path, base = '') {
   }
   return out.join(sep);
 }
+
+/**
+ * The path of a file or folder when that is all the pasted text is: "C:\…", "\\server\…",
+ * "/…" or "~/…", in quotes as Explorer's Copy as path gives it, or a file:// URL. Null for
+ * anything else (more than one line, a relative path, a web address, a sentence).
+ */
+export function pastedPath(text) {
+  let p = String(text ?? '').trim();
+  if (!p || p.length > 1024 || /[\r\n]/.test(p)) return null;
+  if (/^(["']).*\1$/.test(p)) p = p.slice(1, -1).trim();
+  if (/^file:\/\//i.test(p)) {
+    try {
+      const url = new URL(p);
+      const path = decodeURIComponent(url.pathname);
+      // file:///C:/x → C:/x; file://server/share/x → \\server\share\x
+      if (url.host) p = `\\\\${url.host}${path.replace(/\//g, '\\')}`;
+      else p = /^\/[A-Za-z]:\//.test(path) ? path.slice(1) : path;
+    } catch {
+      return null;
+    }
+  }
+  if (/["<>|*?\t]/.test(p.replace(/^\\\\\?\\/, ''))) return null;
+  const root = /^(?:[A-Za-z]:[\\/]|\\\\(?=[^\\])|~?\/(?!\/))/.exec(p);
+  // A name after the root: not "/" or "C:\" alone.
+  return root && /[^\\/]/.test(p.slice(root[0].length)) ? p : null;
+}

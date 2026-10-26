@@ -46,7 +46,7 @@ function refresh(dir, hidden) {
 
 /**
  * The files known in `roots` ([{ dir, label, kind }]) as quick open entries
- * ({ id: 'd:<path>', name, rel, where, kind, modifiedAt, path }), starting a new
+ * ({ id: 'd:<path>', name, rel, where, kind, root, modifiedAt, path }), starting a new
  * listing for those not listed lately. { files, loading, truncated }.
  */
 let watching = false;
@@ -66,7 +66,7 @@ export function folderFiles(roots, { hidden = false } = {}) {
     // Made once per listing (quick open ranks them on every key).
     const made = `${now.at}|${label}|${kind}`;
     if (now.made !== made) {
-      now.entries = now.files.map((f) => ({ id: `d:${f.path}`, path: f.path, name: f.name, rel: f.rel, where: label, kind, modifiedAt: f.mtimeMs ? new Date(f.mtimeMs).toISOString() : '' }));
+      now.entries = now.files.map((f) => ({ id: `d:${f.path}`, path: f.path, name: f.name, rel: f.rel, where: label, kind, root: dir, modifiedAt: f.mtimeMs ? new Date(f.mtimeMs).toISOString() : '' }));
       now.made = made;
     }
     files = files.concat(now.entries);

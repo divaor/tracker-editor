@@ -19,6 +19,7 @@ import { indentLabel } from '../indent.js';
 import { problemsSummary } from './problems.js';
 import { tabViewState } from '../tabViews.js';
 import { TabViewMenu } from './tabViews.js';
+import { terminalsAvailable } from '../terminals.js';
 
 /** The server of a file on one ({ conn, status }), or null. */
 const serverOf = (path) => {
@@ -58,6 +59,9 @@ export function WhereChip({ kind, label, state, title, onClick }) {
   </button>`;
 }
 
+// Terminals for a file on disk or a server: in its folder, here or over SSH (not FTP).
+const parentOfPath = (p) => p.slice(0, Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'))) || p;
+const canTerminal = (p) => terminalsAvailable() && (!isRemotePath(p) || server(remoteParts(p).id)?.protocol === 'sftp');
 const syncInfo = (sync) => ({ configured: isSyncConfigured(), phase: sync?.phase, local: isLocal() });
 
 // The tabs of the bar by group, in the groups' order (vs: tabViewState).
@@ -214,7 +218,9 @@ export function TabBar({ session, projects, settings, actions }) {
       { separator: true },
       { label: 'Copy for Claude', icon: 'claude', run: () => actions.copyForClaude(key) },
       parseKey(key)?.kind === 'disk' && { label: 'Copy path', icon: 'copy', run: () => actions.copyPath(parseKey(key).path) },
-      parseKey(key)?.kind === 'disk' && { label: 'Show in folder', icon: 'folder', run: () => actions.showOnDisk(parseKey(key).path) },
+      parseKey(key)?.kind === 'disk' && window.desktop?.folders && { label: 'Show its folder in Folders', icon: 'folderOpen', run: () => actions.showFolderOf(parseKey(key).path) },
+      parseKey(key)?.kind === 'disk' && !isRemotePath(parseKey(key).path) && { label: 'Show in the file explorer', icon: 'external', run: () => actions.showOnDisk(parseKey(key).path) },
+      parseKey(key)?.kind === 'disk' && canTerminal(parseKey(key).path) && { label: 'Open a terminal in its folder', icon: 'terminal', run: () => actions.terminalHere(parentOfPath(parseKey(key).path)) },
       { separator: true },
       { label: 'Close', icon: 'x', run: () => actions.close(key) },
       { label: 'Close others', disabled: !others.length, run: () => actions.closeMany(others) },
@@ -475,11 +481,12 @@ export function FileBar({ file, repo, disk, sealed, projects, canPreview, previe
   const listenButton = html`<button type="button" class="btn ghost sm" title="Read aloud from the cursor, or the selection (Alt+R)" onClick=${actions.readAloud}><${Icon} name="volume" size=${15} /><span class="label">Listen</span></button>`;
   const shareButton = html`<button type="button" class="btn ghost sm" title="Share: WhatsApp, Teams, email, copy…" onClick=${actions.share}><${Icon} name="share" size=${15} /><span class="label">Share</span></button>`;
   const moreItems = (id) => [
-    disk && { label: 'Show in folder', icon: 'folder', run: () => actions.showOnDisk(disk.path) },
+    disk && window.desktop?.folders && { label: 'Show its folder in Folders', icon: 'folderOpen', run: () => actions.showFolderOf(disk.path) },
+    disk && !isRemotePath(disk.path) && { label: 'Show in the file explorer', icon: 'external', run: () => actions.showOnDisk(disk.path) },
     disk && { label: 'Copy path', icon: 'copy', run: () => actions.copyPath(disk.path) },
     disk && { label: isLocal() ? 'Copy into my files' : 'Copy into my files (synced)', icon: 'filePlus', run: () => actions.copyToFiles(disk.path) },
     disk && { label: 'Properties', icon: 'info', run: () => actions.showProperties(disk.path) },
-    disk && (!isRemotePath(disk.path) || server(remoteParts(disk.path).id)?.protocol === 'sftp') && { label: 'Open a terminal in its folder', icon: 'terminal', run: () => actions.terminalHere(disk.path.slice(0, Math.max(disk.path.lastIndexOf('/'), disk.path.lastIndexOf('\\'))) || disk.path) },
+    disk && canTerminal(disk.path) && { label: 'Open a terminal in its folder', icon: 'terminal', run: () => actions.terminalHere(parentOfPath(disk.path)) },
     disk && { separator: true },
     id && { label: 'Details…', icon: 'tag', run: () => actions.openDialog({ type: 'file', id }) },
     !disk?.follow && { label: 'Format document (Shift+Alt+F)', icon: 'code', run: () => actions.formatDocument() },
@@ -703,6 +710,12 @@ export function StatusBar({ recording, big, cursor, language, file, repo, disk, 
     <button type="button" class="status-item status-btn-text ${settings.wordWrap ? 'on' : ''}" title="Word wrap (Alt+Z)" aria-pressed=${settings.wordWrap} onClick=${() => saveSettings({ wordWrap: !getSettings().wordWrap })}>
       <${Icon} name="wrap" size=${14} /><span class="hide-narrow">Wrap</span>
     </button>
+    ${terminalsAvailable() &&
+    html`<button type="button" class="status-item status-btn-text status-terminal"
+      title=${disk ? `Open a terminal in this file’s folder${kind === 'remote' ? ' on the server' : ''} (Ctrl+\` shows or hides the terminal)` : 'Open a terminal (Ctrl+` shows or hides it)'}
+      aria-label=${disk ? 'Open a terminal in this file’s folder' : 'Open a terminal'} onClick=${actions.terminalForFile}>
+      <${Icon} name="terminal" size=${14} /><span class="hide-narrow">Terminal</span>
+    </button>`}
     ${disk
       ? html`<span class="status-item hide-narrow" title="The file's encoding and line endings, kept when saving">${disk.encoding === 'latin1' ? 'Windows-1252' : 'UTF-8'}${disk.bom ? ' BOM' : ''} · ${disk.eol === 'crlf' ? 'CRLF' : 'LF'}</span>`
       : html`<span class="status-item hide-narrow">UTF-8 · LF</span>`}

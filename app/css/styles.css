@@ -4727,6 +4727,244 @@ mark {
   padding: 4px 10px 8px;
 }
 
+/* ---- Compare with… --------------------------------------------------------------- */
+.compare-picker {
+  display: flex;
+  flex-direction: column;
+  width: min(980px, 100%);
+  max-height: 84vh;
+}
+
+.modal-backdrop.top:has(.compare-picker) {
+  padding-top: 6vh;
+}
+
+.cmp-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+  padding: 12px 16px 8px;
+}
+
+.cmp-title {
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+.cmp-title strong {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.cmp-current {
+  min-width: 0;
+  color: var(--text-3);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.cmp-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-3);
+}
+
+.cmp-search input {
+  flex: 1;
+  min-width: 0;
+  min-height: 50px !important;
+  padding-inline: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  font-size: 16px;
+}
+
+.cmp-list {
+  flex: 1;
+  max-height: none;
+  min-height: 160px;
+  padding: 0 8px 8px;
+}
+
+.cmp-section-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 8px 5px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.cmp-count {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-size: 11px;
+  letter-spacing: 0;
+}
+
+.cmp-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px 7px 8px;
+  border: 0;
+  border-left: 4px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+/* The project's or folder's color: a band on the left and a tint, so a group is found at a glance. */
+.cmp-row.has-group {
+  border-left-color: var(--gc);
+  background: color-mix(in srgb, var(--gc) 5%, transparent);
+}
+
+.cmp-row + .cmp-row {
+  margin-top: 2px;
+}
+
+.cmp-row.active {
+  background: var(--accent-soft);
+}
+
+.cmp-row.has-group.active {
+  background: color-mix(in srgb, var(--gc) 16%, var(--accent-soft));
+}
+
+.cmp-row > .file-icon,
+.cmp-row > .icon {
+  flex: none;
+}
+
+.cmp-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.cmp-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.cmp-near {
+  margin-left: 8px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* The whole folder, never cut: it is how two files of the same name are told apart. */
+.cmp-path {
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+
+.cmp-group {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  max-width: 30%;
+  overflow: hidden;
+  padding: 2px 9px 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--gc) 15%, transparent);
+  color: var(--text);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cmp-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--gc);
+}
+
+.cmp-kind {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--kc) 14%, transparent);
+  color: var(--kc);
+}
+
+.cmp-more {
+  padding: 4px 12px;
+}
+
+.cmp-empty {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 28px 12px;
+  color: var(--text-2);
+  text-align: center;
+}
+
+.cmp-empty p {
+  margin: 0;
+}
+
+.cmp-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+}
+
+.cmp-keys kbd {
+  margin-right: 2px;
+}
+
+@media (max-width: 640px) {
+  .compare-picker {
+    max-height: 90vh;
+  }
+
+  .cmp-group {
+    display: none;
+  }
+
+  .cmp-keys {
+    display: none;
+  }
+}
+
 /* ---- Dialogs, settings ---------------------------------------------------------- */
 .modal-body {
   padding: 4px 22px 16px;
@@ -5152,7 +5390,20 @@ mark {
 }
 
 .compare-label {
+  flex-shrink: 0;
+  max-width: 60%;
   overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+
+/* Where the file is: the end of the path stays in view (it tells two files apart). */
+.compare-detail {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  direction: rtl;
+  text-align: left;
   text-overflow: ellipsis;
 }
 

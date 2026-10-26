@@ -121,6 +121,7 @@ export const COMMAND_LIST = [
   { id: 'macro-run', group: 'Tools', label: 'Run the macro many times' },
   { id: 'type-out', group: 'Tools', label: 'Type into another window', keys: 'Alt+T', only: 'desktop' },
   { id: 'clipboard-history', group: 'Tools', label: 'Clipboard history', keys: 'Mod+Shift+V', only: 'desktop' },
+  { id: 'compare-with', group: 'Tools', label: 'Compare with another file…', hint: 'An open tab (the ones next to it first), a file in your folders, my files, or Browse…' },
   { id: 'compare-clipboard', group: 'Tools', label: 'Compare with the clipboard' },
   { id: 'image-ocr', group: 'Tools', label: 'Text from an image' },
   { id: 'screenshot-ocr', group: 'Tools', label: 'Text from a screenshot', only: 'desktop' },

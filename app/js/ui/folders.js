@@ -108,6 +108,15 @@ function NameField({ initial, dir = false, label, onDone, onCancel }) {
     onBlur=${() => finish(true)} />`;
 }
 
+// A file to show in the tree (revealInFolders), taken by the view when it shows or at once.
+let pendingReveal = null;
+
+/** Shows the file at `path` in the folders view: the folders above it opened, the file picked. */
+export function revealInFolders(path) {
+  pendingReveal = path;
+  window.dispatchEvent(new CustomEvent('folders:reveal'));
+}
+
 /**
  * The folders view of the sidebar (desktop): folders picked in the system
  * dialog, browsed and changed like a file explorer. Text files open as tabs on
@@ -551,6 +560,35 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     if (!keepAnchor) setAnchor(at);
   };
 
+  // A file to show (revealInFolders): once its folder is shown and read, the folders between
+  // it and the file open and the file is picked (the filter is cleared).
+  const [reveal, setReveal] = useState(null);
+  useEffect(() => {
+    const take = () => {
+      if (!pendingReveal) return;
+      setReveal(pendingReveal);
+      pendingReveal = null;
+    };
+    take();
+    window.addEventListener('folders:reveal', take);
+    return () => window.removeEventListener('folders:reveal', take);
+  }, []);
+  useEffect(() => {
+    const section = reveal && sectionOf(reveal);
+    if (!section || !listings.get(section)) return;
+    const target = reveal;
+    setReveal(null);
+    setFilter('');
+    (async () => {
+      const chain = [];
+      for (let d = dirOf(target); d !== section && d !== dirOf(d) && rootOf(d, [section]); d = dirOf(d)) chain.unshift(d);
+      const read = await Promise.all(chain.map(async (d) => [d, await bridge.list(d).then((r) => r.entries, (err) => ({ error: message(err) }))]));
+      setChildren((m) => new Map([...m, ...read]));
+      setExpanded((e) => new Set([...e, ...chain]));
+      select([target]);
+    })();
+  }, [reveal, liveKey, listings]);
+
   // ---- Opening ----
 
   const openOutside = (e) => bridge.openExternal(e.path).catch(fail);
@@ -987,6 +1025,9 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       one && !one.dir && ['M', 'R'].includes(gitOn(one.path)) && opensInEditor(one.name) && { label: 'Compare with the last commit (Git)', icon: 'branch', run: () => actions.compareWithHead(one.path) },
       images.length && images.length === items.length && { label: `Text from ${images.length === 1 ? 'the image' : `${images.length} images`}…`, icon: 'scan', run: () => actions.readImageFiles(images.map((e) => e.path), folderOf(images)) },
       files.length === 2 && items.length === 2 && files.every((e) => opensInEditor(e.name)) && { label: 'Compare the two', icon: 'columns', run: () => actions.compareDiskFiles(files[0].path, files[1].path) },
+      // A terminal in the folder (a file's: the folder it is in), in the editor or the system's app.
+      one && terminalFor(one.path) && { label: one.dir ? 'Open a terminal here' : 'Open a terminal in its folder', icon: 'terminal', run: () => actions.terminalHere(one.dir ? one.path : dirOf(one.path)) },
+      one && !remote && bridge.terminal && { label: 'Open in the system’s terminal', icon: 'external', run: () => actions.systemTerminalHere(one.dir ? one.path : dirOf(one.path)) },
       { separator: true },
       { label: 'Cut (Ctrl+X)', icon: 'scissors', run: () => clipFromMenu('cut') },
       { label: 'Copy (Ctrl+C)', icon: 'copy', run: () => clipFromMenu('copy') },
@@ -1003,8 +1044,6 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       one && !remote && { label: 'Show in the file explorer', icon: 'external', run: () => actions.showOnDisk(one.path) },
       one && { label: 'Properties (Alt+Enter)', icon: 'info', run: () => actions.showProperties(one.path) },
       one?.dir && { label: 'Find in this folder…', icon: 'search', run: () => actions.findInFolder(one.path) },
-      one?.dir && terminalFor(one.path) && { label: 'Open a terminal here', icon: 'terminal', run: () => actions.terminalHere(one.path) },
-      one?.dir && !remote && bridge.terminal && { label: 'Open in the system’s terminal', icon: 'external', run: () => actions.systemTerminalHere(one.path) },
       one?.dir && mirrorItem(one.path),
       one?.dir && !live.includes(one.path) && { label: 'Open beside (another root in the tree)', icon: 'columns', run: () => openBeside(one.path) },
       one?.dir && { label: (settings.folderFavorites ?? []).includes(one.path) ? 'Remove from favorites' : 'Add to favorites', icon: 'star', run: () => saveSettings({ folderFavorites: toggleFavorite(settings.folderFavorites, one.path) }) },

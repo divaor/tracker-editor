@@ -29,7 +29,8 @@ contextBridge.exposeInMainWorld('desktop', {
   },
   // Files on disk, edited in place: only ones picked in the open dialog.
   disk: {
-    open: () => ipcRenderer.invoke('disk:open'),
+    // { title, single }: the dialog's title, one file only (Compare with… Browse).
+    open: (opts) => ipcRenderer.invoke('disk:open', opts),
     read: (path) => ipcRenderer.invoke('disk:read', path),
     editorConfig: (path) => ipcRenderer.invoke('disk:editorconfig', path),
     readAppended: (path, offset, opts) => ipcRenderer.invoke('disk:read-appended', path, offset, opts),
@@ -45,6 +46,23 @@ contextBridge.exposeInMainWorld('desktop', {
         return '';
       }
     },
+    // Files and folders pasted from another app: their paths come from the File objects here,
+    // never from the page; the main process opens them as if opened with the app.
+    openPasted: (files) =>
+      ipcRenderer.invoke(
+        'disk:take-pasted',
+        [...files]
+          .map((file) => {
+            try {
+              return webUtils.getPathForFile(file);
+            } catch {
+              return '';
+            }
+          })
+          .filter(Boolean),
+      ),
+    // A path pasted as text: opened after the person confirms it in a native dialog (unless reachable already).
+    openTyped: (path) => ipcRenderer.invoke('disk:open-typed', path),
     onChanged(callback) {
       const listener = (_event, change) => callback(change);
       ipcRenderer.on('disk:changed', listener);
@@ -62,6 +80,8 @@ contextBridge.exposeInMainWorld('desktop', {
   folders: {
     pick: (defaultPath) => ipcRenderer.invoke('folder:pick', defaultPath),
     roots: () => ipcRenderer.invoke('folder:roots'),
+    // The folder of a file open here, for the folders view (asked about in a native dialog when new).
+    allowParent: (file) => ipcRenderer.invoke('folder:allow-parent', file),
     forget: (folder) => ipcRenderer.invoke('folder:forget', folder),
     list: (dir) => ipcRenderer.invoke('folder:list', dir),
     // A folder on this computer in the system's terminal app.
