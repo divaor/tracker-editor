@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#0F766E</color>
-    <!-- The page's background (--bg), so starting looks like the editor. -->
+    <!-- The page background (the bg color in styles.css), so starting looks like the editor. -->
     <color name="splash_background">#F6F5F1</color>
 </resources>
