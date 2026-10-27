@@ -11,7 +11,8 @@ import { serverLabel } from '../lspTools.js';
 import { dictationSupported } from './dictation.js';
 import { canDragOut, draggedTab, dropped, isOwnDrop, onDragOutEnd, startDragOut } from '../dragOut.js';
 import { Menu, MenuButton } from './menu.js';
-import { isRemotePath, kindHint, KINDS, kindOfKey, protocolName, remoteAddress, remoteParts, whereState } from '../where.js';
+import { contentPlace, isContentPath, isRemotePath, kindHint, KINDS, kindOfKey, protocolName, remoteAddress, remoteParts, whereState } from '../where.js';
+import { diskReadOnly } from '../diskTabs.js';
 import { server, serverStatus } from '../servers.js';
 import { mirrorOf } from '../mirrors.js';
 import { mirrorState } from './mirrors.js';
@@ -218,9 +219,10 @@ export function TabBar({ session, projects, settings, actions }) {
       { label: 'Compare with clipboard', icon: 'copy', run: () => (actions.showInMain(key), actions.compareWithClipboard()) },
       { separator: true },
       { label: 'Copy for Claude', icon: 'claude', run: () => actions.copyForClaude(key) },
-      parseKey(key)?.kind === 'disk' && { label: 'Copy path', icon: 'copy', run: () => actions.copyPath(parseKey(key).path) },
+      parseKey(key)?.kind === 'disk' && !isContentPath(parseKey(key).path) && { label: 'Copy path', icon: 'copy', run: () => actions.copyPath(parseKey(key).path) },
       parseKey(key)?.kind === 'disk' && window.desktop?.folders && { label: 'Show its folder in Folders', icon: 'folderOpen', run: () => actions.showFolderOf(parseKey(key).path) },
-      parseKey(key)?.kind === 'disk' && !isRemotePath(parseKey(key).path) && { label: 'Show in the file explorer', icon: 'external', run: () => actions.showOnDisk(parseKey(key).path) },
+      parseKey(key)?.kind === 'disk' && !isRemotePath(parseKey(key).path) && window.desktop?.disk?.show && { label: 'Show in the file explorer', icon: 'external', run: () => actions.showOnDisk(parseKey(key).path) },
+      parseKey(key)?.kind === 'disk' && isContentPath(parseKey(key).path) && window.desktop?.android && { label: 'Open with another app…', icon: 'external', run: () => actions.openWithApp(parseKey(key).path) },
       parseKey(key)?.kind === 'disk' && canTerminal(parseKey(key).path) && { label: 'Open a terminal in its folder', icon: 'terminal', run: () => actions.terminalHere(parentOfPath(parseKey(key).path)) },
       { separator: true },
       { label: 'Close', icon: 'x', run: () => actions.close(key) },
@@ -421,24 +423,26 @@ function DiskBar({ disk, buttons, moreItems, actions }) {
   const { path, dirty, follow, conflict, missing, truncated, offline } = disk;
   const remote = isRemotePath(path);
   const srv = remote ? serverOf(path) : null;
-  const readOnly = follow || truncated;
+  const readOnly = diskReadOnly(disk);
   const state = whereState({ kind: remote ? 'remote' : 'disk', disk, server: srv?.status });
   const location = remote ? remoteParts(path).path : path;
-  const folder = location.slice(0, location.length - disk.name.length - 1) || location;
-  const where = remote ? `${KINDS.remote.hint}\n${protocolName(srv.conn?.protocol)} · ${remoteAddress(path, srv.conn)}` : `${KINDS.disk.hint}\n${path}`;
+  // A file another Android app gave: where it is in words (its address is no path).
+  const content = isContentPath(path);
+  const folder = content ? contentPlace(path) : location.slice(0, location.length - disk.name.length - 1) || location;
+  const where = remote ? `${KINDS.remote.hint}\n${protocolName(srv.conn?.protocol)} · ${remoteAddress(path, srv.conn)}` : `${KINDS.disk.hint}\n${content ? folder : path}`;
   const encoding = `${disk.eol === 'crlf' ? 'Windows (CRLF)' : 'Unix (LF)'} line endings · ${disk.encoding === 'latin1' ? 'Windows-1252' : 'UTF-8'}${disk.bom ? ' with BOM' : ''}, kept when saving`;
   const elsewhere = remote ? 'on the server' : 'on disk';
   // In a mirrored folder: also kept on the other side.
   const mirrored = mirrorOf(path);
   return html`<div class="filebar-stack">
     <div class="filebar">
-      <${WhereChip} kind=${remote ? 'remote' : 'disk'} label=${remote ? (srv.conn?.name ?? 'Server') : 'This computer'} state=${state} title=${where} onClick=${() => actions.showOnDisk(path)} />
+      <${WhereChip} kind=${remote ? 'remote' : 'disk'} label=${remote ? (srv.conn?.name ?? 'Server') : KINDS.disk.label} state=${state} title=${where} onClick=${() => actions.showOnDisk(path)} />
       ${mirrored &&
       html`<button type="button" class="mirror-badge" onClick=${() => actions.syncMirror(mirrored.mirror.id)}
         title=${`Mirrored: kept the same as ${mirrored.side === 'local' ? `${server(mirrored.mirror.conn)?.name ?? 'the server'}: ${mirrored.mirror.remote}` : mirrored.mirror.local}. ${mirrorState(mirrored.mirror).text}. Click to sync now.`}>
         <span aria-hidden="true">⇄</span><span class="label">${mirrored.side === 'local' ? (server(mirrored.mirror.conn)?.name ?? 'Server') : 'This computer'}</span>
       </button>`}
-      <span class="filebar-note" title=${`${remote ? remoteAddress(path, srv.conn) : path}\n${encoding}`}><span class="filebar-title">${disk.name}</span><span class="muted small filebar-path">${folder}</span></span>
+      <span class="filebar-note" title=${`${remote ? remoteAddress(path, srv.conn) : content ? folder : path}\n${encoding}`}><span class="filebar-title">${disk.name}</span><span class="muted small filebar-path">${folder}</span></span>
       <span class="spacer" />
       ${buttons}
       <button type="button" class="btn ghost sm ${follow ? 'on' : ''}" aria-pressed=${follow} disabled=${missing}
@@ -472,6 +476,8 @@ function DiskBar({ disk, buttons, moreItems, actions }) {
     html`<div class="filebar-notice warn" role="status"><${Icon} name="alert" size=${15} /><span>The file is not ${elsewhere} any more (moved, renamed or deleted). Save puts it back.</span></div>`}
     ${truncated &&
     html`<div class="filebar-notice" role="status"><${Icon} name="disk" size=${15} /><span>A ${formatSize(disk.size)} file: showing its last part, read-only. Follow shows new lines as they are written.</span></div>`}
+    ${disk.readOnly && !truncated &&
+    html`<div class="filebar-notice" role="status"><${Icon} name="lock" size=${15} /><span>Read-only: the app this file came from does not let it be saved here. ⋯ → Copy into my files keeps an editable copy.</span></div>`}
   </div>`;
 }
 
@@ -483,10 +489,11 @@ export function FileBar({ file, repo, disk, sealed, projects, canPreview, previe
   const shareButton = html`<button type="button" class="btn ghost sm" title="Share: WhatsApp, Teams, email, copy…" onClick=${actions.share}><${Icon} name="share" size=${15} /><span class="label">Share</span></button>`;
   const moreItems = (id) => [
     disk && window.desktop?.folders && { label: 'Show its folder in Folders', icon: 'folderOpen', run: () => actions.showFolderOf(disk.path) },
-    disk && !isRemotePath(disk.path) && { label: 'Show in the file explorer', icon: 'external', run: () => actions.showOnDisk(disk.path) },
-    disk && { label: 'Copy path', icon: 'copy', run: () => actions.copyPath(disk.path) },
+    disk && !isRemotePath(disk.path) && window.desktop?.disk?.show && { label: 'Show in the file explorer', icon: 'external', run: () => actions.showOnDisk(disk.path) },
+    disk && isContentPath(disk.path) && window.desktop?.android && { label: 'Open with another app…', icon: 'external', run: () => actions.openWithApp(disk.path) },
+    disk && !isContentPath(disk.path) && { label: 'Copy path', icon: 'copy', run: () => actions.copyPath(disk.path) },
     disk && { label: isLocal() ? 'Copy into my files' : 'Copy into my files (synced)', icon: 'filePlus', run: () => actions.copyToFiles(disk.path) },
-    disk && { label: 'Properties', icon: 'info', run: () => actions.showProperties(disk.path) },
+    disk && window.desktop?.folders && { label: 'Properties', icon: 'info', run: () => actions.showProperties(disk.path) },
     disk && canTerminal(disk.path) && { label: 'Open a terminal in its folder', icon: 'terminal', run: () => actions.terminalHere(parentOfPath(disk.path)) },
     disk && { separator: true },
     id && { label: 'Details…', icon: 'tag', run: () => actions.openDialog({ type: 'file', id }) },
@@ -504,7 +511,7 @@ export function FileBar({ file, repo, disk, sealed, projects, canPreview, previe
     window.desktop?.ocr && { label: 'Text from a screenshot…', icon: 'scan', run: actions.screenshotToText },
     id && { label: 'Send checklist to tracker…', icon: 'checklist', run: actions.sendChecklist },
     window.desktop?.typing && { label: 'Type into another window', icon: 'keyboard', run: () => actions.typeOut() },
-    { label: disk && !isRemotePath(disk.path) ? 'Copy for Claude (the path)' : 'Copy for Claude (name and text)', icon: 'claude', run: () => actions.copyForClaude(store.session.active) },
+    { label: disk && !isRemotePath(disk.path) && !isContentPath(disk.path) ? 'Copy for Claude (the path)' : 'Copy for Claude (name and text)', icon: 'claude', run: () => actions.copyForClaude(store.session.active) },
     settings.llm.enabled && { label: 'Ask the model… (Ctrl+K)', icon: 'sparkle', run: actions.askSelection },
     { label: 'Insert snippet…', icon: 'snippet', run: actions.openSnippets },
     id && { label: 'Save as snippet', icon: 'snippet', run: actions.saveSnippet },
@@ -706,7 +713,7 @@ export function StatusBar({ recording, big, cursor, language, file, repo, disk, 
   if (repo) state = repo.dirty && !isLocal() ? 'Edited · goes to the tracker on the next sync' : 'Tracker file';
   if (kind === 'disk') state = disk.dirty ? 'Not saved to disk · Ctrl+S saves' : disk.follow ? 'Following the file as it grows' : isLocal() ? 'File on this computer, edited where it is' : 'File on this computer · not synced';
   if (kind === 'remote') state = `${protocolName(srv.conn?.protocol)} · ${remoteAddress(disk.path, srv.conn)}${disk.dirty ? ' · not saved to the server' : ''}`;
-  const label = { synced: 'My files', doc: 'Tracker', disk: 'This computer', remote: srv?.conn?.name ?? 'Server' }[kind];
+  const label = { synced: 'My files', doc: 'Tracker', disk: KINDS.disk.label, remote: srv?.conn?.name ?? 'Server' }[kind];
   const connection = srv && { connected: 'Connected', connecting: 'Connecting…', error: `Not connected: ${srv.status.error}`, disconnected: 'Not connected' }[srv.status.state];
   return html`<footer class="statusbar">
     ${kind &&

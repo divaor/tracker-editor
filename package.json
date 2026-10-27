@@ -24,6 +24,9 @@
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "0.133.0",
+    "@capacitor/android": "8.5.3",
+    "@capacitor/cli": "8.5.3",
+    "@capacitor/core": "8.5.3",
     "@codemirror/lang-markdown": "^6.5.2",
     "@codemirror/language-data": "^6.5.2",
     "@codemirror/lsp-client": "6.3.0",

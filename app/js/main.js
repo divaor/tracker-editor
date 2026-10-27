@@ -59,6 +59,8 @@ try {
 }
 
 const canUseServiceWorker = location.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(location.hostname);
-if ('serviceWorker' in navigator && canUseServiceWorker) {
+// The Android app carries its own files: a service worker's cache would keep old ones after an update.
+if (window.desktop?.platform === 'android') navigator.serviceWorker?.getRegistrations?.().then((all) => all.forEach((r) => r.unregister()));
+else if ('serviceWorker' in navigator && canUseServiceWorker) {
   navigator.serviceWorker.register('sw.js').catch((err) => console.warn('Service worker registration failed', err));
 }

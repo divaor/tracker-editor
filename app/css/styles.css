@@ -8550,3 +8550,27 @@ body:has(.edit-bar) .toasts {
 .side-host .cm-lineNumbers .cm-gutterElement {
   cursor: pointer;
 }
+
+/* The Android app draws under the status and navigation bars (edge to edge): the page keeps
+   clear of them. Capacitor passes the bars' sizes as safe-area insets (or as --safe-area-inset-*
+   on older WebViews). */
+html[data-native='android'] body {
+  background: var(--surface);
+}
+
+html[data-native='android'] #root {
+  padding: env(safe-area-inset-top, var(--safe-area-inset-top, 0px)) env(safe-area-inset-right, var(--safe-area-inset-right, 0px))
+    env(safe-area-inset-bottom, var(--safe-area-inset-bottom, 0px)) env(safe-area-inset-left, var(--safe-area-inset-left, 0px));
+}
+
+html[data-native='android'] .app {
+  height: 100%;
+}
+
+html[data-native='android'] .toasts {
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+}
+
+html[data-native='android'] body:has(.edit-bar) .toasts {
+  bottom: calc(56px + var(--edit-lift, 0px));
+}

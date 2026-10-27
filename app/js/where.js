@@ -5,6 +5,40 @@
 
 export const REMOTE_SCHEME = 'remote://';
 export const isRemotePath = (p) => typeof p === 'string' && p.startsWith(REMOTE_SCHEME);
+/** A file another Android app gave (Open with, the file picker): edited through its content:// address. */
+export const isContentPath = (p) => typeof p === 'string' && p.startsWith('content://');
+
+// Where Android's own apps keep a file, by the address they give it.
+const CONTENT_PLACES = {
+  'com.android.providers.downloads.documents': 'Downloads',
+  'com.android.providers.media.documents': 'Photos and media',
+  media: 'Photos and media',
+  'com.google.android.apps.nbu.files.provider': 'Files by Google',
+  'com.google.android.apps.docs.storage': 'Google Drive',
+  'com.google.android.apps.docs.storage.legacy': 'Google Drive',
+};
+
+/** Where a content:// file is, for its bar: a folder on the phone ("Documents/notes"), or the app or place that has it. */
+export function contentPlace(uri) {
+  const m = /^content:\/\/([^/]+)(\/.*)?$/.exec(uri ?? '');
+  if (!m) return '';
+  const [, authority, rest = ''] = m;
+  if (authority === 'com.android.externalstorage.documents') {
+    // …/document/primary%3ADocuments%2Fnotes.txt → Documents (on the phone's storage).
+    const id = decodeURIComponent(rest.split('/').pop() ?? '');
+    const [volume, path = ''] = id.split(':');
+    const folder = path.split('/').slice(0, -1).join('/');
+    const where = volume === 'primary' ? 'Phone storage' : 'SD card';
+    return folder ? `${where} · ${folder}` : where;
+  }
+  if (CONTENT_PLACES[authority]) return CONTENT_PLACES[authority];
+  // Another app's own files: its name from its address (com.mixplorer.file → Mixplorer).
+  const GENERIC = ['com', 'org', 'net', 'io', 'android', 'google', 'apps', 'provider', 'providers', 'fileprovider', 'documents', 'document', 'app', 'file', 'files', 'storage'];
+  const name = authority.split('.').find((p) => !GENERIC.includes(p.toLowerCase()));
+  return name ? `From ${name[0].toUpperCase()}${name.slice(1)}` : 'From another app';
+}
+
+const android = () => globalThis.window?.desktop?.platform === 'android';
 
 /** remote://<id>/<path> → { id, path }. */
 export function remoteParts(uri) {
@@ -20,7 +54,15 @@ export const toRemoteUri = (id, path) => `${REMOTE_SCHEME}${id}${path.startsWith
 export const KINDS = {
   synced: { label: 'My files', icon: 'cloud', hint: 'In your files: saved on this device and synced to your data repo.' },
   doc: { label: 'Tracker', icon: 'paperclip', hint: 'A document attached to a tracker item: synced with the tracker.' },
-  disk: { label: 'This computer', icon: 'disk', hint: 'A file on this computer, edited where it is: not synced.' },
+  disk: {
+    get label() {
+      return android() ? 'This device' : 'This computer';
+    },
+    icon: 'disk',
+    get hint() {
+      return android() ? 'A file on this device, edited where it is: not synced.' : 'A file on this computer, edited where it is: not synced.';
+    },
+  },
   remote: { label: 'Server', icon: 'server', hint: 'A file on a server, saved back to it: not synced.' },
 };
 

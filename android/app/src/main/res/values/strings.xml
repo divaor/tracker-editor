@@ -1,0 +1,11 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Tracker Editor</string>
+    <string name="title_activity_main">Tracker Editor</string>
+    <string name="package_name">com.divaor.trackereditor</string>
+    <string name="custom_url_scheme">com.divaor.trackereditor</string>
+    <string name="open_label">Tracker Editor</string>
+    <string name="process_text_label">Tracker Editor</string>
+    <string name="shortcut_new">New note</string>
+    <string name="shortcut_voice">Voice note</string>
+</resources>

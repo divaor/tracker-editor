@@ -12,6 +12,7 @@ import { mergeItems, mergeProjects, normalizeItem, nowIso, parseData, serializeD
 import { decodeFor, encodeFor, fetchVault, vaultState } from './vault.js';
 import { localRepo, onLocalDataChange } from './localData.js';
 import { moveData } from './moveData.js';
+import { isDesktopApp } from './platform.js';
 
 // Tracker documents larger than this are opened on demand instead of downloaded ahead.
 const MAX_DOC_BYTES = 2 * 1024 * 1024;
@@ -224,7 +225,8 @@ export function startSync() {
     if (reason === 'local' || reason === 'text' || reason === 'remote') set({});
   });
   const sinceLast = () => Date.now() - Date.parse(getSyncState().lastSyncAt ?? 0);
-  const desktop = Boolean(window.desktop);
+  // The desktop app syncs in the background too; a browser or the Android app while shown.
+  const desktop = isDesktopApp();
   interval = setInterval(
     () => {
       if (getSettings().autoSync && (desktop || document.visibilityState === 'visible')) syncNow();

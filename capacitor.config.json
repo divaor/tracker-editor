@@ -1,0 +1,14 @@
+{
+  "appId": "com.divaor.trackereditor",
+  "appName": "Tracker Editor",
+  "webDir": "app",
+  "android": {
+    "path": "android",
+    "allowMixedContent": false,
+    "captureInput": false,
+    "webContentsDebuggingEnabled": false
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}

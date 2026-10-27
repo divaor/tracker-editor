@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Long-press the app's icon: the same shortcuts as the web app's manifest. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="new"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_new">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.divaor.trackereditor"
+            android:targetClass="com.divaor.trackereditor.MainActivity"
+            android:data="tracker-editor://new" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="voice"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_voice">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.divaor.trackereditor"
+            android:targetClass="com.divaor.trackereditor.MainActivity"
+            android:data="tracker-editor://voice" />
+    </shortcut>
+</shortcuts>

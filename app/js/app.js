@@ -12,8 +12,8 @@ import { FORMATTABLE, formatText, formatterFor, guessFormatter } from './formatt
 import { getReaderState, onReaderState, setReaderHighlighter, startReading, stopReading, toggleReading } from './reader.js';
 import { getSettings, isLocal, isSyncConfigured, onSettings, resolvedTheme, saveSettings } from './settings.js';
 import { diskKey, fileKey, flush, parseKey, repoKey, store } from './store.js';
-import { diskAvailable, openDiskFiles, recheckServerTabs, reloadDiskTab, saveDiskTab, unwatchDisk, watchDiskTabs } from './diskTabs.js';
-import { isRemotePath, kindOfKey, remoteAddress, remoteParts, remoteRoot, toRemoteUri } from './where.js';
+import { diskAvailable, diskReadOnly, openDiskFiles, recheckServerTabs, reloadDiskTab, saveDiskTab, unwatchDisk, watchDiskTabs } from './diskTabs.js';
+import { isContentPath, isRemotePath, kindOfKey, remoteAddress, remoteParts, remoteRoot, toRemoteUri } from './where.js';
 import { onServers, server, watchServers } from './servers.js';
 import { HostKeyDialog, PromptDialog, ServerDialog, SshImportDialog } from './ui/servers.js';
 import { activeTerminal, focusTerminal, openTerminal, retheme, runInTerminal, setActiveTerminal, setRefHandler, setToggleHandler, terminals, terminalsAvailable, terminalText } from './terminals.js';
@@ -86,6 +86,7 @@ import { FolderGroupDialog } from './ui/tabViews.js';
 import { SideBySideDialog } from './ui/sideBySide.js';
 import { activeFor, folderGroupOf, loadRoots, rememberFolders, sectionFolders, tabViewState } from './tabViews.js';
 import { stepView, suggestedProject, viewKey } from './tabGroups.js';
+import { isDesktopApp } from './platform.js';
 
 const isNarrow = () => matchMedia('(max-width: 860px)').matches;
 
@@ -448,7 +449,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         const now = activeInfo();
         if (!now) return;
         const disk = now.kind === 'disk' ? store.diskTab(now.path) : null;
-        if (disk?.follow || disk?.truncated) return toast('This tab is read-only (followed, or the end of a large file).');
+        if (diskReadOnly(disk)) return toast(disk.readOnly ? 'This file is read-only here: the app it came from does not let it be saved.' : 'This tab is read-only (followed, or the end of a large file).');
         if (now.kind === 'file' && store.isSealed(now.id)) return;
         const sel = hostRef.current?.selectionInfo();
         const part = sel && sel.key === now.key && sel.from !== sel.to ? sel : null;
@@ -668,7 +669,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         if (!tab) return;
         if (on && tab.dirty) return toast('Save or reload the file first: following shows the file as it is on disk.');
         store.diskPatch(path, { follow: on });
-        hostRef.current?.setReadOnly(diskKey(path), on || tab.truncated);
+        hostRef.current?.setReadOnly(diskKey(path), on || tab.truncated || tab.readOnly);
         if (on) actions.reloadDisk(path).then(() => hostRef.current?.appendText(diskKey(path), '', { follow: true }));
       },
       /** A file that changed on disk while edited here: what is on disk (left) against your edits. */
@@ -697,8 +698,16 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       },
       /** Shows a file in the file explorer; one on a server, in the folders view at its folder. */
       showOnDisk(path) {
-        if (!isRemotePath(path)) return window.desktop?.disk?.show(path);
+        if (!isRemotePath(path)) return window.desktop?.disk?.show?.(path);
         actions.showInFolders(path.slice(0, path.lastIndexOf('/')) || remoteRoot(remoteParts(path).id));
+      },
+      /** Android: a file from another app, opened with an app of the person's choice. */
+      async openWithApp(path) {
+        try {
+          await window.desktop.android.openWith(path, '');
+        } catch (err) {
+          toast(err.message, { kind: 'error' });
+        }
       },
       /** Connects to a server again (its tabs are looked at again when it is back). */
       async reconnectServer(id) {
@@ -941,8 +950,8 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         }
         if (k?.kind === 'disk') {
           const d = store.diskTab(k.path);
-          // A file on a server goes as a copy (other apps cannot reach it there).
-          return d && { name: d.name, text: d.text, path: d.missing || isRemotePath(d.path) ? '' : d.path, dirty: d.dirty };
+          // A file on a server, or from another Android app, goes as a copy (its address is no path others can use).
+          return d && { name: d.name, text: d.text, path: d.missing || isRemotePath(d.path) || isContentPath(d.path) ? '' : d.path, dirty: d.dirty };
         }
         const t = k && store.repoTab(k.path);
         return t && { name: t.name, text: t.text };
@@ -1749,7 +1758,7 @@ export function App() {
       language: activeFile?.language ?? '',
     });
     // A followed file, or the tail of a huge one, is read-only.
-    if (activeDisk) host.setReadOnly(activeKey, Boolean(activeDisk.follow || activeDisk.truncated));
+    if (activeDisk) host.setReadOnly(activeKey, diskReadOnly(activeDisk));
     setBig(host.isBig(activeKey));
     // Code on this computer gets its language server (started when needed).
     if (activeDisk && !isRemotePath(activeDisk.path) && getSettings().languageServers !== false && !host.isBig(activeKey)) lspRef.current?.attach(activeKey, activeDisk.path);
@@ -2361,7 +2370,7 @@ export function App() {
     // Into the open tab when it can be edited, else a new note.
     const k = parseKey(store.session.active);
     const disk = k?.kind === 'disk' ? store.diskTab(k.path) : null;
-    const editable = k && view === 'editor' && !(k.kind === 'file' && store.isSealed(k.id)) && !(disk && (disk.follow || disk.truncated));
+    const editable = k && view === 'editor' && !(k.kind === 'file' && store.isSealed(k.id)) && !diskReadOnly(disk);
     setDictating(editable ? store.session.active : fileKey(actions.newFile({ focus: false })));
   };
   actions.voiceNote = () => setDictating(fileKey(actions.newFile({ focus: false })));
@@ -2594,7 +2603,7 @@ export function App() {
       name: sideFile?.name ?? sideRepo.name,
       language: sideFile?.language ?? '',
     });
-    if (sideParsed.kind === 'disk') host.setReadOnly(sideKey, Boolean(sideRepo.follow || sideRepo.truncated));
+    if (sideParsed.kind === 'disk') host.setReadOnly(sideKey, diskReadOnly(sideRepo));
   }, [sideKey, showSide, activeKey]);
 
   // Notes captured while the window was closed or loading.
@@ -2710,6 +2719,8 @@ export function App() {
     takeInbox();
     const onHash = () => location.hash === '#/inbox' && takeInbox();
     window.addEventListener('hashchange', onHash);
+    // The Android app: shared while it runs.
+    const offShared = window.desktop?.shared?.onShared?.(takeInbox);
     onLaunchFiles((files) => actions.importFiles(files));
     // Desktop: files and folders opened with the app ("Open with", "Edit with Tracker Editor",
     // the command line): files as tabs on disk, folders in the folders view.
@@ -2724,6 +2735,7 @@ export function App() {
     return () => {
       window.removeEventListener('hashchange', onHash);
       offLaunched?.();
+      offShared?.();
     };
   }, []);
 
@@ -2912,7 +2924,7 @@ export function App() {
       } else if (e.ctrlKey && e.key === '`') {
         e.preventDefault();
         actions.toggleTerminal();
-      } else if (e.key === 'F5' && !mod && !e.altKey && !e.shiftKey && window.desktop) {
+      } else if (e.key === 'F5' && !mod && !e.altKey && !e.shiftKey && isDesktopApp()) {
         e.preventDefault();
         actions.runFile();
       } else if (mod && e.key === '\\') {
@@ -3070,6 +3082,33 @@ export function App() {
   const docs = store.docs();
   const scopedDocs = docs.filter((d) => matchesScope(d, settings.projectScope, projectsByKey));
   const narrow = isNarrow();
+
+  // Android's Back: what is open on top closes first; with nothing open, the app goes to the
+  // background (as Home). Escape closes most things (menus, dialogs, the find bar); the rest here.
+  const backState = useRef({});
+  backState.current = { view, dialog, panel, assist, compare, previewFull, sidebar, terminalShown, lineMenu };
+  useEffect(
+    () =>
+      window.desktop?.android?.onBack(() => {
+        const focus = document.activeElement && document.activeElement !== document.body ? document.activeElement : document;
+        const esc = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+        focus.dispatchEvent(esc);
+        if (esc.defaultPrevented) return true;
+        const s = backState.current;
+        if (s.lineMenu) setLineMenu(null);
+        else if (s.dialog) setDialog(null);
+        else if (s.assist) setAssist(false);
+        else if (s.compare) setCompare(null);
+        else if (s.panel) setPanel(null);
+        else if (s.view !== 'editor') setView('editor');
+        else if (s.previewFull) setPreviewFull(false);
+        else if (s.terminalShown) setTerminalShown(false);
+        else if (s.sidebar && isNarrow()) setSidebar(false);
+        else return false;
+        return true;
+      }),
+    [],
+  );
 
   // The editor view stays mounted (CodeMirror lives in it) and is only hidden while Settings is open.
   // The handle between the text and the preview or side view: the editor's share of the width.

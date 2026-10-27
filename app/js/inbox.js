@@ -1,15 +1,16 @@
 // Text and files shared to the editor from other apps. Android's Share menu
 // posts them to the service worker (share_target in the manifest), which keeps
 // them in a cache until the app takes them; desktop Chrome and Edge hand over
-// files opened with the installed app through the launch queue.
+// files opened with the installed app through the launch queue. In the Android
+// app, its native side hands them over (androidApp.js `shared`).
 export const INBOX = 'editor-inbox';
 
 let taking = Promise.resolve([]);
 
 async function takeOnce() {
-  if (typeof caches === 'undefined') return [];
+  const shared = (await globalThis.window?.desktop?.shared?.take?.().catch(() => [])) ?? [];
+  if (typeof caches === 'undefined') return shared;
   const inbox = await caches.open(INBOX);
-  const shared = [];
   for (const request of await inbox.keys()) {
     if (!request.url.endsWith('.json')) continue;
     const meta = await (await inbox.match(request)).json();

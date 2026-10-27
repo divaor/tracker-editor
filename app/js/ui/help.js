@@ -4,6 +4,7 @@ import { findCommands, groupsOf, keysFor } from '../commands.js';
 import { renderMarkdown } from '../markdown.js';
 import { ClearButton, Modal, Segmented } from './components.js';
 import { Icon } from './icons.js';
+import { isDesktopApp } from '../platform.js';
 
 const TABS = [
   { id: 'commands', label: 'Commands and shortcuts' },
@@ -21,7 +22,7 @@ export const Keys = ({ keys }) =>
 /** The cheat sheet: every command and its keys, searchable; a click runs the command. */
 function CommandsTab({ query, setQuery, onRun }) {
   const mac = isMac();
-  const desktop = Boolean(window.desktop);
+  const desktop = isDesktopApp();
   const input = useRef(null);
   const list = useRef(null);
   useEffect(() => input.current?.focus(), []);

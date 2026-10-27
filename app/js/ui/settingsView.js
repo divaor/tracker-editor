@@ -24,6 +24,7 @@ import { Icon } from './icons.js';
 import { KINDS } from '../where.js';
 import { COLOR_MODES } from './tabViews.js';
 import { looksLikeVisionModel } from '../ocr.js';
+import { isAndroidApp, isDesktopApp } from '../platform.js';
 
 const SYNC_FIELDS = ['owner', 'repo', 'branch', 'trackerPath', 'device'];
 const pick = (obj, keys) => Object.fromEntries(keys.map((k) => [k, obj[k] ?? '']));
@@ -229,7 +230,7 @@ function EditorCard({ settings }) {
         onChange=${(v) => saveSettings({ autoName: v })} />
       <${Check} checked=${settings.autoFile} label="File new notes under a project, with tags" hint="By the model, from your projects and the tags you use. Undo is in the message."
         onChange=${(v) => saveSettings({ autoFile: v })} />
-      ${window.desktop &&
+      ${isDesktopApp() &&
       html`<${Field} label="Run commands (F5)" wide hint=${`One "type: command" per line, to change or add to the built-in ones (${Object.keys(RUN_COMMANDS).filter((e) => RUN_COMMANDS[e]).slice(0, 8).join(', ')}…). {file} is the file, {dir} its folder, {name} its name; an empty command turns a type off.`}>
         <textarea class="run-commands" rows="3" spellcheck=${false} value=${settings.runCommands ?? ''} placeholder=${'py: uv run {file}\nts: bun {file}'} onInput=${(e) => saveSettings({ runCommands: e.currentTarget.value })} />
       </${Field}>`}
@@ -523,8 +524,8 @@ function AsyncModelForm({ settings, actions }) {
     saveSettings({ llm: { enabled: true, provider: 'async', profile: profileText, chatModel: model || 'default', embedModel: '', webhook: hook } });
     actions.toast('Model service saved. Open it with the ✦ button or Ctrl+Shift+A.');
   };
-  return html`<p class="muted">For a model service that answers later: a request gives back a task id, and the answer comes from a status address, or by webhook to this computer. You describe the service in a connection profile; the API key is stored ${window.desktop ? 'in this computer’s keychain' : 'in this browser'}, not in the profile.</p>
-    ${!window.desktop && html`<p class="notice"><${Icon} name="alert" size=${15} />In a browser the service must allow requests from this page (CORS), and webhooks are not available. The desktop app needs neither.</p>`}
+  return html`<p class="muted">For a model service that answers later: a request gives back a task id, and the answer comes from a status address, or by webhook to this computer. You describe the service in a connection profile; the API key is stored ${isDesktopApp() ? 'in this computer’s keychain' : isAndroidApp() ? 'on this device, encrypted' : 'in this browser'}, not in the profile.</p>
+    ${!isDesktopApp() && html`<p class="notice"><${Icon} name="alert" size=${15} />In a browser (and the Android app) the service must allow requests from this page (CORS), and webhooks are not available. The desktop app needs neither.</p>`}
     <div class="field-grid">
       <label class="field span-2"><span>Connection profile (JSON)</span>
         <textarea class="profile-input" rows="14" spellcheck=${false} value=${profileText} onInput=${(e) => setProfileText(e.currentTarget.value)} placeholder="{ &quot;submit&quot;: { … }, &quot;status&quot;: { … } }" />
@@ -624,7 +625,7 @@ function OpenAiModelForm({ settings, actions }) {
   };
   return html`
     <p class="muted">Summarize files, ask questions about them and find things by meaning with a model running on this computer. Nothing leaves your machine. Works with <a href="https://ollama.com" target="_blank" rel="noopener">Ollama</a>, <a href="https://lmstudio.ai" target="_blank" rel="noopener">LM Studio</a> and other servers with an OpenAI-compatible API.</p>
-    ${!window.desktop && html`<p class="notice"><${Icon} name="alert" size=${15} />In a browser this only reaches the model if the page runs on the same computer and the server allows it. The desktop app needs no extra setup.</p>`}
+    ${!isDesktopApp() && html`<p class="notice"><${Icon} name="alert" size=${15} />In a browser (and the Android app) this only reaches the model if the page runs on the same computer and the server allows it. The desktop app needs no extra setup.</p>`}
     <div class="field-grid">
       <div class="field span-2"><span>Server</span>
         <div class="input-row">
@@ -649,7 +650,7 @@ function OpenAiModelForm({ settings, actions }) {
         <li>Install Ollama from ollama.com and start it.</li>
         <li>In a terminal: <code>ollama pull llama3.2</code> (chat) and <code>ollama pull nomic-embed-text</code> (finding by meaning).</li>
         <li>Press <strong>Ollama</strong>, then <strong>Test and list models</strong>, pick the models and press <strong>Save and turn on</strong>.</li>
-        ${!window.desktop &&
+        ${!isDesktopApp() &&
         html`<li>In the browser, Ollama must also allow this site: set the environment variable <code>OLLAMA_ORIGINS=${location.origin}</code> and restart it (LM Studio: turn on CORS in its server settings). The desktop app needs none of this.</li>`}
       </ol>
     </details>`;

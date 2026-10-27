@@ -516,7 +516,8 @@ export const store = {
     const existing = diskTabs.get(info.path);
     if (!existing?.dirty) {
       const { path, name, text, eol, bom, encoding, mtimeMs, size, truncated } = info;
-      diskTabs.set(path, { path, name, text, eol, bom, encoding, mtimeMs, size, truncated, dirty: false, follow: existing?.follow ?? false, conflict: false, missing: false });
+      // `readOnly`: the app that gave the file (Android) does not let it be saved.
+      diskTabs.set(path, { path, name, text, eol, bom, encoding, mtimeMs, size, truncated, readOnly: Boolean(info.readOnly), dirty: false, follow: existing?.follow ?? false, conflict: false, missing: false });
     }
     persist.disk(0);
     store.open(diskKey(info.path));
@@ -544,7 +545,7 @@ export const store = {
     const tab = diskTabs.get(path);
     if (!tab) return;
     const { text, eol, bom, encoding, mtimeMs, size, truncated } = info;
-    diskTabs.set(path, { ...tab, text, eol, bom, encoding, mtimeMs, size, truncated, dirty: false, conflict: false, missing: false, stale: false });
+    diskTabs.set(path, { ...tab, text, eol, bom, encoding, mtimeMs, size, truncated, readOnly: Boolean(info.readOnly), dirty: false, conflict: false, missing: false, stale: false });
     persist.disk();
     emit('disk', { path });
   },
