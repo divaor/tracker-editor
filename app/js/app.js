@@ -86,7 +86,7 @@ import { FolderGroupDialog } from './ui/tabViews.js';
 import { SideBySideDialog } from './ui/sideBySide.js';
 import { activeFor, folderGroupOf, loadRoots, rememberFolders, sectionFolders, tabViewState } from './tabViews.js';
 import { stepView, suggestedProject, viewKey } from './tabGroups.js';
-import { isDesktopApp } from './platform.js';
+import { isAndroidApp, isDesktopApp } from './platform.js';
 
 const isNarrow = () => matchMedia('(max-width: 860px)').matches;
 
@@ -3275,7 +3275,7 @@ function Welcome({ actions, hasFiles, configured, desktop }) {
   return html`<div class="welcome">
     <div class="welcome-card">
       <h1>No file open</h1>
-      <p class="muted">${isLocal() ? 'Every tab is saved on this computer as you type, next to your tracker.' : 'Every tab is saved on this device as you type and synced to your GitHub data repo, so you can read it on your phone and other computers.'}</p>
+      <p class="muted">${isLocal() ? (isAndroidApp() ? 'Every tab is saved on this device as you type.' : 'Every tab is saved on this computer as you type, next to your tracker.') : 'Every tab is saved on this device as you type and synced to your GitHub data repo, so you can read it on your phone and other computers.'}</p>
       <div class="welcome-actions">
         <button type="button" class="btn primary" onClick=${() => actions.newFile()}><${Icon} name="plus" size=${16} />New file</button>
         ${hasFiles && html`<button type="button" class="btn" onClick=${() => actions.openDialog({ type: 'quickOpen' })}><${Icon} name="search" size=${16} />Open a file</button>`}

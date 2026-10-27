@@ -425,6 +425,26 @@ public class TrackerNativePlugin extends Plugin {
         call.resolve();
     }
 
+    /** Lines from the page for the app's log ({ lines: [string] }): its errors and what it did. */
+    @PluginMethod
+    public void log(PluginCall call) {
+        try {
+            JSArray lines = call.getArray("lines", new JSArray());
+            for (int i = 0; i < lines.length() && i < 200; i++) {
+                String line = lines.getString(i);
+                AppLog.write("page", line.length() > 4000 ? line.substring(0, 4000) + "…" : line);
+            }
+        } catch (Exception ignored) {}
+        call.resolve();
+    }
+
+    /** Send a log: the share sheet with the log (LogActivity, as from the icon's menu). */
+    @PluginMethod
+    public void sendLog(PluginCall call) {
+        getActivity().startActivity(new Intent(getContext(), LogActivity.class));
+        call.resolve();
+    }
+
     /** { sdk, release, manufacturer, model, versionName, versionCode }. */
     @PluginMethod
     public void info(PluginCall call) {

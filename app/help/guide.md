@@ -2,7 +2,7 @@
 
 Tracker Editor is a Notepad++-style editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs. Everything is saved the moment you paste or type, on this computer with the tracker, or, once you turn on sync, in the same private GitHub data repo as the tracker, so your files are on your computers and your phone.
 
-Version 0.24.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.24.0 · Web app: https://divaor.github.io/tracker-editor/
+Version 0.24.1 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.24.1 · Web app: https://divaor.github.io/tracker-editor/
 
 ---
 
@@ -14,9 +14,9 @@ Download from **https://github.com/divaor/tracker-editor/releases/latest**:
 
 | System | File |
 | --- | --- |
-| Windows | `Tracker Editor Setup 0.24.0.exe` (installer) or `Tracker Editor-0.24.0-portable.exe` (no install, no admin rights) |
-| macOS | `Tracker Editor-0.24.0-arm64.dmg` |
-| Linux | `Tracker Editor-0.24.0.AppImage` |
+| Windows | `Tracker Editor Setup 0.24.1.exe` (installer) or `Tracker Editor-0.24.1-portable.exe` (no install, no admin rights) |
+| macOS | `Tracker Editor-0.24.1-arm64.dmg` |
+| Linux | `Tracker Editor-0.24.1.AppImage` |
 
 The builds are not code-signed, so the first launch warns you. On Windows, choose *More info → Run anyway*. On macOS, right-click the app → *Open*. Installing the desktop app also registers `tracker-editor://` links, so the tracker's **Open in editor** opens files straight in it.
 
@@ -27,7 +27,7 @@ The builds are not code-signed, so the first launch warns you. On Windows, choos
 The editor as an Android app, with what a web page cannot do: **Open with** from other apps, **Folders** on the phone, **servers** and **terminals**. For Android 7 and later on 64-bit phones (nearly all from the last ten years).
 
 1. Install **Obtainium** (from https://github.com/ImranR98/Obtainium/releases or F-Droid). It installs apps from their GitHub releases and keeps them up to date.
-2. In Obtainium: **Add app**, paste `https://github.com/divaor/tracker-editor`, **Add**, then **Install** (`Tracker-Editor-0.24.0.apk`). The first time, Android asks to let Obtainium install apps: allow it.
+2. In Obtainium: **Add app**, paste `https://github.com/divaor/tracker-editor`, **Add**, then **Install** (`Tracker-Editor-0.24.1.apk`). The first time, Android asks to let Obtainium install apps: allow it.
 3. Obtainium tells you when there is a new version and installs it over the old one; your files and settings stay. (Or download the `.apk` from the releases page and open it; then updates are by hand.)
 
 What the app adds:
@@ -38,6 +38,7 @@ What the app adds:
 - **A terminal on the phone**: the status bar's **Terminal** opens Android's own shell in the open file's folder, with its basic commands (`ls`, `cat`, `grep`, `cp`, `mv`…). With an SSH server set up, **+** in the panel opens a terminal there.
 - **A model on your computer** (Ollama, LM Studio) answers the phone over your network, without CORS settings: see [Option A](#option-a-a-model-on-this-computer-ollama-lm-studio).
 - **Back** closes what is open (a dialog, a panel, the sidebar), then leaves the app.
+- **Something not working?** Long-press the app's icon → **Send a log** (it works even when the app is stuck), or **Settings** → **Send a log** at the bottom. It opens the share sheet with a text file: send it by email, WhatsApp, Drive… It says what the app did and what Android recorded about its crashes and freezes; it has file paths and server names, never passwords or the text of your files.
 
 The app keeps its own data, apart from the web app in the phone's browser: to have your files in it, sync with GitHub there too (**Settings → Where your data is**).
 
@@ -642,6 +643,8 @@ Turn them on in **Settings → Desktop**.
 - **Android says "already installed" but doesn't open**: remove it from the home screen and install again from the web address.
 - **Obtainium says the app cannot be updated ("signatures do not match")**: an APK built elsewhere (or a test build) is installed. Uninstall Tracker Editor and install it again from Obtainium (sync with GitHub first, or your files on the phone go with it).
 - **Android app: Open a folder does nothing**: it needs **All files access**. Allow it in Android's settings (Apps → Tracker Editor → Permissions, or the screen it opened), come back and tap **Open a folder…** again.
+- **Android app: nothing responds, or it closes by itself**: long-press its icon → **Send a log** and send it to whoever helps you with it.
+- **Android app: "The app's file access did not start"**: Folders, servers and terminals need it; the rest of the editor works without it. **Send a log** (the message's reason is in it too).
 - **Android app: "The app's access to files and servers stopped"**: Android ended its file access while the app was in the background. Do it again: it starts again. Terminals on the phone and on servers end with it.
 - **Android app: a file opened with Tracker Editor is Read-only**: the app that gave it allows reading only (Gmail attachments, many file managers' "Open with"). Save a copy with ⋯ → **Download**, or open it from Folders instead.
 - **The menu bar appears (Windows, Linux)**: it shows when `Alt` is pressed and let go on its own, as in other Windows programs; press `Alt` again to hide it. Holding `Alt` for `Alt+drag` or a shortcut does not show it.

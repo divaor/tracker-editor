@@ -869,6 +869,8 @@ export function SettingsView({ settings, sync, actions }) {
     ${dictationSupported() && html`<${DictationCard} settings=${settings} />`}
     <${EncryptionCard} actions=${actions} />
     <${DataCard} actions=${actions} />
-    <p class="muted small about">Tracker Editor ${APP_VERSION} · ${window.desktop ? `Desktop app (Electron ${window.desktop.versions?.electron ?? ''})` : 'Web app'} · <a href="https://github.com/divaor/tracker-editor" target="_blank" rel="noopener">Source</a></p>
+    <p class="muted small about">Tracker Editor ${APP_VERSION} · ${isAndroidApp() ? 'Android app' : window.desktop ? `Desktop app (Electron ${window.desktop.versions?.electron ?? ''})` : 'Web app'} · <a href="https://github.com/divaor/tracker-editor" target="_blank" rel="noopener">Source</a></p>
+    ${window.desktop?.android?.sendLog &&
+    html`<p class="muted small about">Something not working? <button type="button" class="btn link" onClick=${() => window.desktop.android.sendLog().catch((err) => actions.toast(err.message, { kind: 'error' }))}>Send a log</button> (also in the app icon's long-press menu). It has file paths and server names, never passwords or the text of your files.</p>`}
   </div>`;
 }

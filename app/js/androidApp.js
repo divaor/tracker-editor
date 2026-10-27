@@ -20,6 +20,50 @@ const call = (method, options = {}) =>
     throw new Error(err?.message ?? String(err));
   });
 
+// ---- The app's log (Send a log): the page's errors and what it did, in batches ----
+const logLines = [];
+let logTimer = null;
+/** One line for the app's log (AppLog.java). Never secrets or the text of files. */
+export function logLine(text) {
+  logLines.push(String(text));
+  if (logLines.length > 400) logLines.splice(0, logLines.length - 400);
+  if (!logTimer) logTimer = setTimeout(flushLog, 1500);
+}
+function flushLog() {
+  logTimer = null;
+  if (!logLines.length) return;
+  cap.nativePromise(PLUGIN, 'log', { lines: logLines.splice(0) }).catch(() => {});
+}
+/** A console argument as text: errors with their stack, objects as JSON (cut short). */
+export function logText(value) {
+  if (value instanceof Error) return value.stack || `${value.name}: ${value.message}`;
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value)?.slice(0, 1000) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+function watchPage() {
+  for (const level of ['error', 'warn']) {
+    const original = console[level].bind(console);
+    console[level] = (...args) => {
+      logLine(`${level}: ${args.map(logText).join(' ')}`);
+      original(...args);
+    };
+  }
+  addEventListener('error', (e) => logLine(`error: ${e.error ? logText(e.error) : `${e.message} (${e.filename}:${e.lineno})`}`));
+  addEventListener('unhandledrejection', (e) => logLine(`unhandled: ${logText(e.reason)}`));
+  addEventListener('pagehide', flushLog);
+  // The page too busy to answer touches.
+  try {
+    new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) if (entry.duration > 1500) logLine(`The page was busy for ${Math.round(entry.duration)} ms`);
+    }).observe({ type: 'longtask', buffered: true });
+  } catch {}
+  logLine(`Page started (WebView ${/Chrome\/([\d.]+)/.exec(navigator.userAgent)?.[1] ?? '?'})`);
+}
+
 /** A file the app reads as the editor opens it: { path, name, text, eol, bom, encoding, mtimeMs, size, truncated, readOnly }. */
 async function readFile(uri) {
   const info = await call('stat', { uri });
@@ -158,12 +202,18 @@ const packBytes = (value) => {
 
 function startBackend(restart = false) {
   if (!backend || restart) {
+    const t0 = performance.now();
+    logLine(restart ? 'Starting the app’s file access again' : 'Starting the app’s file access');
     backend = call('backend', { restart }).then(({ port, token }) => {
+      logLine(`File access ready (${Math.round(performance.now() - t0)} ms)`);
       const info = { base: `http://127.0.0.1:${port}`, token };
       listenTo(info);
       return info;
     });
-    backend.catch(() => (backend = null));
+    backend.catch((err) => {
+      logLine(`File access did not start: ${err.message}`);
+      backend = null;
+    });
   }
   return backend;
 }
@@ -171,6 +221,9 @@ function startBackend(restart = false) {
 function listenTo({ base, token }) {
   events?.close();
   events = new EventSource(`${base}/events?token=${encodeURIComponent(token)}`);
+  let lost = false;
+  events.onopen = () => (lost = false);
+  events.onerror = () => !lost && ((lost = true), logLine('Lost the file access events (trying again)'));
   events.onmessage = (e) => {
     let message;
     try {
@@ -197,6 +250,7 @@ export async function nodeInvoke(channel, ...args) {
     try {
       res = await fetch(`${base}/invoke`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-token': token }, body: JSON.stringify({ channel, args: packBytes(args) }) });
     } catch (err) {
+      logLine(`Could not reach the app’s file access (${channel}): ${err.message}`);
       if (attempt) throw new Error('The app’s access to files and servers stopped. Try again.');
       continue;
     }
@@ -308,6 +362,7 @@ function remoteBridge() {
 }
 
 function install() {
+  watchPage();
   const backListeners = new Set();
   cap.addListener(PLUGIN, 'back', () => {
     // The newest listener decides; nothing listening: as Home.
@@ -436,6 +491,8 @@ function install() {
         return () => backListeners.delete(handler);
       },
       minimize: () => call('minimize'),
+      // Send a log: the share sheet with the app's log (as from the icon's menu).
+      sendLog: () => (flushLog(), call('sendLog')),
       shareText: (text, title = '') => call('shareText', { text, title }),
       openWith: (uri, mime = '') => call('openWith', { uri, mime }),
       info: () => call('info'),

@@ -132,3 +132,37 @@ test('the Android app carries every page module the main process imports', async
   assert.ok(wanted.size > 3);
   assert.deepEqual([...wanted].filter((name) => !listed.includes(name)), []);
 });
+
+test('what the phone’s Node.js lacks is filled in', async () => {
+  const { Collator, strictUtf8Decoder, userInfoFallback, watchFallback } = require('../mobile/node/phone.cjs');
+  // Folders' order: numbers as numbers, case ignored with 'base'.
+  const names = ['file10.txt', 'File2.txt', 'file1.txt', 'b', 'A'];
+  assert.deepEqual([...names].sort(new Collator(undefined, { numeric: true, sensitivity: 'base' }).compare), ['A', 'b', 'file1.txt', 'File2.txt', 'file10.txt']);
+  assert.deepEqual(['b', 'a10', 'a9'].sort(new Collator().compare), ['a10', 'a9', 'b']);
+  // UTF-8 checked strictly, as the desktop does to tell UTF-8 files from Latin-1 ones.
+  class NoIcu extends TextDecoder {
+    constructor(label, options = {}) {
+      if (options.fatal) throw Object.assign(new TypeError('no ICU'), { code: 'ERR_NO_ICU' });
+      super(label, options);
+    }
+  }
+  const Strict = strictUtf8Decoder(NoIcu, (await import('node:buffer')).isUtf8);
+  assert.equal(new Strict('utf-8', { fatal: true }).decode(Buffer.from('café', 'utf8')), 'café');
+  assert.throws(() => new Strict('utf-8', { fatal: true }).decode(Buffer.from('caf\xe9', 'latin1')), TypeError);
+  assert.equal(new Strict('utf-8').decode(Buffer.from('caf\xe9', 'latin1')), 'caf�');
+  // An app's user has no passwd entry.
+  const info = userInfoFallback(() => {
+    throw new Error('uv_os_get_passwd returned ENOENT');
+  })();
+  assert.equal(typeof info.username, 'string');
+  assert.ok(info.username.length > 0);
+  // No recursive watching: the folder itself.
+  const seen = [];
+  const watch = watchFallback((file, options) => {
+    seen.push(options.recursive);
+    if (options.recursive) throw Object.assign(new TypeError('not on this platform'), { code: 'ERR_FEATURE_UNAVAILABLE_ON_PLATFORM' });
+    return 'watcher';
+  });
+  assert.equal(watch('/x', { recursive: true }), 'watcher');
+  assert.deepEqual(seen, [true, false]);
+});

@@ -8,4 +8,6 @@
     <string name="process_text_label">Tracker Editor</string>
     <string name="shortcut_new">New note</string>
     <string name="shortcut_voice">Voice note</string>
+    <string name="shortcut_log">Send a log</string>
+    <string name="shortcut_log_long">Send a log (when something goes wrong)</string>
 </resources>

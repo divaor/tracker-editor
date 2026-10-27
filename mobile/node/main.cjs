@@ -10,10 +10,14 @@
 const fs = require('node:fs');
 const Module = require('node:module');
 const path = require('node:path');
+const { fillIn } = require('./phone.cjs');
 const { createBridge } = require('./bridge.cjs');
 
+// Its output goes to node.log ("Send a log"): never the configuration, which holds the tokens.
+const filled = fillIn();
 const config = JSON.parse(process.argv[2] ?? '{}');
 const here = config.projectDir ?? path.join(__dirname, '..');
+console.log(`Node.js ${process.version} (${process.arch}), app ${config.version ?? '?'}${filled.length ? `; filled in: ${filled.join(', ')}` : ''}`);
 
 // Where things go: the app's own folders (temporary files, settings), not the phone's root.
 if (config.paths?.temp) process.env.TMPDIR = config.paths.temp;
@@ -40,12 +44,26 @@ Object.assign(event, require(shimPath).pageEvent);
 process.on('uncaughtException', (err) => console.error('Uncaught', err));
 process.on('unhandledRejection', (err) => console.error('Unhandled', err));
 
-require(path.join(here, 'electron', 'main.cjs'));
-require('./android.cjs')(bridge, config);
+// When the main process cannot load, Node ends at once with the reason in the log (the app
+// says it could not start), rather than staying without a port.
+try {
+  require(path.join(here, 'electron', 'main.cjs'));
+  require('./android.cjs')(bridge, config);
+} catch (err) {
+  console.error('The main process could not load:', err?.stack ?? err);
+  process.exit(1);
+}
 
-bridge.listen(config.port ?? 0).then((port) => {
-  if (!config.portFile) return console.log(`listening on ${port}`);
-  const tmp = `${config.portFile}.tmp`;
-  fs.writeFileSync(tmp, String(port));
-  fs.renameSync(tmp, config.portFile);
-});
+bridge.listen(config.port ?? 0).then(
+  (port) => {
+    console.log(`Listening on 127.0.0.1:${port}`);
+    if (!config.portFile) return;
+    const tmp = `${config.portFile}.tmp`;
+    fs.writeFileSync(tmp, String(port));
+    fs.renameSync(tmp, config.portFile);
+  },
+  (err) => {
+    console.error('Could not listen:', err);
+    process.exit(1);
+  },
+);
