@@ -2,7 +2,7 @@
 
 Tracker Editor is a Notepad++-style editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs. Everything is saved the moment you paste or type, on this computer with the tracker, or, once you turn on sync, in the same private GitHub data repo as the tracker, so your files are on your computers and your phone.
 
-Version 0.22.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.22.0 · Web app: https://divaor.github.io/tracker-editor/
+Version 0.22.1 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.22.1 · Web app: https://divaor.github.io/tracker-editor/
 
 ---
 
@@ -14,9 +14,9 @@ Download from **https://github.com/divaor/tracker-editor/releases/latest**:
 
 | System | File |
 | --- | --- |
-| Windows | `Tracker Editor Setup 0.22.0.exe` (installer) or `Tracker Editor-0.22.0-portable.exe` (no install, no admin rights) |
-| macOS | `Tracker Editor-0.22.0-arm64.dmg` |
-| Linux | `Tracker Editor-0.22.0.AppImage` |
+| Windows | `Tracker Editor Setup 0.22.1.exe` (installer) or `Tracker Editor-0.22.1-portable.exe` (no install, no admin rights) |
+| macOS | `Tracker Editor-0.22.1-arm64.dmg` |
+| Linux | `Tracker Editor-0.22.1.AppImage` |
 
 The builds are not code-signed, so the first launch warns you. On Windows, choose *More info → Run anyway*. On macOS, right-click the app → *Open*. Installing the desktop app also registers `tracker-editor://` links, so the tracker's **Open in editor** opens files straight in it.
 
@@ -79,7 +79,7 @@ On an iPhone, apps added to the home screen each keep their own storage: the edi
 
 ### Your layout
 
-- **Text size**: smaller to fit more on a small screen, larger to read easily. On a phone, **pinch** the text with two fingers (the page itself stays as it is). On a computer, `Ctrl+=` / `Ctrl+-` (Mac `Cmd`), or `Ctrl` and the mouse wheel over the text; `Ctrl+0` goes back to the usual 14 px. Or tap **Aa** in the status bar for **A−** / **A+** and **Usual size**. Each device keeps its own size (also in **Settings → Editor → Text size**). The desktop's **View** menu has them too; zooming the whole window (menus and lists too) is there as well, without keys.
+- **Text size**: smaller to fit more on a small screen, larger to read easily. On a phone, **pinch** the text with two fingers (the page itself stays as it is). On a computer, `Ctrl+=` / `Ctrl+-` (Mac `Cmd`), or `Ctrl` and the mouse wheel over the text; `Ctrl+0` goes back to the usual 14 px. Or tap **Aa** in the status bar for **A−** / **A+** and **Usual size**. Each device keeps its own size (also in **Settings → Editor → Text size**). On a phone the line numbers take less room too (smaller numbers, problems as a thin colored bar next to them); turning off **Settings → Editor → Line numbers and folding** hides the numbers altogether. The desktop's **View** menu has them too; zooming the whole window (menus and lists too) is there as well, without keys.
 - **The sidebar's width**: drag its right edge, for example to see long names in folders. Double-click the edge to go back to the default width.
 - **Text and preview (or the side view)**: drag the line between them to give either side more room; double-click it for half and half.
 - **Clearing a filter**: the × at the end of a search or filter field empties it (`Escape` too in the sidebar's filters).

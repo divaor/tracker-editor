@@ -7535,6 +7535,59 @@ button.help-command:focus-visible {
   width: 1em;
 }
 
+/* Phones (and phones held sideways): a slim gutter, so the text gets the room. Line numbers
+   a little smaller with less padding, the fold arrows in a narrow column, problems as a thin
+   bar in their color, and less space before the text. */
+@media (max-width: 640px), (pointer: coarse) and (max-height: 500px) {
+  .editor-area .cm-lineNumbers .cm-gutterElement {
+    min-width: 0;
+    padding: 0 2px 0 3px;
+    font-size: 0.82em;
+    /* The same line height as the text beside it (1.55 of the editor's size). */
+    line-height: 1.89;
+  }
+
+  .editor-area .cm-foldGutter .cm-gutterElement {
+    padding: 0;
+    font-size: 0.85em;
+    line-height: 1.82;
+    text-align: center;
+  }
+
+  .editor-area .cm-gutter-lint {
+    width: 5px;
+  }
+
+  .editor-area .cm-gutter-lint .cm-gutterElement {
+    padding: 0;
+  }
+
+  .editor-area .cm-lint-marker {
+    width: 3px;
+    height: 100%;
+    margin-left: 1px;
+    border-radius: 2px;
+    background: var(--danger);
+    content: normal;
+  }
+
+  .editor-area .cm-lint-marker-warning {
+    background: var(--warn);
+  }
+
+  .editor-area .cm-lint-marker-info {
+    background: var(--accent);
+  }
+
+  .editor-area .cm-line {
+    padding-left: 4px;
+  }
+
+  .editor-area .cm-line.cm-indent-guides {
+    background-position: 4px 0;
+  }
+}
+
 /* ---- Indentation guides, bracket colors, sticky scroll (editor.js) ---- */
 .cm-editor {
   --guide: color-mix(in srgb, var(--text-3) 30%, transparent);
