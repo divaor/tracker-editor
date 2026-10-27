@@ -579,7 +579,7 @@ function listedTime(raw, now = new Date()) {
     if (m[6]) h = (h % 12) + (/p/i.test(m[6]) ? 12 : 0);
   } else if ((m = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2}) (\d{1,2}):(\d{2})$/.exec(text))) {
     [y, mo, d, h, mi] = [+m[1], +m[2] - 1, +m[3], +m[4], +m[5]];
-  } else if ((m = /^(\p{L}{3})\.? (\d{1,2}) (\S+)$/u.exec(text)) || (m = /^(\d{1,2}) (\p{L}{3})\.? (\S+)$/u.exec(text))) {
+  } else if ((m = /^([^\d\s.]{3})\.? (\d{1,2}) (\S+)$/u.exec(text)) || (m = /^(\d{1,2}) ([^\d\s.]{3})\.? (\S+)$/u.exec(text))) {
     const [name, day] = /^\d/.test(m[1]) ? [m[2], m[1]] : [m[1], m[2]];
     mo = MONTHS[name.toLowerCase()];
     d = +day;

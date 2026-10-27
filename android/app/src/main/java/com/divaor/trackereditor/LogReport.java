@@ -55,12 +55,14 @@ final class LogReport {
         }
         if (Build.VERSION.SDK_INT >= 30) out.append("All files access: ").append(Environment.isExternalStorageManager() ? "yes" : "no").append("\n");
         out.append("\n");
-        exits(context, out);
-        for (String name : new String[] { "app.old.log", "app.log", "node.old.log", "node.log" }) {
+        // Node's log first (its errors say why Folders, servers or terminals fail), then the
+        // app's, then Android's records with their long traces: a report cut short keeps the start.
+        for (String name : new String[] { "node.old.log", "node.log", "app.old.log", "app.log" }) {
             File f = AppLog.fileFor(context, name);
             if (!f.exists()) continue;
             out.append("== ").append(name).append(" ==\n").append(tail(f, MAX_FILE_PART)).append("\n");
         }
+        exits(context, out);
         return out.toString();
     }
 
@@ -78,7 +80,7 @@ final class LogReport {
                     .append("  ").append(reason(e.getReason()))
                     .append("  status ").append(e.getStatus())
                     .append("  importance ").append(e.getImportance());
-                if (e.getDescription() != null) out.append("  ").append(e.getDescription());
+                if (e.getDescription() != null) out.append("  ").append(cut(e.getDescription(), 300));
                 out.append("\n");
                 if (e.getReason() == ApplicationExitInfo.REASON_ANR) {
                     String trace = anrTrace(e);
@@ -102,12 +104,16 @@ final class LogReport {
             for (ApplicationExitInfo e : am.getHistoricalProcessExitReasons(context.getPackageName(), 0, 12)) {
                 if (e.getTimestamp() <= seen) continue;
                 newest = Math.max(newest, e.getTimestamp());
-                AppLog.i("exit", e.getProcessName() + " ended " + new SimpleDateFormat("HH:mm:ss", Locale.ROOT).format(new Date(e.getTimestamp())) + ": " + reason(e.getReason()) + " (status " + e.getStatus() + ")" + (e.getDescription() != null ? " " + e.getDescription() : ""));
+                AppLog.i("exit", e.getProcessName() + " ended " + new SimpleDateFormat("HH:mm:ss", Locale.ROOT).format(new Date(e.getTimestamp())) + ": " + reason(e.getReason()) + " (status " + e.getStatus() + ")" + (e.getDescription() != null ? " " + cut(e.getDescription(), 160) : ""));
             }
             prefs.edit().putLong("exitsSeen", newest).apply();
         } catch (Exception err) {
             AppLog.w("exit", "Could not read the last exits", err);
         }
+    }
+
+    private static String cut(String s, int max) {
+        return s.length() > max ? s.substring(0, max) + "…" : s;
     }
 
     private static String reason(int r) {

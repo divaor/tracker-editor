@@ -4,10 +4,25 @@
 
 const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+// Letters and digits, for a character class (word edges, names): Unicode's own classes where
+// the engine knows them (browsers, the desktop). The Android app's Node.js has no ICU, so
+// `\p{…}` is a syntax error there: the letters and digits of the main scripts stand in.
+const WORD_RANGES = 'A-Za-z0-9\\u00AA\\u00B2\\u00B3\\u00B5\\u00B9\\u00BA\\u00BC-\\u00BE\\u00C0-\\u00D6\\u00D8-\\u00F6\\u00F8-\\u02C1\\u02C6-\\u02D1\\u02E0-\\u02E4\\u0370-\\u0374\\u0376-\\u037D\\u0386\\u0388-\\u03FF\\u0400-\\u0481\\u048A-\\u052F\\u0531-\\u0556\\u0560-\\u0588\\u05D0-\\u05EA\\u05EF-\\u05F2\\u0620-\\u064A\\u0660-\\u0669\\u066E-\\u066F\\u0671-\\u06D3\\u06F0-\\u06FC\\u0904-\\u0939\\u0966-\\u096F\\u0E01-\\u0E30\\u0E50-\\u0E59\\u10A0-\\u10FF\\u1100-\\u11FF\\u1E00-\\u1FBC\\u2070-\\u2079\\u2080-\\u2089\\u2C00-\\u2CE4\\u3041-\\u3096\\u30A1-\\u30FA\\u3105-\\u312F\\u3131-\\u318E\\u3400-\\u4DBF\\u4E00-\\u9FFF\\uAC00-\\uD7A3\\uF900-\\uFAFF\\uFF10-\\uFF19\\uFF21-\\uFF3A\\uFF41-\\uFF5A\\uFF66-\\uFF9D';
+export const wordCharsFor = (unicodeProperties) => (unicodeProperties ? '\\p{L}\\p{N}' : WORD_RANGES);
+export const WORD_CHARS = wordCharsFor(
+  (() => {
+    try {
+      return new RegExp('\\p{L}', 'u').test('é');
+    } catch {
+      return false;
+    }
+  })(),
+);
+
 /** A global, multiline RegExp for the query, or throws with a readable message for a bad pattern. */
 export function buildMatcher(query, { caseSensitive = false, wholeWord = false, regex = false } = {}) {
   let source = regex ? query : escapeRegExp(query);
-  if (wholeWord) source = `(?<![\\p{L}\\p{N}_])(?:${source})(?![\\p{L}\\p{N}_])`;
+  if (wholeWord) source = `(?<![${WORD_CHARS}_])(?:${source})(?![${WORD_CHARS}_])`;
   const flags = `gm${caseSensitive ? '' : 'i'}`;
   try {
     return new RegExp(source, `${flags}u`);

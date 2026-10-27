@@ -166,3 +166,24 @@ test('what the phone’s Node.js lacks is filled in', async () => {
   assert.equal(watch('/x', { recursive: true }), 'watcher');
   assert.deepEqual(seen, [true, false]);
 });
+
+test('the phone’s Node.js (no ICU) can parse what it runs: no \\p{…}', async () => {
+  const fs = await import('node:fs');
+  const read = (p) => fs.readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
+  const modules = JSON.parse(/const PAGE_MODULES = (\[[^\]]*\])/.exec(read('scripts/android-node.js'))[1].replace(/'/g, '"'));
+  const files = [
+    ...fs.readdirSync(new URL('../electron/', import.meta.url)).filter((f) => f.endsWith('.cjs') && f !== 'preload.cjs').map((f) => `electron/${f}`),
+    ...fs.readdirSync(new URL('../mobile/node/', import.meta.url)).filter((f) => f.endsWith('.cjs')).map((f) => `mobile/node/${f}`),
+    ...modules.map((f) => `app/js/${f}`),
+  ];
+  // search.js asks the engine first (WORD_CHARS); everything else uses that.
+  const offending = files.filter((f) => f !== 'app/js/search.js' && /\\[pP]\{/.test(read(f)));
+  assert.deepEqual(offending, []);
+  const { wordCharsFor, WORD_CHARS } = await import('../app/js/search.js');
+  assert.equal(WORD_CHARS, '\\p{L}\\p{N}');
+  // The stand-in agrees with Unicode's classes on the world's main scripts.
+  const ranges = new RegExp(`[${wordCharsFor(false)}]`, 'u');
+  const unicode = new RegExp(`[${wordCharsFor(true)}]`, 'u');
+  const sample = [...'aZ09éñüßÅøœçĞİıŁżΩωЖжЯ中文日本語ひらカタ한국어αβγ١٢٣אבגعربي ¡!?.,;:-_()[]{}<>/\\|@#%&*+=~`"\'«»“”…—–€£©°±§•·\t'];
+  assert.deepEqual(sample.filter((c) => ranges.test(c) !== unicode.test(c)), []);
+});

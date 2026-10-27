@@ -201,7 +201,13 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     return isRemotePath(path) ? { label: 'Keep on this computer (mirror)…', icon: 'sync', run: () => actions.newMirror({ conn: remoteParts(path).id, remote: remoteParts(path).path }) } : null;
   };
 
-  const refreshRoots = () => bridge.roots().then(setRoots);
+  // Not reachable (the Android app's file access did not start): said, with Try again.
+  const [unreachable, setUnreachable] = useState(null);
+  const refreshRoots = () =>
+    bridge.roots().then(
+      (list) => (setRoots(list), setUnreachable(null)),
+      (err) => setUnreachable(String(err?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '')),
+    );
   useEffect(() => {
     refreshRoots();
     bridge.places().then(setPlaces, () => {});
@@ -1128,10 +1134,19 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
 
   // ---- The view ----
 
+  if (!roots && unreachable) {
+    return html`<div class="folders-empty">
+      <p class="notice error-text"><${Icon} name="alert" size=${15} />${unreachable}</p>
+      <p class="form-actions">
+        <button type="button" class="btn primary" onClick=${refreshRoots}><${Icon} name="rotate" size=${15} />Try again</button>
+        ${window.desktop?.android?.sendLog && html`<button type="button" class="btn" onClick=${() => window.desktop.android.sendLog()}>Send a log</button>`}
+      </p>
+    </div>`;
+  }
   if (!roots) return html`<div class="file-list" />`;
   if (!root) {
     return html`<div class="folders-empty">
-      <p>Browse a folder on this computer, or one on a server, and open its files here, like in a file explorer.</p>
+      <p>Browse a folder on ${hereName()}, or one on a server, and open its files here, like in a file explorer.</p>
       <p class="muted small">${isLocal() ? 'They are edited where they are. "Copy into my files" puts a copy with your notes.' : 'They are edited in place and are not synced. "Copy into my files" makes a copy that syncs.'}</p>
       <button type="button" class="btn primary" onClick=${() => pick()}><${Icon} name="folderOpen" size=${16} />Open a folder…</button>
       <div class="folder-places">

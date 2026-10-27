@@ -878,7 +878,13 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       /** Picks a folder in the system dialog and shows it (`beside`: next to the folders open in the tree). */
       async openFolder(defaultPath, { beside = false } = {}) {
         if (!window.desktop?.folders) return toast('Folders work in the desktop app.', { kind: 'error' });
-        const picked = await window.desktop.folders.pick(defaultPath);
+        let picked;
+        try {
+          picked = await window.desktop.folders.pick(defaultPath);
+        } catch (err) {
+          toast(ipcMessage(err), { kind: 'error', timeout: 12000 });
+          return null;
+        }
         if (!picked) return null;
         actions.showInFolders(picked, { beside });
         return picked;
@@ -933,7 +939,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       /** Ctrl+Shift+E: the folders view (a folder is picked first when there is none yet). */
       async showFolders() {
         if (!window.desktop?.folders) return;
-        if (!(await window.desktop.folders.roots()).length) return actions.openFolder();
+        if (!(await window.desktop.folders.roots().catch(() => [])).length) return actions.openFolder();
         saveSettings({ sidebarMode: 'folders' });
         setSidebar(true);
       },

@@ -2,9 +2,11 @@
 // cursor, where it is declared (by how declarations are written in most languages)
 // and where it is used. Pure, so the Node tests can import it.
 
-const NAME_CHAR = /[\p{L}\p{N}_$]/u;
+import { WORD_CHARS } from './search.js';
+
+const NAME_CHAR = new RegExp(`[${WORD_CHARS}_$]`, 'u');
 // In CSS, YAML, shell and the like names have dashes too: a name with one keeps them.
-const NAME_CHAR_DASH = /[\p{L}\p{N}_$-]/u;
+const NAME_CHAR_DASH = new RegExp(`[${WORD_CHARS}_$-]`, 'u');
 
 /** The name at `pos` (or just before it): { word, from, to }, or null on spaces and symbols. */
 export function wordAt(text, pos, { dashes = false } = {}) {
@@ -28,7 +30,7 @@ const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
  */
 export function occurrences(text, word, { limit = 5000 } = {}) {
   if (!word) return [];
-  const edge = word.includes('-') ? '[\\p{L}\\p{N}_$-]' : '[\\p{L}\\p{N}_$]';
+  const edge = word.includes('-') ? `[${WORD_CHARS}_$-]` : `[${WORD_CHARS}_$]`;
   const re = new RegExp(`(?<!${edge})${escapeRe(word)}(?!${edge})`, 'gu');
   const out = [];
   let line = 1;

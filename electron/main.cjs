@@ -1556,8 +1556,8 @@ const usableRoots = (dirs) =>
     }
   });
 ipcMain.handle('code:declarations', guard(async (_e, dirs, word) => {
-  if (typeof word !== 'string' || !/^[\p{L}\p{N}_$-]{1,100}$/u.test(word)) return { found: [], truncated: false };
-  const { codeNav, outline } = await loadAppModules();
+  const { codeNav, outline, search } = await loadAppModules();
+  if (typeof word !== 'string' || !new RegExp(`^[${search.WORD_CHARS}_$-]{1,100}$`, 'u').test(word)) return { found: [], truncated: false };
   const roots = usableRoots(dirs);
   return findDeclarations({
     roots,
