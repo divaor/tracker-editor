@@ -1,0 +1,6 @@
+{
+  "name": "tracker-editor-android-node",
+  "private": true,
+  "type": "commonjs",
+  "description": "The Android app's own Node.js: runs electron/main.cjs with electronShim.cjs (see main.cjs)."
+}

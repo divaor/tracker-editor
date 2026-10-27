@@ -136,9 +136,175 @@ function startWatching() {
   watchTimer = setInterval(() => document.visibilityState === 'visible' && lookAtWatched(), WATCH_EVERY);
 }
 
+// ---- The app's own Node.js: the desktop's main process for folders, servers, terminals ----
+// Started the first time something needs it; the native side gives its port and token. When
+// Android has ended it (it ends processes it does not need), the next call starts it again.
+let backend = null;
+let events = null;
+const nodeListeners = new Map(); // channel → Set of callbacks
+
+const unpackBytes = (value) => {
+  if (value === null || typeof value !== 'object') return value;
+  if (typeof value.__bytes === 'string' && Object.keys(value).length === 1) return fromBase64(value.__bytes);
+  if (Array.isArray(value)) return value.map(unpackBytes);
+  return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, unpackBytes(v)]));
+};
+const packBytes = (value) => {
+  if (value instanceof Uint8Array) return { __bytes: toBase64(value) };
+  if (Array.isArray(value)) return value.map(packBytes);
+  if (value && typeof value === 'object' && value.constructor === Object) return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, packBytes(v)]));
+  return value;
+};
+
+function startBackend(restart = false) {
+  if (!backend || restart) {
+    backend = call('backend', { restart }).then(({ port, token }) => {
+      const info = { base: `http://127.0.0.1:${port}`, token };
+      listenTo(info);
+      return info;
+    });
+    backend.catch(() => (backend = null));
+  }
+  return backend;
+}
+
+function listenTo({ base, token }) {
+  events?.close();
+  events = new EventSource(`${base}/events?token=${encodeURIComponent(token)}`);
+  events.onmessage = (e) => {
+    let message;
+    try {
+      message = JSON.parse(e.data);
+    } catch {
+      return;
+    }
+    const args = unpackBytes(message.args ?? []);
+    for (const cb of nodeListeners.get(message.channel) ?? []) {
+      try {
+        cb(...args);
+      } catch (err) {
+        console.error(message.channel, err);
+      }
+    }
+  };
+}
+
+/** A handler of the desktop's main process (ipcRenderer.invoke there). */
+export async function nodeInvoke(channel, ...args) {
+  for (let attempt = 0; ; attempt++) {
+    const { base, token } = await startBackend(attempt > 0);
+    let res;
+    try {
+      res = await fetch(`${base}/invoke`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-token': token }, body: JSON.stringify({ channel, args: packBytes(args) }) });
+    } catch (err) {
+      if (attempt) throw new Error('The app’s access to files and servers stopped. Try again.');
+      continue;
+    }
+    const body = await res.json();
+    if (!body.ok) throw new Error(body.error);
+    return unpackBytes(body.value);
+  }
+}
+
+/** A message with no answer (ipcRenderer.send there). */
+function nodeSend(channel, ...args) {
+  startBackend()
+    .then(({ base, token }) => fetch(`${base}/send`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-token': token }, body: JSON.stringify({ channel, args: packBytes(args) }) }))
+    .catch(() => {});
+}
+
+/** What the main process sends the page (webContents.send there). Listening does not start it. */
+function nodeOn(channel, callback) {
+  if (!nodeListeners.has(channel)) nodeListeners.set(channel, new Set());
+  nodeListeners.get(channel).add(callback);
+  return () => nodeListeners.get(channel)?.delete(callback);
+}
+
+// Node asks the phone (a folder or file to pick, a question with buttons, a file to open with
+// another app): the native side shows it and answers Node itself.
+nodeOn('native:ask', (ask) => call('answerAsk', ask).catch((err) => console.warn('Could not ask', err)));
+nodeOn('native:open-url', (url) => window.open(url, '_blank'));
+nodeOn('native:clipboard', (text) => navigator.clipboard?.writeText(text).catch(() => {}));
+
 function mimeOf(name) {
   const ext = /\.([^.]+)$/.exec(name ?? '')?.[1]?.toLowerCase();
   return { json: 'application/json', xml: 'application/xml', html: 'text/html', htm: 'text/html', md: 'text/markdown', csv: 'text/csv', css: 'text/css', js: 'text/javascript' }[ext] ?? 'text/plain';
+}
+
+const isContent = (path) => typeof path === 'string' && path.startsWith('content://');
+
+function foldersBridge() {
+  const inv = (channel) => (...args) => nodeInvoke(channel, ...args);
+  return {
+    pick: inv('folder:pick'),
+    roots: inv('folder:roots'),
+    allowParent: inv('folder:allow-parent'),
+    forget: inv('folder:forget'),
+    list: inv('folder:list'),
+    properties: inv('folder:properties'),
+    size: inv('folder:size'),
+    chmod: inv('folder:chmod'),
+    find: inv('folder:find'),
+    stopFind: inv('folder:find-stop'),
+    findNames: inv('folder:find-names'),
+    index: inv('folder:index'),
+    replace: inv('folder:replace'),
+    replaceUndo: inv('folder:replace-undo'),
+    onFound(cb) {
+      const a = nodeOn('folder:found', (data) => cb({ type: 'found', ...data }));
+      const b = nodeOn('folder:find-progress', (data) => cb({ type: 'progress', ...data }));
+      return () => (a(), b());
+    },
+    places: inv('folder:places'),
+    newFile: inv('folder:new-file'),
+    newFolder: inv('folder:new-folder'),
+    rename: inv('folder:rename'),
+    move: inv('folder:move'),
+    copy: inv('folder:copy'),
+    existing: inv('folder:existing'),
+    zip: inv('folder:zip'),
+    unzip: inv('folder:unzip'),
+    // Files pasted from other apps by path: not on a phone.
+    copyIn: async () => {
+      throw new Error('Files from other apps cannot be pasted here on a phone: share them to Tracker Editor instead.');
+    },
+    trash: inv('folder:trash'),
+    transfers: inv('transfer:list'),
+    stopTransfer: inv('transfer:stop'),
+    onTransfer: (cb) => nodeOn('transfer:update', cb),
+    openExternal: inv('folder:open-external'),
+    readImage: inv('folder:read-image'),
+    peekBytes: inv('folder:peek-bytes'),
+    peekText: inv('folder:peek-text'),
+    watch: inv('folder:watch'),
+    onChanged: (cb) => nodeOn('folder:changed', cb),
+    // The Paste button: what was copied or cut in the folders view (a paste event, as on the desktop).
+    paste: async () => {
+      document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: new DataTransfer(), bubbles: true }));
+    },
+  };
+}
+
+function remoteBridge() {
+  const inv = (channel) => (...args) => nodeInvoke(channel, ...args);
+  return {
+    connections: inv('remote:connections'),
+    save: inv('remote:save'),
+    delete: inv('remote:delete'),
+    test: inv('remote:test'),
+    connect: inv('remote:connect'),
+    disconnect: inv('remote:disconnect'),
+    forgetHostKey: inv('remote:forget-host-key'),
+    pickKey: inv('remote:pick-key'),
+    sshConfig: inv('remote:ssh-config'),
+    importSsh: inv('remote:import-ssh'),
+    answerHostKey: inv('remote:host-key-answer'),
+    answerPrompt: inv('remote:prompt-answer'),
+    onPrompt: (cb) => nodeOn('remote:prompt', cb),
+    onPromptGone: (cb) => nodeOn('remote:prompt-gone', cb),
+    onStatus: (cb) => nodeOn('remote:status', cb),
+    onHostKey: (cb) => nodeOn('remote:host-key', cb),
+  };
 }
 
 function install() {
@@ -156,6 +322,13 @@ function install() {
     secrets: {
       get: (key) => call('secretGet', { key }).then((r) => r.value ?? ''),
       set: (key, value) => call('secretSet', { key, value: value || null }),
+    },
+    // Model and speech servers: asked by Node, as by the desktop's main process, so a server
+    // on this network needs no CORS settings.
+    llm: {
+      request: (id, url, init) => nodeInvoke('llm:request', id, url, init),
+      abort: (id) => nodeSend('llm:abort', id),
+      onChunk: (id, callback) => nodeOn('llm:chunk', (chunkId, chunk, done, error) => chunkId === id && callback(chunk, done, error)),
     },
     // Import files (copies that sync): the system's picker.
     async openFiles() {
@@ -189,11 +362,14 @@ function install() {
         }
         return out;
       },
-      read: (path) => readFile(path),
-      editorConfig: async () => null,
-      readAppended: (path, offset, opts) => readAppended(path, offset, opts),
-      write: (path, text, opts) => writeFile(path, text, opts),
+      // Files from other apps (content://) through the native side; files in the folders
+      // view and on servers through Node, as on the desktop.
+      read: (path) => (isContent(path) ? readFile(path) : nodeInvoke('disk:read', path)),
+      editorConfig: (path) => (isContent(path) ? Promise.resolve(null) : nodeInvoke('disk:editorconfig', path)),
+      readAppended: (path, offset, opts) => (isContent(path) ? readAppended(path, offset, opts) : nodeInvoke('disk:read-appended', path, offset, opts)),
+      write: (path, text, opts) => (isContent(path) ? writeFile(path, text, opts) : nodeInvoke('disk:write', path, text, opts)),
       async stat(path) {
+        if (!isContent(path)) return nodeInvoke('disk:stat', path);
         try {
           const info = await call('stat', { uri: path });
           return { mtimeMs: info.mtimeMs, size: info.size };
@@ -202,6 +378,7 @@ function install() {
         }
       },
       async watch(path, on = true) {
+        if (!isContent(path)) return nodeInvoke('disk:watch', path, on);
         if (!on) return void watched.delete(path);
         if (watched.has(path)) return;
         // What it is like now (just read): later looks compare with it.
@@ -211,13 +388,41 @@ function install() {
         if (watched.get(path) === undefined) watched.set(path, now ? { mtimeMs: now.mtimeMs, size: now.size } : null);
       },
       pathOf: () => '',
+      // A path typed or pasted: opened once the person confirms it in a native dialog.
+      openTyped: (path) => nodeInvoke('disk:open-typed', path),
       onChanged(callback) {
         changeListeners.add(callback);
-        return () => changeListeners.delete(callback);
+        const off = nodeOn('disk:changed', callback);
+        return () => (changeListeners.delete(callback), off());
       },
       // Open with / Edit with: [{ path }] to open as tabs.
       takeLaunched: async () => take('launched'),
       onLaunched: (callback) => subscribe('launched', callback),
+    },
+    // The folders view: folders on the phone's storage and on servers (as on the desktop).
+    folders: foldersBridge(),
+    remote: remoteBridge(),
+    mirrors: {
+      list: () => nodeInvoke('mirror:list'),
+      pickLocal: (suggested) => nodeInvoke('mirror:pick-local', suggested),
+      save: (mirror) => nodeInvoke('mirror:save', mirror),
+      delete: (id) => nodeInvoke('mirror:delete', id),
+      sync: (id, opts) => nodeInvoke('mirror:sync', id, opts),
+      onStatus: (cb) => nodeOn('mirror:status', cb),
+    },
+    // Terminals: on servers over SSH, and a shell on the phone.
+    terminal: {
+      open: (connId, opts) => nodeInvoke('term:open', connId, opts),
+      input: (id, data) => nodeSend('term:input', id, data),
+      resize: (id, cols, rows) => nodeInvoke('term:resize', id, cols, rows),
+      close: (id) => nodeInvoke('term:close', id),
+      ownKeys: async () => {},
+      onData: (cb) => nodeOn('term:data', cb),
+      onExit: (cb) => nodeOn('term:exit', cb),
+    },
+    code: {
+      declarations: (dirs, word) => nodeInvoke('code:declarations', dirs, word),
+      symbols: (dirs, query) => nodeInvoke('code:symbols', dirs, query),
     },
     // Share → Tracker Editor, and text selected in another app: [{ title, text, url, files }].
     shared: {
@@ -234,6 +439,9 @@ function install() {
       shareText: (text, title = '') => call('shareText', { text, title }),
       openWith: (uri, mime = '') => call('openWith', { uri, mime }),
       info: () => call('info'),
+      node: () => nodeInvoke('app:info'),
+      storageAccess: () => call('storageAccess'),
+      requestStorageAccess: () => call('requestStorageAccess'),
       // The status and navigation bars' icons follow the page's theme.
       barStyle: (dark) => cap.nativePromise('SystemBars', 'setStyle', { style: dark ? 'DARK' : 'LIGHT' }).catch(() => {}),
     },

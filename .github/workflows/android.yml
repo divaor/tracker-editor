@@ -11,6 +11,7 @@ on:
       - 'capacitor.config.json'
       - 'package-lock.json'
       - 'mobile/**'
+      - 'scripts/android-node.js'
       - '.github/workflows/android.yml'
   workflow_dispatch:
 
@@ -30,6 +31,12 @@ jobs:
           cache: gradle
       - run: npm ci
       - run: npx cap sync android
+      # The app's own Node.js (nodejs-mobile, about 100 MB to fetch): kept between runs.
+      - uses: actions/cache@v4
+        with:
+          path: android/app/libnode
+          key: libnode-${{ hashFiles('scripts/android-node.js') }}
+      - run: npm run android:node
       - run: ./gradlew assembleDebug --no-daemon --stacktrace
         working-directory: android
       - uses: actions/upload-artifact@v7

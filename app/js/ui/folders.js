@@ -6,6 +6,7 @@ import { getSettings, isLocal, saveSettings } from '../settings.js';
 import { diskKey } from '../store.js';
 import { server, servers, serverStatus } from '../servers.js';
 import { isRemotePath, protocolName, remoteParts, remoteRoot } from '../where.js';
+import { isAndroidApp } from '../platform.js';
 import { ClearButton, dismissToast, Modal, toast } from './components.js';
 import { mirrorOf } from '../mirrors.js';
 import { MirrorBar } from './mirrors.js';
@@ -57,14 +58,15 @@ let clip = null;
 function DeleteDialog({ entries, onConfirm, onClose }) {
   const names = entries.slice(0, 6).map((e) => e.name);
   const what = entries.length === 1 ? html`<strong>${entries[0].name}</strong>` : count(entries.length, 'item');
-  // Servers have no Recycle Bin: deleting there is for good.
+  // Servers have no Recycle Bin, nor has a phone: deleting there is for good.
   const onServer = isRemotePath(entries[0]?.path) && server(remoteParts(entries[0].path).id);
+  const forGood = onServer || isAndroidApp();
   return html`<${Modal} title="Delete" onClose=${onClose}
     footer=${html`<span class="spacer" /><button type="button" class="btn" onClick=${onClose}>Cancel</button>
-      <button type="button" class="btn primary danger" onClick=${onConfirm}><${Icon} name="trash" size=${15} />${onServer ? 'Delete for good' : `Move to ${binName().replace('the ', '')}`}</button>`}>
-    <p>${onServer ? html`Delete ${what} from <strong>${onServer.name}</strong>?` : html`Move ${what} to ${binName()}?`}</p>
+      <button type="button" class="btn primary danger" onClick=${onConfirm}><${Icon} name="trash" size=${15} />${forGood ? 'Delete for good' : `Move to ${binName().replace('the ', '')}`}</button>`}>
+    <p>${onServer ? html`Delete ${what} from <strong>${onServer.name}</strong>?` : forGood ? html`Delete ${what} from this device?` : html`Move ${what} to ${binName()}?`}</p>
     ${entries.length > 1 && html`<ul class="delete-list">${names.map((n) => html`<li key=${n}>${n}</li>`)}${entries.length > names.length && html`<li class="muted">and ${entries.length - names.length} more</li>`}</ul>`}
-    <p class="muted small">${onServer ? 'Files deleted on a server cannot be brought back from here.' : `You can restore ${entries.length === 1 ? 'it' : 'them'} from there.`}</p>
+    <p class="muted small">${onServer ? 'Files deleted on a server cannot be brought back from here.' : forGood ? 'Android has no Trash for these files: they cannot be brought back.' : `You can restore ${entries.length === 1 ? 'it' : 'them'} from there.`}</p>
   </${Modal}>`;
 }
 
@@ -79,7 +81,7 @@ function ExistsDialog({ names, target, onChoose, onClose }) {
       <button type="button" class="btn primary" onClick=${() => onChoose('replace')}>Replace</button>`}>
     <p>${names.length === 1 ? html`<strong>${names[0]}</strong> is` : `${names.length} items with these names are`} already in <strong>${baseName(onServer ? remoteParts(target).path || '/' : target)}</strong>.</p>
     ${names.length > 1 && html`<ul class="delete-list">${shown.map((n) => html`<li key=${n}>${n}</li>`)}${names.length > shown.length && html`<li class="muted">and ${names.length - shown.length} more</li>`}</ul>`}
-    <p class="muted small">Replace: the ones there ${onServer ? 'are deleted from the server for good' : `go to ${binName()}`}. Keep both: the new ones get a number, as “name (2)”. Skip: those are left out.</p>
+    <p class="muted small">Replace: the ones there ${onServer ? 'are deleted from the server for good' : isAndroidApp() ? 'are deleted for good' : `go to ${binName()}`}. Keep both: the new ones get a number, as “name (2)”. Skip: those are left out.</p>
   </${Modal}>`;
 }
 
@@ -719,7 +721,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       actions.closeDiskPaths(gone);
       lookAgain();
       await load();
-      toast(`Moved ${count(gone.length, 'item')} to ${binName()}`);
+      toast(isRemotePath(doomed[0]?.path) || isAndroidApp() ? `Deleted ${count(gone.length, 'item')}` : `Moved ${count(gone.length, 'item')} to ${binName()}`);
     } catch (err) {
       fail(err);
       load();

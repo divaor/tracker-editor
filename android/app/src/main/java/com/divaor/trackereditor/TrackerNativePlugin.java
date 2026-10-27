@@ -442,6 +442,340 @@ public class TrackerNativePlugin extends Plugin {
         call.resolve(info);
     }
 
+    // ---- The app's own Node.js: folders on the phone, servers, terminals (NodeBackend) ----
+
+    private NodeBackend node;
+
+    private synchronized NodeBackend node() {
+        if (node == null) {
+            node = new NodeBackend(
+                getContext(),
+                new NodeBackend.Secrets() {
+                    @Override
+                    public String get(String key) {
+                        return readSecret(key);
+                    }
+
+                    @Override
+                    public void set(String key, String value) {
+                        writeSecret(key, value);
+                    }
+                }
+            );
+        }
+        return node;
+    }
+
+    /** Starts it when needed: { port, token } for the page. `restart`: a fresh one. */
+    @PluginMethod
+    public void backend(PluginCall call) {
+        boolean restart = call.getBoolean("restart", false);
+        io.execute(() -> {
+            try {
+                if (restart) node().stop();
+                org.json.JSONObject info = node().start();
+                JSObject out = new JSObject();
+                out.put("port", info.getInt("port"));
+                out.put("token", info.getString("token"));
+                call.resolve(out);
+            } catch (Exception e) {
+                call.reject(message(e));
+            }
+        });
+    }
+
+    /** Whether the app may open folders on the phone's storage (Android 11: All files access). */
+    private boolean allFiles() {
+        if (Build.VERSION.SDK_INT >= 30) return android.os.Environment.isExternalStorageManager();
+        return getContext().checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    @PluginMethod
+    public void storageAccess(PluginCall call) {
+        JSObject out = new JSObject();
+        out.put("granted", allFiles());
+        call.resolve(out);
+    }
+
+    /** Asks for access to the phone's files: Android's settings page for it (or its permission prompt before Android 11). */
+    @PluginMethod
+    public void requestStorageAccess(PluginCall call) {
+        askForStorage();
+        call.resolve();
+    }
+
+    private void askForStorage() {
+        getActivity().runOnUiThread(() -> {
+            if (Build.VERSION.SDK_INT >= 30) {
+                Intent intent = new Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:" + getContext().getPackageName()));
+                try {
+                    getActivity().startActivity(intent);
+                } catch (ActivityNotFoundException e) {
+                    getActivity().startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
+                }
+            } else {
+                getActivity().requestPermissions(new String[] { android.Manifest.permission.READ_EXTERNAL_STORAGE, android.Manifest.permission.WRITE_EXTERNAL_STORAGE }, 41);
+            }
+        });
+    }
+
+    private org.json.JSONObject paths(List<String> paths) {
+        try {
+            return new org.json.JSONObject().put("paths", new org.json.JSONArray(paths));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void answer(String id, org.json.JSONObject answer) {
+        io.execute(() -> node().answer(id, answer));
+    }
+
+    private String pendingAsk;
+
+    /**
+     * Node asked the phone something (the page passes it on; the answer goes straight to Node):
+     * kind 'open' (a folder or a file), 'message' (a dialog with buttons) or 'openPath'.
+     */
+    @PluginMethod
+    public void answerAsk(PluginCall call) {
+        String id = call.getString("id");
+        String kind = call.getString("kind", "");
+        JSObject payload = call.getObject("payload", new JSObject());
+        if (id == null) {
+            call.reject("No question.");
+            return;
+        }
+        switch (kind) {
+            case "open":
+                if (payload.toString().contains("openDirectory")) chooseFolder(call, id, payload.getString("title"));
+                else pickFileFor(call, id);
+                break;
+            case "message":
+                showMessage(call, id, payload);
+                break;
+            case "openPath":
+                openPathFor(call, id, payload.getString("path"));
+                break;
+            default:
+                answer(id, null);
+                call.resolve();
+        }
+    }
+
+    // A folder: the usual places on the phone, its SD cards, or one picked in Android's picker.
+    private void chooseFolder(PluginCall call, String id, String title) {
+        if (!allFiles()) {
+            getActivity().runOnUiThread(() ->
+                new android.app.AlertDialog.Builder(getActivity())
+                    .setTitle("Allow access to your files")
+                    .setMessage(
+                        "To open folders on this phone, Tracker Editor needs access to its files (Android calls it All files access). It only opens the folders you pick."
+                    )
+                    .setPositiveButton("Allow", (d, w) -> askForStorage())
+                    .setNegativeButton("Not now", null)
+                    .show()
+            );
+            answer(id, paths(new ArrayList<>()));
+            call.resolve();
+            return;
+        }
+        List<String> labels = new ArrayList<>();
+        List<String> places = new ArrayList<>();
+        java.io.File storage = android.os.Environment.getExternalStorageDirectory();
+        labels.add("Phone storage");
+        places.add(storage.getPath());
+        labels.add("Documents");
+        places.add(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOCUMENTS).getPath());
+        labels.add("Download");
+        places.add(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS).getPath());
+        if (Build.VERSION.SDK_INT >= 30) {
+            android.os.storage.StorageManager sm = (android.os.storage.StorageManager) getContext().getSystemService(Context.STORAGE_SERVICE);
+            for (android.os.storage.StorageVolume v : sm.getStorageVolumes()) {
+                if (v.isRemovable() && v.getDirectory() != null) {
+                    labels.add(v.getDescription(getContext()));
+                    places.add(v.getDirectory().getPath());
+                }
+            }
+        }
+        labels.add("Another folder…");
+        getActivity().runOnUiThread(() ->
+            new android.app.AlertDialog.Builder(getActivity())
+                .setTitle(title == null || title.isEmpty() ? "Open a folder" : title)
+                .setItems(labels.toArray(new String[0]), (d, which) -> {
+                    if (which < places.size()) {
+                        List<String> picked = new ArrayList<>();
+                        picked.add(places.get(which));
+                        answer(id, paths(picked));
+                        call.resolve();
+                    } else {
+                        pendingAsk = id;
+                        startActivityForResult(call, new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), "treePicked");
+                    }
+                })
+                .setOnCancelListener((d) -> {
+                    answer(id, paths(new ArrayList<>()));
+                    call.resolve();
+                })
+                .show()
+        );
+    }
+
+    /** primary:Documents/x → /storage/emulated/0/Documents/x; 1A2B-3C4D:x → /storage/1A2B-3C4D/x; else null. */
+    static String pathOfDocumentId(String authority, String docId) {
+        if (!"com.android.externalstorage.documents".equals(authority) || docId == null) return null;
+        int colon = docId.indexOf(':');
+        if (colon < 0) return null;
+        String volume = docId.substring(0, colon);
+        String rest = docId.substring(colon + 1);
+        String root = "primary".equalsIgnoreCase(volume) ? android.os.Environment.getExternalStorageDirectory().getPath() : "/storage/" + volume;
+        return rest.isEmpty() ? root : root + "/" + rest;
+    }
+
+    @ActivityCallback
+    private void treePicked(PluginCall call, ActivityResult result) {
+        String id = pendingAsk;
+        Uri uri = result.getData() == null ? null : result.getData().getData();
+        List<String> picked = new ArrayList<>();
+        if (uri != null) {
+            String path = pathOfDocumentId(uri.getAuthority(), DocumentsContract.getTreeDocumentId(uri));
+            if (path != null) picked.add(path);
+            else getActivity().runOnUiThread(() ->
+                android.widget.Toast.makeText(getContext(), "Pick a folder on the phone's storage or an SD card.", android.widget.Toast.LENGTH_LONG).show()
+            );
+        }
+        answer(id, paths(picked));
+        call.resolve();
+    }
+
+    // A file (a key for a server): its path when it is on the phone's storage, else a copy in
+    // the app's own folder.
+    private void pickFileFor(PluginCall call, String id) {
+        pendingAsk = id;
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        startActivityForResult(call, intent, "filePickedFor");
+    }
+
+    @ActivityCallback
+    private void filePickedFor(PluginCall call, ActivityResult result) {
+        String id = pendingAsk;
+        Uri uri = result.getData() == null ? null : result.getData().getData();
+        if (uri == null) {
+            answer(id, paths(new ArrayList<>()));
+            call.resolve();
+            return;
+        }
+        io.execute(() -> {
+            List<String> picked = new ArrayList<>();
+            String path = null;
+            try {
+                path = pathOfDocumentId(uri.getAuthority(), DocumentsContract.getDocumentId(uri));
+            } catch (Exception ignored) {}
+            if (path == null || !new java.io.File(path).canRead()) {
+                try {
+                    java.io.File dir = new java.io.File(getContext().getFilesDir(), "picked");
+                    dir.mkdirs();
+                    String name = describe(uri).getString("name");
+                    java.io.File copy = new java.io.File(dir, name == null ? "file" : name.replaceAll("[/\\\\]", "_"));
+                    try (InputStream in = getContext().getContentResolver().openInputStream(uri); OutputStream out = new java.io.FileOutputStream(copy)) {
+                        byte[] buf = new byte[64 * 1024];
+                        int n;
+                        while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                    }
+                    path = copy.getPath();
+                } catch (Exception e) {
+                    path = null;
+                }
+            }
+            if (path != null) picked.add(path);
+            node().answer(id, paths(picked));
+            call.resolve();
+        });
+    }
+
+    // A question with buttons (Electron's message box): the answer is the button's index.
+    private void showMessage(PluginCall call, String id, JSObject payload) {
+        List<String> buttons = new ArrayList<>();
+        try {
+            org.json.JSONArray list = payload.getJSONArray("buttons");
+            for (int i = 0; i < list.length(); i++) buttons.add(list.getString(i));
+        } catch (Exception ignored) {}
+        if (buttons.isEmpty()) buttons.add("OK");
+        int cancelId = payload.getInteger("cancelId", 0);
+        int defaultId = payload.getInteger("defaultId", buttons.size() - 1);
+        String detail = payload.getString("detail", "");
+        String message = payload.getString("message", "");
+        Runnable cancel = () -> {
+            answer(id, response(cancelId));
+            call.resolve();
+        };
+        getActivity().runOnUiThread(() -> {
+            android.app.AlertDialog.Builder b = new android.app.AlertDialog.Builder(getActivity());
+            String title = payload.getString("title", "");
+            if (title != null && !title.isEmpty()) b.setTitle(title);
+            if (buttons.size() <= 3) {
+                b.setMessage(detail == null || detail.isEmpty() ? message : message + "\n\n" + detail);
+                List<Integer> others = new ArrayList<>();
+                for (int i = 0; i < buttons.size(); i++) if (i != cancelId && i != defaultId) others.add(i);
+                if (defaultId != cancelId) b.setPositiveButton(buttons.get(defaultId), (d, w) -> {
+                    answer(id, response(defaultId));
+                    call.resolve();
+                });
+                if (cancelId < buttons.size()) b.setNegativeButton(buttons.get(cancelId), (d, w) -> cancel.run());
+                if (!others.isEmpty()) {
+                    int other = others.get(0);
+                    b.setNeutralButton(buttons.get(other), (d, w) -> {
+                        answer(id, response(other));
+                        call.resolve();
+                    });
+                }
+            } else {
+                b.setTitle(message);
+                b.setItems(buttons.toArray(new String[0]), (d, which) -> {
+                    answer(id, response(which));
+                    call.resolve();
+                });
+            }
+            b.setOnCancelListener((d) -> cancel.run());
+            b.show();
+        });
+    }
+
+    private static org.json.JSONObject response(int index) {
+        try {
+            return new org.json.JSONObject().put("response", index);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    // A file in the folders view opened with another app (the phone asks which).
+    private void openPathFor(PluginCall call, String id, String path) {
+        String error = null;
+        try {
+            java.io.File file = new java.io.File(path);
+            Uri uri = androidx.core.content.FileProvider.getUriForFile(getContext(), getContext().getPackageName() + ".fileprovider", file);
+            String ext = android.webkit.MimeTypeMap.getFileExtensionFromUrl(Uri.fromFile(file).toString());
+            String mime = ext == null ? null : android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext.toLowerCase(java.util.Locale.ROOT));
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setDataAndType(uri, mime == null ? "*/*" : mime);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+            getActivity().startActivity(Intent.createChooser(intent, file.getName()));
+        } catch (ActivityNotFoundException e) {
+            error = "No app on this phone opens this kind of file.";
+        } catch (Exception e) {
+            error = message(e);
+        }
+        org.json.JSONObject out = new org.json.JSONObject();
+        try {
+            if (error != null) out.put("error", error);
+        } catch (Exception ignored) {}
+        answer(id, out);
+        call.resolve();
+    }
+
     // ---- Secrets: the GitHub token and model keys, encrypted with a key that never leaves the Keystore.
 
     private SecretKey secretKey() throws Exception {
@@ -463,39 +797,24 @@ public class TrackerNativePlugin extends Plugin {
         return getContext().getSharedPreferences(SECRETS, Context.MODE_PRIVATE);
     }
 
-    @PluginMethod
-    public void secretGet(PluginCall call) {
-        String key = call.getString("key");
-        JSObject out = new JSObject();
+    /** A secret, or null (none, or its key was lost with a restore to another phone). */
+    String readSecret(String key) {
         String stored = key == null ? null : secrets().getString(key, null);
-        if (stored == null) {
-            out.put("value", null);
-            call.resolve(out);
-            return;
-        }
+        if (stored == null) return null;
         try {
             byte[] all = Base64.decode(stored, Base64.NO_WRAP);
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.DECRYPT_MODE, secretKey(), new GCMParameterSpec(128, all, 0, 12));
-            out.put("value", new String(cipher.doFinal(all, 12, all.length - 12), StandardCharsets.UTF_8));
+            return new String(cipher.doFinal(all, 12, all.length - 12), StandardCharsets.UTF_8);
         } catch (Exception e) {
-            // A key lost with a restore to another phone: the secret has to be entered again.
-            out.put("value", null);
+            return null;
         }
-        call.resolve(out);
     }
 
-    @PluginMethod
-    public void secretSet(PluginCall call) {
-        String key = call.getString("key");
-        String value = call.getString("value");
-        if (key == null) {
-            call.reject("No name.");
-            return;
-        }
+    /** Keeps a secret (null or empty: forgets it). */
+    void writeSecret(String key, String value) {
         if (value == null || value.isEmpty()) {
             secrets().edit().remove(key).apply();
-            call.resolve();
             return;
         }
         try {
@@ -507,9 +826,30 @@ public class TrackerNativePlugin extends Plugin {
             System.arraycopy(iv, 0, all, 0, iv.length);
             System.arraycopy(sealed, 0, all, iv.length, sealed.length);
             secrets().edit().putString(key, Base64.encodeToString(all, Base64.NO_WRAP)).apply();
+        } catch (Exception e) {
+            throw new IllegalStateException("The secret could not be kept: " + message(e));
+        }
+    }
+
+    @PluginMethod
+    public void secretGet(PluginCall call) {
+        JSObject out = new JSObject();
+        out.put("value", readSecret(call.getString("key")));
+        call.resolve(out);
+    }
+
+    @PluginMethod
+    public void secretSet(PluginCall call) {
+        String key = call.getString("key");
+        if (key == null || key.startsWith("node-")) {
+            call.reject("No name.");
+            return;
+        }
+        try {
+            writeSecret(key, call.getString("value"));
             call.resolve();
         } catch (Exception e) {
-            call.reject("The secret could not be kept: " + message(e));
+            call.reject(e.getMessage());
         }
     }
 

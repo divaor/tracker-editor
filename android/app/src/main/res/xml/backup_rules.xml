@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 and older. Secrets are encrypted with a key that stays on this phone, so a copy
+     restored on another one could not be read: they, and what Node keeps, stay out. -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="secrets.xml" />
+    <exclude domain="file" path="node-data/" />
+    <exclude domain="file" path="nodejs/" />
+    <exclude domain="file" path="picked/" />
+</full-backup-content>

@@ -85,6 +85,13 @@ jobs:
         if: steps.key.outputs.missing != 'true'
       - run: npx cap sync android
         if: steps.key.outputs.missing != 'true'
+      - uses: actions/cache@v4
+        if: steps.key.outputs.missing != 'true'
+        with:
+          path: android/app/libnode
+          key: libnode-${{ hashFiles('scripts/android-node.js') }}
+      - run: npm run android:node
+        if: steps.key.outputs.missing != 'true'
       - name: Build the APK
         if: steps.key.outputs.missing != 'true'
         working-directory: android

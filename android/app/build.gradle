@@ -23,10 +23,31 @@ android {
         versionCode appVersionCode
         versionName appVersion
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        // Phones of the last ten years; the app's Node.js (libnode) is built for this one.
+        ndk { abiFilters 'arm64-v8a' }
+        // libnode is built against the shared C++ library, so the app carries it too.
+        externalNativeBuild {
+            cmake { arguments '-DANDROID_STL=c++_shared' }
+        }
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    // The app's own Node.js: nodejs-mobile's libnode.so and nodehost (src/main/cpp), which starts
+    // it. scripts/android-node.js fetches libnode into libnode/ and the Node side into assets.
+    externalNativeBuild {
+        cmake { path 'src/main/cpp/CMakeLists.txt' }
+    }
+    sourceSets {
+        main { jniLibs.srcDirs = ['libnode/bin'] }
+    }
+    packaging {
+        jniLibs {
+            // Compressed in the APK (libnode is large), unpacked when installed.
+            useLegacyPackaging = true
+            pickFirsts += ['**/libnode.so']
         }
     }
     signingConfigs {
