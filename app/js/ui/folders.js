@@ -5,7 +5,7 @@ import { formatBytes, timeAgo } from '../format.js';
 import { getSettings, isLocal, saveSettings } from '../settings.js';
 import { diskKey } from '../store.js';
 import { server, servers, serverStatus } from '../servers.js';
-import { isRemotePath, protocolName, remoteParts, remoteRoot } from '../where.js';
+import { isRemotePath, KINDS, protocolName, remoteParts, remoteRoot } from '../where.js';
 import { isAndroidApp } from '../platform.js';
 import { ClearButton, dismissToast, Modal, toast } from './components.js';
 import { mirrorOf } from '../mirrors.js';
@@ -48,6 +48,9 @@ const shortDate = (ms) => {
   const d = new Date(ms);
   return d.toLocaleString(undefined, d.getFullYear() === new Date().getFullYear() ? { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' } : { year: 'numeric', month: 'short', day: 'numeric' });
 };
+const touchScreen = () => matchMedia('(pointer: coarse)').matches;
+// "this computer", or "this device" in the Android app.
+const hereName = () => KINDS.disk.label.toLowerCase();
 const binName = () => (window.desktop?.platform === 'win32' ? 'the Recycle Bin' : 'the Trash');
 
 // Cut or copied in this view (kept while you move between folders): { op: 'cut' | 'copy', paths, text }.
@@ -561,6 +564,12 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     setCursor(at);
     if (!keepAnchor) setAnchor(at);
   };
+  // Touch screens: a tap opens, as in a phone's file manager; Select (in the long press menu)
+  // makes taps pick instead, until nothing is picked.
+  const [picking, setPicking] = useState(false);
+  useEffect(() => {
+    if (picking && !selected.size) setPicking(false);
+  }, [picking, selected]);
 
   // A file to show (revealInFolders): once its folder is shown and read, the folders between
   // it and the file open and the file is picked (the filter is cleared).
@@ -1012,7 +1021,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     hasTerminal && { label: 'Open a terminal here', icon: 'terminal', run: () => actions.terminalHere(dir) },
     !isRemotePath(dir) && bridge.terminal && { label: 'Open in the system’s terminal', icon: 'external', run: () => actions.systemTerminalHere(dir) },
     mirrorItem(dir),
-    !remote && { label: 'Open in the file explorer', icon: 'external', run: () => bridge.openExternal(dir).catch(fail) },
+    !remote && !isAndroidApp() && { label: 'Open in the file explorer', icon: 'external', run: () => bridge.openExternal(dir).catch(fail) },
   ];
   const entryItems = () => {
     const items = targets();
@@ -1021,6 +1030,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     const files = items.filter((e) => !e.dir);
     const images = files.filter((e) => isImageName(e.name));
     return [
+      touchScreen() && !picking && { label: 'Select', icon: 'check', hint: 'Then tap others to pick them too', run: () => setPicking(true) },
       { label: one?.dir ? 'Open' : 'Open (Enter)', icon: one?.dir ? 'folderOpen' : 'file', run: openSelected },
       one && !one.dir && { label: 'View it large (Space)', icon: 'fullscreen', run: () => setViewing(one.path) },
       one && !one.dir && { label: 'Open with its program', icon: 'external', run: () => openOutside(one) },
@@ -1043,7 +1053,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       { label: one ? 'Copy path' : 'Copy paths', icon: 'copy', run: () => (one ? actions.copyPath(one.path) : navigator.clipboard.writeText(items.map((e) => e.path).join('\n')).then(() => toast('Paths copied'))) },
       !remote && { label: one ? 'Copy for Claude (the path)' : 'Copy for Claude (the paths)', icon: 'claude', run: () => navigator.clipboard.writeText(items.map((e) => quotePath(e.path)).join(' ')).then(() => toast('On the clipboard: paste it into Claude')) },
       files.length && files.length === items.length && files.every((e) => opensInEditor(e.name)) && { label: isLocal() ? 'Copy into my files' : 'Copy into my files (synced)', icon: 'filePlus', run: () => files.forEach((e) => actions.copyToFiles(e.path)) },
-      one && !remote && { label: 'Show in the file explorer', icon: 'external', run: () => actions.showOnDisk(one.path) },
+      one && !remote && window.desktop?.disk?.show && { label: 'Show in the file explorer', icon: 'external', run: () => actions.showOnDisk(one.path) },
       one && { label: 'Properties (Alt+Enter)', icon: 'info', run: () => actions.showProperties(one.path) },
       one?.dir && { label: 'Find in this folder…', icon: 'search', run: () => actions.findInFolder(one.path) },
       one?.dir && mirrorItem(one.path),
@@ -1081,7 +1091,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
             : { label: 'Connect', icon: 'server', run: () => actions.openServer(conn.id) },
         ]
       : [
-          { label: 'Show this folder in the file explorer', icon: 'external', run: () => actions.showOnDisk(dir) },
+          window.desktop?.disk?.show && { label: 'Show this folder in the file explorer', icon: 'external', run: () => actions.showOnDisk(dir) },
           { label: `Forget ${baseName(root)}`, icon: 'x', run: () => forget(root) },
         ]),
   ];
@@ -1195,17 +1205,20 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
         ev.stopPropagation();
         list.current?.focus();
         if (ev.shiftKey) select(rangeOf(order, anchor ?? e.path, e.path), { at: e.path, keepAnchor: true });
-        else if (ev.ctrlKey || ev.metaKey) {
+        else if (ev.ctrlKey || ev.metaKey || (picking && touchScreen())) {
           const next = new Set(selected);
           next.has(e.path) ? next.delete(e.path) : next.add(e.path);
           setSelected(next);
           setCursor(e.path);
           setAnchor(e.path);
-        } else select([e.path]);
+        } else {
+          select([e.path]);
+          if (touchScreen()) openEntry(e);
+        }
       }}
       onDblClick=${(ev) => {
         ev.stopPropagation();
-        openEntry(e);
+        if (!touchScreen()) openEntry(e);
       }}
       onContextMenu=${(ev) => {
         ev.preventDefault();
@@ -1414,7 +1427,8 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       onClose=${() => (setViewing(null), list.current?.focus())} />`}
     <div class="sidebar-foot folders-foot">
       <span class="muted small folders-status" aria-live="polite">${selectionSummary(entries, selected, formatBytes)}</span>
-      <span class="folders-where ${remote ? 'kind-remote' : 'kind-disk'}" title=${remote ? `On ${conn?.name}: files are saved back to the server${isLocal() ? '' : ', not synced. Copy into my files makes a synced copy'}.` : isLocal() ? 'Files on this computer: edited where they are.' : 'Files on this computer: edited in place, not synced. Copy into my files makes a synced copy.'}>
+      ${picking && html`<button type="button" class="btn sm" onClick=${() => (setPicking(false), select([]))}>Done</button>`}
+      <span class="folders-where ${remote ? 'kind-remote' : 'kind-disk'}" title=${remote ? `On ${conn?.name}: files are saved back to the server${isLocal() ? '' : ', not synced. Copy into my files makes a synced copy'}.` : isLocal() ? `Files on ${hereName()}: edited where they are.` : `Files on ${hereName()}: edited in place, not synced. Copy into my files makes a synced copy.`}>
         <${Icon} name=${remote ? 'server' : 'disk'} size=${14} />
       </span>
     </div>

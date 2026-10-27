@@ -32,13 +32,20 @@ jobs:
       - run: npm ci
       - run: npx cap sync android
       # The app's own Node.js (nodejs-mobile, about 100 MB to fetch): kept between runs.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: android/app/libnode
           key: libnode-${{ hashFiles('scripts/android-node.js') }}
       - run: npm run android:node
       - run: ./gradlew assembleDebug --no-daemon --stacktrace
         working-directory: android
+      - name: Check what the APK holds
+        run: |
+          apk=$(ls android/app/build/outputs/apk/debug/*.apk)
+          for f in lib/arm64-v8a/libnode.so lib/arm64-v8a/libnodehost.so lib/arm64-v8a/libtrackerpty.so lib/arm64-v8a/libc++_shared.so assets/nodejs/mobile/node/main.cjs assets/nodejs/electron/main.cjs assets/nodejs/node_modules/ssh2/package.json assets/public/index.html; do
+            unzip -l "$apk" "$f" > /dev/null || { echo "::error::$f is missing from the APK"; exit 1; }
+          done
+          ls -l "$apk"
       - uses: actions/upload-artifact@v7
         with:
           name: tracker-editor-android-debug

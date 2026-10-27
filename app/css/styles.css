@@ -2607,6 +2607,12 @@ button.folder-col:hover {
   gap: 8px;
 }
 
+/* Done: leaves picking several (touch screens). */
+.folders-foot .btn {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
 .folders-servers {
   display: flex;
   flex-wrap: wrap;

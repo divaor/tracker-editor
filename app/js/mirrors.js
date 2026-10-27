@@ -29,7 +29,7 @@ export async function refreshMirrors() {
 export function watchMirrors() {
   if (!bridge() || wired) return () => {};
   wired = true;
-  refreshMirrors();
+  refreshMirrors().catch((err) => console.warn('Mirrors', err));
   return bridge().onStatus((m) => {
     const at = list.findIndex((x) => x.id === m.id);
     list = at === -1 ? [...list, m] : list.map((x) => (x.id === m.id ? m : x));

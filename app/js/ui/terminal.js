@@ -2,6 +2,7 @@ import { html, useEffect, useLayoutEffect, useReducer, useRef, useState } from '
 import { saveSettings } from '../settings.js';
 import { server, servers } from '../servers.js';
 import { activeTerminal, attach, clearTerminal, closeTerminal, copyFromTerminal, fitSoon, focusTerminal, onTerminals, pasteIntoTerminal, setActiveTerminal, terminalHasSelection, terminals } from '../terminals.js';
+import { KINDS } from '../where.js';
 import { Icon } from './icons.js';
 import { Menu, MenuButton } from './menu.js';
 
@@ -64,13 +65,13 @@ export function TerminalPanel({ settings, actions, onHide }) {
   const sftp = servers().filter((c) => c.protocol === 'sftp');
   const here = () => actions.openTerminal('local', actions.localTerminalDir());
   const newItems = () => [
-    { label: 'This computer', icon: 'disk', hint: actions.localTerminalDir() || 'Your home folder', run: here },
+    { label: KINDS.disk.label, icon: 'disk', hint: actions.localTerminalDir() || 'Your home folder', run: here },
     { separator: true },
     ...(sftp.length
       ? sftp.map((c) => ({ label: `${c.name} (${c.user ? `${c.user}@` : ''}${c.host})`, icon: 'server', run: () => actions.openTerminal(c.id) }))
       : [{ label: 'Connect to a server…', icon: 'server', run: () => actions.editServer() }]),
   ];
-  const place = (s) => (s.connId === 'local' ? 'This computer' : (server(s.connId)?.name ?? 'Server'));
+  const place = (s) => (s.connId === 'local' ? KINDS.disk.label : (server(s.connId)?.name ?? 'Server'));
   const tabLabel = (s) => `${s.runner ? 'Run · ' : ''}${place(s)}${s.cwd ? ` · ${baseName(s.cwd)}` : ''}`;
 
   return html`<section class="terminal-panel" ref=${panel} style=${{ height: `${height}px` }} aria-label="Terminal">
@@ -101,9 +102,9 @@ export function TerminalPanel({ settings, actions, onHide }) {
       }}>
       ${!list.length &&
       html`<div class="terminal-empty">
-        <p>A terminal on this computer, or on a server (signed in like its files).</p>
+        <p>A terminal on ${KINDS.disk.label.toLowerCase()}, or on a server (signed in like its files).</p>
         <div class="terminal-empty-servers">
-          <button type="button" class="btn sm" onClick=${here}><${Icon} name="disk" size=${15} />This computer</button>
+          <button type="button" class="btn sm" onClick=${here}><${Icon} name="disk" size=${15} />${KINDS.disk.label}</button>
           ${sftp.map((c) => html`<button type="button" key=${c.id} class="btn sm" onClick=${() => actions.openTerminal(c.id)}><${Icon} name="server" size=${15} />${c.name}</button>`)}
           ${!sftp.length && html`<button type="button" class="btn sm" onClick=${() => actions.editServer()}><${Icon} name="server" size=${15} />Connect to a server…</button>`}
         </div>

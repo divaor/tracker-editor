@@ -115,3 +115,20 @@ test('questions for the phone are answered by its native side alone', async () =
     await bridge.close();
   }
 });
+
+test('the Android app carries every page module the main process imports', async () => {
+  const fs = await import('node:fs');
+  const read = (p) => fs.readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
+  const listed = JSON.parse(/const PAGE_MODULES = (\[[^\]]*\])/.exec(read('scripts/android-node.js'))[1].replace(/'/g, '"'));
+  const wanted = new Set();
+  const add = (name) => {
+    if (wanted.has(name)) return;
+    wanted.add(name);
+    for (const [, dep] of read(`app/js/${name}`).matchAll(/from '\.\/([\w.-]+\.js)'/g)) add(dep);
+  };
+  for (const f of fs.readdirSync(new URL('../electron/', import.meta.url)).filter((f) => f.endsWith('.cjs'))) {
+    for (const [, name] of read(`electron/${f}`).matchAll(/APP_DIR, 'js', '([\w.-]+\.js)'/g)) add(name);
+  }
+  assert.ok(wanted.size > 3);
+  assert.deepEqual([...wanted].filter((name) => !listed.includes(name)), []);
+});

@@ -2,7 +2,7 @@
 
 Tracker Editor is a Notepad++-style editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs. Everything is saved the moment you paste or type, on this computer with the tracker, or, once you turn on sync, in the same private GitHub data repo as the tracker, so your files are on your computers and your phone.
 
-Version 0.23.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.23.0 · Web app: https://divaor.github.io/tracker-editor/
+Version 0.24.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.24.0 · Web app: https://divaor.github.io/tracker-editor/
 
 ---
 
@@ -14,15 +14,34 @@ Download from **https://github.com/divaor/tracker-editor/releases/latest**:
 
 | System | File |
 | --- | --- |
-| Windows | `Tracker Editor Setup 0.23.0.exe` (installer) or `Tracker Editor-0.23.0-portable.exe` (no install, no admin rights) |
-| macOS | `Tracker Editor-0.23.0-arm64.dmg` |
-| Linux | `Tracker Editor-0.23.0.AppImage` |
+| Windows | `Tracker Editor Setup 0.24.0.exe` (installer) or `Tracker Editor-0.24.0-portable.exe` (no install, no admin rights) |
+| macOS | `Tracker Editor-0.24.0-arm64.dmg` |
+| Linux | `Tracker Editor-0.24.0.AppImage` |
 
 The builds are not code-signed, so the first launch warns you. On Windows, choose *More info → Run anyway*. On macOS, right-click the app → *Open*. Installing the desktop app also registers `tracker-editor://` links, so the tracker's **Open in editor** opens files straight in it.
 
 **Tracker Editor as your editor (Windows).** The installed app adds itself to Explorer: right-click a text or code file → **Open with → Tracker Editor** (it never becomes their default program unless you choose that), **Edit with Tracker Editor** on any file, and **Open in Tracker Editor** on folders (Windows 11: under **Show more options**). The file opens as a tab edited in place; a folder opens in Folders. Turn it on or off in **Settings → Desktop → Tracker Editor in Explorer** (the portable app starts with it off). To make it the default for a type: right-click a file → **Open with → Choose another app → Tracker Editor → Always**. On macOS it is in Finder's **Open With** for text and code files; a file given on the command line (`"Tracker Editor.exe" notes.txt`) opens too.
 
-### Phone
+### Android: the app
+
+The editor as an Android app, with what a web page cannot do: **Open with** from other apps, **Folders** on the phone, **servers** and **terminals**. For Android 7 and later on 64-bit phones (nearly all from the last ten years).
+
+1. Install **Obtainium** (from https://github.com/ImranR98/Obtainium/releases or F-Droid). It installs apps from their GitHub releases and keeps them up to date.
+2. In Obtainium: **Add app**, paste `https://github.com/divaor/tracker-editor`, **Add**, then **Install** (`Tracker-Editor-0.24.0.apk`). The first time, Android asks to let Obtainium install apps: allow it.
+3. Obtainium tells you when there is a new version and installs it over the old one; your files and settings stay. (Or download the `.apk` from the releases page and open it; then updates are by hand.)
+
+What the app adds:
+- **Open with**: in Files, a file manager, Gmail or Drive, open a text or code file with **Tracker Editor**: it opens as a tab edited where it is, and **Save** writes it back (a file the other app only lets you read says **Read-only**). The tab's ⋯ → **Open with another app** hands it on.
+- **Share** text, links or files to **Tracker Editor**: they become new files. Select text in any app → ⋮ → **Tracker Editor**: a new note with it. Long-press the app's icon for **New note** and **Voice note**.
+- **Folders** (the sidebar's **Folders**): folders on the phone and its memory card, as on a computer (see [Folders](#folders-a-file-explorer)). **Open a folder…** asks the first time for **All files access** (Android's permission for file managers: allow it for Tracker Editor, then come back and tap it again; the editor only opens the folders you pick). Then choose **Phone storage**, **Documents**, **Download**, the memory card, or **Another folder…**. **Tap** a folder or a file to open it; a **long press** gives its menu, where **Select** lets you tap others to pick them too (**Done** when finished). **Delete** is for good here: Android has no Trash for these files.
+- **Servers**: SFTP, FTP and FTPS, their terminals, find in a folder, transfers and mirrors, as on a computer (see 11). Saved passwords are encrypted with a key kept in the phone's secure hardware.
+- **A terminal on the phone**: the status bar's **Terminal** opens Android's own shell in the open file's folder, with its basic commands (`ls`, `cat`, `grep`, `cp`, `mv`…). With an SSH server set up, **+** in the panel opens a terminal there.
+- **A model on your computer** (Ollama, LM Studio) answers the phone over your network, without CORS settings: see [Option A](#option-a-a-model-on-this-computer-ollama-lm-studio).
+- **Back** closes what is open (a dialog, a panel, the sidebar), then leaves the app.
+
+The app keeps its own data, apart from the web app in the phone's browser: to have your files in it, sync with GitHub there too (**Settings → Where your data is**).
+
+### Phone: the web app (iPhone, or without installing the app)
 
 1. Open https://divaor.github.io/tracker-editor/ on the phone.
 2. Install it: Android ⋮ → **Install app**; iPhone Share → **Add to Home Screen**.
@@ -319,7 +338,7 @@ Turn on **Settings → Editor → Suggest the rest as you type**: a moment after
 2. `ollama pull llama3.2` (chat) and `ollama pull nomic-embed-text` (find by meaning).
 3. **Settings → Model → This computer → Ollama → Test and list models**, pick both, **Save and turn on**.
 
-Nothing leaves your computer. The desktop app needs no extra setup; in a browser, Ollama must allow the site (`OLLAMA_ORIGINS=https://divaor.github.io`). On a phone, a model on your computer is out of reach: use option B there.
+Nothing leaves your computer. The desktop app needs no extra setup; in a browser, Ollama must allow the site (`OLLAMA_ORIGINS=https://divaor.github.io`). **The Android app** reaches a model on a computer on the same network by its address (`http://192.168.1.20:11434/v1`), without CORS settings; Ollama must listen on the network for that (`OLLAMA_HOST=0.0.0.0`; LM Studio: **Serve on Local Network**). The web app on a phone cannot reach it: use option B there.
 
 ### Option B: an AI provider with your API key (Claude, OpenAI, Gemini…)
 
@@ -413,7 +432,7 @@ It types real key presses into whichever window has the focus when the countdown
 - **Compare with clipboard** (⋯): what you copied against the file, with **Use the clipboard text**.
 - **Send checklist to tracker** (⋯): the open `- [ ]` items of the selection or the file become tracker tasks linking back to the line; dates like `(due 2026-10-30)` become due dates, and items already sent start unticked.
 
-## 10. Logs, files on disk and folders (desktop)
+## 10. Logs, files on disk and folders (desktop, Android app)
 
 - **File → Open File (Edit in Place)** (`Ctrl+O`): edit a file where it is (a config file, a script, a log). It is not synced. `Ctrl+S` saves it back with its line endings (CRLF/LF), BOM and encoding, shown in the status bar.
 - **Changed elsewhere**: with no unsaved edits it reloads by itself. With edits, a yellow notice offers **Compare**, **Reload (lose my edits)** or **Keep mine and save over it**. Saving never silently overwrites another program's change.
@@ -472,7 +491,7 @@ The sidebar has two views on the desktop: **My files** (synced) and **Folders** 
 - **Remembered**: the width of the sidebar, list or details, the order, the favorites and recent folders, and whether the preview shows and how tall it is.
 - The list follows changes made in other apps. The folders, where you were, the order and the open files are remembered.
 
-## 11. Files on servers (desktop)
+## 11. Files on servers (desktop, Android app)
 
 Edit files on your servers as if they were here: **SFTP** (over SSH), **FTPS** (FTP over TLS) or **FTP** (not encrypted; only where nothing else is available).
 
@@ -621,6 +640,10 @@ Turn them on in **Settings → Desktop**.
 - **Typing drops or changes characters**: choose *Slow*, or on Windows *Send characters instead of key presses*.
 - **The model service test fails with 403**: check the API key and that it has access to the knowledge base or agent named in *Model or agent name*.
 - **Android says "already installed" but doesn't open**: remove it from the home screen and install again from the web address.
+- **Obtainium says the app cannot be updated ("signatures do not match")**: an APK built elsewhere (or a test build) is installed. Uninstall Tracker Editor and install it again from Obtainium (sync with GitHub first, or your files on the phone go with it).
+- **Android app: Open a folder does nothing**: it needs **All files access**. Allow it in Android's settings (Apps → Tracker Editor → Permissions, or the screen it opened), come back and tap **Open a folder…** again.
+- **Android app: "The app's access to files and servers stopped"**: Android ended its file access while the app was in the background. Do it again: it starts again. Terminals on the phone and on servers end with it.
+- **Android app: a file opened with Tracker Editor is Read-only**: the app that gave it allows reading only (Gmail attachments, many file managers' "Open with"). Save a copy with ⋯ → **Download**, or open it from Folders instead.
 - **The menu bar appears (Windows, Linux)**: it shows when `Alt` is pressed and let go on its own, as in other Windows programs; press `Alt` again to hide it. Holding `Alt` for `Alt+drag` or a shortcut does not show it.
 - **"The file changed on disk since you opened it"**: another program saved it. Use **Compare**, then reload or keep yours.
 - **The capture shortcut "is used by another app"**: click the field and press another combination.
@@ -665,5 +688,5 @@ Turn them on in **Settings → Desktop**.
 - `editor/files/<id>/<name>` holds each file's text, readable on github.com, except encrypted files, which start with `TRACKER-EDITOR-ENCRYPTED v1`.
 - `editor/vault.json` holds the encryption salt and a check value, never the passphrase.
 - Each device also keeps a full copy in the app's storage, so everything works offline.
-- Settings, the GitHub token, the model's API keys (one per provider) and webhook secret stay on each device (the keychain on desktop).
+- Settings, the GitHub token, the model's API keys (one per provider) and webhook secret stay on each device (the keychain on desktop; in the Android app encrypted with a key kept in the phone's secure hardware, and left out of Android's backups).
 - Files opened from disk, from the Folders view or from a server stay where they are and are never synced. Mirrors (which folders, not your files) are listed in the app's folder on this computer, with what each side looked like at the last sync. Servers you set up (not their passwords) are listed in the app's own folder on this computer; passwords and key passphrases are in its keychain. The clipboard history stays on the computer, encrypted. Images for text recognition never leave the device, unless you choose your model to read them.

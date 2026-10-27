@@ -2,7 +2,7 @@ import { html, useEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import { addSection, baseName, isWithin, moveSectionTo, rootOf, withCurrent } from '../folders.js';
 import { getSettings } from '../settings.js';
 import { onServers, server, servers, serverStatus } from '../servers.js';
-import { isRemotePath, protocolName, remoteParts, toRemoteUri } from '../where.js';
+import { isRemotePath, KINDS, protocolName, remoteParts, toRemoteUri } from '../where.js';
 import { Modal } from './components.js';
 import { Icon } from './icons.js';
 
@@ -188,7 +188,7 @@ export function SideBySideDialog({ onClose, actions }) {
     ${note && html`<p class="notice ${note.error ? 'error' : ''}" role="status"><${Icon} name=${note.error ? 'alert' : 'info'} size=${15} />${note.text}</p>`}
 
     <h3 class="sbs-heading">Add beside them <span class="muted small">(one or several)</span></h3>
-    <h4 class="sbs-group"><${Icon} name="disk" size=${14} />This computer</h4>
+    <h4 class="sbs-group"><${Icon} name="disk" size=${14} />${KINDS.disk.label}</h4>
     <ul class="sbs-list">
       ${here.map(candidate)}
       <li><button type="button" class="sbs-add" onClick=${pick}><${Icon} name="folderOpen" size=${15} /><span class="sbs-name">Pick a folder…</span><span class="sbs-where">in the system dialog</span><${Icon} name="plus" size=${15} class="sbs-plus" /></button></li>

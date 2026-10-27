@@ -2406,7 +2406,7 @@ export function App() {
   /** Where a terminal on this computer starts: the open file's folder, else the one shown in Folders. */
   actions.localTerminalDir = () => {
     const k = parseKey(store.session.active);
-    if (k?.kind === 'disk' && !isRemotePath(k.path)) return parentDir(k.path);
+    if (k?.kind === 'disk' && !isRemotePath(k.path) && !isContentPath(k.path)) return parentDir(k.path);
     const folder = getSettings().sidebarMode === 'folders' ? getSettings().folder : '';
     return folder && !isRemotePath(folder) ? folder : '';
   };
@@ -2435,7 +2435,7 @@ export function App() {
   actions.terminalForFile = () => {
     if (!terminalsAvailable()) return;
     const k = parseKey(store.session.active);
-    const dir = k?.kind === 'disk' ? parentDir(k.path) : actions.localTerminalDir();
+    const dir = k?.kind === 'disk' && !isContentPath(k.path) ? parentDir(k.path) : actions.localTerminalDir();
     const connId = isRemotePath(dir) ? remoteParts(dir).id : 'local';
     const cwd = isRemotePath(dir) ? remoteParts(dir).path : dir;
     const there = terminals().find((s) => !s.exited && !s.runner && s.connId === connId && s.cwd === cwd);

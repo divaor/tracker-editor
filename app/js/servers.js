@@ -29,7 +29,7 @@ export async function refreshServers() {
 /** Follows the main process's status events; `onConnected(id)` runs when a server connects. */
 export function watchServers({ onConnected = () => {} } = {}) {
   if (!bridge()) return () => {};
-  refreshServers();
+  refreshServers().catch((err) => console.warn('Servers', err));
   return bridge().onStatus((s) => {
     const before = status.get(s.id)?.state;
     status.set(s.id, { state: s.state, error: s.error });

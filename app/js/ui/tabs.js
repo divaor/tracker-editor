@@ -44,7 +44,7 @@ function tabInfo(key) {
       const { conn } = serverOf(d.path);
       return { kind, name: d.name, project: '', unsynced: d.dirty, follow: d.follow, offline: d.offline, dotTitle: 'Not saved to the server', title: `On ${conn?.name ?? 'a server'}: ${remoteAddress(d.path, conn)}${d.dirty ? ' · not saved to the server' : ''}` };
     }
-    return { kind, name: d.name, project: '', unsynced: d.dirty, follow: d.follow, dotTitle: 'Not saved', title: `On this computer: ${d.path}${d.dirty ? ' · not saved' : ''}` };
+    return { kind, name: d.name, project: '', unsynced: d.dirty, follow: d.follow, dotTitle: 'Not saved', title: `On ${KINDS.disk.label.toLowerCase()}: ${d.path}${d.dirty ? ' · not saved' : ''}` };
   }
   const t = k && store.repoTab(k.path);
   return t && { kind, name: t.name, project: store.doc(k.path)?.project ?? '', unsynced: !isLocal() && t.dirty, dotTitle: 'Not synced yet', title: `Tracker document: ${t.path}` };
@@ -63,7 +63,9 @@ export function WhereChip({ kind, label, state, title, onClick }) {
 
 // Terminals for a file on disk or a server: in its folder, here or over SSH (not FTP).
 const parentOfPath = (p) => p.slice(0, Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'))) || p;
-const canTerminal = (p) => terminalsAvailable() && (!isRemotePath(p) || server(remoteParts(p).id)?.protocol === 'sftp');
+const canTerminal = (p) => terminalsAvailable() && !isContentPath(p) && (!isRemotePath(p) || server(remoteParts(p).id)?.protocol === 'sftp');
+// A file with a folder of its own (not one another Android app gave, content://).
+const inFolders = (p) => Boolean(window.desktop?.folders) && !isContentPath(p);
 const syncInfo = (sync) => ({ configured: isSyncConfigured(), phase: sync?.phase, local: isLocal() });
 
 // The tabs of the bar by group, in the groups' order (vs: tabViewState).
@@ -220,7 +222,7 @@ export function TabBar({ session, projects, settings, actions }) {
       { separator: true },
       { label: 'Copy for Claude', icon: 'claude', run: () => actions.copyForClaude(key) },
       parseKey(key)?.kind === 'disk' && !isContentPath(parseKey(key).path) && { label: 'Copy path', icon: 'copy', run: () => actions.copyPath(parseKey(key).path) },
-      parseKey(key)?.kind === 'disk' && window.desktop?.folders && { label: 'Show its folder in Folders', icon: 'folderOpen', run: () => actions.showFolderOf(parseKey(key).path) },
+      parseKey(key)?.kind === 'disk' && inFolders(parseKey(key).path) && { label: 'Show its folder in Folders', icon: 'folderOpen', run: () => actions.showFolderOf(parseKey(key).path) },
       parseKey(key)?.kind === 'disk' && !isRemotePath(parseKey(key).path) && window.desktop?.disk?.show && { label: 'Show in the file explorer', icon: 'external', run: () => actions.showOnDisk(parseKey(key).path) },
       parseKey(key)?.kind === 'disk' && isContentPath(parseKey(key).path) && window.desktop?.android && { label: 'Open with another app…', icon: 'external', run: () => actions.openWithApp(parseKey(key).path) },
       parseKey(key)?.kind === 'disk' && canTerminal(parseKey(key).path) && { label: 'Open a terminal in its folder', icon: 'terminal', run: () => actions.terminalHere(parentOfPath(parseKey(key).path)) },
@@ -440,7 +442,7 @@ function DiskBar({ disk, buttons, moreItems, actions }) {
       ${mirrored &&
       html`<button type="button" class="mirror-badge" onClick=${() => actions.syncMirror(mirrored.mirror.id)}
         title=${`Mirrored: kept the same as ${mirrored.side === 'local' ? `${server(mirrored.mirror.conn)?.name ?? 'the server'}: ${mirrored.mirror.remote}` : mirrored.mirror.local}. ${mirrorState(mirrored.mirror).text}. Click to sync now.`}>
-        <span aria-hidden="true">⇄</span><span class="label">${mirrored.side === 'local' ? (server(mirrored.mirror.conn)?.name ?? 'Server') : 'This computer'}</span>
+        <span aria-hidden="true">⇄</span><span class="label">${mirrored.side === 'local' ? (server(mirrored.mirror.conn)?.name ?? 'Server') : KINDS.disk.label}</span>
       </button>`}
       <span class="filebar-note" title=${`${remote ? remoteAddress(path, srv.conn) : content ? folder : path}\n${encoding}`}><span class="filebar-title">${disk.name}</span><span class="muted small filebar-path">${folder}</span></span>
       <span class="spacer" />
@@ -488,12 +490,12 @@ export function FileBar({ file, repo, disk, sealed, projects, canPreview, previe
   const listenButton = html`<button type="button" class="btn ghost sm" title="Read aloud from the cursor, or the selection (Alt+R)" onClick=${actions.readAloud}><${Icon} name="volume" size=${15} /><span class="label">Listen</span></button>`;
   const shareButton = html`<button type="button" class="btn ghost sm" title="Share: WhatsApp, Teams, email, copy…" onClick=${actions.share}><${Icon} name="share" size=${15} /><span class="label">Share</span></button>`;
   const moreItems = (id) => [
-    disk && window.desktop?.folders && { label: 'Show its folder in Folders', icon: 'folderOpen', run: () => actions.showFolderOf(disk.path) },
+    disk && inFolders(disk.path) && { label: 'Show its folder in Folders', icon: 'folderOpen', run: () => actions.showFolderOf(disk.path) },
     disk && !isRemotePath(disk.path) && window.desktop?.disk?.show && { label: 'Show in the file explorer', icon: 'external', run: () => actions.showOnDisk(disk.path) },
     disk && isContentPath(disk.path) && window.desktop?.android && { label: 'Open with another app…', icon: 'external', run: () => actions.openWithApp(disk.path) },
     disk && !isContentPath(disk.path) && { label: 'Copy path', icon: 'copy', run: () => actions.copyPath(disk.path) },
     disk && { label: isLocal() ? 'Copy into my files' : 'Copy into my files (synced)', icon: 'filePlus', run: () => actions.copyToFiles(disk.path) },
-    disk && window.desktop?.folders && { label: 'Properties', icon: 'info', run: () => actions.showProperties(disk.path) },
+    disk && inFolders(disk.path) && { label: 'Properties', icon: 'info', run: () => actions.showProperties(disk.path) },
     disk && canTerminal(disk.path) && { label: 'Open a terminal in its folder', icon: 'terminal', run: () => actions.terminalHere(parentOfPath(disk.path)) },
     disk && { separator: true },
     id && { label: 'Details…', icon: 'tag', run: () => actions.openDialog({ type: 'file', id }) },
@@ -711,7 +713,7 @@ export function StatusBar({ recording, big, cursor, language, file, repo, disk, 
   if (file && isLocal()) state = `Saved · edited ${timeAgo(file.modifiedAt)}`;
   else if (file) state = file.dirty ? 'Saved on this device · not synced yet' : file.sha ? `Synced · edited ${timeAgo(file.modifiedAt)}${file.modifiedBy ? ` on ${file.modifiedBy}` : ''}` : 'Saved on this device';
   if (repo) state = repo.dirty && !isLocal() ? 'Edited · goes to the tracker on the next sync' : 'Tracker file';
-  if (kind === 'disk') state = disk.dirty ? 'Not saved to disk · Ctrl+S saves' : disk.follow ? 'Following the file as it grows' : isLocal() ? 'File on this computer, edited where it is' : 'File on this computer · not synced';
+  if (kind === 'disk') state = disk.dirty ? 'Not saved to disk · Ctrl+S saves' : disk.follow ? 'Following the file as it grows' : isLocal() ? `File on ${KINDS.disk.label.toLowerCase()}, edited where it is` : `File on ${KINDS.disk.label.toLowerCase()} · not synced`;
   if (kind === 'remote') state = `${protocolName(srv.conn?.protocol)} · ${remoteAddress(disk.path, srv.conn)}${disk.dirty ? ' · not saved to the server' : ''}`;
   const label = { synced: 'My files', doc: 'Tracker', disk: KINDS.disk.label, remote: srv?.conn?.name ?? 'Server' }[kind];
   const connection = srv && { connected: 'Connected', connecting: 'Connecting…', error: `Not connected: ${srv.status.error}`, disconnected: 'Not connected' }[srv.status.state];

@@ -85,7 +85,7 @@ jobs:
         if: steps.key.outputs.missing != 'true'
       - run: npx cap sync android
         if: steps.key.outputs.missing != 'true'
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         if: steps.key.outputs.missing != 'true'
         with:
           path: android/app/libnode
@@ -98,6 +98,14 @@ jobs:
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: ./gradlew assembleRelease --no-daemon --stacktrace
+      - name: Check what the APK holds
+        if: steps.key.outputs.missing != 'true'
+        run: |
+          apk=$(ls android/app/build/outputs/apk/release/*.apk)
+          for f in lib/arm64-v8a/libnode.so lib/arm64-v8a/libnodehost.so lib/arm64-v8a/libtrackerpty.so lib/arm64-v8a/libc++_shared.so assets/nodejs/mobile/node/main.cjs assets/nodejs/electron/main.cjs assets/nodejs/node_modules/ssh2/package.json assets/public/index.html; do
+            unzip -l "$apk" "$f" > /dev/null || { echo "::error::$f is missing from the APK"; exit 1; }
+          done
+          ls -l "$apk"
       - uses: actions/upload-artifact@v7
         if: steps.key.outputs.missing != 'true'
         with:

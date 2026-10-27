@@ -1,12 +1,13 @@
 # Tracker Editor — notes for Claude
 
-A Notepad++-style editor whose files sync through the same private GitHub data repo as Tracker (github.com/divaor/tracking_app). Electron on desktop, PWA on mobile.
+A Notepad++-style editor whose files sync through the same private GitHub data repo as Tracker (github.com/divaor/tracking_app). Electron on desktop, a Capacitor app on Android, PWA elsewhere.
 
 ## Commands
 
 - `npm test` runs the unit tests (`node:test`, no browser needed). Run it before committing.
 - `npm run web` serves `app/` at http://localhost:8080.
 - `npm start` launches the Electron app. As root/in containers: `npx electron --no-sandbox .`
+- `npm run android:node` (`scripts/android-node.js`) fetches nodejs-mobile's libnode (pinned, `npm pack`) into `android/app/libnode/` and assembles the Node side into `android/app/src/main/assets/nodejs/` (`--assets-only` skips libnode); neither is committed. Then `npx cap sync android` and `./gradlew assembleDebug` in `android/` (needs the Android SDK and NDK: CI does it, `.github/workflows/android.yml`; releases sign with the `ANDROID_KEYSTORE` / `ANDROID_KEYSTORE_PASSWORD` secrets and skip the APK without them).
 - `npm run vendor` re-bundles CodeMirror (from `vendor-src/codemirror.js`, esbuild with code splitting) into `app/vendor/cm/` and xterm.js with its fit add-on (`vendor-src/xterm.js`) into `app/vendor/xterm/`, `@codemirror/lsp-client` (`vendor-src/lsp.js`, pinned) as a second entry of the CodeMirror build (`cm/lsp.js`, its `marked` import pointed at `../marked.js`; the script fails if a chunk imports it), `@anthropic-ai/sdk` (`vendor-src/anthropic.js`, pinned) into `app/vendor/anthropic.js`, and copies Preact/htm, marked, DOMPurify and tesseract.js (with its core and the eng/spa models, into `app/vendor/ocr/`). Run it after upgrading any of them, and commit the output.
 
 ## Architecture
@@ -172,10 +173,20 @@ A Notepad++-style editor whose files sync through the same private GitHub data r
   - The data folder is created only when local mode uses it (GitHub users never get one). `localRepo.js`, `localData.js` and `moveData.js` are tested in Node (`localStore.cjs` too).
 - The token is read and written through `settings.js` (`getToken`/`setToken`): Electron `safeStorage` via the preload bridge on desktop (secret `github-token`), `localStorage` on web. Other secrets go through `getSecret`/`setSecret` (`SECRET_NAMES`, and `SECRET_KEYS` in `main.cjs`).
 
+- The Android app (`android/`, Capacitor; `capacitor.config.json`, `webDir` app, scheme https, so the page is `https://localhost`):
+  - `app/js/androidApp.js` (loaded before main.js) defines `window.desktop` with `platform: 'android'` (`platform.js`: `isAndroidApp`, `isDesktopApp`; features check the part of `window.desktop` they use). No service worker in the app (`main.js`). `data-native='android'` on the root (edge-to-edge styles); the bars follow the theme (SystemBars).
+  - `TrackerNativePlugin.java` (plugin `TrackerNative`): Open with / Edit with / Share / PROCESS_TEXT / `tracker-editor://` intents (`launch` event, `takeLaunch`; `sortLaunch` and `routeOfLink` sort them), content:// files (`stat`, `read`, `write` as base64; `textBytes.js` decodes and encodes them by the desktop's rules; `changedSince`; a poller stands in for watching), `pick`, `saveAs`, `openWith`, `shareText`, Back (`onBack`: the newest handler, else `minimize`), secrets (`secretGet`/`secretSet`: AES-GCM with an AndroidKeyStore key; `node-*` names are refused to the page). content:// tabs are `isContentPath` in where.js (`contentPlace`, no path, folder or terminal items; `readOnly` when the app that gave them says so).
+  - The app's own Node.js (nodejs-mobile 18) runs the desktop main process for folders, servers, terminals, find, transfers, mirrors and model requests: `NodeService` (process `:node`, JNI `nodehost.cpp` → `node::Start`, output to logcat `TrackerNode`), `NodeBackend` (copies assets/nodejs to files/nodejs once per version, makes the tokens, waits for the port file). `mobile/node/main.cjs` maps `electron` → `electronShim.cjs` and `@lydell/node-pty` → `pty.cjs` (`libtrackerpty.so`, `cpp/pty.c`, Node-API: forkpty) and requires `electron/main.cjs`; `android.cjs` adds `folder:places` etc. Keep main.cjs working under the shim (the page's guard is `app://editor/`, which `pageEvent` carries).
+  - `bridge.cjs` replaces IPC with HTTP on 127.0.0.1: `/invoke`, `/send`, `/events` (SSE, queued until the page listens), with the page's token; Buffers as `{ __bytes }`. What the shim asks of the phone (`dialog.showOpenDialog`, `showMessageBox`, `shell.openPath`) goes out as `native:ask`; the page passes it to `answerAsk` and the plugin answers Node itself on `/native` with a second token the page never sees, so the page cannot pick a folder or answer a dialog. Keep it so.
+  - Folders on the phone need All files access (`MANAGE_EXTERNAL_STORAGE`); `chooseFolder` offers storage, Documents, Download, removable volumes, or the system's tree picker (`pathOfDocumentId`). `shell.trashItem` deletes for good (the page says so: `isAndroidApp()` in ui/folders.js). On touch screens a tap opens rows in Folders (`touchScreen`), `Select` in the long-press menu picks several.
+  - Plain http is allowed only to 127.0.0.1/localhost (`network_security_config.xml`); secrets and Node's data stay out of backups (`backup_rules.xml`, `data_extraction_rules.xml`).
+  - Versions: `versionName` is package.json's, `versionCode` major·10000 + minor·100 + patch (`build.gradle`). The release key must never change (Obtainium and Android refuse updates signed otherwise).
+
 ## When changing things
 
 - Adding or removing a file under `app/` → update `ASSETS` in `app/sw.js` (CodeMirror chunks are listed in `vendor/cm/files.json` instead, and text recognition in `vendor/ocr/files.json` and the terminal in `vendor/xterm/files.json`, both cached when first used). `test/app.test.js` enforces this.
-- Bumping the version → update `package.json`, `app/js/version.js` and the `CACHE` name in `app/sw.js`. The tests check that they match.
+- Bumping the version → update `package.json`, `app/js/version.js` and the `CACHE` name in `app/sw.js`. The tests check that they match. The Android app takes package.json's.
+- Adding a module that `electron/main.cjs` imports from `app/js` → add it to `PAGE_MODULES` in `scripts/android-node.js`; a package it needs → `PACKAGES`.
 - The manifest `id` is `/tracker-editor/`. Ids resolve against the origin, and the tracker on the same origin (divaor.github.io) owns the origin root. Never change it: a new id makes installed copies a different app.
 - The CSP in `app/index.html` allows only same-origin scripts. Fetches may go to any https origin and to `localhost` (the model and speech servers); `media-src` allows `blob:` for speech audio, `img-src` and `frame-src` allow `blob:` for the folders view's pictures and PDFs.
   - Do not add inline scripts.
