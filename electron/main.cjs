@@ -2497,6 +2497,10 @@ function buildMenu() {
   const isMac = process.platform === 'darwin';
   // Shortcuts the editor itself handles are shown but left to it (registerAccelerator: false).
   const shown = (label, accelerator, command) => ({ label, accelerator, registerAccelerator: false, click: () => send(command) });
+  const zoomWindow = (by) => {
+    const wc = mainWindow?.webContents;
+    if (wc) wc.setZoomLevel(by ? wc.getZoomLevel() + by : 0);
+  };
   const item = (label, accelerator, command) => ({ label, accelerator, click: () => send(command) });
   const template = [
     ...(isMac ? [{ role: 'appMenu' }] : []),
@@ -2628,9 +2632,13 @@ function buildMenu() {
         shown('Previous Group of Tabs', 'CmdOrCtrl+Alt+PageUp', 'tab-group-prev'),
         shown('All Tabs', 'CmdOrCtrl+Alt+Home', 'tab-view-all'),
         { type: 'separator' },
-        { role: 'resetZoom' },
-        { role: 'zoomIn' },
-        { role: 'zoomOut' },
+        shown('Larger Text', 'CmdOrCtrl+=', 'text-larger'),
+        shown('Smaller Text', 'CmdOrCtrl+-', 'text-smaller'),
+        shown('Usual Text Size', 'CmdOrCtrl+0', 'text-reset'),
+        // The whole window (menus, lists, text): no keys, those are the text's.
+        { label: 'Zoom the Whole Window In', click: () => zoomWindow(0.5) },
+        { label: 'Zoom the Whole Window Out', click: () => zoomWindow(-0.5) },
+        { label: 'Whole Window at Its Usual Size', click: () => zoomWindow(0) },
         { type: 'separator' },
         { role: 'togglefullscreen' },
         { role: 'reload' },

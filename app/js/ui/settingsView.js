@@ -1,4 +1,5 @@
 import { html, useEffect, useState } from '../../vendor/preact-htm.js';
+import { clampFont, DEFAULT_FONT } from '../textSize.js';
 import { DEFAULT_LLM_URL } from '../llm.js';
 import { API_PROVIDERS, connectionOf, createModelClient, keySecret, providerOf } from '../providers.js';
 import { RUN_COMMANDS } from '../runFile.js';
@@ -178,9 +179,9 @@ function EditorCard({ settings }) {
       <div class="field span-2"><span>Theme</span>
         <${Segmented} options=${[{ id: 'system', label: 'System' }, { id: 'light', label: 'Light' }, { id: 'dark', label: 'Dark' }]} value=${settings.theme} onChange=${(theme) => saveSettings({ theme })} label="Theme" />
       </div>
-      <${Field} label="Font size">
-        <select value=${String(settings.fontSize)} onChange=${(e) => saveSettings({ fontSize: Number(e.currentTarget.value) })}>
-          ${[12, 13, 14, 15, 16, 18, 20].map((n) => html`<option key=${n} value=${n}>${n} px</option>`)}
+      <${Field} label="Text size" hint="On this device. Also Ctrl+= / Ctrl+- (Ctrl+0 the usual size), Ctrl+wheel, a pinch on a phone, or Aa in the status bar">
+        <select value=${String(clampFont(settings.fontSize))} onChange=${(e) => saveSettings({ fontSize: Number(e.currentTarget.value) })}>
+          ${[...new Set([10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, clampFont(settings.fontSize)])].sort((a, b) => a - b).map((n) => html`<option key=${n} value=${n}>${n} px${n === DEFAULT_FONT ? ' (usual)' : ''}</option>`)}
         </select>
       </${Field}>
       <${Field} label="Indentation" hint="For files whose text or .editorconfig does not say">

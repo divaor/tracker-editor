@@ -33,6 +33,7 @@ import { onTransfers, watchTransfers } from './transfers.js';
 import { TransfersCard } from './ui/transfers.js';
 import { baseName, besideSettings, claudeText, inPlaceSettings, isImageName, opensInEditor, remapPath, withCurrent } from './folders.js';
 import { folderOfPath, nearestTabs } from './comparePick.js';
+import { clampFont, DEFAULT_FONT, pinchFont, stepFont, textSizeKey } from './textSize.js';
 import { draggedPaths, draggedTab, dropped, isOwnDrop } from './dragOut.js';
 import { dataClient, getSyncState, movedTo, onSyncResult, onSyncState, syncNow } from './syncManager.js';
 import { matchesScope, projectKey, projectList } from './tracker-model.js';
@@ -2112,6 +2113,13 @@ export function App() {
   actions.copyText = (text) => navigator.clipboard.writeText(text).then(() => toast('Copied.'), () => toast('Could not copy.', { kind: 'error' }));
 
   actions.toggleWrap = () => saveSettings({ wordWrap: !getSettings().wordWrap });
+  /** The text size on this device: a step larger (1) or smaller (-1), or the usual size (0). */
+  actions.textSize = (step, { quiet = false } = {}) => {
+    const now = clampFont(getSettings().fontSize);
+    const next = step === 0 ? DEFAULT_FONT : stepFont(now, step);
+    if (next !== now) saveSettings({ fontSize: next });
+    if (!quiet) toast(`Text size: ${next} px${next === DEFAULT_FONT ? ' (the usual size)' : ''}`, { key: 'text-size', timeout: 1600 });
+  };
   actions.toggleProblems = () => setPanel((p) => (p === 'problems' ? null : 'problems'));
   /** Ctrl+Shift+P: every command by name (as in VS Code). */
   actions.commandPalette = (query = '') => setDialog((d) => (d?.type === 'palette' ? null : { type: 'palette', query }));
@@ -2682,6 +2690,58 @@ export function App() {
     };
   }, []);
 
+  // The text size from the pointer: Ctrl+wheel over the text (a touchpad's pinch comes as one
+  // too), and two fingers pinching on a touch screen (the page itself does not zoom there).
+  useEffect(() => {
+    const area = areaEl.current;
+    if (!area) return;
+    let turned = 0;
+    const onWheel = (e) => {
+      if (!e.ctrlKey || !e.target.closest?.('.cm-editor')) return;
+      e.preventDefault();
+      turned += e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+      if (Math.abs(turned) < 50) return;
+      actions.textSize(turned < 0 ? 1 : -1);
+      turned = 0;
+    };
+    let pinch = null;
+    const apart = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    const onStart = (e) => {
+      if (e.touches.length === 2 && e.target.closest?.('.cm-editor')) pinch = { apart: apart(e.touches), from: clampFont(getSettings().fontSize), size: null };
+      else if (e.touches.length > 2) pinch = null;
+    };
+    const onMove = (e) => {
+      if (!pinch || e.touches.length !== 2) return;
+      e.preventDefault();
+      const size = pinchFont(pinch.from, pinch.apart, apart(e.touches));
+      if (size === (pinch.size ?? pinch.from)) return;
+      pinch.size = size;
+      // Shown at once; kept when the fingers lift.
+      document.documentElement.style.setProperty('--editor-font-size', `${size}px`);
+    };
+    const onEnd = (e) => {
+      if (!pinch || e.touches.length >= 2) return;
+      const { size, from } = pinch;
+      pinch = null;
+      if (size && size !== from) {
+        saveSettings({ fontSize: size });
+        toast(`Text size: ${size} px`, { key: 'text-size', timeout: 1600 });
+      }
+    };
+    area.addEventListener('wheel', onWheel, { passive: false });
+    area.addEventListener('touchstart', onStart, { passive: true });
+    area.addEventListener('touchmove', onMove, { passive: false });
+    area.addEventListener('touchend', onEnd);
+    area.addEventListener('touchcancel', onEnd);
+    return () => {
+      area.removeEventListener('wheel', onWheel);
+      area.removeEventListener('touchstart', onStart);
+      area.removeEventListener('touchmove', onMove);
+      area.removeEventListener('touchend', onEnd);
+      area.removeEventListener('touchcancel', onEnd);
+    };
+  }, []);
+
   // Desktop: a paste outside any text (no tab open, the tab bar…) opens files copied in another
   // app, or a path; the editor and the folders view take their own pastes first.
   useEffect(() => {
@@ -2707,6 +2767,10 @@ export function App() {
       if (e.key === 'F1' && !mod && !e.altKey) {
         e.preventDefault();
         actions.command('help');
+      } else if (textSizeKey(e) !== null) {
+        // Ctrl+= / Ctrl+- / Ctrl+0: the editor's text, not the whole page.
+        e.preventDefault();
+        actions.textSize(textSizeKey(e));
       } else if (mod && !e.shiftKey && k === 'p') {
         e.preventDefault();
         setDialog({ type: 'quickOpen' });
@@ -2867,6 +2931,9 @@ export function App() {
       settings: () => setView('settings'),
       'toggle-sidebar': () => setSidebar((s) => !s),
       'toggle-wrap': () => actions.toggleWrap(),
+      'text-larger': () => actions.textSize(1),
+      'text-smaller': () => actions.textSize(-1),
+      'text-reset': () => actions.textSize(0),
       'read-aloud': () => actions.readAloud(),
       flush: async () => {
         hostRef.current?.flushAll();

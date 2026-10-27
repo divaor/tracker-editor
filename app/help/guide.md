@@ -2,7 +2,7 @@
 
 Tracker Editor is a Notepad++-style editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs. Everything is saved the moment you paste or type, on this computer with the tracker, or, once you turn on sync, in the same private GitHub data repo as the tracker, so your files are on your computers and your phone.
 
-Version 0.21.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.21.0 · Web app: https://divaor.github.io/tracker-editor/
+Version 0.22.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.22.0 · Web app: https://divaor.github.io/tracker-editor/
 
 ---
 
@@ -14,9 +14,9 @@ Download from **https://github.com/divaor/tracker-editor/releases/latest**:
 
 | System | File |
 | --- | --- |
-| Windows | `Tracker Editor Setup 0.21.0.exe` (installer) or `Tracker Editor-0.21.0-portable.exe` (no install, no admin rights) |
-| macOS | `Tracker Editor-0.21.0-arm64.dmg` |
-| Linux | `Tracker Editor-0.21.0.AppImage` |
+| Windows | `Tracker Editor Setup 0.22.0.exe` (installer) or `Tracker Editor-0.22.0-portable.exe` (no install, no admin rights) |
+| macOS | `Tracker Editor-0.22.0-arm64.dmg` |
+| Linux | `Tracker Editor-0.22.0.AppImage` |
 
 The builds are not code-signed, so the first launch warns you. On Windows, choose *More info → Run anyway*. On macOS, right-click the app → *Open*. Installing the desktop app also registers `tracker-editor://` links, so the tracker's **Open in editor** opens files straight in it.
 
@@ -79,6 +79,7 @@ On an iPhone, apps added to the home screen each keep their own storage: the edi
 
 ### Your layout
 
+- **Text size**: smaller to fit more on a small screen, larger to read easily. On a phone, **pinch** the text with two fingers (the page itself stays as it is). On a computer, `Ctrl+=` / `Ctrl+-` (Mac `Cmd`), or `Ctrl` and the mouse wheel over the text; `Ctrl+0` goes back to the usual 14 px. Or tap **Aa** in the status bar for **A−** / **A+** and **Usual size**. Each device keeps its own size (also in **Settings → Editor → Text size**). The desktop's **View** menu has them too; zooming the whole window (menus and lists too) is there as well, without keys.
 - **The sidebar's width**: drag its right edge, for example to see long names in folders. Double-click the edge to go back to the default width.
 - **Text and preview (or the side view)**: drag the line between them to give either side more room; double-click it for half and half.
 - **Clearing a filter**: the × at the end of a search or filter field empties it (`Escape` too in the sidebar's filters).
@@ -587,6 +588,7 @@ Turn them on in **Settings → Desktop**.
 | `Ctrl+D` | Select the next occurrence |
 | `Ctrl+/` | Comment lines |
 | `Alt+Z` | Word wrap |
+| `Ctrl+=` / `Ctrl+-` / `Ctrl+0` | Larger / smaller text / the usual size (also `Ctrl`+wheel, a pinch on a phone, **Aa** in the status bar) |
 | `Alt+R` | Read aloud, pause or resume |
 | `Alt+T` | Type the selection or file into another window (desktop) |
 | `Ctrl+K` | The ✦ model panel: about the selection or the file (no file open: how to do something in the editor) |
@@ -628,6 +630,7 @@ Turn them on in **Settings → Desktop**.
 - **Can I sign in with my Claude Pro or Max subscription?** No: Anthropic allows it only in its own apps. Use **Ask in the Claude app**, or an API key (paid separately). See [Your Claude subscription](#your-claude-subscription).
 - **Ask in the Claude app opened an empty chat**: the question was too long for a link; it is on the clipboard, paste it.
 - **Pasting a file copied in Explorer or Finder pastes nothing (web app)**: the browser can't open files where they are. Use the desktop app, or drop the file on the window to add a copy to my files.
+- **`Ctrl+=` zooms the whole window, or does nothing**: it changes the text's size in the editor (an older desktop version zoomed the window). In a browser, click into the text first. To zoom the whole window: **View → Zoom the Whole Window In**.
 - **Compare with… doesn't list a file on disk**: type part of its name (files in the folders open in Folders show as you type), or use **Browse…**.
 - **A folder says "That file was not opened here"**: it is a link to a place outside the folder you picked, or the folder was forgotten. Open that place with **Open another folder…**.
 - **Dragging a tab out does nothing**: encrypted files are never written out (their tabs only move within the bar); use **Copy for Claude** or copy the text instead.

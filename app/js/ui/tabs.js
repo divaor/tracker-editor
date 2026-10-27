@@ -5,7 +5,7 @@ import { getSettings, isLocal, isSyncConfigured, saveSettings } from '../setting
 import { fileKey, parseKey, store } from '../store.js';
 import { syncNow } from '../syncManager.js';
 import { projectKey } from '../tracker-model.js';
-import { ProjectChip } from './components.js';
+import { dismissToast, ProjectChip } from './components.js';
 import { Icon } from './icons.js';
 import { serverLabel } from '../lspTools.js';
 import { dictationSupported } from './dictation.js';
@@ -20,6 +20,7 @@ import { problemsSummary } from './problems.js';
 import { tabViewState } from '../tabViews.js';
 import { TabViewMenu } from './tabViews.js';
 import { terminalsAvailable } from '../terminals.js';
+import { clampFont, DEFAULT_FONT, MAX_FONT, MIN_FONT } from '../textSize.js';
 
 /** The server of a file on one ({ conn, status }), or null. */
 const serverOf = (path) => {
@@ -610,6 +611,47 @@ const INDENT_SOURCES = {
 };
 
 // The status bar's "Spaces: 4" / "Tab size: 4": tabs or spaces, the width, converting.
+// The text size on this device: Aa opens − 14 px + and the usual size, open while you step.
+function TextSizeButton({ size, actions }) {
+  const [at, setAt] = useState(null);
+  const button = useRef(null);
+  const box = useRef(null);
+  useEffect(() => {
+    if (!at) return;
+    const onDown = (e) => !box.current?.contains(e.target) && !button.current?.contains(e.target) && setAt(null);
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      setAt(null);
+      button.current?.focus();
+    };
+    document.addEventListener('pointerdown', onDown, true);
+    document.addEventListener('keydown', onKey, true);
+    return () => {
+      document.removeEventListener('pointerdown', onDown, true);
+      document.removeEventListener('keydown', onKey, true);
+    };
+  }, [at]);
+  const step = (n) => actions.textSize(n, { quiet: true });
+  return html`<button type="button" ref=${button} class="status-item status-btn-text status-text-size" aria-haspopup="dialog" aria-expanded=${Boolean(at)}
+      aria-label=${`Text size: ${size} px`} title=${`Text size: ${size} px. Ctrl+= and Ctrl+- (or Ctrl+wheel, or pinch on a phone) change it, Ctrl+0 the usual size.`}
+      onClick=${(e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        // The size's own message would cover the popup.
+        dismissToast('text-size');
+        setAt(at ? null : { right: Math.max(8, innerWidth - r.right), bottom: innerHeight - r.top + 4 });
+      }}>
+      <span class="aa" aria-hidden="true">A<small>A</small></span><span class="hide-narrow">${size}</span>
+    </button>
+    ${at &&
+    html`<div class="text-size-pop" ref=${box} role="dialog" aria-label="Text size" style=${{ right: `${at.right}px`, bottom: `${at.bottom}px` }}>
+      <button type="button" class="text-size-step" aria-label="Smaller text" title="Smaller (Ctrl+-)" disabled=${size <= MIN_FONT} onClick=${() => step(-1)}><span class="aa small" aria-hidden="true">A</span>−</button>
+      <span class="text-size-value" aria-live="polite">${size} px</span>
+      <button type="button" class="text-size-step" aria-label="Larger text" title="Larger (Ctrl+=)" disabled=${size >= MAX_FONT} onClick=${() => step(1)}><span class="aa" aria-hidden="true">A</span>+</button>
+      <button type="button" class="btn ghost sm text-size-reset" title="Ctrl+0" disabled=${size === DEFAULT_FONT} onClick=${() => step(0)}>Usual size (${DEFAULT_FONT})</button>
+    </div>`}`;
+}
+
 function IndentButton({ indent, actions }) {
   const [at, setAt] = useState(null);
   const button = useRef(null);
@@ -707,6 +749,7 @@ export function StatusBar({ recording, big, cursor, language, file, repo, disk, 
     </label>`}
     ${(repo || disk) && html`<span class="status-item">${language || PLAIN_TEXT}</span>`}
     ${cursor?.indent && html`<${IndentButton} indent=${cursor.indent} actions=${actions} />`}
+    <${TextSizeButton} size=${clampFont(settings.fontSize)} actions=${actions} />
     <button type="button" class="status-item status-btn-text ${settings.wordWrap ? 'on' : ''}" title="Word wrap (Alt+Z)" aria-pressed=${settings.wordWrap} onClick=${() => saveSettings({ wordWrap: !getSettings().wordWrap })}>
       <${Icon} name="wrap" size=${14} /><span class="hide-narrow">Wrap</span>
     </button>

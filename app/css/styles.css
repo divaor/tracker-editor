@@ -4319,6 +4319,75 @@ body:is(.resizing-x, .resizing-y) iframe {
   background: var(--surface-2);
 }
 
+/* A pinch on the text changes its size (app.js), so the browser does not zoom the page there. */
+.editor-area .cm-editor {
+  touch-action: pan-x pan-y;
+}
+
+/* The text size: Aa in the status bar, and its − 14 px + over it. */
+.status-text-size .aa,
+.text-size-step .aa {
+  font-family: var(--font);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.status-text-size .aa small {
+  font-size: 0.78em;
+}
+
+.text-size-pop {
+  position: fixed;
+  z-index: 60;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 196px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  color: var(--text);
+  animation: rise 0.1s ease-out;
+}
+
+.text-size-step {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 1px;
+  width: 52px;
+  height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 18px;
+}
+
+.text-size-step .aa.small {
+  font-size: 13px;
+}
+
+.text-size-step:disabled {
+  opacity: 0.4;
+}
+
+.text-size-value {
+  min-width: 52px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  text-align: center;
+}
+
+.text-size-reset {
+  width: 100%;
+  justify-content: center;
+}
+
 .statusbar {
   container-type: inline-size;
   display: flex;
