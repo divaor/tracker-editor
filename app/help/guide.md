@@ -2,7 +2,7 @@
 
 Tracker Editor is a Notepad++-style editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs. Everything is saved the moment you paste or type, on this computer with the tracker, or, once you turn on sync, in the same private GitHub data repo as the tracker, so your files are on your computers and your phone.
 
-Version 0.22.1 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.22.1 · Web app: https://divaor.github.io/tracker-editor/
+Version 0.23.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.23.0 · Web app: https://divaor.github.io/tracker-editor/
 
 ---
 
@@ -14,9 +14,9 @@ Download from **https://github.com/divaor/tracker-editor/releases/latest**:
 
 | System | File |
 | --- | --- |
-| Windows | `Tracker Editor Setup 0.22.1.exe` (installer) or `Tracker Editor-0.22.1-portable.exe` (no install, no admin rights) |
-| macOS | `Tracker Editor-0.22.1-arm64.dmg` |
-| Linux | `Tracker Editor-0.22.1.AppImage` |
+| Windows | `Tracker Editor Setup 0.23.0.exe` (installer) or `Tracker Editor-0.23.0-portable.exe` (no install, no admin rights) |
+| macOS | `Tracker Editor-0.23.0-arm64.dmg` |
+| Linux | `Tracker Editor-0.23.0.AppImage` |
 
 The builds are not code-signed, so the first launch warns you. On Windows, choose *More info → Run anyway*. On macOS, right-click the app → *Open*. Installing the desktop app also registers `tracker-editor://` links, so the tracker's **Open in editor** opens files straight in it.
 
@@ -87,6 +87,8 @@ On an iPhone, apps added to the home screen each keep their own storage: the edi
 ### Editing tools
 
 - **Format document** (`Shift+Alt+F`, ⋯ menu, or **Edit → Format Document**): tidies the file, or only the selection (for example the JSON inside a log line). **JSON** on one line becomes one value per line (numbers and text exactly as written, comments kept); also **XML**, **SQL** (by dialect: pick PostgreSQL, MySQL, MS SQL… in the status bar), **JavaScript**, **TypeScript**, **CSS/SCSS/Less**, **HTML**, **Vue**, **Markdown**, **YAML** and **GraphQL**. It uses the file's name or the language picked in the status bar; text with no name is formatted when it looks like JSON or XML. A file with a language server that formats (Go, C, Rust…) uses the server's (see Language servers). Something it cannot read says what and where; `Ctrl+Z` takes a format back.
+- **Line numbers**: click one (on a phone, tap it) to select that line and open a small menu by it: **Copy**, **Cut**, **Paste** and **Select all**, and under **⋯** **Duplicate**, **Comment**, **Delete** and **Ask** (the model, about those lines). `Shift+click` selects from the selection up to that line; a right-click (a long press on a phone) opens the menu for what is selected. On a phone the keyboard stays down, so it does not cover the text. `Ctrl+L` selects the line too; again, the next one as well.
+- **The edit bar (phones and tablets)**: while you type, a bar takes the status bar's place right above the keyboard, with the keys a phone keyboard lacks: **Tab**, **Ctrl** (the next key or letter comes with it: Ctrl, then `a` selects all, `z` undoes, `/` comments, `f` finds, `s` saves; Ctrl, then → jumps a word), **Select** (the arrows select, as with Shift), the **arrows** (hold one to keep going), **Undo** and **Redo**. **{ }** switches to a row of symbols (brackets and quotes close as when typed; swipe it sideways for more), and the keyboard icon goes back. **⋯** shows the tools: Copy, Cut and Paste (with nothing selected, the whole line), Select all, Select line, Find, Save (a file on disk; Sync for files synced with GitHub), Comment, Duplicate, Delete line, Line up / down, Outdent / Indent, Line start / end, Go to line, Esc, Ask (the model) and **Hide keyboard**. When the keyboard goes down (the phone's Back), the status bar comes back. Turn it off in **Settings → Editor → Edit bar while typing on a touch screen**.
 - **Text tools** (⋯ → **Text tools**, **Edit → Text**, or Help): UPPER and lower case, sort lines, remove duplicate lines, trim trailing spaces, duplicate or delete a line, comment lines.
 - **Indentation**: each file keeps its own, tabs or spaces and how many: from its text, or from an `.editorconfig` next to a file on disk or on a server. The status bar shows it (**Spaces: 2**, **Tab size: 4**); click it to indent with tabs or spaces, pick the width, **convert** the whole file, or go back to what the text uses. What you pick is remembered for the file. Files that say nothing use **Settings → Editor → Indentation**.
 - **Edit several lines at once**: `Shift+Alt+↓` (or `↑`) puts a cursor on each line as you go (as in Notepad++; `Ctrl+Shift+Alt+arrows` as in VS Code; on a Mac `Cmd+Shift+Option+arrows`); `Shift+Alt+→` / `←` widen or narrow the column, so you select a rectangle. Type, paste or delete and every line changes. Shorter lines get their cursor at the end. `Ctrl+Alt+↑` / `↓` (Mac `Cmd+Option+↑` / `↓`) add one cursor above or below. With the mouse: `Alt+drag` draws the rectangle, `Ctrl+click` (Mac `Cmd+click`) adds a cursor. `Escape` goes back to one cursor.
@@ -572,6 +574,7 @@ Turn them on in **Settings → Desktop**.
 | `Ctrl+Shift+P` (or `Ctrl+P`, then `>`) | Run a command by name |
 | `Tab` in HTML, XML, JSX | Expand an Emmet abbreviation (`ul>li*3`, `div.card`, `!`) |
 | `Shift+Alt+F` | Format document (or the selection) |
+| `Ctrl+L` | Select the line (again: the next one too); or click its number for Copy, Cut, Paste, Select all |
 | `Ctrl+F` / `Ctrl+H` | Find / replace in this file (`Enter` next, `Shift+Enter` previous, `Alt+Enter` select all; in the replace field `Enter` replaces, `Ctrl+Enter` replaces all) |
 | `Ctrl+G` | Go to line |
 | `Ctrl+Shift+M` / `F8` / `Shift+F8` | Problems in this file / the next one / the one before |
@@ -622,6 +625,7 @@ Turn them on in **Settings → Desktop**.
 - **"The file changed on disk since you opened it"**: another program saved it. Use **Compare**, then reload or keep yours.
 - **The capture shortcut "is used by another app"**: click the field and press another combination.
 - **The screenshot is black (macOS)**: allow Tracker Editor under System Settings → Privacy & Security → Screen Recording, then restart it.
+- **Paste in the edit bar or the line-number menu says the browser did not let it read the clipboard**: allow the clipboard for the site when the browser asks, or long-press in the text and choose **Paste**.
 - **Dictation says to allow the microphone**: allow it for the site or app in the browser's settings. "Needs a connection": the speech service is online.
 - **Text from an image reads badly**: crop to the text, choose one language, or use a sharper photo.
 - **No ✦ bubble**: connect a model in Settings → Model and check *Model button at the bottom right*.

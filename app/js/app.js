@@ -34,6 +34,7 @@ import { TransfersCard } from './ui/transfers.js';
 import { baseName, besideSettings, claudeText, inPlaceSettings, isImageName, opensInEditor, remapPath, withCurrent } from './folders.js';
 import { folderOfPath, nearestTabs } from './comparePick.js';
 import { clampFont, DEFAULT_FONT, pinchFont, stepFont, textSizeKey } from './textSize.js';
+import { keyboardState } from './editKeys.js';
 import { draggedPaths, draggedTab, dropped, isOwnDrop } from './dragOut.js';
 import { dataClient, getSyncState, movedTo, onSyncResult, onSyncState, syncNow } from './syncManager.js';
 import { matchesScope, projectKey, projectList } from './tracker-model.js';
@@ -75,6 +76,7 @@ import { prepareTyping, typingDelay } from './typing.js';
 import { isSealed } from './crypto.js';
 import { decodeFor, encodeFor, lock, onVault, openText, setUpVault, unlock, vaultState } from './vault.js';
 import { ReadAloudBar } from './ui/readAloud.js';
+import { EditBar, LineMenu } from './ui/editBar.js';
 import { ShareDialog } from './ui/share.js';
 import { SettingsView } from './ui/settingsView.js';
 import { Sidebar } from './ui/sidebar.js';
@@ -1363,6 +1365,10 @@ export function App() {
   const [dialog, setDialog] = useState(null);
   const [sidebar, setSidebar] = useState(() => !isNarrow());
   const [cursor, setCursor] = useState(null);
+  // Touch screens: typing with the keyboard up (the edit bar instead of the status bar), and the
+  // menu a tap on a line number opens ({ key, x, top, bottom }).
+  const [editing, setEditing] = useState(false);
+  const [lineMenu, setLineMenu] = useState(null);
   // The open tab is in the lighter editor for very large files.
   const [big, setBig] = useState(false);
   const [preview, setPreview] = useState(() => new Set());
@@ -1573,6 +1579,7 @@ export function App() {
       onImage: (file) => actions.readImages([{ blob: file, name: file.name || 'Pasted image' }]),
       onPasteFiles: (files) => actions.openPastedFiles(files),
       onPastePath: (path) => actions.offerPastedPath(path),
+      onLineMenu: (at) => setLineMenu(at),
       linkTargets: () => store.live().map((f) => linkName(f.name)),
       // A tab's editor state is gone (closed, or made again under a new path): its server forgets it.
       onDrop: (key) => lspRef.current?.forget(key),
@@ -2244,6 +2251,36 @@ export function App() {
     setAssistStart(null);
     setAssist(true);
   };
+  /** Copy, Cut and Paste from the edit bar and the line-number menu: the selection, or the cursor's line. */
+  actions.editClip = async (kind) => {
+    const host = hostRef.current;
+    if (!host?.active) return;
+    if (kind === 'paste') {
+      if (!host.canEdit()) return;
+      // The desktop app pastes for real into the text (files copied elsewhere open, as with Ctrl+V).
+      if (window.desktop?.folders?.paste && document.activeElement?.closest?.('.cm-content')) return void window.desktop.folders.paste();
+      let text;
+      try {
+        text = await navigator.clipboard.readText();
+      } catch {
+        return toast('The browser did not let the editor read the clipboard. Long-press in the text and choose Paste.', { kind: 'error', key: 'clip', timeout: 6000 });
+      }
+      if (!host.paste(text)) toast('There is no text on the clipboard.', { key: 'clip', timeout: 2500 });
+      return;
+    }
+    const clip = host.clipText();
+    if (!clip?.text) return;
+    try {
+      await navigator.clipboard.writeText(clip.text);
+    } catch {
+      return toast('The browser did not let the editor use the clipboard.', { kind: 'error', key: 'clip', timeout: 5000 });
+    }
+    if (kind === 'cut') host.cut();
+    const lines = clip.text.split('\n').length - (clip.text.endsWith('\n') ? 1 : 0);
+    toast(`${kind === 'cut' ? 'Cut' : 'Copied'}${lines > 1 ? ` ${lines} lines` : ''}`, { key: 'clip', timeout: 1500 });
+  };
+  /** The edit bar's Hide keyboard: the text lets go of the focus (the status bar comes back). */
+  actions.hideKeyboard = () => document.activeElement?.blur?.();
   actions.openAssist = (start) => {
     setView('editor');
     setAssistStart({ ...start, id: Date.now() });
@@ -2742,6 +2779,44 @@ export function App() {
     };
   }, []);
 
+  // Touch screens: while the text has the focus, the edit bar takes the status bar's place
+  // (setting `editBar`). Closing the keyboard (the phone's Back) leaves the focus in the text, so
+  // the visible page growing back says it went down: the status bar returns until it is up again.
+  useEffect(() => {
+    if (settings.editBar === false) return void setEditing(false);
+    const touch = matchMedia('(pointer: coarse)');
+    const vv = window.visualViewport;
+    const size = () => (vv ? { width: vv.width * vv.scale, height: vv.height * vv.scale } : { width: innerWidth, height: innerHeight });
+    let keyboard = keyboardState(null, size());
+    let down = false; // the keyboard went down while the text kept the focus
+    const typing = () => Boolean(document.activeElement?.closest?.('.editor-area .cm-content'));
+    const update = () => setEditing(touch.matches && typing() && !down);
+    const onFocus = () => {
+      down = false;
+      setTimeout(update, 0);
+    };
+    const onResize = () => {
+      const was = keyboard.open;
+      keyboard = keyboardState(keyboard, size());
+      if (was && !keyboard.open) down = true;
+      if (keyboard.open) down = false;
+      update();
+    };
+    document.addEventListener('focusin', onFocus);
+    document.addEventListener('focusout', onFocus);
+    vv?.addEventListener('resize', onResize);
+    touch.addEventListener('change', update);
+    update();
+    return () => {
+      document.removeEventListener('focusin', onFocus);
+      document.removeEventListener('focusout', onFocus);
+      vv?.removeEventListener('resize', onResize);
+      touch.removeEventListener('change', update);
+    };
+  }, [settings.editBar]);
+  // The line-number menu belongs to the tab it was opened in.
+  useEffect(() => setLineMenu(null), [store.session.active, view]);
+
   // Desktop: a paste outside any text (no tab open, the tab bar…) opens files copied in another
   // app, or a path; the editor and the folders view take their own pastes first.
   useEffect(() => {
@@ -3079,12 +3154,15 @@ export function App() {
         </div>
         ${terminalShown && html`<${TerminalPanel} settings=${settings} actions=${actions} onHide=${() => (setTerminalShown(false), hostRef.current?.focus())} />`}
         <${ReadAloudBar} />
-        <${StatusBar} recording=${recording} big=${big && Boolean(activeKey)} cursor=${activeKey ? cursor : null} language=${languageName} file=${activeFile} repo=${activeRepo} disk=${activeDisk} settings=${settings} sync=${sync} actions=${actions} group=${activeGroup}
+        ${editing && activeKey && !activeSealed && !compare && hostRef.current
+          ? html`<${EditBar} host=${hostRef.current} actions=${actions} save=${activeDisk ? 'Save' : isLocal(settings) ? null : 'Sync'} />`
+          : html`<${StatusBar} recording=${recording} big=${big && Boolean(activeKey)} cursor=${activeKey ? cursor : null} language=${languageName} file=${activeFile} repo=${activeRepo} disk=${activeDisk} settings=${settings} sync=${sync} actions=${actions} group=${activeGroup}
           problems=${settings.problems !== false && activeKey ? problems[activeKey] : null} problemsOpen=${panel === 'problems'}
           lsp=${activeKey && settings.languageServers !== false ? lspRef.current?.statusOf(activeKey) : null} lspOpen=${panel === 'servers'}
-          git=${activeKey && gitHeads[activeKey] ? { ...gitHeads[activeKey], changes: hostRef.current?.gitChanges(activeKey)?.changes ?? null } : null} />
+          git=${activeKey && gitHeads[activeKey] ? { ...gitHeads[activeKey], changes: hostRef.current?.gitChanges(activeKey)?.changes ?? null } : null} />`}
       </div>
     </main>
+    ${lineMenu && hostRef.current && html`<${LineMenu} key=${`${lineMenu.key}:${lineMenu.top}:${lineMenu.x}`} at=${lineMenu} host=${hostRef.current} actions=${actions} onClose=${() => setLineMenu(null)} />`}
 
     ${panel === 'folderSearch' && folderSearchDir && window.desktop?.folders && html`<${FolderSearchPanel} key=${folderSearchDir} dir=${folderSearchDir} actions=${actions} onClose=${() => setPanel(null)} />`}
     ${panel === 'servers' && lspRef.current && html`<${LanguageServersPanel} lsp=${lspRef.current} tick=${lspTick} actions=${actions} onClose=${() => setPanel(null)} />`}

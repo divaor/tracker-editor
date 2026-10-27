@@ -84,6 +84,11 @@ import {
   undo,
   unifiedMergeView,
   runScopeHandlers,
+  selectAll,
+  moveLineUp,
+  moveLineDown,
+  indentMore,
+  indentLess,
   ViewPlugin,
   WidgetType,
 } from '../vendor/cm/codemirror.js';
@@ -98,6 +103,7 @@ import { emmetOnTab, linkedTags } from './htmlTools.js';
 import { inlineSuggestions } from './inlineSuggest.js';
 import { findFileRefs, pastedPath } from './fileRefs.js';
 import { addCursorAbove, addCursorBelow, columnBox, columnKeymap } from './columnSelect.js';
+import { clipRanges, codeOfKey, lineTapSelection, selectLineRanges } from './editKeys.js';
 
 export { languages };
 
@@ -594,6 +600,16 @@ export const COMMANDS = {
   matchingBracket: cursorMatchingBracket,
   nextProblem: nextDiagnostic,
   previousProblem: previousDiagnostic,
+  // The edit bar on touch screens and the line-number menu.
+  selectAll,
+  selectLine: (v) => {
+    v.dispatch({ selection: EditorSelection.create(selectLineRanges(v.state).map((r) => EditorSelection.range(r.anchor, r.head)), v.state.selection.mainIndex), scrollIntoView: true, userEvent: 'select' });
+    return true;
+  },
+  moveLineUp,
+  moveLineDown,
+  indentMore,
+  indentLess,
   // (Format document is actions.formatDocument: formatter.js, which loads its parts when needed.)
 };
 
@@ -726,7 +742,7 @@ function fileRefAt(state, pos) {
  * `openSide(key, el, …)` shows a second tab next to it (the split view); a tab's
  * state, with its undo history, moves between the panes.
  */
-export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpenLink, onOpenRef, onSuggest, onImage, onPasteFiles, onPastePath, onProblems, onProblemAction, onDrop, linkTargets, settings }) {
+export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpenLink, onOpenRef, onSuggest, onImage, onPasteFiles, onPastePath, onProblems, onProblemAction, onDrop, onLineMenu, linkTargets, settings }) {
   const states = new Map(); // key → EditorState
   const scroll = new Map(); // key → scroll position
   const pending = new Map(); // key → timer for onChange
@@ -787,6 +803,60 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
   const keyOfView = (v) => (v === view ? active : v === side?.view ? side.key : null);
   const current = () => (focused === 'side' && side ? side : { key: active, view });
 
+  // A key in a view as the keyboard would press it (the edit bar's keys, Ctrl+letter): the
+  // editor's keymaps take it, and the window's shortcuts see it bubble up.
+  const pressOn = (v, { key, shiftKey = false, ctrlKey = false, altKey = false }) => {
+    const e = new KeyboardEvent('keydown', { key, code: codeOfKey(key), shiftKey, ctrlKey, altKey, bubbles: true, cancelable: true });
+    v.contentDOM.dispatchEvent(e);
+    return e.defaultPrevented;
+  };
+  // Ctrl from the edit bar: the next character typed (or tapped in its symbols row) comes as
+  // Ctrl+that key instead of being inserted. A callback for when it is used.
+  let ctrlArmed = null;
+  const stickyCtrl = EditorView.inputHandler.of((v, _from, _to, text) => {
+    if (!ctrlArmed || [...text].length !== 1 || !text.trim()) return false;
+    const used = ctrlArmed;
+    ctrlArmed = null;
+    // After CodeMirror has put the text back as it was.
+    setTimeout(() => {
+      pressOn(v, { key: text, ctrlKey: true, shiftKey: text !== text.toLowerCase() });
+      used();
+    }, 0);
+    return true;
+  });
+
+  // A tap or click on a line number selects that line (Shift: up to it) and opens the small
+  // menu by it (`onLineMenu`); a right-click or a long press opens it for the selection.
+  const coarse = () => typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+  const lineMenuAt = (v, e) => {
+    focused = v === side?.view ? 'side' : 'main';
+    const r = (e.target.closest?.('.cm-gutterElement') ?? e.target).getBoundingClientRect();
+    onLineMenu?.({ key: keyOfView(v), x: r.right, top: r.top, bottom: r.bottom });
+  };
+  const selectTapped = (v, block, extend) => {
+    const sel = lineTapSelection(v.state, block.from, block.to, { extend });
+    // Not 'select.pointer': that puts the browser's selection in the text, which takes the focus.
+    v.dispatch({ selection: EditorSelection.single(sel.anchor, sel.head), userEvent: 'select' });
+  };
+  const lineNumberHandlers = {
+    mousedown(v, block, e) {
+      // A right button keeps the focus where it is; its menu comes with `contextmenu`.
+      if (e.button !== 0) return e.button === 2;
+      selectTapped(v, block, e.shiftKey);
+      // On a phone the keyboard stays down: the menu does not need it.
+      if (!coarse()) v.focus();
+      lineMenuAt(v, e);
+      return true;
+    },
+    contextmenu(v, block, e) {
+      const { from, to } = v.state.selection.main;
+      if (from === to || block.to < from || block.from >= to) selectTapped(v, block, false);
+      if (!coarse()) v.focus();
+      lineMenuAt(v, e);
+      return true;
+    },
+  };
+
   // A tab's indentation: its own (detected, from .editorconfig, or picked), else the default.
   const indentFor = (key, o = options) => {
     const own = indents.get(key);
@@ -800,7 +870,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       wrap: o.wordWrap && !big ? EditorView.lineWrapping : [],
       whitespace: o.showWhitespace ? [highlightWhitespace(), highlightTrailingWhitespace()] : [],
       tabs: [EditorState.tabSize.of(indent.size), indentUnit.of(indent.tabs ? '\t' : ' '.repeat(indent.size))],
-      gutter: [o.lineNumbers ? lineNumbers() : [], foldGutter()],
+      gutter: [o.lineNumbers ? lineNumbers({ domEventHandlers: lineNumberHandlers }) : [], foldGutter()],
       checks: o.problems !== false && !big ? [problemsLinter(key, onProblems, onProblemAction), lintGutter()] : [],
       aids: big ? [] : [o.indentGuides !== false ? indentGuides : [], o.bracketColors !== false ? bracketColors : [], o.stickyScroll !== false ? stickyScroll : []],
     };
@@ -854,6 +924,8 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
     const config = configFor(options, key);
     return [
       readOnly.of([]),
+      // Before the recorder: a character turned into Ctrl+it is recorded as that key only.
+      stickyCtrl,
       recorder,
       lineFilterField,
       gutter.of(config.gutter),
@@ -895,6 +967,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
         // Problems: the next and the one before (as in VS Code; the list is the window's Ctrl+Shift+M).
         { key: 'F8', run: nextDiagnostic, preventDefault: true },
         { key: 'Shift-F8', run: previousDiagnostic, preventDefault: true },
+        { key: 'Mod-l', run: COMMANDS.selectLine, preventDefault: true },
         { key: 'Mod-Shift-d', run: copyLineDown },
         { key: 'Mod-Shift-k', run: deleteLine },
         // A column from the keyboard (Shift+Alt+arrows, as in Notepad++; before CodeMirror's copy line up/down).
@@ -1435,12 +1508,66 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       for (const key of [...pending.keys()]) flush(key);
     },
 
-    run(name) {
+    run(name, { focus = true } = {}) {
       const command = COMMANDS[name];
       const { key, view: v } = current();
       if (!command || !key) return false;
-      v.focus();
+      if (focus) v.focus();
       return command(v);
+    },
+
+    /** A key pressed in the pane typed in last ({ key, shiftKey, ctrlKey, altKey }), as the keyboard would: the edit bar's keys. */
+    pressKey(init) {
+      const { key, view: v } = current();
+      return key ? pressOn(v, init) : false;
+    },
+
+    /** The edit bar's Ctrl: the next character typed comes as Ctrl+it; `onUsed` is called then (null: dropped). */
+    armCtrl(onUsed) {
+      ctrlArmed = onUsed ?? null;
+    },
+
+    /** Types `text` in the pane typed in last, through the input handlers (so brackets close as typed). */
+    typeText(text) {
+      const { key, view: v } = current();
+      if (!key || v.state.readOnly) return false;
+      return replay(v, { type: 'text', text });
+    },
+
+    /** What Copy takes in the pane typed in last: the selection, or the cursor's line ({ text, ranges }). */
+    clipText() {
+      const { key, view: v } = current();
+      return key ? clipRanges(v.state) : null;
+    },
+
+    /** Cut, once its text is on the clipboard: removes what Copy takes. */
+    cut() {
+      const { key, view: v } = current();
+      if (!key || v.state.readOnly) return false;
+      const { ranges } = clipRanges(v.state);
+      if (!ranges.length) return false;
+      v.dispatch({ changes: ranges, scrollIntoView: true, userEvent: 'delete.cut' });
+      return true;
+    },
+
+    /** Paste: `text` in place of the selection (at each cursor). */
+    paste(text) {
+      const { key, view: v } = current();
+      if (!key || v.state.readOnly || !text) return false;
+      v.dispatch(v.state.replaceSelection(text), { scrollIntoView: true, userEvent: 'input.paste' });
+      return true;
+    },
+
+    /** Brings the cursor of the pane typed in last into view (the edit bar took the status bar's place). */
+    revealCursor() {
+      const { key, view: v } = current();
+      if (key) v.dispatch({ effects: EditorView.scrollIntoView(v.state.selection.main.head, { y: 'nearest', yMargin: 24 }) });
+    },
+
+    /** Whether the pane typed in last can be changed (not read-only). */
+    canEdit() {
+      const { key, view: v } = current();
+      return Boolean(key) && !v.state.readOnly;
     },
 
     /** Moves the cursor to a line (1-based) and column, centering it. */

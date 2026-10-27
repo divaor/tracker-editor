@@ -41,6 +41,9 @@ export const DEFAULT_SETTINGS = {
   wordWrap: typeof matchMedia === 'function' && matchMedia('(max-width: 860px)').matches,
   showWhitespace: false,
   lineNumbers: true,
+  // Touch screens: the edit bar (Tab, Ctrl, arrows, symbols, copy and paste…) in the status
+  // bar's place while you type.
+  editBar: true,
   // Each file's indentation from its text (tabs or spaces, how many) or its .editorconfig;
   // `tabSize` is for files that do not say. The ones picked in the status bar: key → { tabs, size }.
   detectIndent: true,

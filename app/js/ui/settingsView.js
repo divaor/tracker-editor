@@ -206,7 +206,10 @@ function EditorCard({ settings }) {
       <${Check} checked=${settings.fileIcons !== false} label="File type icons" hint="In My files and Folders, an icon in the color of each kind of file (JSON, Python, pictures…)"
         onChange=${(v) => saveSettings({ fileIcons: v })} />
       <${Check} checked=${settings.wordWrap} label="Word wrap" hint="Alt+Z" onChange=${(v) => saveSettings({ wordWrap: v })} />
-      <${Check} checked=${settings.lineNumbers} label="Line numbers and folding" onChange=${(v) => saveSettings({ lineNumbers: v })} />
+      <${Check} checked=${settings.lineNumbers} label="Line numbers and folding" hint="A tap or click on a line number selects the line and offers Copy, Cut, Paste and Select all"
+        onChange=${(v) => saveSettings({ lineNumbers: v })} />
+      <${Check} checked=${settings.editBar !== false} label="Edit bar while typing on a touch screen" hint="In the status bar's place: Tab, Ctrl, Select, arrows, Undo; { } for symbols, ⋯ for copy, paste, lines, find, save"
+        onChange=${(v) => saveSettings({ editBar: v })} />
       <${Check} checked=${settings.showWhitespace} label="Show spaces and trailing whitespace" onChange=${(v) => saveSettings({ showWhitespace: v })} />
       <${Check} checked=${settings.groupTabs} label="Group headers in the tab bar" hint="Each project's or folder's tabs together, with a header that folds them"
         onChange=${(v) => saveSettings({ groupTabs: v })} />

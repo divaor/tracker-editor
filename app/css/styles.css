@@ -8399,3 +8399,154 @@ button.help-command:focus-visible {
 .custom-server-form {
   margin-top: 8px;
 }
+
+/* Touch screens: the edit bar in the status bar's place while you type (ui/editBar.js). Its
+   buttons never take the focus; a row that does not fit scrolls sideways. On iOS the keyboard
+   covers the page's bottom, so `--edit-lift` lifts the bar above it. */
+.edit-bar {
+  display: flex;
+  flex-shrink: 0;
+  align-items: stretch;
+  height: 44px;
+  padding: 0 2px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-2);
+  transform: translateY(calc(-1 * var(--edit-lift, 0px)));
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.edit-row {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  touch-action: pan-x;
+}
+
+.edit-row::-webkit-scrollbar {
+  display: none;
+}
+
+.edit-key {
+  display: inline-flex;
+  flex: 1 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 30px;
+  height: 36px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  touch-action: pan-x;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.edit-key:active {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.edit-key.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.edit-key.edit-switch {
+  flex: 0 0 auto;
+  align-self: center;
+  width: 34px;
+  padding: 0;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 14px;
+}
+
+.edit-key.edit-symbol {
+  flex: 0 0 auto;
+  min-width: 36px;
+  font-family: var(--mono);
+  font-size: 17px;
+  font-weight: 400;
+  color: var(--text);
+}
+
+.edit-key.edit-tool {
+  flex: 0 0 auto;
+  padding: 0 10px;
+  color: var(--text);
+}
+
+.edit-tool .icon {
+  color: var(--text-2);
+}
+
+/* Toasts stay clear of the bar. */
+body:has(.edit-bar) .toasts {
+  bottom: calc(56px + var(--edit-lift, 0px));
+}
+
+/* The menu by a line number (a tap or click on it, or a right-click). */
+.line-menu {
+  position: fixed;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  max-width: calc(100vw - 16px);
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  animation: rise 0.1s ease-out;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.line-menu-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.line-menu-item .icon {
+  color: var(--text-2);
+}
+
+.line-menu-item:hover,
+.line-menu-item:active {
+  background: var(--surface-3);
+}
+
+.line-menu-more {
+  padding: 0 8px;
+}
+
+/* Line numbers answer a click (they select the line and open the menu). */
+.editor-host .cm-lineNumbers .cm-gutterElement,
+.side-host .cm-lineNumbers .cm-gutterElement {
+  cursor: pointer;
+}
