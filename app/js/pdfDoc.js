@@ -2,6 +2,7 @@
 // cached then): opening one (asking for its password when it has one), drawing a page on a
 // canvas with its text over it (to select and copy), its outline as contents, and its text
 // ("As text", search, the model). Scripts and forms in PDFs never run. Page side: not pure.
+import './compat.js';
 
 let lib = null;
 const at = (p) => new URL(`../vendor/pdf/${p}`, import.meta.url).href;
@@ -10,7 +11,8 @@ const at = (p) => new URL(`../vendor/pdf/${p}`, import.meta.url).href;
 export function pdfLib() {
   lib ??= import('../vendor/pdf/pdf.js').then(
     (m) => {
-      m.GlobalWorkerOptions.workerSrc = at('pdf.worker.js');
+      // Its worker through pdfWorker.js, which adds what older WebViews lack (compat.js).
+      m.GlobalWorkerOptions.workerSrc = new URL('./pdfWorker.js', import.meta.url).href;
       return m;
     },
     (err) => {

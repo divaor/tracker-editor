@@ -113,6 +113,8 @@ const ASSETS = [
   'js/ui/diskDialogs.js',
   'js/diskTabs.js',
   'js/docBookmarks.js',
+  'js/compat.js',
+  'js/pdfWorker.js',
   'js/capture.js',
   'js/capturePage.js',
   'js/snipPage.js',

@@ -25,6 +25,14 @@ const check = (name, ok, detail = '') => {
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${detail ? `  ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`.slice(0, 600) : ''}`);
 };
 const fixture = (name) => fs.readFileSync(path.join(ROOT, 'test/fixtures/documents', name)).toString('base64');
+// One part failing does not stop the others.
+const part = async (name, run) => {
+  try {
+    await run();
+  } catch (err) {
+    check(name, false, err.stack ?? String(err));
+  }
+};
 
 let device;
 try {
@@ -42,7 +50,7 @@ try {
   check('the app’s page loads', true, await page.evaluate(() => `${location.href} · ${navigator.userAgent.match(/Chrome\/[\d.]+/)?.[0]}`));
 
   // Text from an image: a picture drawn here, read in English and in Spanish.
-  for (const langs of ['eng', 'spa']) {
+  for (const langs of ['eng', 'spa']) await part(`text from an image (${langs})`, async () => {
     const ocr = await page.evaluate(async (langs) => {
       const { recognize } = await import('/js/ocrEngine.js');
       const c = document.createElement('canvas');
@@ -65,41 +73,43 @@ try {
       }
     }, langs);
     check(`text from an image (${langs})`, /Hello Tracker 2026/.test(ocr.text ?? ''), ocr);
-  }
+  });
 
   // A PDF: opened by pdf.js, its first page drawn, its worker a real one.
-  const pdf = await page.evaluate(async (b64) => {
-    const bytes = Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0));
-    const { openPdf, pdfLib, drawPage, pdfText } = await import('/js/pdfDoc.js');
-    const doc = await openPdf(bytes);
-    const box = document.createElement('div');
-    box.className = 'pdf-page';
-    box.style.cssText = 'position:fixed;left:0;top:0;width:600px;height:800px;z-index:99';
-    document.body.append(box);
-    const job = drawPage(await pdfLib(), await doc.getPage(1), box, 1);
-    await job.done;
-    const canvas = box.querySelector('canvas');
-    const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
-    let dark = 0;
-    for (let i = 0; i < data.length; i += 16) if (data[i] < 128) dark++;
-    const text = await pdfText(doc);
-    const realWorker = doc.loadingTask._worker?.port instanceof Worker;
-    box.remove();
-    await doc.loadingTask.destroy();
-    return { pages: doc.numPages, dark, realWorker, text: text.slice(0, 60) };
-  }, fixture('libreoffice.pdf'));
-  check('a PDF is drawn', pdf.dark > 100 && /Part one/.test(pdf.text), pdf);
-  check('…by pdf.js’s own worker', pdf.realWorker, pdf);
+  await part('a PDF is drawn', async () => {
+    const pdf = await page.evaluate(async (b64) => {
+      const bytes = Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0));
+      const { openPdf, pdfLib, drawPage, pdfText } = await import('/js/pdfDoc.js');
+      const doc = await openPdf(bytes);
+      const box = document.createElement('div');
+      box.className = 'pdf-page';
+      box.style.cssText = 'position:fixed;left:0;top:0;width:600px;height:800px;z-index:99';
+      document.body.append(box);
+      const job = drawPage(await pdfLib(), await doc.getPage(1), box, 1);
+      await job.done;
+      const canvas = box.querySelector('canvas');
+      const data = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+      let dark = 0;
+      for (let i = 0; i < data.length; i += 16) if (data[i] < 128) dark++;
+      const text = await pdfText(doc);
+      const realWorker = doc.loadingTask._worker?.port instanceof Worker;
+      box.remove();
+      await doc.loadingTask.destroy();
+      return { pages: doc.numPages, dark, realWorker, text: text.slice(0, 60) };
+    }, fixture('libreoffice.pdf'));
+    check('a PDF is drawn', pdf.dark > 100 && /Part one/.test(pdf.text), pdf);
+    check('…by pdf.js’s own worker', pdf.realWorker, pdf);
+  });
 
   // Documents converted on the page (zip, XML, DecompressionStream).
-  for (const [name, kind, words] of [['pandoc.docx', 'docx', 'Nested one'], ['pandoc.epub', 'epub', 'Second chapter'], ['openpyxl.xlsx', 'xlsx', 'Merged note']]) {
+  for (const [name, kind, words] of [['pandoc.docx', 'docx', 'Nested one'], ['pandoc.epub', 'epub', 'Second chapter'], ['openpyxl.xlsx', 'xlsx', 'Merged note']]) await part(`${name} is converted`, async () => {
     const doc = await page.evaluate(async ({ b64, kind }) => {
       const { convertDocument } = await import('/js/documents.js');
       const d = await convertDocument(kind, Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0)));
       return { text: d.text.slice(0, 2000) };
     }, { b64: fixture(name), kind });
     check(`${name} is converted`, doc.text.includes(words), doc.text.slice(0, 80));
-  }
+  });
   await page.screenshot({ path: path.join(OUT, 'app.png') });
   check('no page errors', errors.length === 0, errors.join(' | '));
 } catch (err) {
