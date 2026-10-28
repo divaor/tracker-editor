@@ -110,7 +110,8 @@ try {
     }, { b64: fixture(name), kind });
     check(`${name} is converted`, doc.text.includes(words), doc.text.slice(0, 80));
   });
-  await page.screenshot({ path: path.join(OUT, 'app.png') });
+  // The screen as Android shows it (a page screenshot fails on some older WebViews).
+  fs.writeFileSync(path.join(OUT, 'app.png'), execFileSync('adb', ['exec-out', 'screencap', '-p'], { maxBuffer: 64 * 1024 * 1024 }));
   check('no page errors', errors.length === 0, errors.join(' | '));
 } catch (err) {
   check('ran', false, err.stack ?? String(err));
