@@ -12,6 +12,11 @@ jobs:
   webview:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    # An older WebView (Android 14's own) and a recent one.
+    strategy:
+      fail-fast: false
+      matrix:
+        api-level: [34, 36]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -44,15 +49,15 @@ jobs:
       # An x86_64 image translates the app's arm64 libraries (Android 11 and later).
       - uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 34
+          api-level: ${{ matrix.api-level }}
           arch: x86_64
           target: google_apis
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: node scripts/android-check.mjs android/app/build/outputs/apk/debug/app-debug.apk
+          script: node scripts/android-check.mjs $(ls android/app/build/outputs/apk/debug/*.apk)
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: android-check
+          name: android-check-api${{ matrix.api-level }}
           if-no-files-found: ignore
           path: android-check/
