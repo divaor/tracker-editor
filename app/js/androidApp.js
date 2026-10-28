@@ -201,11 +201,21 @@ function speech() {
     else if (e.type === 'stopped') w.reject(interrupted());
     else w.reject(new Error(e.message || 'the text-to-speech engine failed'));
   });
+  // An engine just started may list no voices yet (Google's after the phone starts, one loading
+  // its models): an empty list is asked for again a few times, and not kept.
+  let retries = 0;
+  let retryTimer = null;
   const load = () =>
     (loading ??= call('ttsVoices', { engine }).then(
       (r) => {
         list = (r.voices ?? []).map((v) => ({ voiceURI: v.name, name: v.name, lang: v.lang, localService: !v.network, quality: v.quality, default: v.name === r.defaultVoice }));
         info = { engine: r.engine ?? '', systemEngine: r.systemEngine ?? '', engines: r.engines ?? [] };
+        if (list.length) retries = 0;
+        else {
+          loading = null;
+          clearTimeout(retryTimer);
+          if (retries++ < 6) retryTimer = setTimeout(() => load().catch(() => {}), 2000);
+        }
         changed.forEach((fn) => fn());
         return list;
       },
@@ -224,6 +234,7 @@ function speech() {
       if (name === engine) return;
       engine = name;
       loading = null;
+      retries = 0;
       list = [];
       load().catch(() => {});
     },

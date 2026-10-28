@@ -88,7 +88,9 @@ try {
       if (!t) return { error: 'no tts bridge' };
       const out = { web: typeof window.speechSynthesis };
       try {
-        const voices = await t.loadVoices();
+        // An engine just started may list none yet: the app asks again, and so does the check.
+        let voices = await t.loadVoices();
+        for (let i = 0; i < 8 && !voices.length; i++) voices = await new Promise((r) => setTimeout(r, 2000)).then(() => t.loadVoices());
         out.voices = voices.length;
         out.sample = voices.slice(0, 3).map((v) => `${v.name} (${v.lang})`);
       } catch (err) {
