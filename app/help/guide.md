@@ -2,7 +2,7 @@
 
 Tracker Editor is a Notepad++-style editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs. Everything is saved the moment you paste or type, on this computer with the tracker, or, once you turn on sync, in the same private GitHub data repo as the tracker, so your files are on your computers and your phone.
 
-Version 0.24.2 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.24.2 · Web app: https://divaor.github.io/tracker-editor/
+Version 0.25.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.25.0 · Web app: https://divaor.github.io/tracker-editor/
 
 ---
 
@@ -27,11 +27,11 @@ The builds are not code-signed, so the first launch warns you. On Windows, choos
 The editor as an Android app, with what a web page cannot do: **Open with** from other apps, **Folders** on the phone, **servers** and **terminals**. For Android 7 and later on 64-bit phones (nearly all from the last ten years).
 
 1. Install **Obtainium** (from https://github.com/ImranR98/Obtainium/releases or F-Droid). It installs apps from their GitHub releases and keeps them up to date.
-2. In Obtainium: **Add app**, paste `https://github.com/divaor/tracker-editor`, **Add**, then **Install** (`Tracker-Editor-0.24.2.apk`). The first time, Android asks to let Obtainium install apps: allow it.
+2. In Obtainium: **Add app**, paste `https://github.com/divaor/tracker-editor`, **Add**, then **Install** (`Tracker-Editor-0.25.0.apk`). The first time, Android asks to let Obtainium install apps: allow it.
 3. Obtainium tells you when there is a new version and installs it over the old one; your files and settings stay. (Or download the `.apk` from the releases page and open it; then updates are by hand.)
 
 What the app adds:
-- **Open with**: in Files, a file manager, Gmail or Drive, open a text or code file with **Tracker Editor**: it opens as a tab edited where it is, and **Save** writes it back (a file the other app only lets you read says **Read-only**). The tab's ⋯ → **Open with another app** hands it on.
+- **Open with**: in Files, a file manager, Gmail or Drive, open a text or code file with **Tracker Editor**: it opens as a tab edited where it is, and **Save** writes it back (a file the other app only lets you read says **Read-only**). The tab's ⋯ → **Open with another app** hands it on. PDFs, e-books, Word, OpenDocument, RTF, spreadsheets and presentations open too, shown as they look (see [Documents](#documents-pdfs-e-books-word-and-more)).
 - **Share** text, links or files to **Tracker Editor**: they become new files. Select text in any app → ⋮ → **Tracker Editor**: a new note with it. Long-press the app's icon for **New note** and **Voice note**.
 - **Folders** (the sidebar's **Folders**): folders on the phone and its memory card, as on a computer (see [Folders](#folders-a-file-explorer)). **Open a folder…** asks the first time for **All files access** (Android's permission for file managers: allow it for Tracker Editor, then come back and tap it again; the editor only opens the folders you pick). Then choose **Phone storage**, **Documents**, **Download**, the memory card, or **Another folder…**. **Tap** a folder or a file to open it; a **long press** gives its menu, where **Select** lets you tap others to pick them too (**Done** when finished). **Delete** is for good here: Android has no Trash for these files.
 - **Servers**: SFTP, FTP and FTPS, their terminals, find in a folder, transfers and mirrors, as on a computer (see 11). Saved passwords are encrypted with a key kept in the phone's secure hardware.
@@ -458,7 +458,7 @@ The sidebar has two views on the desktop: **My files** (synced) and **Folders** 
 | To | Do |
 | --- | --- |
 | Select | Click; `Ctrl`+click to add; `Shift`+click for a range; `Ctrl+A` for all; arrow keys (`Shift` to extend); or type the start of a name. The bottom line counts what is selected. |
-| Open | Double-click or `Enter`. A folder opens in the view (`Backspace` or ↑ goes back; click the path at the top to jump). A text file opens **in place** like `Ctrl+O` (not synced, `Ctrl+S` saves, Follow works). **Pictures and PDFs show large here** (as with `Space`; `Enter` there opens them with their program); to open them with their program straight away, choose that in **Settings → Desktop → Folders**. Office files and other formats open **with their own program**. |
+| Open | Double-click or `Enter`. A folder opens in the view (`Backspace` or ↑ goes back; click the path at the top to jump). A text file opens **in place** like `Ctrl+O` (not synced, `Ctrl+S` saves, Follow works). **Pictures show large here** (as with `Space`; `Enter` there opens them with their program). **Documents** (PDFs, e-books, Word, OpenDocument, RTF, spreadsheets, presentations) **open in a tab, shown as they look** (see [Documents](#documents-pdfs-e-books-word-and-more)). To open pictures and documents with their program straight away, choose that in **Settings → Desktop → Folders**. Other formats open **with their own program**. |
 | Make | **New file**, **New folder** (`Ctrl+Shift+N`): type the name in the list, `Enter`. |
 | Rename | `F2`, type, `Enter` (`Escape` cancels). |
 | Copy, move | `Ctrl+C` / `Ctrl+X`, then `Ctrl+V` in another folder (or **Paste into this folder** on a folder). **Duplicate** makes "name - Copy". Or drag onto a folder or onto part of the path at the top: moves, with `Ctrl` copies. Dropped on a file inside an opened folder, it goes into that folder (the folder is outlined). |
@@ -472,8 +472,8 @@ The sidebar has two views on the desktop: **My files** (synced) and **Folders** 
 | Details | The columns button (right of the toolbar): **Name**, **Size** and **Modified** in columns (**Permissions** on servers when shown). Click a header to sort by it, click again to turn the order around. Folders stay first. |
 | Favorites | ☆ in the folder's bar adds it to the favorites (or right-click a folder → **Add to favorites**); they show under its name, one click away. Drop files on one to move them there. Right-click one to remove it. |
 | Recent | 🕘 in the folder's bar: the folders you visited last. |
-| Preview | The eye button: the file you pick shows under the list: pictures, PDFs, Markdown, HTML, CSV and JSON as they look, the start of any other text file; other formats say what they are, with **Open with its program**. Drag the top edge of the preview to make it taller. |
-| View large | `Space` (or right-click → **View it large**, or ⛶ in the preview): the file over the whole window, like Quick Look. `←` / `→` go through the folder's files, `Enter` opens it, `Space` or `Escape` closes it. |
+| Preview | The eye button: the file you pick shows under the list: pictures, documents (PDFs, e-books, Word…), Markdown, HTML, CSV and JSON as they look, the start of any other text file; other formats say what they are, with **Open with its program**. Drag the top edge of the preview to make it taller. |
+| View large | `Space` (or right-click → **View it large**, or ⛶ in the preview): the file over the whole window (the whole screen on a phone), like Quick Look. `←` / `→` go through the folder's files, `Enter` opens it (a document in its tab, a picture with its program), `Space` or `Escape` closes it. |
 | Already there | When names you paste, drop or move are already in that folder, it asks once for all of them: **Replace** (the old ones go to the Recycle Bin; on a server they are deleted), **Keep both** (the new ones get " (2)") or **Skip** (those are left out). **Cancel** does nothing. Moving something into the folder it is already in says so. |
 | Compare | Select two text files, right-click → **Compare the two**: side by side, the second one opens in a tab. |
 | Zip | Right-click → **Compress to name.zip** (or **Compress N items to a zip**: `Archive.zip`) makes it next to them. On a `.zip`: **Extract into a new folder** unpacks it beside it ("name", or "name (2)" when taken). Unsafe names (that would land outside that folder) are left out, and an archive that unpacks to far more than its size is refused. On this computer only. |
@@ -492,6 +492,20 @@ The sidebar has two views on the desktop: **My files** (synced) and **Folders** 
 - **Remembered**: the width of the sidebar, list or details, the order, the favorites and recent folders, and whether the preview shows and how tall it is.
 - The list follows changes made in other apps. The folders, where you were, the order and the open files are remembered.
 
+### Documents: PDFs, e-books, Word and more
+
+PDFs, e-books (EPUB, FictionBook), Word and OpenDocument text (`.docx`, `.odt`), RTF, spreadsheets (`.xlsx`, `.ods`) and presentations (`.pptx`, `.odp`) open in a tab of their own, **shown as they look** and read-only: from Folders (a double-click, `Enter`, or a tap on a phone), from **Open with** in other apps on Android, with `Ctrl+O`, or on a server.
+
+- **PDFs**: the pages are drawn as you scroll. **−** and **+** zoom (so do `Ctrl`+wheel and two fingers on a touch screen), **Fit** fits the width, **3 / 20** is the page you are on and **Contents** lists its bookmarks. Select text on a page to copy it. A PDF with a password asks for it.
+- **E-books** read as one page, chapter after chapter, in the editor's text size (`Ctrl+=` and `Ctrl+-`, **Aa** in the status bar, or a pinch). **Contents** goes to a chapter, and the links inside the book work. Books with DRM cannot be opened: only the app they were bought for can.
+- **Word, OpenDocument and RTF**: headings, bold, italic, lists, tables (merged cells too), pictures, links and footnotes. Their fonts and page layout are left to the editor's look. **Contents** lists the headings.
+- **Spreadsheets**: each sheet as a table with its column letters and row numbers (the first 2,000 rows and 80 columns). **Contents** goes to a sheet. Values show as they were saved; a formula saved without its value shows the formula.
+- **Presentations**: each slide with its title, text, tables and pictures, then its speaker notes.
+- **As text** (in the file bar) puts its text in the editor: select it, search it (`Ctrl+F`), copy it, read it aloud. **As it looks** goes back. Its text is also what Find in files, **Copy for Claude** and the model use.
+- **Its program** (or ⋯ → **Open with its program**) opens it in the app made for it, for what this view leaves out. ⋯ → **Copy its text into my files** keeps its text as a note.
+- Changed elsewhere, it is shown again; **Reload** reads it again. Nothing here changes the file.
+- Not shown here: old `.doc`, `.xls` and `.ppt` files and Pages, Numbers and Keynote files (they open with their program). Pictures in Windows-only formats (EMF, WMF) show as **[picture]**.
+
 ## 11. Files on servers (desktop, Android app)
 
 Edit files on your servers as if they were here: **SFTP** (over SSH), **FTPS** (FTP over TLS) or **FTP** (not encrypted; only where nothing else is available).
@@ -508,7 +522,7 @@ Working there:
 - **Changed on the server?** Tabs you haven't edited update by themselves. With your edits, you get **Compare**, **Reload** or **Keep mine and save over it**. **Follow** shows lines added to a log on the server.
 - **The server hung up?** FTP servers close a connection left idle for a few minutes (and networks drop them): the next thing you do (open a folder, Refresh, open or save a file) connects again by itself.
 - **Server unreachable?** Your edits stay on this device, even if you close the app; the tab says **Not connected · not saved**. **Reconnect** (in the file bar) and then **Ctrl+S**.
-- Pictures and PDFs show large here, as on this computer; other files (and pictures and PDFs with **Open with its program**) open with their program from a downloaded copy (changes made there are not sent back). Pictures can also have their text read (see 13).
+- Pictures show large here and documents open in a tab, as on this computer; other files (and pictures and documents with **Open with its program**) open with their program from a downloaded copy (changes made there are not sent back). Pictures can also have their text read (see 13).
 - Your password and key passphrase are kept in this computer's keychain and never shown again; the editor only uses key files you choose (or the ones your SSH config names).
 - ⋯ next to the server's name: switch between folders and servers, edit or disconnect the server, add another, **Show permissions** (`rw-r--r--` next to each file), **Mirrors…**.
 - **Find in this folder**, **Properties** (with permissions you can change) and the rest of the Folders view work on servers too.
@@ -647,6 +661,8 @@ Turn them on in **Settings → Desktop**.
 - **Android app: "The app's file access did not start"**: Folders, servers and terminals need it; the rest of the editor works without it. **Send a log** (the message's reason is in it too).
 - **Android app: "The app's access to files and servers stopped"**: Android ended its file access while the app was in the background. Do it again: it starts again. Terminals on the phone and on servers end with it.
 - **Android app: a file opened with Tracker Editor is Read-only**: the app that gave it allows reading only (Gmail attachments, many file managers' "Open with"). Save a copy with ⋯ → **Download**, or open it from Folders instead.
+- **A document shows a message instead of its pages**: "protected (DRM)": only the app it was bought for opens it. "damaged or is not what its name says": the file is broken, or a different format with that name (an old `.doc` renamed `.docx`, say). Either way **Its program** tries the app made for it.
+- **A document looks plainer than in Word or LibreOffice**: this view shows its text, structure and pictures, not its fonts, colors or page layout. **Its program** shows all of it.
 - **The menu bar appears (Windows, Linux)**: it shows when `Alt` is pressed and let go on its own, as in other Windows programs; press `Alt` again to hide it. Holding `Alt` for `Alt+drag` or a shortcut does not show it.
 - **"The file changed on disk since you opened it"**: another program saved it. Use **Compare**, then reload or keep yours.
 - **The capture shortcut "is used by another app"**: click the field and press another combination.

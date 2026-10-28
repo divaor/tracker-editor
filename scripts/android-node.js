@@ -17,7 +17,7 @@ const ABIS = ['arm64-v8a'];
 const LIBNODE = path.join(ROOT, 'android', 'app', 'libnode');
 const ASSETS = path.join(ROOT, 'android', 'app', 'src', 'main', 'assets', 'nodejs');
 // The modules electron/main.cjs imports from the page (app/js), and what those import.
-const PAGE_MODULES = ['search.js', 'folders.js', 'indent.js', 'codeNav.js', 'outline.js', 'gitStatus.js', 'replace.js'];
+const PAGE_MODULES = ['search.js', 'folders.js', 'docTypes.js', 'indent.js', 'codeNav.js', 'outline.js', 'gitStatus.js', 'replace.js'];
 // Packages the main process needs on a phone (not node-pty, Electron or the build tools).
 const PACKAGES = ['ssh2', 'basic-ftp', 'fflate'];
 // Native parts are left out: the packages fall back to JavaScript without them.

@@ -33,11 +33,14 @@ test('service worker precaches every app file and its cache name tracks the vers
   const xterm = JSON.parse(await readFile(path.join(appDir, 'vendor/xterm/files.json'), 'utf8')).map((f) => `vendor/xterm/${f}`);
   // And the formatters (Prettier, sql-formatter): vendor/format/files.json.
   const format = JSON.parse(await readFile(path.join(appDir, 'vendor/format/files.json'), 'utf8')).map((f) => `vendor/format/${f}`);
-  const files = (await listFiles(appDir)).map((f) => path.relative(appDir, f).split(path.sep).join('/')).filter((f) => !['sw.js', 'vendor/cm/files.json', 'vendor/ocr/files.json', 'vendor/xterm/files.json', 'vendor/format/files.json'].includes(f));
-  assert.deepEqual([...assets.filter((a) => a !== './'), ...chunks, ...ocr, ...xterm, ...format].sort(), files.sort());
+  // And pdf.js with what it loads: vendor/pdf/files.json.
+  const pdf = JSON.parse(await readFile(path.join(appDir, 'vendor/pdf/files.json'), 'utf8')).map((f) => `vendor/pdf/${f}`);
+  const files = (await listFiles(appDir)).map((f) => path.relative(appDir, f).split(path.sep).join('/')).filter((f) => !['sw.js', 'vendor/cm/files.json', 'vendor/ocr/files.json', 'vendor/xterm/files.json', 'vendor/format/files.json', 'vendor/pdf/files.json'].includes(f));
+  assert.deepEqual([...assets.filter((a) => a !== './'), ...chunks, ...ocr, ...xterm, ...format, ...pdf].sort(), files.sort());
   assert.ok(!assets.some((a) => a.startsWith('vendor/format/')), 'the formatters are not precached');
   assert.ok(!assets.some((a) => a.startsWith('vendor/ocr/')), 'text recognition is not precached');
   assert.ok(!assets.some((a) => a.startsWith('vendor/xterm/')), 'the terminal is not precached');
+  assert.ok(!assets.some((a) => a.startsWith('vendor/pdf/')), 'pdf.js is not precached');
   assert.match(sw, new RegExp(`const CACHE = 'editor-v${APP_VERSION.replace(/\./g, '\\.')}'`));
 });
 

@@ -1,7 +1,7 @@
 {
   "name": "tracker-editor",
   "productName": "Tracker Editor",
-  "version": "0.24.2",
+  "version": "0.25.0",
   "description": "A Notepad++-style editor for many open files, synced through GitHub, with projects, tags, search across files and a local model.",
   "author": "divaor",
   "license": "UNLICENSED",
@@ -44,6 +44,7 @@
     "esbuild": "^0.28.2",
     "htm": "^3.1.1",
     "marked": "^18.1.1",
+    "pdfjs-dist": "6.4.299",
     "prettier": "^3.9.9",
     "sql-formatter": "^15.9.0",
     "tesseract.js": "^7.0.0"

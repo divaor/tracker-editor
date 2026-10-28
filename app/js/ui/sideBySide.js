@@ -1,5 +1,6 @@
 import { html, useEffect, useRef, useState } from '../../vendor/preact-htm.js';
-import { addSection, baseName, isWithin, moveSectionTo, rootOf, withCurrent } from '../folders.js';
+import { addSection, baseName, folderLabel, isWithin, moveSectionTo, placeLabel, rootOf, withCurrent } from '../folders.js';
+import { isAndroidApp } from '../platform.js';
 import { getSettings } from '../settings.js';
 import { onServers, server, servers, serverStatus } from '../servers.js';
 import { isRemotePath, KINDS, protocolName, remoteParts, toRemoteUri } from '../where.js';
@@ -10,10 +11,10 @@ const message = (err) => String(err?.message ?? err).replace(/^Error invoking re
 const dirOf = (p) => p.slice(0, Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'))) || p;
 const innerPath = (p) => remoteParts(p).path.replace(/\/+$/, '');
 /** A folder's name: its own, or the server's for a server's top folder. */
-const nameOf = (p) => (isRemotePath(p) ? (innerPath(p) ? baseName(innerPath(p)) : (server(remoteParts(p).id)?.name ?? 'Server')) : baseName(p));
+const nameOf = (p) => (isRemotePath(p) ? (innerPath(p) ? baseName(innerPath(p)) : (server(remoteParts(p).id)?.name ?? 'Server')) : folderLabel(p));
 /** Where it is: the folder holding it (on a server: the server's name first). */
 const whereOf = (p) => {
-  if (!isRemotePath(p)) return dirOf(p);
+  if (!isRemotePath(p)) return placeLabel(dirOf(p));
   const inner = innerPath(p);
   return `${server(remoteParts(p).id)?.name ?? 'Server'} · ${inner ? inner.slice(0, inner.lastIndexOf('/')) || '/' : '/'}`;
 };
@@ -219,7 +220,7 @@ export function SideBySideDialog({ onClose, actions }) {
     </form>`}
     <div class="form-actions">
       <button type="button" class="btn sm" onClick=${() => (onClose(), actions.editServer())}><${Icon} name="server" size=${15} />Connect to a new server…</button>
-      <button type="button" class="btn ghost sm" onClick=${() => (onClose(), actions.importSshConfig())}>Servers from your SSH config…</button>
+      ${!isAndroidApp() && html`<button type="button" class="btn ghost sm" onClick=${() => (onClose(), actions.importSshConfig())}>Servers from your SSH config…</button>`}
     </div>
   </${Modal}>`;
 }

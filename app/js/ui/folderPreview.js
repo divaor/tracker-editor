@@ -1,18 +1,21 @@
 import { html, useEffect, useLayoutEffect, useRef, useState } from '../../vendor/preact-htm.js';
+import { documentKind } from '../docTypes.js';
 import { peekKind } from '../folders.js';
 import { formatBytes, timeAgo } from '../format.js';
 import { previewKind } from '../previews.js';
 import { Icon } from './icons.js';
+import { DocumentView } from './documentView.js';
 import { PreviewBody } from './preview.js';
 
-const MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', bmp: 'image/bmp', webp: 'image/webp', ico: 'image/x-icon', avif: 'image/avif', pdf: 'application/pdf' };
+const MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', bmp: 'image/bmp', webp: 'image/webp', ico: 'image/x-icon', avif: 'image/avif' };
 const extOf = (name) => /\.([^.]+)$/.exec(name)?.[1]?.toLowerCase() ?? '';
 const message = (err) => String(err?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
 
 /**
  * What a file holds, read for a preview (a moment after it is picked, so moving
- * through a list stays quick): { kind, url } for pictures and PDFs (a blob URL,
- * revoked when it changes), { kind: 'text', text, more } for text, or { error }.
+ * through a list stays quick): { kind, url } for pictures (a blob URL, revoked when
+ * it changes), { kind: 'text', text, more } for text, { kind: 'doc' } for documents
+ * (their view reads them), or { error }.
  */
 function usePeek(entry) {
   const [peek, setPeek] = useState(null);
@@ -21,6 +24,7 @@ function usePeek(entry) {
     if (!entry || entry.dir) return;
     const kind = peekKind(entry.name);
     if (kind === 'none') return setPeek({ kind });
+    if (kind === 'doc') return setPeek({ kind });
     let url = '';
     let stale = false;
     const timer = setTimeout(async () => {
@@ -32,8 +36,6 @@ function usePeek(entry) {
           return;
         }
         const bytes = new Uint8Array(await bridge.peekBytes(entry.path));
-        // A PDF's bytes go to the PDF viewer only when they are one (never shown as a page).
-        if (kind === 'pdf' && String.fromCharCode(...bytes.subarray(0, 5)) !== '%PDF-') throw new Error('This is not a PDF.');
         if (stale) return;
         url = URL.createObjectURL(new Blob([bytes], { type: MIME[extOf(entry.name)] ?? 'application/octet-stream' }));
         setPeek({ kind, url });
@@ -54,7 +56,7 @@ function usePeek(entry) {
 const Facts = ({ entry, extra = '' }) =>
   html`<p class="peek-facts muted small">${entry.dir ? 'Folder' : formatBytes(entry.size)}${entry.mtimeMs ? ` · ${timeAgo(new Date(entry.mtimeMs).toISOString())}` : ''}${extra ? ` · ${extra}` : ''}</p>`;
 
-/** A file's preview: the picture, the PDF, the rendered Markdown (HTML, CSV, JSON…) or the start of its text. */
+/** A file's preview: the picture, the document (PDF, e-book, Word…), the rendered Markdown (HTML, CSV, JSON…) or the start of its text. */
 export function FilePeek({ entry, big = false, onOpen, onOpenOutside }) {
   const peek = usePeek(entry);
   const [size, setSize] = useState('');
@@ -81,7 +83,10 @@ export function FilePeek({ entry, big = false, onOpen, onOpenOutside }) {
       ${!big && html`<${Facts} entry=${entry} extra=${size} />`}
     </div>`;
   }
-  if (peek.kind === 'pdf') return html`<iframe class="peek-pdf" src=${peek.url} title=${entry.name} />`;
+  if (peek.kind === 'doc') {
+    return html`<${DocumentView} key=${entry.path} name=${entry.name} kind=${documentKind(entry.name)} version=${entry.mtimeMs} compact=${!big}
+      load=${() => window.desktop.disk.readBytes(entry.path)} onOpenOutside=${big ? undefined : () => onOpenOutside(entry)} />`;
+  }
   const kind = previewKind(entry.name);
   return html`<div class="peek-text-wrap ${kind ? `peek-${kind}` : ''}">
     ${kind ? html`<${PreviewBody} kind=${kind} text=${peek.text} name=${entry.name} />` : html`<pre class="peek-text">${peek.text}</pre>`}
@@ -137,16 +142,18 @@ export function FileViewer({ entries, path, onPath, onOpen, onOpenOutside, onClo
     return () => document.removeEventListener('keydown', onKey, true);
   });
   if (!entry) return null;
+  const inApp = ['text', 'doc'].includes(peekKind(entry.name));
+  const openLabel = inApp ? 'Open' : 'Open with its program';
   return html`<div class="viewer-backdrop" role="dialog" aria-modal="true" aria-label=${`Viewing ${entry.name}`} onPointerDown=${(e) => e.target === e.currentTarget && onClose()}>
     <div class="viewer">
       <div class="viewer-head">
         <${Icon} name=${peekKind(entry.name) === 'image' ? 'image' : 'file'} size=${16} />
         <strong class="viewer-name" title=${entry.path}>${entry.name}</strong>
-        <span class="muted small">${index + 1} of ${entries.length} · ${formatBytes(entry.size)}</span>
+        <span class="muted small viewer-count">${index + 1} of ${entries.length}<span class="viewer-size"> · ${formatBytes(entry.size)}</span></span>
         <span class="spacer" />
         <button type="button" class="icon-btn sm" aria-label="Previous (←)" title="Previous (←)" disabled=${entries.length < 2} onClick=${() => go(-1)}><${Icon} name="arrowUp" size=${16} class="turn-left" /></button>
         <button type="button" class="icon-btn sm" aria-label="Next (→)" title="Next (→)" disabled=${entries.length < 2} onClick=${() => go(1)}><${Icon} name="arrowUp" size=${16} class="turn-right" /></button>
-        <button type="button" class="btn sm" onClick=${() => onOpen(entry)}><${Icon} name=${peekKind(entry.name) === 'text' ? 'edit' : 'external'} size=${15} />${peekKind(entry.name) === 'text' ? 'Open' : 'Open with its program'} (Enter)</button>
+        <button type="button" class="btn sm viewer-open" title=${`${openLabel} (Enter)`} aria-label=${openLabel} onClick=${() => onOpen(entry)}><${Icon} name=${inApp ? 'edit' : 'external'} size=${15} /><span class="viewer-open-label">${openLabel}</span></button>
         <button type="button" class="icon-btn sm" aria-label="Close (Esc)" title="Close (Esc)" onClick=${onClose}><${Icon} name="x" size=${17} /></button>
       </div>
       <div class="viewer-body">

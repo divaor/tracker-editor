@@ -71,6 +71,22 @@ test('breadcrumbs go from the picked folder down, and never above it', () => {
   assert.equal(page.parentOf('/home/ana/notes', '/home/ana/notes/'), null, 'not above the picked folder');
 });
 
+test('the phone’s storage and memory cards are named for what they are, not 0', () => {
+  assert.equal(page.folderLabel('/storage/emulated/0'), 'Phone storage');
+  assert.equal(page.folderLabel('/storage/emulated/0/'), 'Phone storage');
+  assert.equal(page.folderLabel('/storage/emulated/10'), 'Phone storage (10)');
+  assert.equal(page.folderLabel('/storage/1A2B-3C4D'), 'SD card');
+  assert.equal(page.folderLabel('/sdcard'), 'Phone storage');
+  assert.equal(page.folderLabel('/storage/emulated/0/Documents'), 'Documents');
+  assert.equal(page.folderLabel('/home/ana/0'), '0');
+  assert.equal(page.placeLabel('/storage/emulated/0/Documents/notes'), 'Phone storage/Documents/notes');
+  assert.equal(page.placeLabel('/storage/emulated/0'), 'Phone storage');
+  assert.equal(page.placeLabel('/storage/emulated'), 'This device');
+  assert.equal(page.placeLabel('/storage/1A2B-3C4D/Music'), 'SD card/Music');
+  assert.equal(page.placeLabel('C:\\Users\\Ana'), 'C:\\Users\\Ana');
+  assert.equal(page.breadcrumbs('/storage/emulated/0/Download', '/storage/emulated/0')[0].name, 'Phone storage');
+});
+
 test('the picked folder that holds a path: the deepest, Windows without case', () => {
   const roots = ['/home/ana', '/home/ana/work', 'D:\\Logs'];
   assert.equal(page.rootOf('/home/ana/work/app/src', roots), '/home/ana/work');
@@ -234,7 +250,14 @@ test('the folder as a tree: expanded folders show their contents, a filter keeps
 test('what the preview shows for a file', () => {
   assert.equal(page.peekKind('photo.JPG'), 'image');
   assert.equal(page.peekKind('icon.webp'), 'image');
-  assert.equal(page.peekKind('report.pdf'), 'pdf');
+  // Documents are shown as they look (ui/documentView.js), and open in a tab of their own.
+  for (const name of ['report.pdf', 'book.epub', 'letter.DOCX', 'notes.odt', 'old.rtf', 'sheet.xlsx', 'sheet.ods', 'deck.pptx', 'deck.odp', 'tale.fb2']) {
+    assert.equal(page.peekKind(name), 'doc', name);
+    assert.equal(page.opensHere(name), true, name);
+    assert.equal(page.opensInEditor(name), false, name);
+  }
+  assert.equal(page.opensHere('notes.md'), true);
+  assert.equal(page.opensHere('song.mp3'), false);
   assert.equal(page.peekKind('notes.md'), 'text');
   assert.equal(page.peekKind('Makefile'), 'text');
   assert.equal(page.peekKind('song.mp3'), 'none');

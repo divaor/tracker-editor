@@ -2,8 +2,9 @@
 // chunk (listed in vendor/cm/files.json), then serve network-first so updates
 // show up immediately when online. GitHub and model requests are never intercepted.
 // Text recognition (vendor/ocr/, about 9 MB), the terminal (vendor/xterm/,
-// desktop only) and the formatters (vendor/format/) are cached the first time they are used.
-const CACHE = 'editor-v0.24.2';
+// desktop only), the formatters (vendor/format/) and pdf.js (vendor/pdf/, about 6 MB) are
+// cached the first time they are used.
+const CACHE = 'editor-v0.25.0';
 const INBOX = 'editor-inbox'; // shared files waiting for the app (see js/inbox.js)
 const ASSETS = [
   './',
@@ -156,6 +157,20 @@ const ASSETS = [
   'js/mirrors.js',
   'js/transfers.js',
   'js/ui/transfers.js',
+  'js/docTypes.js',
+  'js/documents.js',
+  'js/unzip.js',
+  'js/xmlLite.js',
+  'js/pdfDoc.js',
+  'js/docs/common.js',
+  'js/docs/docx.js',
+  'js/docs/epub.js',
+  'js/docs/fb2.js',
+  'js/docs/odf.js',
+  'js/docs/pptx.js',
+  'js/docs/rtf.js',
+  'js/docs/xlsx.js',
+  'js/ui/documentView.js',
 ];
 
 self.addEventListener('install', (event) => {

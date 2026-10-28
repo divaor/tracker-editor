@@ -31,7 +31,7 @@ import { lastSyncText, mirror as mirrorById, onMirrors, watchMirrors as watchMir
 import { MirrorDeletesDialog, MirrorDialog, MirrorsDialog } from './ui/mirrors.js';
 import { onTransfers, watchTransfers } from './transfers.js';
 import { TransfersCard } from './ui/transfers.js';
-import { baseName, besideSettings, claudeText, inPlaceSettings, isImageName, opensInEditor, remapPath, withCurrent } from './folders.js';
+import { baseName, besideSettings, claudeText, folderLabel, inPlaceSettings, isImageName, opensHere, remapPath, withCurrent } from './folders.js';
 import { folderOfPath, nearestTabs } from './comparePick.js';
 import { clampFont, DEFAULT_FONT, pinchFont, stepFont, textSizeKey } from './textSize.js';
 import { keyboardState } from './editKeys.js';
@@ -51,6 +51,7 @@ import { revealInFolders } from './ui/folders.js';
 import { HistoryPanel } from './ui/history.js';
 import { TrashDialog } from './ui/trash.js';
 import { LockedFile } from './ui/encryption.js';
+import { DocumentView } from './ui/documentView.js';
 import { TypeOutPanel } from './ui/typeOut.js';
 import { SnippetPicker } from './ui/snippets.js';
 import { AssistBubble, AssistPanel } from './ui/askSelection.js';
@@ -128,7 +129,7 @@ function download(name, text) {
 const folderRoots = (settings) =>
   window.desktop?.folders
     ? withCurrent(settings.folderSections, settings.folder).map((dir) =>
-        isRemotePath(dir) ? { dir, kind: 'remote', label: server(remoteParts(dir).id)?.name ?? 'Server' } : { dir, kind: 'disk', label: baseName(dir) },
+        isRemotePath(dir) ? { dir, kind: 'remote', label: server(remoteParts(dir).id)?.name ?? 'Server' } : { dir, kind: 'disk', label: folderLabel(dir) },
       )
     : [];
 // A path as "folder/inside/it" when it is in one of the folders open in Folders, else as it is.
@@ -658,6 +659,9 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       },
       async reloadDisk(path) {
         try {
+          // A document: its view reads it again too.
+          const tab = store.diskTab(path);
+          if (tab?.doc) store.diskPatch(path, { reloads: (tab.reloads ?? 0) + 1 });
           hostRef.current?.replaceText(diskKey(path), await reloadDiskTab(path));
         } catch (err) {
           toast(err.message, { kind: 'error' });
@@ -700,6 +704,27 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       showOnDisk(path) {
         if (!isRemotePath(path)) return window.desktop?.disk?.show?.(path);
         actions.showInFolders(path.slice(0, path.lastIndexOf('/')) || remoteRoot(remoteParts(path).id));
+      },
+      /** A file on disk or a server with its own program (on the phone: an app of the person's choice). */
+      async openOutside(path) {
+        if (isContentPath(path)) return actions.openWithApp(path);
+        try {
+          await window.desktop.folders.openExternal(path);
+        } catch (err) {
+          toast(ipcMessage(err), { kind: 'error' });
+        }
+      },
+      /** A document's text, as its view read it: the tab's text (search, the model, "As text"). */
+      documentText(path, text) {
+        const tab = store.diskTab(path);
+        if (!tab?.doc || tab.text === text) return;
+        store.diskPatch(path, { text });
+        hostRef.current?.replaceText(diskKey(path), text);
+      },
+      /** A document shown as text in the editor (to select, search, copy), or as it looks again. */
+      documentAsText(path, on) {
+        if (!store.diskTab(path)?.doc) return;
+        store.diskPatch(path, { asText: on });
       },
       /** Android: a file from another app, opened with an app of the person's choice. */
       async openWithApp(path) {
@@ -795,9 +820,12 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       async copyToFiles(path) {
         const tab = store.diskTab(path);
         try {
-          const { name, text } = tab ?? (await window.desktop.disk.read(path));
-          actions.newFile({ name, text });
-          toast(`${name} is now also in your files, and syncs. The file on disk is not changed.`);
+          const read = tab ?? (await window.desktop.disk.read(path));
+          // A document: its text, as a text file.
+          if (read.doc && !read.text) return toast('Its text is not read yet: open it first.');
+          const name = read.doc ? `${read.name.replace(/\.[^.]+$/, '')}.txt` : read.name;
+          actions.newFile({ name, text: read.text });
+          toast(read.doc ? `Its text is now in your files as ${name}, and syncs. The document is not changed.` : `${name} is now also in your files, and syncs. The file on disk is not changed.`);
         } catch (err) {
           toast(ipcMessage(err), { kind: 'error' });
         }
@@ -1746,6 +1774,8 @@ export function App() {
   // An encrypted file this device cannot read yet shows a lock instead of the editor.
   const activeSealed = Boolean(activeFile && store.isSealed(activeFile.id));
   const showPreview = Boolean(previewType) && preview.has(activeKey) && !compare && !activeSealed;
+  // A document (PDF, e-book, Word…) shows as it looks, in the editor's place, unless "As text".
+  const docShown = Boolean(activeDisk?.doc && !activeDisk.asText && view === 'editor' && !compare);
   // A comparison belongs to its tab.
   useEffect(() => {
     if (compare && compare.key !== activeKey) setCompare(null);
@@ -1754,7 +1784,7 @@ export function App() {
   useLayoutEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    if (!activeKey || view !== 'editor' || (!activeFile && !activeRepo && !activeDisk) || activeSealed) {
+    if (!activeKey || view !== 'editor' || (!activeFile && !activeRepo && !activeDisk) || activeSealed || docShown) {
       host.hide();
       return;
     }
@@ -1767,9 +1797,9 @@ export function App() {
     if (activeDisk) host.setReadOnly(activeKey, diskReadOnly(activeDisk));
     setBig(host.isBig(activeKey));
     // Code on this computer gets its language server (started when needed).
-    if (activeDisk && !isRemotePath(activeDisk.path) && getSettings().languageServers !== false && !host.isBig(activeKey)) lspRef.current?.attach(activeKey, activeDisk.path);
+    if (activeDisk && !activeDisk.doc && !isRemotePath(activeDisk.path) && getSettings().languageServers !== false && !host.isBig(activeKey)) lspRef.current?.attach(activeKey, activeDisk.path);
     if (!isNarrow()) host.focus();
-  }, [activeKey, view, Boolean(activeFile || activeRepo || activeDisk), activeSealed]);
+  }, [activeKey, view, Boolean(activeFile || activeRepo || activeDisk), activeSealed, docShown]);
 
   // ---- Language servers (desktop): F12, Shift+F12 and F2 ask the file's server first ----
   // The editor's own ways (codeNav.js: the declarations it recognizes) when there is none.
@@ -2199,7 +2229,7 @@ export function App() {
   // made elsewhere).
   const [gitHeads, setGitHeads] = useState({}); // key → { branch, root, tracked } or null
   const lookUpGit = (key) => {
-    if (!key?.startsWith('d:') || isRemotePath(key.slice(2)) || !window.desktop?.git) return;
+    if (!key?.startsWith('d:') || isRemotePath(key.slice(2)) || !window.desktop?.git || store.diskTab(key.slice(2))?.doc) return;
     window.desktop.git.head(key.slice(2)).then(
       (head) => {
         hostRef.current?.setGitBase(key, head?.text ?? null);
@@ -2752,7 +2782,7 @@ export function App() {
     if (!area) return;
     let turned = 0;
     const onWheel = (e) => {
-      if (!e.ctrlKey || !e.target.closest?.('.cm-editor')) return;
+      if (!e.ctrlKey || !e.target.closest?.('.cm-editor, .doc-html')) return;
       e.preventDefault();
       turned += e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
       if (Math.abs(turned) < 50) return;
@@ -2762,7 +2792,7 @@ export function App() {
     let pinch = null;
     const apart = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
     const onStart = (e) => {
-      if (e.touches.length === 2 && e.target.closest?.('.cm-editor')) pinch = { apart: apart(e.touches), from: clampFont(getSettings().fontSize), size: null };
+      if (e.touches.length === 2 && e.target.closest?.('.cm-editor, .doc-html')) pinch = { apart: apart(e.touches), from: clampFont(getSettings().fontSize), size: null };
       else if (e.touches.length > 2) pinch = null;
     };
     const onMove = (e) => {
@@ -3069,7 +3099,7 @@ export function App() {
       if (isOwnDrop(e.dataTransfer)) {
         const paths = draggedTab() ? [] : draggedPaths();
         dropped();
-        for (const path of paths.filter((p) => opensInEditor(p))) actions.openDiskPath(path, { report: paths.length === 1 });
+        for (const path of paths.filter((p) => opensHere(p))) actions.openDiskPath(path, { report: paths.length === 1 });
         return;
       }
       actions.importFiles([...e.dataTransfer.files]);
@@ -3166,7 +3196,7 @@ export function App() {
           data-kind=${kindOfKey(activeKey) ?? undefined} ref=${areaEl} style=${{ '--split': `${((settings.splitRatio || 0.5) * 100).toFixed(2)}%` }}>
           <div class="editor-host" ref=${editorEl} />
           ${assist && (activeKey || assistStart) && view === 'editor' && !compare && !activeSealed && html`<${AssistPanel} key=${`${activeKey}:${assistStart?.id ?? 0}`} scope=${assistScope} start=${assistStart} hasFile=${Boolean(activeKey)} actions=${actions} onClose=${() => (setAssist(false), setAssistStart(null), hostRef.current?.focus())} />`}
-          ${!assist && modelReady && settings.assistBubble && activeKey && !compare && !activeSealed && !typingJob && html`<${AssistBubble} onOpen=${() => setAssist(true)} />`}
+          ${!assist && modelReady && settings.assistBubble && activeKey && !compare && !activeSealed && !docShown && !typingJob && html`<${AssistBubble} onOpen=${() => setAssist(true)} />`}
           ${showSide && splitHandle('Resize the side view')}
           ${showSide &&
           html`<div class="side-pane" aria-label=${`Side view: ${sideFile?.name ?? sideRepo.name}`}>
@@ -3195,13 +3225,17 @@ export function App() {
               setTimeout(() => hostRef.current?.reveal(line, column, 1), 60);
             }} />`}
           ${activeSealed && html`<${LockedFile} file=${activeFile} actions=${actions} />`}
+          ${docShown &&
+          html`<${DocumentView} key=${`${activeKey}:${activeDisk.mtimeMs}:${activeDisk.reloads ?? 0}`} name=${activeDisk.name} kind=${activeDisk.doc} version=${activeDisk.mtimeMs}
+            load=${() => window.desktop.disk.readBytes(activeDisk.path)} onText=${(text) => actions.documentText(activeDisk.path, text)}
+            onOpenOutside=${() => actions.openOutside(activeDisk.path)} />`}
           ${!activeKey && html`<${Welcome} actions=${actions} desktop=${diskAvailable()} hasFiles=${store.live().length + docs.length > 0} configured=${isLocal(settings) || isSyncConfigured(settings)} />`}
         </div>
         ${terminalShown && html`<${TerminalPanel} settings=${settings} actions=${actions} onHide=${() => (setTerminalShown(false), hostRef.current?.focus())} />`}
         <${ReadAloudBar} />
         ${editing && activeKey && !activeSealed && !compare && hostRef.current
           ? html`<${EditBar} host=${hostRef.current} actions=${actions} save=${activeDisk ? 'Save' : isLocal(settings) ? null : 'Sync'} />`
-          : html`<${StatusBar} recording=${recording} big=${big && Boolean(activeKey)} cursor=${activeKey ? cursor : null} language=${languageName} file=${activeFile} repo=${activeRepo} disk=${activeDisk} settings=${settings} sync=${sync} actions=${actions} group=${activeGroup}
+          : html`<${StatusBar} recording=${recording} big=${big && Boolean(activeKey) && !docShown} cursor=${activeKey && !docShown ? cursor : null} language=${languageName} file=${activeFile} repo=${activeRepo} disk=${activeDisk} settings=${settings} sync=${sync} actions=${actions} group=${activeGroup}
           problems=${settings.problems !== false && activeKey ? problems[activeKey] : null} problemsOpen=${panel === 'problems'}
           lsp=${activeKey && settings.languageServers !== false ? lspRef.current?.statusOf(activeKey) : null} lspOpen=${panel === 'servers'}
           git=${activeKey && gitHeads[activeKey] ? { ...gitHeads[activeKey], changes: hostRef.current?.gitChanges(activeKey)?.changes ?? null } : null} />`}
@@ -3289,7 +3323,7 @@ function Welcome({ actions, hasFiles, configured, desktop }) {
         ${desktop && html`<button type="button" class="btn" title="Edit a file where it is (a log, a config file); it is not synced" onClick=${() => actions.openDiskFiles()}><${Icon} name="disk" size=${16} />Open from disk</button>`}
         ${window.desktop?.folders && html`<button type="button" class="btn" title="Browse a folder and open its files where they are; they are not synced (Ctrl+Shift+E)" onClick=${() => actions.showFolders()}><${Icon} name="folderOpen" size=${16} />Open a folder</button>`}
       </div>
-      ${!configured && html`<p class="notice"><${Icon} name="cloudOff" size=${16} />Not syncing yet. <button type="button" class="btn link" onClick=${actions.showSettings}>Set up sync</button> with the same repo and token as the tracker (or paste its setup code).</p>`}
+      ${!configured && html`<p class="notice"><${Icon} name="cloudOff" size=${16} /><span>Not syncing yet. <button type="button" class="btn link" onClick=${actions.showSettings}>Set up sync</button> with the same repo and token as the tracker (or paste its setup code).</span></p>`}
       <dl class="shortcuts">
         <div><dt><kbd>Alt</kbd> <kbd>N</kbd></dt><dd>New file</dd></div>
         <div><dt><kbd>Ctrl</kbd> <kbd>P</kbd></dt><dd>Open a file by name</dd></div>

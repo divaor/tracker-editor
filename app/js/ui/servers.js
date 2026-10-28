@@ -1,4 +1,5 @@
 import { html, useEffect, useState } from '../../vendor/preact-htm.js';
+import { isAndroidApp } from '../platform.js';
 import { refreshServers, servers } from '../servers.js';
 import { protocolName } from '../where.js';
 import { Check, Field, Modal, Segmented, toast } from './components.js';
@@ -73,7 +74,7 @@ export function ServerDialog({ conn = {}, actions, onClose }) {
 
   return html`<${Modal} title=${editing ? `Server: ${conn.name}` : 'Connect to a server'} wide className="server-dialog" onClose=${onClose}
     footer=${html`${editing && html`<button type="button" class="btn ghost danger" onClick=${remove}><${Icon} name="trash" size=${15} />Remove</button>`}
-      ${!editing && html`<button type="button" class="btn ghost" title="Set up the hosts of ~/.ssh/config" onClick=${() => (onClose(), actions.importSshConfig())}>From SSH config…</button>`}
+      ${!editing && !isAndroidApp() && html`<button type="button" class="btn ghost" title="Set up the hosts of ~/.ssh/config" onClick=${() => (onClose(), actions.importSshConfig())}>From SSH config…</button>`}
       <span class="spacer" />
       <button type="button" class="btn" disabled=${!form.host || check?.state === 'busy'} onClick=${test}>Test</button>
       <button type="button" class="btn" disabled=${!form.host} onClick=${() => save(false)}>Save</button>

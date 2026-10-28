@@ -32,6 +32,7 @@ contextBridge.exposeInMainWorld('desktop', {
     // { title, single }: the dialog's title, one file only (Compare with… Browse).
     open: (opts) => ipcRenderer.invoke('disk:open', opts),
     read: (path) => ipcRenderer.invoke('disk:read', path),
+    readBytes: (path) => ipcRenderer.invoke('disk:read-bytes', path),
     editorConfig: (path) => ipcRenderer.invoke('disk:editorconfig', path),
     readAppended: (path, offset, opts) => ipcRenderer.invoke('disk:read-appended', path, offset, opts),
     write: (path, text, opts) => ipcRenderer.invoke('disk:write', path, text, opts),

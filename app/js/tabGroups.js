@@ -1,7 +1,7 @@
 // Tab views: which group each open tab belongs to (a tracker project, a folder
 // open in Folders, Notes or Other files), and which tabs a view of the tab bar
 // shows (all groups, one, or several together). Pure, so the Node tests can import it.
-import { baseName, isWithin, rootOf } from './folders.js';
+import { baseName, folderLabel, isWithin, rootOf } from './folders.js';
 import { compactName, defaultProjectColor, projectKey } from './tracker-model.js';
 
 // Folder colors, apart from the colors of where files live (green, blue, amber, magenta).
@@ -82,7 +82,7 @@ function describe(id, tab, byKey, colors, links, folderName) {
     return { id, kind: 'project', name, color: record?.color || defaultProjectColor(key), folders: linked, keys: [] };
   }
   const path = id.slice(2);
-  return { id, kind: 'folder', name: folderName(path) || baseName(path), path, color: colors[path] || null, keys: [] };
+  return { id, kind: 'folder', name: folderName(path) || folderLabel(path), path, color: colors[path] || null, keys: [] };
 }
 
 /** A view's id, for remembering its last tab: '' for all tabs. */
@@ -115,7 +115,7 @@ export function groupName(id, { projects = [], folderName = baseName } = {}) {
   if (id === OTHER) return 'Other files';
   if (id === PINNED) return 'Pinned';
   if (id.startsWith('p:')) return projects.find((p) => p.key === id.slice(2))?.name ?? id.slice(2);
-  if (id.startsWith('f:')) return folderName(id.slice(2)) || baseName(id.slice(2));
+  if (id.startsWith('f:')) return folderName(id.slice(2)) || folderLabel(id.slice(2));
   return '';
 }
 

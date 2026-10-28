@@ -3,6 +3,12 @@
 /* ---- Tokens ------------------------------------------------------------ */
 :root {
   color-scheme: light;
+  /* Around dialogs and the viewer; the system bars' sizes where the page draws under them (the Android app). */
+  --overlay-gap: 24px;
+  --safe-top: 0px;
+  --safe-right: 0px;
+  --safe-bottom: 0px;
+  --safe-left: 0px;
   --bg: #f6f5f1;
   --surface: #ffffff;
   --surface-2: #efede7;
@@ -570,8 +576,10 @@ button.tag:hover {
   inset: 0;
   z-index: 50;
   display: grid;
+  /* One column that what is inside cannot widen (a long path, a wide table): it scrolls or is cut short instead. */
+  grid-template-columns: minmax(0, 1fr);
   place-items: center;
-  padding: 24px;
+  padding: calc(var(--overlay-gap) + var(--safe-top)) calc(var(--overlay-gap) + var(--safe-right)) calc(var(--overlay-gap) + var(--safe-bottom)) calc(var(--overlay-gap) + var(--safe-left));
   background: rgba(20, 18, 14, 0.42);
   animation: fade 0.12s ease-out;
 }
@@ -593,7 +601,8 @@ button.tag:hover {
   display: flex;
   flex-direction: column;
   width: min(720px, 100%);
-  max-height: calc(100dvh - 48px);
+  min-width: 0;
+  max-height: calc(100dvh - 2 * var(--overlay-gap) - var(--safe-top) - var(--safe-bottom));
   border: 1px solid var(--border);
   border-radius: 16px;
   background: var(--surface);
@@ -1360,6 +1369,16 @@ button.project-chip:hover {
   border-radius: var(--radius-sm);
   background: var(--surface-2);
   font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.notice > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.notice .icon {
+  flex: none;
 }
 
 .notice .icon {
@@ -2406,14 +2425,6 @@ button.folder-col:hover {
   background: var(--surface);
 }
 
-.peek-pdf {
-  flex: 1;
-  width: 100%;
-  min-height: 0;
-  border: 0;
-  background: var(--surface-2);
-}
-
 .peek-text-wrap {
   flex: 1;
   min-height: 0;
@@ -2448,8 +2459,9 @@ button.folder-col:hover {
   inset: 0;
   z-index: 90;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   place-items: center;
-  padding: 24px;
+  padding: calc(var(--overlay-gap) + var(--safe-top)) calc(var(--overlay-gap) + var(--safe-right)) calc(var(--overlay-gap) + var(--safe-bottom)) calc(var(--overlay-gap) + var(--safe-left));
   background: rgba(15, 14, 12, 0.62);
 }
 
@@ -2457,6 +2469,7 @@ button.folder-col:hover {
   display: flex;
   flex-direction: column;
   width: min(1200px, 100%);
+  min-width: 0;
   height: min(900px, 100%);
   overflow: hidden;
   border-radius: var(--radius);
@@ -2479,6 +2492,38 @@ button.folder-col:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.viewer-count {
+  flex: none;
+  white-space: nowrap;
+}
+
+.viewer-open {
+  flex: none;
+}
+
+/* Phones: the viewer takes the screen, and its bar keeps to what fits. */
+@media (max-width: 640px) {
+  .viewer-backdrop {
+    --overlay-gap: 0px;
+  }
+
+  .viewer {
+    height: 100%;
+    border-radius: 0;
+  }
+
+  .viewer-head {
+    gap: 4px;
+    padding: 0 4px 0 10px;
+  }
+
+  .viewer-head > .icon:first-child,
+  .viewer-size,
+  .viewer-open-label {
+    display: none;
+  }
 }
 
 .viewer-body {
@@ -5082,7 +5127,7 @@ mark {
 
 .field-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px 14px;
 }
 
@@ -5112,7 +5157,13 @@ mark {
 
 .input-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
+}
+
+.input-row > input {
+  flex: 1 1 180px;
+  min-width: 0;
 }
 
 .input-row .area-select {
@@ -6197,6 +6248,17 @@ svg.up {
   display: none;
 }
 
+@media (max-width: 640px) {
+  :root {
+    --overlay-gap: 10px;
+  }
+}
+
+/* Waiting (for the folder's listing, the file access): said only when it takes a moment. */
+.waiting {
+  animation: fade 0.2s ease-out 0.6s both;
+}
+
 @media (max-width: 860px) {
   .brand,
   .quick-open-btn kbd,
@@ -6274,7 +6336,7 @@ svg.up {
 
   .field-grid,
   .file-props {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .settings {
@@ -8558,15 +8620,41 @@ body:has(.edit-bar) .toasts {
 }
 
 /* The Android app draws under the status and navigation bars (edge to edge): the page keeps
-   clear of them. Capacitor passes the bars' sizes as safe-area insets (or as --safe-area-inset-*
-   on older WebViews). */
+   clear of them. Capacitor passes the bars' sizes as safe-area insets (and as --safe-area-inset-*
+   for older WebViews). */
+html[data-native='android'] {
+  /* The larger of the two: some WebViews give env() as 0 while Capacitor passes the variables. */
+  --safe-top: max(env(safe-area-inset-top, 0px), var(--safe-area-inset-top, 0px));
+  --safe-right: max(env(safe-area-inset-right, 0px), var(--safe-area-inset-right, 0px));
+  --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--safe-area-inset-bottom, 0px));
+  --safe-left: max(env(safe-area-inset-left, 0px), var(--safe-area-inset-left, 0px));
+}
+
 html[data-native='android'] body {
   background: var(--surface);
 }
 
 html[data-native='android'] #root {
-  padding: env(safe-area-inset-top, var(--safe-area-inset-top, 0px)) env(safe-area-inset-right, var(--safe-area-inset-right, 0px))
-    env(safe-area-inset-bottom, var(--safe-area-inset-bottom, 0px)) env(safe-area-inset-left, var(--safe-area-inset-left, 0px));
+  padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
+}
+
+/* What is fixed to the window keeps clear of the bars too: the sidebar and panels on phones,
+   transfers (dialogs and the viewer do it with --safe-*). */
+@media (max-width: 860px) {
+  html[data-native='android'] .sidebar {
+    top: calc(var(--topbar) + var(--safe-top));
+    bottom: var(--safe-bottom);
+    left: var(--safe-left);
+  }
+
+  html[data-native='android'] .scrim,
+  html[data-native='android'] .panel {
+    inset: calc(var(--topbar) + var(--safe-top)) var(--safe-right) var(--safe-bottom) var(--safe-left);
+  }
+}
+
+html[data-native='android'] .transfers {
+  bottom: calc(34px + var(--safe-bottom));
 }
 
 html[data-native='android'] .app {
@@ -8574,9 +8662,475 @@ html[data-native='android'] .app {
 }
 
 html[data-native='android'] .toasts {
-  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(20px + var(--safe-bottom));
 }
 
 html[data-native='android'] body:has(.edit-bar) .toasts {
   bottom: calc(56px + var(--edit-lift, 0px));
+}
+
+/* ---- Documents (ui/documentView.js): PDFs, e-books, Word, OpenDocument, RTF, sheets, slides ---- */
+.doc-view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--surface);
+}
+
+/* In a tab: over the editor's place (the editor is hidden meanwhile). */
+.editor-area > .doc-view {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+}
+
+.doc-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  min-height: 38px;
+  padding: 3px 8px 3px 12px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  scrollbar-width: none;
+}
+
+.doc-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.doc-bar.compact {
+  min-height: 32px;
+  padding: 2px 6px;
+}
+
+.doc-bar > * {
+  flex: none;
+}
+
+.doc-kind {
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.doc-bar .doc-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-pages {
+  min-width: 52px;
+  text-align: center;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.doc-zoom {
+  display: inline-flex;
+  align-items: center;
+}
+
+.doc-zoom .icon-btn {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.doc-zoom-value {
+  min-width: 52px;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.doc-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  outline: none;
+  touch-action: pan-x pan-y;
+}
+
+.doc-message {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  color: var(--text-2);
+  text-align: center;
+}
+
+.doc-message p {
+  max-width: 46ch;
+  margin: 0;
+}
+
+
+.menu.doc-contents {
+  max-width: min(420px, calc(100vw - 16px));
+  max-height: min(70vh, 560px);
+}
+
+.menu.doc-contents .menu-item span:first-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The converted page: a column to read, in the editor's text size (a little larger). */
+.doc-html {
+  max-width: 46em;
+  margin: 0 auto;
+  padding: 20px 28px 64px;
+  font-size: calc(var(--editor-font-size, 14px) + 2px);
+  touch-action: pan-x pan-y;
+}
+
+.doc-html.compact {
+  padding: 10px 14px 24px;
+  font-size: 14px;
+}
+
+.doc-html img {
+  display: inline-block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 0;
+}
+
+.doc-html img.doc-cover {
+  display: block;
+  max-height: 80vh;
+  margin: 0 auto;
+}
+
+.doc-html p {
+  margin: 0 0 0.7em;
+}
+
+.doc-html .al-c { text-align: center; }
+.doc-html .al-r { text-align: right; }
+.doc-html .al-j { text-align: justify; }
+.doc-html .doc-i { font-style: italic; }
+.doc-html .doc-b { font-weight: 700; }
+.doc-html .doc-u { text-decoration: underline; }
+.doc-html .doc-s { text-decoration: line-through; }
+.doc-html .doc-sc { font-variant: small-caps; }
+.doc-html .doc-sup { vertical-align: super; font-size: 0.75em; }
+.doc-html .doc-sub { vertical-align: sub; font-size: 0.75em; }
+
+.doc-html .doc-quote,
+.doc-html blockquote {
+  margin: 0.8em 0;
+  padding: 0.1em 1em;
+  border-left: 3px solid var(--border-strong);
+  color: var(--text-2);
+}
+
+.doc-html .doc-subtitle {
+  color: var(--text-2);
+  font-size: 1.15em;
+}
+
+.doc-html .doc-box {
+  margin: 0.6em 0;
+  padding: 0.5em 0.9em;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.doc-html .doc-math {
+  font-family: var(--serif, serif);
+  font-style: italic;
+}
+
+.doc-html .doc-noteref {
+  text-decoration: none;
+}
+
+.doc-html .doc-notes {
+  margin-top: 2.5em;
+  padding-top: 0.6em;
+  border-top: 1px solid var(--border);
+  font-size: 0.9em;
+}
+
+.doc-html .doc-noteback {
+  text-decoration: none;
+}
+
+.doc-html .doc-no-picture {
+  color: var(--text-3);
+  font-size: 0.85em;
+}
+
+.doc-html li.doc-nest {
+  list-style: none;
+}
+
+.doc-html .doc-poem,
+.doc-html .doc-stanza {
+  margin-left: 2em;
+}
+
+.doc-html .doc-chapter + .doc-chapter {
+  margin-top: 2.5em;
+  padding-top: 1.5em;
+  border-top: 1px dashed var(--border);
+}
+
+/* Tables (and sheets) scroll sideways inside the page, never widening it. */
+.doc-html .doc-table-wrap,
+.doc-html table {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.doc-html .doc-table-wrap {
+  margin: 0.8em 0;
+}
+
+.doc-html .doc-table {
+  border-collapse: collapse;
+  font-size: 0.92em;
+}
+
+.doc-html .doc-table td,
+.doc-html .doc-table th {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.doc-html .doc-table td > p:last-child,
+.doc-html .doc-table th > p:last-child {
+  margin-bottom: 0;
+}
+
+.doc-html .doc-grid {
+  font-family: var(--mono);
+  font-size: 0.8em;
+}
+
+.doc-html .doc-grid thead th,
+.doc-html .doc-grid tbody th {
+  position: sticky;
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-weight: 500;
+  text-align: center;
+}
+
+.doc-html .doc-grid thead th {
+  top: 0;
+}
+
+.doc-html .doc-grid tbody th {
+  left: 0;
+}
+
+.doc-html .doc-grid td {
+  white-space: nowrap;
+}
+
+.doc-html .doc-grid td.num {
+  text-align: right;
+}
+
+.doc-html .doc-formula {
+  color: var(--text-3);
+}
+
+.doc-html .doc-sheet {
+  max-width: none;
+}
+
+.doc-html .doc-sheet + .doc-sheet {
+  margin-top: 2em;
+}
+
+.doc-html .doc-more,
+.doc-html .doc-empty {
+  color: var(--text-3);
+  font-size: 0.9em;
+}
+
+/* Workbooks use the width there is. */
+.doc-html:has(.doc-sheet) {
+  max-width: none;
+}
+
+.doc-html .doc-slide {
+  margin: 0 0 1.4em;
+  padding: 1em 1.3em;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.doc-html .doc-slide-no {
+  margin: 0 0 0.3em;
+  color: var(--text-3);
+  font-size: 0.75em;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.doc-html .doc-slide h2 {
+  margin-top: 0;
+}
+
+.doc-html .doc-slide-notes {
+  margin-top: 0.9em;
+  padding-top: 0.6em;
+  border-top: 1px dashed var(--border);
+  color: var(--text-2);
+  font-size: 0.88em;
+}
+
+.doc-html .doc-slide-notes::before {
+  display: block;
+  margin-bottom: 0.2em;
+  color: var(--text-3);
+  font-size: 0.85em;
+  font-weight: 650;
+  content: 'Notes';
+}
+
+/* PDFs: pages on a grey desk, white like paper in both themes. */
+.pdf-view {
+  background: var(--surface-3);
+}
+
+.pdf-pages {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: max-content;
+  min-width: 100%;
+  padding: 12px 8px 40px;
+  transform-origin: 0 0;
+}
+
+.compact .pdf-pages,
+.doc-view.pdf .doc-bar.compact + .pdf-view .pdf-pages {
+  gap: 8px;
+  padding: 8px 4px 16px;
+}
+
+.pdf-page {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(0, 0, 0, 0.05);
+  --scale-round-x: 1px;
+  --scale-round-y: 1px;
+  --user-unit: 1;
+}
+
+.pdf-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+
+/* pdf.js's text layer (from its pdf_viewer.css, Apache-2.0): invisible text over the
+   drawing, there to select and copy. */
+.pdf-page .textLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: clip;
+  opacity: 1;
+  line-height: 1;
+  text-align: initial;
+  letter-spacing: normal;
+  word-spacing: normal;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: CanvasText;
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+
+.pdf-page .textLayer :is(span, br) {
+  position: absolute;
+  color: transparent;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+  user-select: text;
+}
+
+.pdf-page .textLayer > :not(.markedContent),
+.pdf-page .textLayer .markedContent span:not(.markedContent) {
+  z-index: 1;
+  --font-height: 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1;
+  --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+
+.pdf-page .textLayer .markedContent {
+  display: contents;
+}
+
+.pdf-page .textLayer ::selection {
+  background: rgba(0, 0, 255, 0.25);
+  color: transparent;
+}
+
+.pdf-page .textLayer br::selection {
+  background: transparent;
+}
+
+.pdf-page .textLayer .endOfContent {
+  position: absolute;
+  inset: 100% 0 0;
+  display: block;
+  z-index: 0;
+  cursor: default;
+  user-select: none;
+}
+
+.pdf-page .textLayer.selecting .endOfContent {
+  top: 0;
+}
+
+/* The folders view's preview and viewer hold a document too. */
+.peek-body > .doc-view,
+.viewer-body > .doc-view {
+  flex: 1;
+}
+
+@media (max-width: 640px) {
+  .doc-html {
+    padding: 14px 16px 48px;
+  }
+
+  .doc-kind {
+    display: none;
+  }
 }

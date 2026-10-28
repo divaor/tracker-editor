@@ -1,6 +1,6 @@
 import { html, useEffect, useLayoutEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import { canDragOut, draggedPaths, draggedTab, dropped, isOwnDrop, onDragOutEnd, startDragOut } from '../dragOut.js';
-import { baseName, breadcrumbs, FOLDER_SORTS, isImageName, modeString, moveSectionTo, nameMatcher, opensInEditor, parentOf, peekKind, pushRecent, quotePath, rangeOf, renameRange, replaceSection, rootOf, selectionSummary, sortsUp, toggleFavorite, topmost, treeRows, withCurrent } from '../folders.js';
+import { baseName, breadcrumbs, folderLabel, placeLabel, FOLDER_SORTS, isImageName, modeString, moveSectionTo, nameMatcher, opensHere, opensInEditor, parentOf, peekKind, pushRecent, quotePath, rangeOf, renameRange, replaceSection, rootOf, selectionSummary, sortsUp, toggleFavorite, topmost, treeRows, withCurrent } from '../folders.js';
 import { formatBytes, timeAgo } from '../format.js';
 import { getSettings, isLocal, saveSettings } from '../settings.js';
 import { diskKey } from '../store.js';
@@ -187,7 +187,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   const remote = isRemotePath(root);
   const conn = remote ? server(remoteParts(root).id) : null;
   const connState = conn ? serverStatus(conn.id) : null;
-  const rootName = (r) => (isRemotePath(r) ? (server(remoteParts(r).id)?.name ?? 'Server') : baseName(r));
+  const rootName = (r) => (isRemotePath(r) ? (server(remoteParts(r).id)?.name ?? 'Server') : folderLabel(r));
   const internalDrag = useRef(null); // paths dragged within a folder on a server
   // Terminals: in the editor on SSH servers, the system's terminal app for folders here (none on FTP).
   const terminalFor = (p) => (isRemotePath(p) ? server(remoteParts(p).id)?.protocol === 'sftp' : Boolean(bridge.terminal));
@@ -609,13 +609,15 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   // ---- Opening ----
 
   const openOutside = (e) => bridge.openExternal(e.path).catch(fail);
-  // Pictures and PDFs show large here unless the setting says their program.
-  const inViewer = (e) => !e.dir && settings.folderMediaOpens !== 'program' && ['image', 'pdf'].includes(peekKind(e.name));
-  /** Opens a file or folder; `outside` opens a picture or PDF with its program even when they show here. */
+  // Pictures show large here and documents (PDFs, e-books, Word…) open in a tab, unless the setting says their program.
+  const here = settings.folderMediaOpens !== 'program';
+  const inViewer = (e) => !e.dir && here && peekKind(e.name) === 'image';
+  /** Opens a file or folder; `outside` opens a picture or document with its program even when they show here. */
   const openEntry = async (e, { many = false, outside = false } = {}) => {
     if (e.dir) return go(e.path, sectionOf(e.path) ?? dir);
     if (!outside && inViewer(e)) return setViewing(e.path);
-    if (!opensInEditor(e.name)) return openOutside(e);
+    if (peekKind(e.name) === 'doc' && (outside || !here)) return openOutside(e);
+    if (!opensHere(e.name)) return openOutside(e);
     const problem = await actions.openDiskPath(e.path, { report: false });
     // Not text after all: its own program.
     if (problem && /not a text file/i.test(problem)) return openOutside(e);
@@ -626,7 +628,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     const items = targets();
     if (items.length === 1) return openEntry(items[0]);
     const files = items.filter((x) => !x.dir).slice(0, 20);
-    // Several pictures or PDFs: the first shows large (the arrows go through the rest); the others open.
+    // Several pictures: the first shows large (the arrows go through the rest); the others open.
     const shown = files.find(inViewer);
     for (const e of files.filter((x) => !inViewer(x))) openEntry(e, { many: true });
     if (shown) setViewing(shown.path);
@@ -1074,13 +1076,13 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     { label: 'Copy path', icon: 'copy', run: () => actions.copyPath(p) },
   ];
   const rootItems = () => [
-    ...roots.map((r) => ({ label: r, icon: 'folder', checked: r === root, run: () => go(r) })),
+    ...roots.map((r) => ({ label: placeLabel(r), hint: placeLabel(r) === r ? undefined : r, icon: 'folder', checked: r === root, run: () => go(r) })),
     ...servers().map((c) => ({ label: `${c.name} (${protocolName(c.protocol)} · ${c.host})`, icon: 'server', checked: remoteRoot(c.id) === root, run: () => actions.openServer(c.id) })),
     { separator: true },
     { label: 'Folders side by side…', icon: 'columns', hint: 'Several of these next to each other, here or on servers', run: () => actions.sideBySide() },
     { label: 'Open another folder…', icon: 'folderOpen', run: () => pick(remote ? undefined : (parentOf(dir, root) ?? root)) },
     { label: 'Connect to a server…', icon: 'server', run: () => actions.editServer() },
-    { label: 'Servers from your SSH config…', icon: 'server', run: () => actions.importSshConfig() },
+    !isAndroidApp() && { label: 'Servers from your SSH config…', icon: 'server', run: () => actions.importSshConfig() },
     window.desktop?.mirrors && { label: 'Mirrors…', icon: 'sync', run: () => actions.showMirrors() },
     ...(remote ? [] : PLACES.filter((p) => places[p.id] && !roots.includes(places[p.id])).map((p) => ({ label: `Pick in ${p.label}…`, run: () => pick(places[p.id]) }))),
     { separator: true },
@@ -1098,7 +1100,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
         ]
       : [
           window.desktop?.disk?.show && { label: 'Show this folder in the file explorer', icon: 'external', run: () => actions.showOnDisk(dir) },
-          { label: `Forget ${baseName(root)}`, icon: 'x', run: () => forget(root) },
+          { label: `Forget ${folderLabel(root)}`, icon: 'x', run: () => forget(root) },
         ]),
   ];
 
@@ -1143,7 +1145,8 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       </p>
     </div>`;
   }
-  if (!roots) return html`<div class="file-list" />`;
+  // Waiting for the file access (the Android app's starts with the app): said after a moment.
+  if (!roots) return html`<div class="folders-empty"><p class="muted small waiting">${isAndroidApp() ? 'Starting the file access…' : 'Loading…'}</p></div>`;
   if (!root) {
     return html`<div class="folders-empty">
       <p>Browse a folder on ${hereName()}, or one on a server, and open its files here, like in a file explorer.</p>
@@ -1156,7 +1159,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
         )}
       </div>
       <div class="folders-servers">
-        ${roots.map((r) => html`<button type="button" key=${r} class="btn ghost sm" title=${r} onClick=${() => go(r)}><${Icon} name="folder" size=${15} />${baseName(r)}</button>`)}
+        ${roots.map((r) => html`<button type="button" key=${r} class="btn ghost sm" title=${r} onClick=${() => go(r)}><${Icon} name="folder" size=${15} />${folderLabel(r)}</button>`)}
         ${servers().map((c) => html`<button type="button" key=${c.id} class="btn ghost sm" title=${`${protocolName(c.protocol)} · ${c.user ? `${c.user}@` : ''}${c.host}`} onClick=${() => actions.openServer(c.id)}><${Icon} name="server" size=${15} />${c.name}</button>`)}
         <button type="button" class="btn sm" onClick=${() => actions.editServer()}><${Icon} name="server" size=${15} />Connect to a server…</button>
       </div>
@@ -1173,7 +1176,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   const favorite = favorites.includes(dir);
   const recent = (settings.folderRecent ?? []).filter((p) => p !== dir);
   const toggleFav = (p) => saveSettings({ folderFavorites: toggleFavorite(favorites, p) });
-  const placeName = (p) => (isRemotePath(p) && !remoteParts(p).path.replace(/\/+$/, '') ? (server(remoteParts(p).id)?.name ?? 'Server') : baseName(isRemotePath(p) ? remoteParts(p).path || '/' : p));
+  const placeName = (p) => (isRemotePath(p) && !remoteParts(p).path.replace(/\/+$/, '') ? (server(remoteParts(p).id)?.name ?? 'Server') : isRemotePath(p) ? baseName(remoteParts(p).path || '/') : folderLabel(p));
   const placeHint = (p) => (isRemotePath(p) ? `${server(remoteParts(p).id)?.name ?? 'Server'}: ${remoteParts(p).path || '/'}` : p);
   const hiddenCount = live.reduce((n, d) => n + (listings.get(d)?.entries ?? []).filter((e) => e.hidden).length, 0);
   const some = targets().length > 0;
@@ -1286,6 +1289,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
         <p class="error-text small">${l.error}</p>
         ${isRemotePath(x.dir) && html`<p><button type="button" class="btn sm" onClick=${(e) => (e.stopPropagation(), load(x.dir))}>Try again</button> <button type="button" class="btn ghost sm" onClick=${(e) => (e.stopPropagation(), actions.editServer(server(remoteParts(x.dir).id)))}>Edit the server…</button></p>`}
       </div>`}
+      ${!l && !makingHere && html`<p class="muted small empty-list waiting">Reading the folder…</p>`}
       ${x.rows.map(row)}
       ${l && !l.error && !x.rows.length && !makingHere &&
       html`<p class="muted small empty-list">${filter ? (deepOn && deep.searching ? 'Nothing here matches. Looking in the folders inside…' : multi ? 'Nothing in this one matches.' : 'Nothing here or in the folders inside matches.') : hiddenHere && !settings.showHidden ? `Only hidden files here (${hiddenHere}).` : 'This folder is empty. Drop or paste files here.'}</p>`}
@@ -1437,7 +1441,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     ${viewing &&
     html`<${FileViewer} entries=${entries.filter((e) => !e.dir)} path=${viewing}
       onPath=${(p) => (setViewing(p), select([p]))}
-      onOpen=${(e) => (setViewing(null), openEntry(e, { outside: true }))}
+      onOpen=${(e) => (setViewing(null), openEntry(e, { outside: peekKind(e.name) === 'image' }))}
       onOpenOutside=${openOutside}
       onClose=${() => (setViewing(null), list.current?.focus())} />`}
     <div class="sidebar-foot folders-foot">

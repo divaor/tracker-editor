@@ -743,6 +743,14 @@ ipcMain.handle('disk:open', guard(async (_e, opts = {}) => {
 }));
 
 ipcMain.handle('disk:read', guard((_e, file) => (isRemote(file) ? remote.read(file) : disk.readTextFile(checkFile(file)))));
+// A document's bytes (a PDF, an e-book, a Word file…) for the page to show it.
+const MAX_DOCUMENT = 200 * 1024 * 1024;
+ipcMain.handle('disk:read-bytes', guard(async (_e, file) => {
+  if (isRemote(file)) return remote.readBytes(file, MAX_DOCUMENT / 2);
+  checkFile(file);
+  if (fs.statSync(file).size > MAX_DOCUMENT) throw new Error(`${path.basename(file)} is larger than 200 MB.`);
+  return fs.readFileSync(file);
+}));
 // The indentation the .editorconfig files above a file give it ({ tabs, size } or null):
 // its folder's and the ones above (on a server, the nearest few), up to one with root = true.
 // The page gets only that, never their text.
@@ -1286,8 +1294,8 @@ ipcMain.handle('folder:chmod', guard((_e, paths, mode, opts = {}) => {
   if (paths.some(isRemote)) return remote.chmod(paths.filter(isRemote), mode, { recursive });
   return folders.chmodEntries(paths.map(checkFile), mode, { recursive });
 }));
-// The folders view's preview: a picture's or a PDF's bytes, the start of a text file.
-const PEEK_BYTES = { png: 40, jpg: 40, jpeg: 40, gif: 40, bmp: 40, webp: 40, ico: 10, avif: 40, pdf: 100 };
+// The folders view's preview: a picture's bytes, the start of a text file (documents: disk:read-bytes).
+const PEEK_BYTES = { png: 40, jpg: 40, jpeg: 40, gif: 40, bmp: 40, webp: 40, ico: 10, avif: 40 };
 ipcMain.handle('folder:peek-bytes', guard(async (_e, file) => {
   const name = nameOf(file);
   const mb = PEEK_BYTES[/\.([^.]+)$/.exec(name)?.[1]?.toLowerCase() ?? ''];
@@ -2416,8 +2424,6 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: true,
       spellcheck: false,
-      // The built-in PDF viewer, for PDFs in the folders view's preview.
-      plugins: true,
     },
   });
   if (maximized) mainWindow.maximize();

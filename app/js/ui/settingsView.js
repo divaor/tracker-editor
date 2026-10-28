@@ -404,9 +404,9 @@ function DesktopCard({ settings, actions }) {
     </div>
     <h3 class="settings-sub">Folders</h3>
     <div class="field-grid">
-      <${Field} label="Double-clicking a picture or a PDF" hint="Enter does the same. Space always shows it large, and right-click has the other way.">
+      <${Field} label="Opening a picture or a document (PDF, e-book, Word…)" hint="Double-click or Enter. Space always shows it large, and right-click has the other way.">
         <select value=${settings.folderMediaOpens} onChange=${(e) => saveSettings({ folderMediaOpens: e.currentTarget.value })}>
-          <option value="viewer">Shows it large here</option>
+          <option value="viewer">Shows it here (documents in a tab)</option>
           <option value="program">Opens it with its program</option>
         </select>
       </${Field}>
@@ -458,7 +458,7 @@ const PRESETS = [
 ];
 
 const CONNECTIONS = [
-  { id: 'local', label: 'This computer' },
+  { id: 'local', label: isAndroidApp() ? 'Your own server' : 'This computer' },
   { id: 'api', label: 'AI provider' },
   { id: 'async', label: 'Answers later' },
 ];
@@ -624,8 +624,8 @@ function OpenAiModelForm({ settings, actions }) {
     actions.toast('Model saved. Open it with the ✦ button or Ctrl+Shift+A.');
   };
   return html`
-    <p class="muted">Summarize files, ask questions about them and find things by meaning with a model running on this computer. Nothing leaves your machine. Works with <a href="https://ollama.com" target="_blank" rel="noopener">Ollama</a>, <a href="https://lmstudio.ai" target="_blank" rel="noopener">LM Studio</a> and other servers with an OpenAI-compatible API.</p>
-    ${isAndroidApp() ? html`<p class="notice"><${Icon} name="alert" size=${15} />On the phone: a server on a computer on the same network, by its address (<code>http://192.168.1.20:11434/v1</code>). Ollama must listen on the network for that (<code>OLLAMA_HOST=0.0.0.0</code>); LM Studio: <strong>Serve on Local Network</strong>.</p>` : !isDesktopApp() && html`<p class="notice"><${Icon} name="alert" size=${15} />In a browser this only reaches the model if the page runs on the same computer and the server allows it. The desktop app needs no extra setup.</p>`}
+    <p class="muted">Summarize files, ask questions about them and find things by meaning with a model ${isAndroidApp() ? 'you run on a computer of yours. Nothing goes to an outside service' : 'running on this computer. Nothing leaves your machine'}. Works with <a href="https://ollama.com" target="_blank" rel="noopener">Ollama</a>, <a href="https://lmstudio.ai" target="_blank" rel="noopener">LM Studio</a> and other servers with an OpenAI-compatible API.</p>
+    ${isAndroidApp() ? html`<p class="notice"><${Icon} name="alert" size=${15} /><span>On the phone: a server on a computer on the same network, by its address (<code>http://192.168.1.20:11434/v1</code>). Ollama must listen on the network for that (<code>OLLAMA_HOST=0.0.0.0</code>); LM Studio: <strong>Serve on Local Network</strong>.</span></p>` : !isDesktopApp() && html`<p class="notice"><${Icon} name="alert" size=${15} />In a browser this only reaches the model if the page runs on the same computer and the server allows it. The desktop app needs no extra setup.</p>`}
     <div class="field-grid">
       <div class="field span-2"><span>Server</span>
         <div class="input-row">

@@ -7,8 +7,8 @@ import { isRemotePath, remoteParts } from './where.js';
 
 const bridge = () => globalThis.window?.desktop?.disk;
 export const diskAvailable = () => Boolean(bridge());
-/** A tab that cannot be edited: followed, the end of a large file, or one its app (Android) lets us only read. */
-export const diskReadOnly = (tab) => Boolean(tab && (tab.follow || tab.truncated || tab.readOnly));
+/** A tab that cannot be edited: followed, the end of a large file, a document (PDF, e-book…), or one its app (Android) lets us only read. */
+export const diskReadOnly = (tab) => Boolean(tab && (tab.follow || tab.truncated || tab.readOnly || tab.doc));
 
 /** Picks files and opens them as disk tabs. Returns the problems to show ([] when all opened). */
 export async function openDiskFiles() {
@@ -50,11 +50,11 @@ export async function saveDiskTab(path, { force = false } = {}) {
   return 'saved';
 }
 
-/** The file as it is on disk now; returns its text. */
+/** The file as it is on disk now; returns its text (a document's: what its view read, until it changes). */
 export async function reloadDiskTab(path) {
   const info = await bridge().read(path);
   store.diskReloaded(path, info);
-  return info.text;
+  return store.diskTab(path)?.text ?? info.text;
 }
 
 /**

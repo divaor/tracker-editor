@@ -10,6 +10,9 @@
 //   to its stylesheet: the terminal on servers in the desktop app.
 // - Anthropic's SDK for the Claude API is bundled into app/vendor/anthropic.js (claude.js
 //   loads it the first time Claude is the model). The tracker keeps a copy of the file.
+// - pdf.js (its legacy build, for older Android WebViews) goes to app/vendor/pdf/ with its
+//   worker, the decoders it loads (WebAssembly, and JavaScript where that is missing), the
+//   character maps of CJK fonts and the standard fonts. About 6 MB, cached when first used.
 // - Text recognition (tesseract.js) goes to app/vendor/ocr/: the library, its
 //   worker, the WebAssembly core (SIMD, LSTM only) and the English and Spanish
 //   models. About 9 MB, so they are cached when first used, not precached.
@@ -133,6 +136,32 @@ await build({
   logLevel: 'warning',
 });
 console.log(`app/vendor/anthropic.js <- @anthropic-ai/sdk@${sdkVersion}`);
+
+// PDFs (documents.js / pdfDoc.js): saved as .js (not .mjs) for the same reason as the formatters.
+const pdfDir = path.join(outDir, 'pdf');
+await rm(pdfDir, { recursive: true, force: true });
+const { version: pdfVersion } = await pkgInfo('pdfjs-dist');
+const pdfRoot = path.join(root, 'node_modules', 'pdfjs-dist');
+const pdfFiles = [];
+for (const [from, to] of [['legacy/build/pdf.min.mjs', 'pdf.js'], ['legacy/build/pdf.worker.min.mjs', 'pdf.worker.js']]) {
+  const source = await readFile(path.join(pdfRoot, from), 'utf8');
+  await mkdir(pdfDir, { recursive: true });
+  await writeFile(path.join(pdfDir, to), `/* pdfjs-dist@${pdfVersion} (Apache-2.0) - vendored by scripts/vendor.js */\n${source.replace(/\n?\/\/# sourceMappingURL=.*\s*$/, '\n')}`);
+  pdfFiles.push(to);
+}
+// Not the scripting sandbox (quickjs): scripts in PDFs never run here.
+const pdfAssets = { wasm: (f) => !f.startsWith('quickjs'), cmaps: () => true, standard_fonts: () => true, iccs: () => true };
+for (const [dir, keep] of Object.entries(pdfAssets)) {
+  await mkdir(path.join(pdfDir, dir), { recursive: true });
+  for (const f of (await readdir(path.join(pdfRoot, dir))).filter(keep).sort()) {
+    await copyFile(path.join(pdfRoot, dir, f), path.join(pdfDir, dir, f));
+    pdfFiles.push(`${dir}/${f}`);
+  }
+}
+await copyFile(path.join(pdfRoot, 'LICENSE'), path.join(pdfDir, 'LICENSE'));
+pdfFiles.push('LICENSE');
+await writeFile(path.join(pdfDir, 'files.json'), `${JSON.stringify(pdfFiles, null, 2)}\n`);
+console.log(`app/vendor/pdf/ <- pdfjs-dist@${pdfVersion} (${pdfFiles.length} files)`);
 
 const ocrDir = path.join(outDir, 'ocr');
 await rm(ocrDir, { recursive: true, force: true });

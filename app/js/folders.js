@@ -3,6 +3,8 @@
 // Claude for a tab (its path when it is on disk, its text otherwise). Pure,
 // so the Node tests can import it.
 
+import { isDocumentName } from './docTypes.js';
+
 /** The folder under the temporary directory where dragged tabs are written (main.cjs DRAG_DIR). */
 export const DRAG_DIR_NAME = 'Tracker Editor drag';
 
@@ -99,11 +101,30 @@ export function baseName(p) {
   return list.length ? list[list.length - 1] : p;
 }
 
+// The phone's storage and its memory cards (Android) are folders named 0 and 1234-ABCD.
+const STORAGE = /^(\/storage\/emulated\/(\d+)|\/sdcard|\/storage\/self\/primary|\/storage\/([0-9A-F]{4}-[0-9A-F]{4}))(\/.*)?$/i;
+
+/** A folder's name to show: its last part, or what the phone's storage and memory cards are ("Phone storage", "SD card"). */
+export function folderLabel(p) {
+  const m = STORAGE.exec(p ?? '');
+  if (!m || (m[4] && m[4] !== '/')) return baseName(p);
+  if (m[3]) return 'SD card';
+  return m[2] && m[2] !== '0' ? `Phone storage (${m[2]})` : 'Phone storage';
+}
+
+/** Where a folder is, to show ("Phone storage/Documents" rather than /storage/emulated/0/Documents). */
+export function placeLabel(dir) {
+  const m = STORAGE.exec(dir ?? '');
+  if (m) return m[4] && m[4] !== '/' ? `${folderLabel(m[1])}${m[4]}` : folderLabel(m[1]);
+  if (/^\/storage(\/emulated)?\/?$/.test(dir ?? '')) return 'This device';
+  return dir;
+}
+
 /** [{ name, path }] from the picked folder down to `dir`. */
 export function breadcrumbs(dir, root) {
   const sep = sepOf(root);
   const base = trimSep(root);
-  const crumbs = [{ name: baseName(root), path: root }];
+  const crumbs = [{ name: folderLabel(root), path: root }];
   let at = base;
   for (const name of parts(trimSep(dir)).slice(parts(base).length)) {
     at = at.endsWith(sep) || at.endsWith('/') ? `${at}${name}` : `${at}${sep}${name}`;
@@ -230,11 +251,13 @@ const BINARY = new Set(
 const IMAGES = new Set('png jpg jpeg gif bmp webp tif tiff'.split(' '));
 
 const PEEK_IMAGES = new Set('png jpg jpeg gif bmp webp ico avif'.split(' '));
-/** What the folders view's preview shows for a file: 'image', 'pdf', 'text' (read as text) or 'none'. */
-export const peekKind = (name) => (PEEK_IMAGES.has(extOf(name)) ? 'image' : extOf(name) === 'pdf' ? 'pdf' : BINARY.has(extOf(name)) ? 'none' : 'text');
+/** What the folders view's preview shows for a file: 'image', 'doc' (a document shown as it looks: PDF, e-book…), 'text' (read as text) or 'none'. */
+export const peekKind = (name) => (PEEK_IMAGES.has(extOf(name)) ? 'image' : isDocumentName(name) ? 'doc' : BINARY.has(extOf(name)) ? 'none' : 'text');
 
-/** Whether a file opens in the editor (text); the others open with their own program. Unknown types are tried as text. */
-export const opensInEditor = (name) => !BINARY.has(extOf(name));
+/** Whether a file opens in the editor as text; the others open with their own program, or as documents (opensHere). Unknown types are tried as text. */
+export const opensInEditor = (name) => !BINARY.has(extOf(name)) && !isDocumentName(name);
+/** Whether a file opens in a tab here: as text, or as a document shown as it looks. */
+export const opensHere = (name) => opensInEditor(name) || isDocumentName(name);
 /** Images whose text can be read (OCR). */
 export const isImageName = (name) => IMAGES.has(extOf(name));
 

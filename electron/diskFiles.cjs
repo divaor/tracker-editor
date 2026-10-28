@@ -7,6 +7,17 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const MAX_FULL = 20 * 1024 * 1024; // larger files open by their tail, read-only
+
+// Documents the page shows as they look (app/js/docTypes.js has the same list, and a test
+// keeps them in step): opened as tabs without their text, which the page reads from their bytes.
+const DOCUMENT_EXTS = {
+  pdf: 'pdf', epub: 'epub', fb2: 'fb2', docx: 'docx', docm: 'docx', dotx: 'docx', dotm: 'docx', odt: 'odt', ott: 'odt', rtf: 'rtf',
+  xlsx: 'xlsx', xlsm: 'xlsx', xltx: 'xlsx', ods: 'ods', ots: 'ods', pptx: 'pptx', pptm: 'pptx', ppsx: 'pptx', potx: 'pptx', odp: 'odp', otp: 'odp',
+};
+/** The kind of document a file is, by its name ('pdf', 'docx'…), or null. */
+const documentKind = (name) => DOCUMENT_EXTS[/\.([^.\\/]+)$/.exec(String(name))?.[1]?.toLowerCase() ?? ''] ?? null;
+/** A document as a tab: no text (read-only; the page shows it from its bytes). */
+const documentInfo = (file, name, stat) => ({ path: file, name, text: '', eol: 'lf', bom: false, encoding: 'utf-8', mtimeMs: stat.mtimeMs, size: stat.size, truncated: false, doc: documentKind(name) });
 const TAIL = 5 * 1024 * 1024;
 const MAX_APPEND = 2 * 1024 * 1024; // a follow step reads at most this much
 
@@ -77,6 +88,7 @@ function readHead(file, max = 256 * 1024) {
 function readTextFile(file) {
   const stat = fs.statSync(file);
   if (!stat.isFile()) throw new Error(`${file} is not a file.`);
+  if (documentKind(path.basename(file))) return documentInfo(file, path.basename(file), stat);
   const truncated = stat.size > MAX_FULL;
   const buf = truncated ? readRange(file, stat.size - TAIL, TAIL) : fs.readFileSync(file);
   const decoded = decode(buf);
@@ -112,4 +124,4 @@ function writeTextFile(file, text, { eol, bom, encoding, expectedMtime, force = 
   return { mtimeMs: stat.mtimeMs, size: stat.size };
 }
 
-module.exports = { cutText, decode, encode, readHead, readTextFile, readAppended, writeTextFile, MAX_FULL, TAIL };
+module.exports = { cutText, decode, documentInfo, documentKind, DOCUMENT_EXTS, encode, readHead, readTextFile, readAppended, writeTextFile, MAX_FULL, TAIL };

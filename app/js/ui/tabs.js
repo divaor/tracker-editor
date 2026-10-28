@@ -13,6 +13,7 @@ import { canDragOut, draggedTab, dropped, isOwnDrop, onDragOutEnd, startDragOut 
 import { Menu, MenuButton } from './menu.js';
 import { contentPlace, isContentPath, isRemotePath, kindHint, KINDS, kindOfKey, protocolName, remoteAddress, remoteParts, whereState } from '../where.js';
 import { diskReadOnly } from '../diskTabs.js';
+import { documentLabel } from '../docTypes.js';
 import { server, serverStatus } from '../servers.js';
 import { mirrorOf } from '../mirrors.js';
 import { mirrorState } from './mirrors.js';
@@ -447,10 +448,16 @@ function DiskBar({ disk, buttons, moreItems, actions }) {
       <span class="filebar-note" title=${`${remote ? remoteAddress(path, srv.conn) : content ? folder : path}\n${encoding}`}><span class="filebar-title">${disk.name}</span><span class="muted small filebar-path">${folder}</span></span>
       <span class="spacer" />
       ${buttons}
-      <button type="button" class="btn ghost sm ${follow ? 'on' : ''}" aria-pressed=${follow} disabled=${missing}
+      ${disk.doc &&
+      html`<button type="button" class="btn ghost sm ${disk.asText ? 'on' : ''}" aria-pressed=${Boolean(disk.asText)}
+        title=${disk.asText ? 'Show it as it looks again' : 'Its text in the editor: to select, search (Ctrl+F) and copy'} onClick=${() => actions.documentAsText(path, !disk.asText)}>
+        <${Icon} name=${disk.asText ? 'eye' : 'file'} size=${15} /><span class="label">${disk.asText ? 'As it looks' : 'As text'}</span>
+      </button>`}
+      ${!disk.doc &&
+      html`<button type="button" class="btn ghost sm ${follow ? 'on' : ''}" aria-pressed=${follow} disabled=${missing}
         title=${follow ? 'Stop following (the file becomes editable)' : 'Follow the file as it grows, like tail -f (read-only meanwhile)'} onClick=${() => actions.followDisk(path, !follow)}>
         <${Icon} name="follow" size=${15} /><span class="label">Follow</span>
-      </button>
+      </button>`}
       <button type="button" class="btn ghost sm" disabled=${missing} title=${`Read the file ${elsewhere} again`} onClick=${() => (dirty ? actions.openDialog({ type: 'reloadDisk', path }) : actions.reloadDisk(path))}>
         <${Icon} name="rotate" size=${15} /><span class="label">Reload</span>
       </button>
@@ -478,7 +485,7 @@ function DiskBar({ disk, buttons, moreItems, actions }) {
     html`<div class="filebar-notice warn" role="status"><${Icon} name="alert" size=${15} /><span>The file is not ${elsewhere} any more (moved, renamed or deleted). Save puts it back.</span></div>`}
     ${truncated &&
     html`<div class="filebar-notice" role="status"><${Icon} name="disk" size=${15} /><span>A ${formatSize(disk.size)} file: showing its last part, read-only. Follow shows new lines as they are written.</span></div>`}
-    ${disk.readOnly && !truncated &&
+    ${disk.readOnly && !truncated && !disk.doc &&
     html`<div class="filebar-notice" role="status"><${Icon} name="lock" size=${15} /><span>Read-only: the app this file came from does not let it be saved here. ⋯ → Copy into my files keeps an editable copy.</span></div>`}
   </div>`;
 }
@@ -489,6 +496,18 @@ export function FileBar({ file, repo, disk, sealed, projects, canPreview, previe
     html`<button type="button" class="btn ghost sm ${preview ? 'on' : ''}" aria-pressed=${preview} title="Show a reading view next to the text" onClick=${actions.togglePreview}><${Icon} name="eye" size=${15} /><span class="label">Preview</span></button>`;
   const listenButton = html`<button type="button" class="btn ghost sm" title="Read aloud from the cursor, or the selection (Alt+R)" onClick=${actions.readAloud}><${Icon} name="volume" size=${15} /><span class="label">Listen</span></button>`;
   const shareButton = html`<button type="button" class="btn ghost sm" title="Share: WhatsApp, Teams, email, copy…" onClick=${actions.share}><${Icon} name="share" size=${15} /><span class="label">Share</span></button>`;
+  const docItems = () => [
+    { label: 'Open with its program', icon: 'external', run: () => actions.openOutside(disk.path) },
+    inFolders(disk.path) && { label: 'Show its folder in Folders', icon: 'folderOpen', run: () => actions.showFolderOf(disk.path) },
+    !isRemotePath(disk.path) && window.desktop?.disk?.show && { label: 'Show in the file explorer', icon: 'external', run: () => actions.showOnDisk(disk.path) },
+    !isContentPath(disk.path) && { label: 'Copy path', icon: 'copy', run: () => actions.copyPath(disk.path) },
+    { label: 'Copy its text into my files', icon: 'filePlus', disabled: !disk.text, hint: disk.text ? undefined : 'Once its text is read', run: () => actions.copyToFiles(disk.path) },
+    inFolders(disk.path) && { label: 'Properties', icon: 'info', run: () => actions.showProperties(disk.path) },
+    canTerminal(disk.path) && { label: 'Open a terminal in its folder', icon: 'terminal', run: () => actions.terminalHere(parentOfPath(disk.path)) },
+    { separator: true },
+    { label: disk && !isRemotePath(disk.path) && !isContentPath(disk.path) ? 'Copy for Claude (the path)' : 'Copy for Claude (name and text)', icon: 'claude', run: () => actions.copyForClaude(store.session.active) },
+    settings.llm.enabled && disk.asText && { label: 'Ask the model… (Ctrl+K)', icon: 'sparkle', run: actions.askSelection },
+  ];
   const moreItems = (id) => [
     disk && inFolders(disk.path) && { label: 'Show its folder in Folders', icon: 'folderOpen', run: () => actions.showFolderOf(disk.path) },
     disk && !isRemotePath(disk.path) && window.desktop?.disk?.show && { label: 'Show in the file explorer', icon: 'external', run: () => actions.showOnDisk(disk.path) },
@@ -523,6 +542,7 @@ export function FileBar({ file, repo, disk, sealed, projects, canPreview, previe
     id && { separator: true },
     id && { label: 'Move to trash', icon: 'trash', danger: true, run: () => actions.remove(id) },
   ];
+  if (disk?.doc) return html`<${DiskBar} disk=${disk} buttons=${[disk.asText && listenButton, shareButton]} moreItems=${docItems} actions=${actions} />`;
   if (disk) return html`<${DiskBar} disk=${disk} buttons=${[previewButton, listenButton, shareButton]} moreItems=${() => moreItems()} actions=${actions} />`;
   if (repo) {
     // A tracker document: its item's title and project; the path is in the tooltip.
@@ -715,6 +735,7 @@ export function StatusBar({ recording, big, cursor, language, file, repo, disk, 
   if (repo) state = repo.dirty && !isLocal() ? 'Edited · goes to the tracker on the next sync' : 'Tracker file';
   if (kind === 'disk') state = disk.dirty ? 'Not saved to disk · Ctrl+S saves' : disk.follow ? 'Following the file as it grows' : isLocal() ? `File on ${KINDS.disk.label.toLowerCase()}, edited where it is` : `File on ${KINDS.disk.label.toLowerCase()} · not synced`;
   if (kind === 'remote') state = `${protocolName(srv.conn?.protocol)} · ${remoteAddress(disk.path, srv.conn)}${disk.dirty ? ' · not saved to the server' : ''}`;
+  if (disk?.doc) state = `${documentLabel(disk.name)} · ${disk.asText ? 'its text, read-only' : 'shown as it looks, read-only'}`;
   const label = { synced: 'My files', doc: 'Tracker', disk: KINDS.disk.label, remote: srv?.conn?.name ?? 'Server' }[kind];
   const connection = srv && { connected: 'Connected', connecting: 'Connecting…', error: `Not connected: ${srv.status.error}`, disconnected: 'Not connected' }[srv.status.state];
   return html`<footer class="statusbar">
@@ -756,7 +777,7 @@ export function StatusBar({ recording, big, cursor, language, file, repo, disk, 
         ${languageNames().map((name) => html`<option key=${name} value=${name}>${name}</option>`)}
       </select>
     </label>`}
-    ${(repo || disk) && html`<span class="status-item">${language || PLAIN_TEXT}</span>`}
+    ${(repo || disk) && html`<span class="status-item">${disk?.doc ? documentLabel(disk.name) : language || PLAIN_TEXT}</span>`}
     ${cursor?.indent && html`<${IndentButton} indent=${cursor.indent} actions=${actions} />`}
     <${TextSizeButton} size=${clampFont(settings.fontSize)} actions=${actions} />
     <button type="button" class="status-item status-btn-text ${settings.wordWrap ? 'on' : ''}" title="Word wrap (Alt+Z)" aria-pressed=${settings.wordWrap} onClick=${() => saveSettings({ wordWrap: !getSettings().wordWrap })}>
@@ -768,7 +789,9 @@ export function StatusBar({ recording, big, cursor, language, file, repo, disk, 
       aria-label=${disk ? 'Open a terminal in this file’s folder' : 'Open a terminal'} onClick=${actions.terminalForFile}>
       <${Icon} name="terminal" size=${14} /><span class="hide-narrow">Terminal</span>
     </button>`}
-    ${disk
+    ${disk?.doc
+      ? null
+      : disk
       ? html`<span class="status-item hide-narrow" title="The file's encoding and line endings, kept when saving">${disk.encoding === 'latin1' ? 'Windows-1252' : 'UTF-8'}${disk.bom ? ' BOM' : ''} · ${disk.eol === 'crlf' ? 'CRLF' : 'LF'}</span>`
       : html`<span class="status-item hide-narrow">UTF-8 · LF</span>`}
   </footer>`;

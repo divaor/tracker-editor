@@ -1191,6 +1191,7 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
         const st = await s.stat(p);
         if (!st) throw Object.assign(new Error('Not found on the server.'), { notFound: true });
         if (st.dir) throw new Error(`${posix.basename(p)} is a folder.`);
+        if (disk.documentKind(posix.basename(p))) return disk.documentInfo(uri, posix.basename(p), st);
         const truncated = st.size > disk.MAX_FULL;
         const buf = truncated ? await s.readRange(p, st.size - disk.TAIL, disk.TAIL) : await s.read(p);
         const decoded = disk.decode(buf);

@@ -6,6 +6,7 @@
 // Files given to the app (Open with, Edit with, the file picker) are content:// addresses:
 // they open as tabs edited where they are, like files on disk on a computer. The native side
 // only moves bytes; textBytes.js decodes and encodes them by the desktop's rules.
+import { documentKind } from './docTypes.js';
 import { decodeAppended, decodeText, encodeText, fromBase64, fromWholeLine, MAX_APPEND, MAX_FULL, TAIL, toBase64 } from './textBytes.js';
 
 const cap = globalThis.Capacitor;
@@ -67,6 +68,9 @@ function watchPage() {
 /** A file the app reads as the editor opens it: { path, name, text, eol, bom, encoding, mtimeMs, size, truncated, readOnly }. */
 async function readFile(uri) {
   const info = await call('stat', { uri });
+  // A document (PDF, e-book, Word…): shown from its bytes, so no text is read here.
+  const doc = documentKind(info.name, info.mime);
+  if (doc) return { path: uri, name: info.name, text: '', eol: 'lf', bom: false, encoding: 'utf-8', mtimeMs: info.mtimeMs, size: info.size, truncated: false, readOnly: !info.writable, doc };
   const big = info.size > MAX_FULL;
   const { data } = await call('read', big ? { uri, offset: info.size - TAIL, length: TAIL } : { uri });
   const bytes = fromBase64(data);
@@ -92,6 +96,30 @@ async function writeFile(uri, text, { eol, bom, encoding, expectedMtime, expecte
   }
   const info = await call('write', { uri, data: toBase64(encodeText(text, { eol, bom, encoding })) });
   return { mtimeMs: info.mtimeMs, size: info.size };
+}
+
+// A document's bytes, 8 MB at a time (each part crosses to the page as base64).
+const BYTES_PART = 8 * 1024 * 1024;
+const MAX_DOCUMENT = 200 * 1024 * 1024;
+async function readBytes(uri) {
+  const info = await call('stat', { uri });
+  if (info.size > MAX_DOCUMENT) throw new Error(`${info.name} is larger than 200 MB.`);
+  const parts = [];
+  let total = 0;
+  for (;;) {
+    const { data } = await call('read', { uri, offset: total, length: BYTES_PART });
+    const part = fromBase64(data);
+    parts.push(part);
+    total += part.length;
+    if (part.length < BYTES_PART || total > MAX_DOCUMENT || (info.size >= 0 && total >= info.size)) break;
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const p of parts) {
+    out.set(p, at);
+    at += p.length;
+  }
+  return out;
 }
 
 async function readAppended(uri, offset, { encoding = 'utf-8' } = {}) {
@@ -420,6 +448,7 @@ function install() {
       // Files from other apps (content://) through the native side; files in the folders
       // view and on servers through Node, as on the desktop.
       read: (path) => (isContent(path) ? readFile(path) : nodeInvoke('disk:read', path)),
+      readBytes: (path) => (isContent(path) ? readBytes(path) : nodeInvoke('disk:read-bytes', path)),
       editorConfig: (path) => (isContent(path) ? Promise.resolve(null) : nodeInvoke('disk:editorconfig', path)),
       readAppended: (path, offset, opts) => (isContent(path) ? readAppended(path, offset, opts) : nodeInvoke('disk:read-appended', path, offset, opts)),
       write: (path, text, opts) => (isContent(path) ? writeFile(path, text, opts) : nodeInvoke('disk:write', path, text, opts)),
