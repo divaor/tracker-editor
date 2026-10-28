@@ -675,7 +675,7 @@ Turn them on in **Settings → Desktop**.
 - **"This browser cannot read aloud" in the Android app**: versions before 0.27.0 had no voices there: update it. If it now says the phone has no text-to-speech engine, install **Speech Services by Google** from the Play Store (or choose another engine in Android's settings → Text-to-speech output). No voice in your language: add it in the engine's settings.
 - **Full screen covers the status bar and its buttons can't be reached (Android app)**: fixed in 0.27.0; update it.
 - **Text from an image reads badly**: crop to the text, choose one language, or use a sharper photo.
-- **Text from an image says it could not start**: close the dialog and try again; if it keeps saying so, restart the app (on Android, long-press its icon → **Send a log** if it still fails). Versions before 0.27.0 of the Android app stayed on "Starting…": update it.
+- **Text from an image says it could not start**: close the dialog and try again; if it keeps saying so, restart the app (on Android, long-press its icon → **Send a log** if it still fails). Versions before 0.26.0 of the Android app stayed on "Starting…": update it.
 - **No ✦ bubble**: connect a model in Settings → Model and check *Model button at the bottom right*.
 - **The model's help answer says the guide does not cover it**: ask with other words (the names the editor uses: *split view*, *fold*, *server*), or open Help (`F1`) → **Guide** and search it.
 - **"Claude did not accept the API key"**: copy it again from the Claude Console (it starts with `sk-ant-`), paste it in Settings → Model → AI provider and **Test and list models**. "Too many requests… or its spending limit": wait a minute, or raise the limit in the Console.
