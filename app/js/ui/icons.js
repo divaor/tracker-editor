@@ -97,6 +97,8 @@ const PATHS = {
   widen: () => html`<path d="M8 7 3 12l5 5M16 7l5 5-5 5M3 12h18" />`,
   narrow: () => html`<path d="M3 12h7M7 8l4 4-4 4M21 12h-7M17 8l-4 4 4 4" />`,
   fullscreen: () => html`<path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" />`,
+  fullscreenExit: () => html`<path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5" />`,
+  bookmark: () => html`<path d="M6 4h12v16l-6-4.5L6 20z" />`,
   xCircle: () => html`<circle cx="12" cy="12" r="9" /><path d="m15 9-6 6M9 9l6 6" />`,
   indent: () => html`<path d="M3 5h18M11 10h10M11 15h10M3 20h18M3 9.5l3 2.5-3 2.5" />`,
   branch: () => html`<circle cx="6" cy="5" r="2" /><circle cx="6" cy="19" r="2" /><circle cx="18" cy="7" r="2" /><path d="M6 7v10M18 9c0 5-5 4-11 9" />`,

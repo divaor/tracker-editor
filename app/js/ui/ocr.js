@@ -114,7 +114,11 @@ export function OcrDialog({ images, saveTo, actions, onClose }) {
         setResult(read);
         setText(read.text);
       },
-      (err) => !cancelled && setError(engine === 'model' ? `${vision.model} could not read it: ${err.message || err}. Try reading it on this device, or another model in Settings → Model.` : err.message || String(err)),
+      (err) => {
+        if (cancelled) return;
+        const why = err?.message || (err ? String(err) : '');
+        setError(engine === 'model' ? `${vision.model} could not read it: ${why || 'no answer'}. Try reading it on this device, or another model in Settings → Model.` : why || 'The text could not be read.');
+      },
     );
     return () => {
       cancelled = true;

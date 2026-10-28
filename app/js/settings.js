@@ -102,6 +102,9 @@ export const DEFAULT_SETTINGS = {
   // Opening a picture or a PDF in the folders view (double-click, Enter): 'viewer' shows it
   // large here (as Space does), 'program' opens it with its own program.
   folderMediaOpens: 'viewer',
+  // Bookmarks in documents (PDFs, e-books, Word…) by the file's path: { page } or { block, into }
+  // with their label's parts (docBookmarks.js). A document opens at its bookmark until cleared.
+  docBookmarks: {},
   // Servers: permissions (rwxr-xr-x) next to each file in the folders view.
   showPermissions: false,
   // The terminal panel's height (desktop), in pixels.

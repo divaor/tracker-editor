@@ -624,6 +624,8 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     if (problem) toast(`${e.name}: ${problem}`, { kind: 'error' });
     else if (!many) list.current?.focus();
   };
+  // Text from a picture (the viewer's and the preview's button), saved next to it if wanted.
+  const readText = (e) => actions.readImageFiles([e.path], dirOf(e.path));
   const openSelected = () => {
     const items = targets();
     if (items.length === 1) return openEntry(items[0]);
@@ -1230,8 +1232,10 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
           setCursor(e.path);
           setAnchor(e.path);
         } else {
+          const again = selected.size === 1 && selected.has(e.path);
           select([e.path]);
-          if (touchScreen()) openEntry(e);
+          // A tap opens, except a file while the preview shows: it shows there, and a second tap opens it.
+          if (touchScreen() && (e.dir || !settings.folderPreview || again)) openEntry(e);
         }
       }}
       onDblClick=${(ev) => {
@@ -1437,12 +1441,13 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
         onEnd=${() => saveSettings({ folderPreviewHeight: peekDrag.current.height })}
         onReset=${() => saveSettings({ folderPreviewHeight: 260 })} />
       <${PeekPane} entry=${peekEntry} height=${peekHeight} onOpen=${(e) => openEntry(e)} onOpenOutside=${openOutside} onExpand=${(e) => setViewing(e.path)}
-        onClose=${() => saveSettings({ folderPreview: false })} />`}
+        onReadText=${readText} onClose=${() => saveSettings({ folderPreview: false })} />`}
     ${viewing &&
     html`<${FileViewer} entries=${entries.filter((e) => !e.dir)} path=${viewing}
       onPath=${(p) => (setViewing(p), select([p]))}
       onOpen=${(e) => (setViewing(null), openEntry(e, { outside: peekKind(e.name) === 'image' }))}
       onOpenOutside=${openOutside}
+      onReadText=${(e) => (setViewing(null), readText(e))}
       onClose=${() => (setViewing(null), list.current?.focus())} />`}
     <div class="sidebar-foot folders-foot">
       <span class="muted small folders-status" aria-live="polite">${selectionSummary(entries, selected, formatBytes)}</span>

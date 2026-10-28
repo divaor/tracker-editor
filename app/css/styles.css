@@ -8686,6 +8686,34 @@ html[data-native='android'] body:has(.edit-bar) .toasts {
   z-index: 3;
 }
 
+/* Full screen: over the whole window (under dialogs, toasts and menus), inside the safe areas. */
+.doc-view.full,
+.editor-area > .doc-view.full {
+  position: fixed;
+  inset: 0;
+  z-index: 48;
+  padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
+}
+
+.doc-view.full:fullscreen {
+  padding: 0;
+}
+
+.doc-bookmark.on {
+  color: var(--accent);
+}
+
+.doc-bookmark.on .icon path {
+  fill: currentColor;
+}
+
+/* Phones: the buttons at the end of the bar as icons, so the rest fits. */
+@media (max-width: 560px) {
+  .doc-bar .doc-aside .label {
+    display: none;
+  }
+}
+
 .doc-bar {
   display: flex;
   flex: none;

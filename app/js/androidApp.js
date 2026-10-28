@@ -530,6 +530,8 @@ function install() {
       requestStorageAccess: () => call('requestStorageAccess'),
       // The status and navigation bars' icons follow the page's theme.
       barStyle: (dark) => cap.nativePromise('SystemBars', 'setStyle', { style: dark ? 'DARK' : 'LIGHT' }).catch(() => {}),
+      // The status and navigation bars hidden (a document in full screen) or shown again.
+      bars: (shown) => cap.nativePromise('SystemBars', shown ? 'show' : 'hide', {}).catch(() => {}),
     },
   };
   const root = document.documentElement;

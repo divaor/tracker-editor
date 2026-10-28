@@ -85,7 +85,7 @@ export function FilePeek({ entry, big = false, onOpen, onOpenOutside }) {
   }
   if (peek.kind === 'doc') {
     return html`<${DocumentView} key=${entry.path} name=${entry.name} kind=${documentKind(entry.name)} version=${entry.mtimeMs} compact=${!big}
-      load=${() => window.desktop.disk.readBytes(entry.path)} onOpenOutside=${big ? undefined : () => onOpenOutside(entry)} />`;
+      load=${() => window.desktop.disk.readBytes(entry.path)} onOpenOutside=${big ? undefined : () => onOpenOutside(entry)} bookmarkKey=${big ? entry.path : undefined} />`;
   }
   const kind = previewKind(entry.name);
   return html`<div class="peek-text-wrap ${kind ? `peek-${kind}` : ''}">
@@ -95,12 +95,13 @@ export function FilePeek({ entry, big = false, onOpen, onOpenOutside }) {
 }
 
 /** The preview at the bottom of the folders view, for the file picked in the list. */
-export function PeekPane({ entry, height, onOpen, onOpenOutside, onExpand, onClose }) {
+export function PeekPane({ entry, height, onOpen, onOpenOutside, onExpand, onReadText, onClose }) {
   return html`<section class="peek-pane" style=${{ height: `${height}px` }} aria-label="Preview">
     <div class="peek-head">
       <${Icon} name="eye" size=${14} />
       <span class="peek-title" title=${entry?.path ?? ''}>${entry?.name ?? 'Preview'}</span>
       <span class="spacer" />
+      ${entry && !entry.dir && peekKind(entry.name) === 'image' && onReadText && html`<${ReadTextButton} entry=${entry} onReadText=${onReadText} />`}
       ${entry && !entry.dir && html`<button type="button" class="icon-btn sm" aria-label="View it large (Space)" title="View it large (Space)" onClick=${() => onExpand(entry)}><${Icon} name="fullscreen" size=${15} /></button>`}
       <button type="button" class="icon-btn sm" aria-label="Hide the preview" title="Hide the preview" onClick=${onClose}><${Icon} name="x" size=${15} /></button>
     </div>
@@ -110,11 +111,14 @@ export function PeekPane({ entry, height, onOpen, onOpenOutside, onExpand, onClo
   </section>`;
 }
 
+const ReadTextButton = ({ entry, onReadText }) =>
+  html`<button type="button" class="icon-btn sm" aria-label="Text from the image" title="Text from the image: read its text on this device" onClick=${() => onReadText(entry)}><${Icon} name="scan" size=${15} /></button>`;
+
 /**
  * Files viewed large over the window, one at a time (like Quick Look): the arrow
  * keys go to the previous and next file of the folder, Space or Escape close it.
  */
-export function FileViewer({ entries, path, onPath, onOpen, onOpenOutside, onClose }) {
+export function FileViewer({ entries, path, onPath, onOpen, onOpenOutside, onReadText, onClose }) {
   const index = Math.max(0, entries.findIndex((e) => e.path === path));
   const entry = entries[index];
   // Where it is now, ahead of the next render (keys pressed quickly in a row each count).
@@ -153,6 +157,7 @@ export function FileViewer({ entries, path, onPath, onOpen, onOpenOutside, onClo
         <span class="spacer" />
         <button type="button" class="icon-btn sm" aria-label="Previous (←)" title="Previous (←)" disabled=${entries.length < 2} onClick=${() => go(-1)}><${Icon} name="arrowUp" size=${16} class="turn-left" /></button>
         <button type="button" class="icon-btn sm" aria-label="Next (→)" title="Next (→)" disabled=${entries.length < 2} onClick=${() => go(1)}><${Icon} name="arrowUp" size=${16} class="turn-right" /></button>
+        ${peekKind(entry.name) === 'image' && onReadText && html`<${ReadTextButton} entry=${entry} onReadText=${onReadText} />`}
         <button type="button" class="btn sm viewer-open" title=${`${openLabel} (Enter)`} aria-label=${openLabel} onClick=${() => onOpen(entry)}><${Icon} name=${inApp ? 'edit' : 'external'} size=${15} /><span class="viewer-open-label">${openLabel}</span></button>
         <button type="button" class="icon-btn sm" aria-label="Close (Esc)" title="Close (Esc)" onClick=${onClose}><${Icon} name="x" size=${17} /></button>
       </div>

@@ -52,6 +52,7 @@ import { HistoryPanel } from './ui/history.js';
 import { TrashDialog } from './ui/trash.js';
 import { LockedFile } from './ui/encryption.js';
 import { DocumentView } from './ui/documentView.js';
+import { movedBookmarks } from './docBookmarks.js';
 import { TypeOutPanel } from './ui/typeOut.js';
 import { SnippetPicker } from './ui/snippets.js';
 import { AssistBubble, AssistPanel } from './ui/askSelection.js';
@@ -864,6 +865,9 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       /** Open tabs follow files and folders renamed or moved in the folders view ([{ from, to }]). */
       followDiskMoves(moves) {
         hostRef.current?.flushAll();
+        const marks = getSettings().docBookmarks;
+        const moved = movedBookmarks(marks, moves);
+        if (moved !== marks) saveSettings({ docBookmarks: moved });
         for (const tab of store.diskTabs()) {
           const to = moves.map((m) => remapPath(tab.path, m.from, m.to)).find(Boolean);
           if (!to || !store.renameDiskTab(tab.path, to)) continue;
@@ -3228,7 +3232,7 @@ export function App() {
           ${docShown &&
           html`<${DocumentView} key=${`${activeKey}:${activeDisk.mtimeMs}:${activeDisk.reloads ?? 0}`} name=${activeDisk.name} kind=${activeDisk.doc} version=${activeDisk.mtimeMs}
             load=${() => window.desktop.disk.readBytes(activeDisk.path)} onText=${(text) => actions.documentText(activeDisk.path, text)}
-            onOpenOutside=${() => actions.openOutside(activeDisk.path)} />`}
+            onOpenOutside=${() => actions.openOutside(activeDisk.path)} bookmarkKey=${activeDisk.path} />`}
           ${!activeKey && html`<${Welcome} actions=${actions} desktop=${diskAvailable()} hasFiles=${store.live().length + docs.length > 0} configured=${isLocal(settings) || isSyncConfigured(settings)} />`}
         </div>
         ${terminalShown && html`<${TerminalPanel} settings=${settings} actions=${actions} onHide=${() => (setTerminalShown(false), hostRef.current?.focus())} />`}

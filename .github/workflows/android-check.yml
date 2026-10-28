@@ -1,0 +1,58 @@
+# Runs the Android app in an emulator and checks, in its real WebView, what a desktop browser
+# cannot stand in for: text from images (tesseract's worker and models as the APK holds them),
+# PDFs (pdf.js and its worker) and documents converted on the page (scripts/android-check.mjs).
+# Run it by hand from Actions → Android check. Its APK is a debug build with WebView debugging
+# on, for this check only: the release's setting stays off.
+name: Android check
+
+on:
+  workflow_dispatch:
+
+jobs:
+  webview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+      - run: npm ci
+      - run: npm install --no-save playwright-core@1.56.1
+      - name: WebView debugging on (this build only)
+        run: |
+          node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync('capacitor.config.json'));c.android.webContentsDebuggingEnabled=true;fs.writeFileSync('capacitor.config.json',JSON.stringify(c,null,2))"
+      - run: npx cap sync android
+      - uses: actions/cache@v5
+        with:
+          path: android/app/libnode
+          key: libnode-${{ hashFiles('scripts/android-node.js') }}
+      - run: npm run android:node
+      - run: ./gradlew assembleDebug --no-daemon --stacktrace
+        working-directory: android
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      # An x86_64 image translates the app's arm64 libraries (Android 11 and later).
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: node scripts/android-check.mjs android/app/build/outputs/apk/debug/app-debug.apk
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: android-check
+          if-no-files-found: ignore
+          path: android-check/

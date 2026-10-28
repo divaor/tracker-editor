@@ -2,7 +2,7 @@
 
 Tracker Editor is a Notepad++-style editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs. Everything is saved the moment you paste or type, on this computer with the tracker, or, once you turn on sync, in the same private GitHub data repo as the tracker, so your files are on your computers and your phone.
 
-Version 0.25.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.25.0 · Web app: https://divaor.github.io/tracker-editor/
+Version 0.26.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.26.0 · Web app: https://divaor.github.io/tracker-editor/
 
 ---
 
@@ -27,7 +27,7 @@ The builds are not code-signed, so the first launch warns you. On Windows, choos
 The editor as an Android app, with what a web page cannot do: **Open with** from other apps, **Folders** on the phone, **servers** and **terminals**. For Android 7 and later on 64-bit phones (nearly all from the last ten years).
 
 1. Install **Obtainium** (from https://github.com/ImranR98/Obtainium/releases or F-Droid). It installs apps from their GitHub releases and keeps them up to date.
-2. In Obtainium: **Add app**, paste `https://github.com/divaor/tracker-editor`, **Add**, then **Install** (`Tracker-Editor-0.25.0.apk`). The first time, Android asks to let Obtainium install apps: allow it.
+2. In Obtainium: **Add app**, paste `https://github.com/divaor/tracker-editor`, **Add**, then **Install** (`Tracker-Editor-0.26.0.apk`). The first time, Android asks to let Obtainium install apps: allow it.
 3. Obtainium tells you when there is a new version and installs it over the old one; your files and settings stay. (Or download the `.apk` from the releases page and open it; then updates are by hand.)
 
 What the app adds:
@@ -472,8 +472,8 @@ The sidebar has two views on the desktop: **My files** (synced) and **Folders** 
 | Details | The columns button (right of the toolbar): **Name**, **Size** and **Modified** in columns (**Permissions** on servers when shown). Click a header to sort by it, click again to turn the order around. Folders stay first. |
 | Favorites | ☆ in the folder's bar adds it to the favorites (or right-click a folder → **Add to favorites**); they show under its name, one click away. Drop files on one to move them there. Right-click one to remove it. |
 | Recent | 🕘 in the folder's bar: the folders you visited last. |
-| Preview | The eye button: the file you pick shows under the list: pictures, documents (PDFs, e-books, Word…), Markdown, HTML, CSV and JSON as they look, the start of any other text file; other formats say what they are, with **Open with its program**. Drag the top edge of the preview to make it taller. |
-| View large | `Space` (or right-click → **View it large**, or ⛶ in the preview): the file over the whole window (the whole screen on a phone), like Quick Look. `←` / `→` go through the folder's files, `Enter` opens it (a document in its tab, a picture with its program), `Space` or `Escape` closes it. |
+| Preview | The eye button: the file you pick shows under the list: pictures, documents (PDFs, e-books, Word…), Markdown, HTML, CSV and JSON as they look, the start of any other text file; other formats say what they are, with **Open with its program**. Drag the top edge of the preview to make it taller. On a phone, while the preview shows, a tap on a file shows it there; tap it again to open it (folders open with one tap). For a picture, the scan button in the preview's bar reads its text (**Text from the image**). |
+| View large | `Space` (or right-click → **View it large**, or ⛶ in the preview): the file over the whole window (the whole screen on a phone), like Quick Look. `←` / `→` go through the folder's files, `Enter` opens it (a document in its tab, a picture with its program), `Space` or `Escape` closes it. For a picture, the scan button reads its text (**Text from the image**). |
 | Already there | When names you paste, drop or move are already in that folder, it asks once for all of them: **Replace** (the old ones go to the Recycle Bin; on a server they are deleted), **Keep both** (the new ones get " (2)") or **Skip** (those are left out). **Cancel** does nothing. Moving something into the folder it is already in says so. |
 | Compare | Select two text files, right-click → **Compare the two**: side by side, the second one opens in a tab. |
 | Zip | Right-click → **Compress to name.zip** (or **Compress N items to a zip**: `Archive.zip`) makes it next to them. On a `.zip`: **Extract into a new folder** unpacks it beside it ("name", or "name (2)" when taken). Unsafe names (that would land outside that folder) are left out, and an archive that unpacks to far more than its size is refused. On this computer only. |
@@ -496,6 +496,8 @@ The sidebar has two views on the desktop: **My files** (synced) and **Folders** 
 
 PDFs, e-books (EPUB, FictionBook), Word and OpenDocument text (`.docx`, `.odt`), RTF, spreadsheets (`.xlsx`, `.ods`) and presentations (`.pptx`, `.odp`) open in a tab of their own, **shown as they look** and read-only: from Folders (a double-click, `Enter`, or a tap on a phone), from **Open with** in other apps on Android, with `Ctrl+O`, or on a server.
 
+- **Full screen**: the ⛶ button in the document's bar shows only the document (on a phone the status and navigation bars hide too); `Escape`, Back or the button again leave it.
+- **Bookmark**: the bookmark button keeps your place (a PDF's page; in an e-book, Word file or sheet, the paragraph at the top of the screen). The document then **opens there every time**, on any screen size, until you clear it: tap the filled bookmark for **Go to the bookmark**, **Move the bookmark here** or **Clear the bookmark**. One bookmark per file, kept on this device; it follows the file when you rename or move it in Folders.
 - **PDFs**: the pages are drawn as you scroll. **−** and **+** zoom (so do `Ctrl`+wheel and two fingers on a touch screen), **Fit** fits the width, **3 / 20** is the page you are on and **Contents** lists its bookmarks. Select text on a page to copy it. A PDF with a password asks for it.
 - **E-books** read as one page, chapter after chapter, in the editor's text size (`Ctrl+=` and `Ctrl+-`, **Aa** in the status bar, or a pinch). **Contents** goes to a chapter, and the links inside the book work. Books with DRM cannot be opened: only the app they were bought for can.
 - **Word, OpenDocument and RTF**: headings, bold, italic, lists, tables (merged cells too), pictures, links and footnotes. Their fonts and page layout are left to the editor's look. **Contents** lists the headings.
@@ -571,7 +573,7 @@ Turn them on in **Settings → Desktop**.
 
 ## 13. Text from images and voice notes
 
-- **Text from an image**: paste an image into a file (`Ctrl+V` with a screenshot on the clipboard, e.g. after Win+Shift+S), drop one on the window, use **⋯ → Text from an image…** (on a phone: take a photo or pick one), right-click a picture in the Folders view, or **Share → Tracker Editor** from the gallery. The text is read **on the device**, in English and Spanish; the image is not sent anywhere. **With a model that reads images** (e.g. `llama3.2-vision`, `qwen2.5vl`, `gemma3`: **Settings → Model → Model for images**), the dialog's **Read by** can switch to it: often better for photos, handwriting and tables (kept as Markdown tables). The image then goes to your model server (a local one keeps it on your computer); the choice is remembered. Fix anything misread in the box, then **Insert at the cursor**, **New file** or **Copy** (from the Folders view also **Save as name.txt here**). The first time downloads about 9 MB from the editor's own site; after that it works offline. Choosing one language (English or Spanish) can read better.
+- **Text from an image**: paste an image into a file (`Ctrl+V` with a screenshot on the clipboard, e.g. after Win+Shift+S), drop one on the window, use **⋯ → Text from an image…** (on a phone: take a photo or pick one), right-click a picture in the Folders view, or **Share → Tracker Editor** from the gallery. The text is read **on the device**, in English and Spanish; the image is not sent anywhere. **With a model that reads images** (e.g. `llama3.2-vision`, `qwen2.5vl`, `gemma3`: **Settings → Model → Model for images**), the dialog's **Read by** can switch to it: often better for photos, handwriting and tables (kept as Markdown tables). The image then goes to your model server (a local one keeps it on your computer); the choice is remembered. Fix anything misread in the box, then **Insert at the cursor**, **New file** or **Copy** (from the Folders view also **Save as name.txt here**). The first time downloads about 9 MB from the editor's own site; after that it works offline (the Android app has it built in). It is a text-recognition tool (Tesseract), not a model: it needs no model, account or connection. Choosing one language (English or Spanish) can read better.
 - **Voice notes** (phone, and Chrome/Edge/Safari on a computer): the 🎤 button at the top dictates into the open file at the cursor, or a new note when none is open. What it hears shows in a bar; phrases go in with spaces and capitals. Say "new line" / "new paragraph" ("nueva línea", "nuevo párrafo", "punto y aparte"). **Stop** ends it. On Android, long-press the app's icon for **Voice note** to start one directly. Pick the language in **Settings → Voice notes**. It uses the browser's speech service (Google's on Android), so it needs a connection; the desktop app doesn't have it.
 
 ---
@@ -670,6 +672,7 @@ Turn them on in **Settings → Desktop**.
 - **Paste in the edit bar or the line-number menu says the browser did not let it read the clipboard**: allow the clipboard for the site when the browser asks, or long-press in the text and choose **Paste**.
 - **Dictation says to allow the microphone**: allow it for the site or app in the browser's settings. "Needs a connection": the speech service is online.
 - **Text from an image reads badly**: crop to the text, choose one language, or use a sharper photo.
+- **Text from an image says it could not start**: close the dialog and try again; if it keeps saying so, restart the app (on Android, long-press its icon → **Send a log** if it still fails). Versions before 0.26.0 of the Android app stayed on "Starting…": update it.
 - **No ✦ bubble**: connect a model in Settings → Model and check *Model button at the bottom right*.
 - **The model's help answer says the guide does not cover it**: ask with other words (the names the editor uses: *split view*, *fold*, *server*), or open Help (`F1`) → **Guide** and search it.
 - **"Claude did not accept the API key"**: copy it again from the Claude Console (it starts with `sk-ant-`), paste it in Settings → Model → AI provider and **Test and list models**. "Too many requests… or its spending limit": wait a minute, or raise the limit in the Console.
