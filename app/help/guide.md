@@ -544,6 +544,7 @@ Working there:
 `` Ctrl+` `` (or **View → Terminal**, or right-click a folder on an SFTP server → **Open a terminal here**, or ⋯ in a server file's bar → **Open a terminal in its folder**): a shell on the server opens in a panel under the editor, in that folder, signed in like its files. (Terminals on this computer work the same way: see [A terminal, and running a file](#a-terminal-and-running-a-file).)
 
 - **+** opens another (one tab each); drag the panel's top edge to make it taller.
+- Its colors follow the app's theme. In light mode each of the shell's colors is a darker shade, so green and yellow text (prompts, `ls`, test results) stays readable on white.
 - Keys go to the shell: `Ctrl+C` stops a command (copies if text is selected), `Ctrl+V` pastes; `Ctrl+Shift+C` / `Ctrl+Shift+V` also copy and paste; right-click for Copy, Paste, Clear.
 - `` Ctrl+` `` again (or ⌄) hides the panel; the shells keep running. When one ends (`exit`), `Enter` starts it again. **×** on a tab closes that shell.
 - FTP servers have no terminal.
