@@ -37,11 +37,20 @@ export function setRefHandler(fn) {
   onRef = fn;
 }
 
+// Light: xterm's own colors are made for a dark screen (bright green and yellow nearly vanish on
+// white, and prompts are bold, which draws them bright), so each has a darker shade here, all at
+// least 4.5:1 on white; `minimumContrastRatio` does the same for 256 colors and true color.
 const THEMES = {
-  light: { background: '#ffffff', foreground: '#1d1c19', cursor: '#4f46e5', cursorAccent: '#ffffff', selectionBackground: '#c7c4f7' },
+  light: {
+    background: '#ffffff', foreground: '#1d1c19', cursor: '#4f46e5', cursorAccent: '#ffffff', selectionBackground: '#c7c4f7',
+    black: '#1d1c19', red: '#c4231c', green: '#1a7f37', yellow: '#8f6200', blue: '#0b5cbd', magenta: '#9a2b9e', cyan: '#0b7285', white: '#6b6860',
+    brightBlack: '#5c5a55', brightRed: '#d1242f', brightGreen: '#1f883d', brightYellow: '#9a6700', brightBlue: '#1f6feb', brightMagenta: '#a23aa6', brightCyan: '#0d7d91', brightWhite: '#8a8780',
+  },
   dark: { background: '#1b1a18', foreground: '#ece9e2', cursor: '#8b85f5', cursorAccent: '#1b1a18', selectionBackground: '#4a4680' },
 };
-const themeNow = () => THEMES[resolvedTheme(getSettings().theme) === 'dark' ? 'dark' : 'light'];
+const darkNow = () => resolvedTheme(getSettings().theme) === 'dark';
+const themeNow = () => THEMES[darkNow() ? 'dark' : 'light'];
+const contrastNow = () => (darkNow() ? 1 : 4.5);
 
 async function load() {
   if (lib) return lib;
@@ -124,6 +133,7 @@ export async function openTerminal(connId, { cwd = '', label = 'Terminal', runne
     scrollback: 10000,
     macOptionIsMeta: true,
     theme: themeNow(),
+    minimumContrastRatio: contrastNow(),
     cols: lastSize.cols,
     rows: lastSize.rows,
   });
@@ -287,5 +297,8 @@ export const terminalHasSelection = (s = active) => Boolean(s?.term.hasSelection
 
 /** The colors follow the app's theme. */
 export function retheme() {
-  for (const s of sessions) s.term.options.theme = themeNow();
+  for (const s of sessions) {
+    s.term.options.theme = themeNow();
+    s.term.options.minimumContrastRatio = contrastNow();
+  }
 }

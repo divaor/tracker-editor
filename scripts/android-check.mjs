@@ -213,6 +213,50 @@ try {
     }, { b64: fixture(name), kind });
     check(`${name} is converted`, doc.text.includes(words), doc.text.slice(0, 80));
   });
+  // A shell on the phone (the app's Node.js, its pty addon): opens, shows its prompt, runs a command.
+  await part('a terminal on the phone', async () => {
+    const run = await page.evaluate(async () => {
+      const t = window.desktop.terminal;
+      const out = { data: '' };
+      window.__checkTerm = out;
+      out.off = [t.onData(({ id, data }) => id === out.id && (out.data += data)), t.onExit(({ id, code }) => id === out.id && (out.exit = code ?? 0))];
+      const t0 = Date.now();
+      try {
+        const opened = await Promise.race([t.open('local', { cols: 80, rows: 24, cwd: '' }), new Promise((_, no) => setTimeout(() => no(new Error('no answer in 20 s')), 20_000))]);
+        out.id = opened.id;
+        out.shell = opened.shell;
+        out.openMs = Date.now() - t0;
+      } catch (err) {
+        out.error = err.message;
+        return { ...out, off: undefined };
+      }
+      await new Promise((r) => setTimeout(r, 2000));
+      out.prompt = out.data;
+      t.input(out.id, 'echo hi-$((40+2))\r');
+      await new Promise((r) => setTimeout(r, 2500));
+      return { ...out, off: undefined };
+    });
+    // What the system says about it: the app's processes and the Node process's terminals.
+    let system = '';
+    try {
+      const ps = adb('shell', 'ps', '-A', '-o', 'PID,PPID,NAME').split('\n').filter((l) => /trackereditor|\bsh\b/.test(l));
+      const node = ps.find((l) => /trackereditor:node/.test(l))?.trim().split(/\s+/)[0];
+      const fds = node ? adb('shell', 'run-as', PKG, 'ls', '-l', `/proc/${node}/fd`).split('\n').filter((l) => /pt(mx|s)/.test(l)) : [];
+      const denied = adb('logcat', '-d').split('\n').filter((l) => /avc: +denied/.test(l) && /untrusted_app/.test(l)).slice(-8);
+      system = { ps, fds: fds.map((l) => l.replace(/^.*\d\d:\d\d /, '')), denied };
+    } catch (err) {
+      system = String(err.message).slice(0, 300);
+    }
+    await page.evaluate(() => {
+      const out = window.__checkTerm;
+      if (out?.id) window.desktop.terminal.close(out.id);
+      out?.off?.forEach((off) => off?.());
+    });
+    check('a terminal on the phone opens', !run.error && run.id, { ...run, data: run.data?.slice(0, 300) });
+    check('…shows the shell’s prompt', run.prompt?.length > 0, { prompt: run.prompt?.slice(0, 200), system });
+    check('…and runs a command', /hi-42/.test(run.data ?? ''), { data: run.data?.slice(0, 300), exit: run.exit });
+  });
+
   // The screen as Android shows it (a page screenshot fails on some older WebViews).
   fs.writeFileSync(path.join(OUT, 'app.png'), execFileSync('adb', ['exec-out', 'screencap', '-p'], { maxBuffer: 64 * 1024 * 1024 }));
   check('no page errors', errors.length === 0, errors.join(' | '));
@@ -222,6 +266,8 @@ try {
   try {
     // The WebView's console only (never the app's own log, which may name files).
     fs.writeFileSync(path.join(OUT, 'webview-console.txt'), adb('logcat', '-d', '-s', 'chromium:*', 'Capacitor/Console:*'));
+    // Node's own lines (its version, errors; it logs no tokens): the emulator holds only the check's files.
+    fs.writeFileSync(path.join(OUT, 'node.txt'), adb('logcat', '-d', '-s', 'TrackerNode:*'));
   } catch {
     // no log
   }
