@@ -19,6 +19,26 @@ let onRef = null;
 const bridge = () => window.desktop?.terminal;
 const changed = () => listeners.forEach((l) => l());
 const byId = (id) => sessions.find((s) => s.id === id);
+// Output and ends that come before their session knows its id: in the Android app the answer
+// to open and the shell's first output (its prompt) travel separately, and either may come
+// first. Kept a while for start() to take; others are dropped (a session closed meanwhile).
+const early = new Map(); // id → { data, ended, code, timer }
+function keepEarly(id) {
+  let e = early.get(id);
+  if (!e) {
+    e = { data: '', ended: false, code: null, timer: setTimeout(() => early.delete(id), 30_000) };
+    early.set(id, e);
+  }
+  return e;
+}
+function takeEarly(id) {
+  const e = early.get(id);
+  if (e) {
+    clearTimeout(e.timer);
+    early.delete(id);
+  }
+  return e;
+}
 const message = (err) => String(err?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
 
 export const terminalsAvailable = () => Boolean(bridge());
@@ -65,42 +85,70 @@ async function load() {
   return lib;
 }
 
+function ended(s, code) {
+  s.exited = true;
+  s.code = code;
+  s.term.write(`\r\n\x1b[2m[The session ended${code ? ` (exit code ${code})` : ''}. Press Enter to start a new one.]\x1b[0m\r\n`);
+  changed();
+}
+
 function wire() {
   if (wired) return;
   wired = true;
-  bridge().onData(({ id, data }) => byId(id)?.term.write(data));
+  bridge().onData(({ id, data }) => {
+    const s = byId(id);
+    if (s) s.term.write(data);
+    else {
+      const e = keepEarly(id);
+      if (e.data.length < 262144) e.data += data;
+    }
+  });
   bridge().onExit(({ id, code }) => {
     const s = byId(id);
-    if (!s) return;
-    s.exited = true;
-    s.code = code;
-    s.term.write(`\r\n\x1b[2m[The session ended${code ? ` (exit code ${code})` : ''}. Press Enter to start a new one.]\x1b[0m\r\n`);
-    changed();
+    if (s) return ended(s, code);
+    Object.assign(keepEarly(id), { ended: true, code });
   });
 }
 
 async function start(s) {
   s.starting = true;
   changed();
+  // A shell that takes a moment (connecting to a server, the phone starting its file access)
+  // says so; the line goes once it answers.
+  let waiting = false;
+  const slow = setTimeout(() => {
+    if (s.closed) return;
+    waiting = true;
+    s.term.write(`\x1b[2m${s.connId === 'local' ? 'Starting the shell…' : 'Connecting…'}\x1b[0m`);
+  }, 700);
   try {
     const cols = s.term.cols || lastSize.cols;
     const rows = s.term.rows || lastSize.rows;
     const { id, shell } = await bridge().open(s.connId, { cols, rows, cwd: s.cwd });
+    clearTimeout(slow);
+    const before = takeEarly(id);
     // Closed while it was starting: the shell ends right away.
     if (s.closed) {
       bridge().close(id);
       return false;
     }
+    if (waiting) s.term.write('\r\x1b[2K');
     s.id = id;
     s.shell = shell ?? 'posix';
     s.exited = false;
     s.code = null;
+    if (before?.data) s.term.write(before.data);
+    if (before?.ended) {
+      ended(s, before.code);
+      return false;
+    }
     // Fitted meanwhile, and typed meanwhile: both go to the shell now.
     if (s.term.cols !== cols || s.term.rows !== rows) bridge().resize(id, s.term.cols, s.term.rows);
     if (s.typed) bridge().input(id, s.typed);
     s.typed = '';
     return true;
   } catch (err) {
+    clearTimeout(slow);
     s.exited = true;
     s.term.write(`\r\n\x1b[31m${message(err)}\x1b[0m\r\n\x1b[2m[Press Enter to try again.]\x1b[0m\r\n`);
     return false;

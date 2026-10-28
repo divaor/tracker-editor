@@ -4,8 +4,9 @@
 // text from an image (tesseract's worker, core and models as the APK holds them), text to speech
 // (Android's, through the app: spoken, and made into audio ahead for the page to play), a speech
 // server on the computer next to the phone (KOKORO=its /v1 address, as the emulator reaches it),
-// a PDF (pdf.js and its worker) and converted documents. Writes android-check/report.json, a
-// screenshot and the WebView's console lines from logcat; exits 1 when a check fails.
+// a PDF (pdf.js and its worker), converted documents and a shell on the phone (its Node.js and
+// pty addon, directly and through the terminal panel). Writes android-check/report.json, a
+// screenshot, the WebView's console lines and Node's from logcat; exits 1 when a check fails.
 //   [KOKORO=http://10.0.2.2:8880/v1] node scripts/android-check.mjs path/to/app-debug.apk
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -40,6 +41,8 @@ let device;
 try {
   console.log(adb('shell', 'getprop', 'ro.product.cpu.abilist').trim(), '| WebView', adb('shell', 'dumpsys', 'package', 'com.google.android.webview').match(/versionName=(\S+)/)?.[1] ?? '?');
   adb('install', '-r', '-g', apk);
+  // All files access (a special permission install -g does not give), for folders in the phone's storage.
+  adb('shell', 'appops', 'set', '--uid', PKG, 'MANAGE_EXTERNAL_STORAGE', 'allow');
   // The screen on and unlocked (an emulator started from a snapshot may have it off).
   adb('shell', 'svc', 'power', 'stayon', 'true');
   adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP');
@@ -213,37 +216,36 @@ try {
     }, { b64: fixture(name), kind });
     check(`${name} is converted`, doc.text.includes(words), doc.text.slice(0, 80));
   });
-  // A shell on the phone (the app's Node.js, its pty addon): opens, shows its prompt, runs a command.
+  // A shell on the phone (the app's Node.js, its pty addon): opens in a folder of the phone's
+  // storage, shows its prompt and runs a command. Its output may come before the answer to open.
   await part('a terminal on the phone', async () => {
-    const run = await page.evaluate(async () => {
+    const run = await page.evaluate(async (cwd) => {
       const t = window.desktop.terminal;
-      const out = { data: '' };
+      const out = { events: [] };
       window.__checkTerm = out;
-      out.off = [t.onData(({ id, data }) => id === out.id && (out.data += data)), t.onExit(({ id, code }) => id === out.id && (out.exit = code ?? 0))];
+      out.off = [t.onData(({ id, data }) => out.events.push({ id, data, at: Date.now() })), t.onExit(({ id, code }) => out.events.push({ id, exit: code ?? 0, at: Date.now() }))];
       const t0 = Date.now();
       try {
-        const opened = await Promise.race([t.open('local', { cols: 80, rows: 24, cwd: '' }), new Promise((_, no) => setTimeout(() => no(new Error('no answer in 20 s')), 20_000))]);
+        const opened = await Promise.race([t.open('local', { cols: 80, rows: 24, cwd }), new Promise((_, no) => setTimeout(() => no(new Error('no answer in 20 s')), 20_000))]);
         out.id = opened.id;
-        out.shell = opened.shell;
         out.openMs = Date.now() - t0;
+        out.answered = Date.now();
       } catch (err) {
-        out.error = err.message;
-        return { ...out, off: undefined };
+        return { error: err.message };
       }
+      const mine = () => out.events.filter((e) => e.id === out.id);
       await new Promise((r) => setTimeout(r, 2000));
-      out.prompt = out.data;
+      const prompt = mine().map((e) => e.data ?? '').join('');
       t.input(out.id, 'echo hi-$((40+2))\r');
       await new Promise((r) => setTimeout(r, 2500));
-      return { ...out, off: undefined };
-    });
-    // What the system says about it: the app's processes and the Node process's terminals.
+      return { id: out.id, openMs: out.openMs, prompt, data: mine().map((e) => e.data ?? '').join(''), exit: mine().find((e) => 'exit' in e)?.exit, beforeAnswer: mine().filter((e) => e.at < out.answered).length };
+    }, '/storage/emulated/0/Download');
+    // What the system says about it: the app's processes and SELinux denials.
     let system = '';
     try {
       const ps = adb('shell', 'ps', '-A', '-o', 'PID,PPID,NAME').split('\n').filter((l) => /trackereditor|\bsh\b/.test(l));
-      const node = ps.find((l) => /trackereditor:node/.test(l))?.trim().split(/\s+/)[0];
-      const fds = node ? adb('shell', 'run-as', PKG, 'ls', '-l', `/proc/${node}/fd`).split('\n').filter((l) => /pt(mx|s)/.test(l)) : [];
-      const denied = adb('logcat', '-d').split('\n').filter((l) => /avc: +denied/.test(l) && /untrusted_app/.test(l)).slice(-8);
-      system = { ps, fds: fds.map((l) => l.replace(/^.*\d\d:\d\d /, '')), denied };
+      const denied = adb('shell', "logcat -d | grep 'avc: *denied' | grep untrusted_app | tail -n 8").split('\n').filter(Boolean);
+      system = { ps, denied };
     } catch (err) {
       system = String(err.message).slice(0, 300);
     }
@@ -252,9 +254,24 @@ try {
       if (out?.id) window.desktop.terminal.close(out.id);
       out?.off?.forEach((off) => off?.());
     });
-    check('a terminal on the phone opens', !run.error && run.id, { ...run, data: run.data?.slice(0, 300) });
-    check('…shows the shell’s prompt', run.prompt?.length > 0, { prompt: run.prompt?.slice(0, 200), system });
+    check('a terminal on the phone opens', !run.error && run.id, run);
+    check('…in the phone’s Download folder, with its prompt', /Download/.test(run.prompt ?? ''), { prompt: run.prompt?.slice(0, 200), beforeAnswer: run.beforeAnswer, system });
     check('…and runs a command', /hi-42/.test(run.data ?? ''), { data: run.data?.slice(0, 300), exit: run.exit });
+  });
+
+  // The same through the app: Ctrl+` opens the panel with a shell, its prompt on the screen,
+  // and what is typed into it runs.
+  await part('the terminal panel', async () => {
+    await page.keyboard.press('Control+Backquote');
+    const screen = () => page.evaluate(() => document.querySelector('.terminal-screen:not([hidden]) .xterm-rows')?.innerText ?? null);
+    let shown = null;
+    for (let i = 0; i < 20 && !/\$\s*$/.test((shown = await screen()) ?? ''); i++) await page.waitForTimeout(500);
+    check('the terminal panel shows the shell’s prompt', /\$/.test(shown ?? ''), (shown ?? 'no terminal screen').trim().slice(0, 300));
+    await page.focus('.terminal-screen:not([hidden]) .xterm-helper-textarea');
+    await page.keyboard.type('echo ui-$((6*7))');
+    await page.keyboard.press('Enter');
+    for (let i = 0; i < 10 && !/ui-42/.test((shown = await screen()) ?? ''); i++) await page.waitForTimeout(500);
+    check('…and runs what is typed', /ui-42/.test(shown ?? ''), (shown ?? '').trim().slice(-300));
   });
 
   // The screen as Android shows it (a page screenshot fails on some older WebViews).
