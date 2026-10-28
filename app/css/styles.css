@@ -37,6 +37,7 @@
   --bracket-2: #1f72c4;
   /* Where a file lives (where.js): my files, a tracker document, this computer, a server. */
   --kind-synced: #1c8f55;
+  --reading-bg: rgba(16, 185, 129, 0.18);
   --kind-doc: #2f6fd6;
   --kind-disk: #c47a0a;
   --kind-remote: #b5309a;
@@ -93,6 +94,7 @@
     --bracket-1: #da70d6;
     --bracket-2: #87cefa;
     --kind-synced: #4fc58a;
+    --reading-bg: rgba(52, 211, 153, 0.2);
     --kind-doc: #6ea2f2;
     --kind-disk: #eba94a;
     --kind-remote: #e27ad0;
@@ -143,6 +145,7 @@
   --bracket-1: #da70d6;
   --bracket-2: #87cefa;
   --kind-synced: #4fc58a;
+  --reading-bg: rgba(52, 211, 153, 0.2);
   --kind-doc: #6ea2f2;
   --kind-disk: #eba94a;
   --kind-remote: #e27ad0;
@@ -8686,17 +8689,42 @@ html[data-native='android'] body:has(.edit-bar) .toasts {
   z-index: 3;
 }
 
-/* Full screen: over the whole window (under dialogs, toasts and menus), inside the safe areas. */
-.doc-view.full,
-.editor-area > .doc-view.full {
+/* Full screen (ui/fullScreen.js; a document or the preview): over the whole window (under
+   dialogs, toasts and menus), inside the safe areas. */
+.fills-screen,
+.editor-area > .fills-screen {
   position: fixed;
   inset: 0;
   z-index: 48;
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
   padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
+  background: var(--surface);
 }
 
-.doc-view.full:fullscreen {
+.fills-screen:fullscreen {
   padding: 0;
+}
+
+/* The passage read aloud in a document: its block (a PDF: its page). */
+.doc-html .doc-reading {
+  border-radius: 4px;
+  background: var(--reading-bg);
+  box-shadow: 0 0 0 4px var(--reading-bg);
+}
+
+.pdf-page.doc-reading {
+  outline: 3px solid var(--reading-bg);
+  outline-offset: 3px;
+}
+
+.fills-screen > .read-bar {
+  flex: none;
 }
 
 .doc-bookmark.on {

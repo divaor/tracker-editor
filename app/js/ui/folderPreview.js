@@ -85,7 +85,8 @@ export function FilePeek({ entry, big = false, onOpen, onOpenOutside }) {
   }
   if (peek.kind === 'doc') {
     return html`<${DocumentView} key=${entry.path} name=${entry.name} kind=${documentKind(entry.name)} version=${entry.mtimeMs} compact=${!big}
-      load=${() => window.desktop.disk.readBytes(entry.path)} onOpenOutside=${big ? undefined : () => onOpenOutside(entry)} bookmarkKey=${big ? entry.path : undefined} />`;
+      load=${() => window.desktop.disk.readBytes(entry.path)} onOpenOutside=${big ? undefined : () => onOpenOutside(entry)} bookmarkKey=${big ? entry.path : undefined}
+      readKey=${big ? `viewer:${entry.path}` : undefined} listenInBar />`;
   }
   const kind = previewKind(entry.name);
   return html`<div class="peek-text-wrap ${kind ? `peek-${kind}` : ''}">

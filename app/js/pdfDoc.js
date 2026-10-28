@@ -99,8 +99,8 @@ export async function pageText(page) {
   return text.replace(/[ \t]+\n/g, '\n').trim();
 }
 
-/** All the text of a PDF, a page at a time (`stop()` true ends it early); pages apart by a blank line. */
-export async function pdfText(pdf, { stop = () => false } = {}) {
+/** Each page's text, a page at a time (`stop()` true ends it early: null). */
+export async function pdfPageTexts(pdf, { stop = () => false } = {}) {
   const pages = [];
   for (let n = 1; n <= pdf.numPages; n++) {
     if (stop()) return null;
@@ -110,7 +110,13 @@ export async function pdfText(pdf, { stop = () => false } = {}) {
     // Room for the page to answer between pages.
     if (n % 5 === 0) await new Promise((r) => setTimeout(r, 0));
   }
-  return pages.join('\n\n');
+  return pages;
+}
+
+/** All the text of a PDF; pages apart by a blank line. */
+export async function pdfText(pdf, options) {
+  const pages = await pdfPageTexts(pdf, options);
+  return pages && pages.join('\n\n');
 }
 
 // A canvas this large at most (pixels): phones refuse larger ones, and they cost memory.

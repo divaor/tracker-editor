@@ -150,11 +150,15 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
 
-    <!-- Which apps open a file (Open with… in the editor): needed to see them from Android 11 on. -->
+    <!-- Which apps open a file (Open with… in the editor), and the text-to-speech engines (Listen):
+         needed to see them from Android 11 on. -->
     <queries>
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:mimeType="*/*" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
     </queries>
 </manifest>

@@ -16,6 +16,7 @@ import android.provider.OpenableColumns;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
 import android.util.Base64;
+import android.view.WindowManager;
 import androidx.activity.OnBackPressedCallback;
 import androidx.activity.result.ActivityResult;
 import com.getcapacitor.JSArray;
@@ -877,5 +878,57 @@ public class TrackerNativePlugin extends Plugin {
         if (e instanceof SecurityException) return "This app is no longer allowed to open the file. Open it again from where it is.";
         if (e instanceof FileNotFoundException) return e.getMessage() == null ? "The file is not there." : e.getMessage();
         return e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+    }
+
+    // ---- Read aloud: Android's own text to speech (Speech.java), as the WebView has none ----
+
+    private Speech speech;
+
+    private synchronized Speech speech() {
+        if (speech == null) speech = new Speech(getContext(), (event) -> notifyListeners("tts", event));
+        return speech;
+    }
+
+    /** { voices: [{ name, label, lang, network, quality }], defaultVoice, engine }. */
+    @PluginMethod
+    public void ttsVoices(PluginCall call) {
+        speech().voices(call::resolve, call::reject);
+    }
+
+    /** Speaks { id, text, voice, lang, rate, pitch } now; how it goes comes as "tts" events with that id. */
+    @PluginMethod
+    public void ttsSpeak(PluginCall call) {
+        String id = call.getString("id", "");
+        speech().speak(id, call.getString("text", ""), call.getString("voice", ""), call.getString("lang", ""),
+            call.getFloat("rate", 1f), call.getFloat("pitch", 1f), (message) -> {
+                JSObject event = new JSObject();
+                event.put("id", id);
+                event.put("type", "error");
+                event.put("message", message);
+                notifyListeners("tts", event);
+            });
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void ttsStop(PluginCall call) {
+        if (speech != null) speech.stop();
+        call.resolve();
+    }
+
+    /** { on }: the screen stays on while reading aloud. */
+    @PluginMethod
+    public void keepAwake(PluginCall call) {
+        boolean on = Boolean.TRUE.equals(call.getBoolean("on", false));
+        getActivity().runOnUiThread(() -> {
+            if (on) getActivity().getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            else getActivity().getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        });
+        call.resolve();
+    }
+
+    @Override
+    protected void handleOnDestroy() {
+        if (speech != null) speech.shutdown();
     }
 }

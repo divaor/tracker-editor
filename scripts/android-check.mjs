@@ -1,8 +1,8 @@
 // The Android check (.github/workflows/android-check.yml): installs a debug APK (built with
 // WebView debugging on) on the emulator that is running, opens the app and checks, inside its
 // real WebView over Chrome's DevTools protocol, what a desktop browser cannot stand in for:
-// text from an image (tesseract's worker, core and models as the APK holds them), a PDF (pdf.js
-// and its worker) and converted documents. Writes android-check/report.json, a screenshot and
+// text from an image (tesseract's worker, core and models as the APK holds them), text to speech
+// (Android's, through the app), a PDF (pdf.js and its worker) and converted documents. Writes android-check/report.json, a screenshot and
 // the WebView's console lines from logcat; exits 1 when a check fails.
 //   node scripts/android-check.mjs path/to/app-debug.apk
 import { execFileSync } from 'node:child_process';
@@ -77,6 +77,34 @@ try {
       }
     }, langs);
     check(`text from an image (${langs})`, /Hello Tracker 2026/.test(ocr.text ?? ''), ocr);
+  });
+
+  // Read aloud: Android's text to speech through the app (the WebView has no speechSynthesis).
+  await part('text to speech', async () => {
+    const tts = await page.evaluate(async () => {
+      const t = window.desktop?.android?.tts;
+      if (!t) return { error: 'no tts bridge' };
+      const out = { web: typeof window.speechSynthesis };
+      try {
+        const voices = await t.loadVoices();
+        out.voices = voices.length;
+        out.sample = voices.slice(0, 3).map((v) => `${v.name} (${v.lang})`);
+      } catch (err) {
+        return { ...out, error: err.message };
+      }
+      if (!out.voices) return out;
+      const started = Date.now();
+      out.spoken = await Promise.race([
+        t.speak({ text: 'Hello from the check.', lang: 'en-US' }).then(() => 'done', (err) => `error: ${err.message}`),
+        new Promise((r) => setTimeout(() => r('no answer in 20 s'), 20_000)),
+      ]);
+      out.ms = Date.now() - started;
+      return out;
+    });
+    // An emulator image without a speech engine says so; that is not the app's fault.
+    if (/no text-to-speech engine/.test(tts.error ?? '')) return check('text to speech (no engine on this emulator)', true, tts);
+    check('text to speech: the phone’s voices', !tts.error && tts.voices > 0, tts);
+    if (tts.voices) check('…and one speaks', tts.spoken === 'done', tts);
   });
 
   // A PDF: opened by pdf.js, its first page drawn, its worker a real one.

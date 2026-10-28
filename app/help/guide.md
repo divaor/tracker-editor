@@ -2,7 +2,7 @@
 
 Tracker Editor is a Notepad++-style editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs. Everything is saved the moment you paste or type, on this computer with the tracker, or, once you turn on sync, in the same private GitHub data repo as the tracker, so your files are on your computers and your phone.
 
-Version 0.26.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.26.0 · Web app: https://divaor.github.io/tracker-editor/
+Version 0.27.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.27.0 · Web app: https://divaor.github.io/tracker-editor/
 
 ---
 
@@ -14,9 +14,9 @@ Download from **https://github.com/divaor/tracker-editor/releases/latest**:
 
 | System | File |
 | --- | --- |
-| Windows | `Tracker Editor Setup 0.26.0.exe` (installer) or `Tracker Editor-0.26.0-portable.exe` (no install, no admin rights) |
-| macOS | `Tracker Editor-0.26.0-arm64.dmg` |
-| Linux | `Tracker Editor-0.26.0.AppImage` |
+| Windows | `Tracker Editor Setup 0.27.0.exe` (installer) or `Tracker Editor-0.27.0-portable.exe` (no install, no admin rights) |
+| macOS | `Tracker Editor-0.27.0-arm64.dmg` |
+| Linux | `Tracker Editor-0.27.0.AppImage` |
 
 The builds are not code-signed, so the first launch warns you. On Windows, choose *More info → Run anyway*. On macOS, right-click the app → *Open*. Installing the desktop app also registers `tracker-editor://` links, so the tracker's **Open in editor** opens files straight in it.
 
@@ -27,7 +27,7 @@ The builds are not code-signed, so the first launch warns you. On Windows, choos
 The editor as an Android app, with what a web page cannot do: **Open with** from other apps, **Folders** on the phone, **servers** and **terminals**. For Android 7 and later on 64-bit phones (nearly all from the last ten years).
 
 1. Install **Obtainium** (from https://github.com/ImranR98/Obtainium/releases or F-Droid). It installs apps from their GitHub releases and keeps them up to date.
-2. In Obtainium: **Add app**, paste `https://github.com/divaor/tracker-editor`, **Add**, then **Install** (`Tracker-Editor-0.26.0.apk`). The first time, Android asks to let Obtainium install apps: allow it.
+2. In Obtainium: **Add app**, paste `https://github.com/divaor/tracker-editor`, **Add**, then **Install** (`Tracker-Editor-0.27.0.apk`). The first time, Android asks to let Obtainium install apps: allow it.
 3. Obtainium tells you when there is a new version and installs it over the old one; your files and settings stay. (Or download the `.apk` from the releases page and open it; then updates are by hand.)
 
 What the app adds:
@@ -237,8 +237,8 @@ The **switcher at the left end of the tab bar** (it appears once there are two g
 Above the text, for the open file:
 
 - **Where it lives** (the colored chip at the start): my files, tracker, this computer or a server, and how it stands (see 2). Click it to sync now, or for a file on disk or a server, to show its folder.
-- **Preview**: a reading view next to the text (instead of it on phones). Markdown with clickable checklists, HTML in a sandbox, JSON and XML as foldable trees (with where a syntax error is), SVG as a picture, CSV/TSV as a table. Its bar has **Full view** (only the preview, in the editor's place; again to go back), **Full screen** (`Escape` leaves) and × to close it. Drag the line between the text and the preview to resize them.
-- **Listen** (`Alt+R`): reads the file from the cursor, or the selection, highlighting the passage. Pause, skip, speed and voice in the bar that appears. For human-sounding voices, connect a speech server in **Settings → Read aloud** (Kokoro on your computer, or OpenAI).
+- **Preview**: a reading view next to the text (instead of it on phones). Markdown with clickable checklists, HTML in a sandbox, JSON and XML as foldable trees (with where a syntax error is), SVG as a picture, CSV/TSV as a table. Its bar has **Full view** (only the preview, in the editor's place; again to go back), **Full screen** (only the preview, with **Listen** at the bottom; `Escape`, Back or the button again leave it) and × to close it. Drag the line between the text and the preview to resize them.
+- **Listen** (`Alt+R`): reads the file from the cursor, or the selection, highlighting the passage. Pause, skip, speed and voice in the bar that appears. The Android app speaks with the phone's own voices (Android's text-to-speech; more in Android's settings → Text-to-speech output). For human-sounding voices, connect a speech server in **Settings → Read aloud** (Kokoro on your computer, or OpenAI).
 - **Share**: WhatsApp, Teams, email, Quick Share or any app on the phone, as text or as a file; on a computer email, WhatsApp, Teams, copy the text, copy a link that opens the file in the editor, or save a copy.
 - **Summarize** (with the model on).
 - **Send to tracker**: makes the file a task, idea or doc on the tracker, linked to it. *On tracker* shows when it already is.
@@ -497,6 +497,7 @@ The sidebar has two views on the desktop: **My files** (synced) and **Folders** 
 PDFs, e-books (EPUB, FictionBook), Word and OpenDocument text (`.docx`, `.odt`), RTF, spreadsheets (`.xlsx`, `.ods`) and presentations (`.pptx`, `.odp`) open in a tab of their own, **shown as they look** and read-only: from Folders (a double-click, `Enter`, or a tap on a phone), from **Open with** in other apps on Android, with `Ctrl+O`, or on a server.
 
 - **Full screen**: the ⛶ button in the document's bar shows only the document (on a phone the status and navigation bars hide too); `Escape`, Back or the button again leave it.
+- **Listen** (`Alt+R`, or **Listen** in its bar): reads the document aloud from the top of the screen (from a PDF's page you are on), or only the paragraphs you selected. The part being read is highlighted and kept in view. Not for spreadsheets. In full screen the player shows at the bottom.
 - **Bookmark**: the bookmark button keeps your place (a PDF's page; in an e-book, Word file or sheet, the paragraph at the top of the screen). The document then **opens there every time**, on any screen size, until you clear it: tap the filled bookmark for **Go to the bookmark**, **Move the bookmark here** or **Clear the bookmark**. One bookmark per file, kept on this device; it follows the file when you rename or move it in Folders.
 - **PDFs**: the pages are drawn as you scroll. **−** and **+** zoom (so do `Ctrl`+wheel and two fingers on a touch screen), **Fit** fits the width, **3 / 20** is the page you are on and **Contents** lists its bookmarks. Select text on a page to copy it. A PDF with a password asks for it.
 - **E-books** read as one page, chapter after chapter, in the editor's text size (`Ctrl+=` and `Ctrl+-`, **Aa** in the status bar, or a pinch). **Contents** goes to a chapter, and the links inside the book work. Books with DRM cannot be opened: only the app they were bought for can.
@@ -671,8 +672,10 @@ Turn them on in **Settings → Desktop**.
 - **The screenshot is black (macOS)**: allow Tracker Editor under System Settings → Privacy & Security → Screen Recording, then restart it.
 - **Paste in the edit bar or the line-number menu says the browser did not let it read the clipboard**: allow the clipboard for the site when the browser asks, or long-press in the text and choose **Paste**.
 - **Dictation says to allow the microphone**: allow it for the site or app in the browser's settings. "Needs a connection": the speech service is online.
+- **"This browser cannot read aloud" in the Android app**: versions before 0.27.0 had no voices there: update it. If it now says the phone has no text-to-speech engine, install **Speech Services by Google** from the Play Store (or choose another engine in Android's settings → Text-to-speech output). No voice in your language: add it in the engine's settings.
+- **Full screen covers the status bar and its buttons can't be reached (Android app)**: fixed in 0.27.0; update it.
 - **Text from an image reads badly**: crop to the text, choose one language, or use a sharper photo.
-- **Text from an image says it could not start**: close the dialog and try again; if it keeps saying so, restart the app (on Android, long-press its icon → **Send a log** if it still fails). Versions before 0.26.0 of the Android app stayed on "Starting…": update it.
+- **Text from an image says it could not start**: close the dialog and try again; if it keeps saying so, restart the app (on Android, long-press its icon → **Send a log** if it still fails). Versions before 0.27.0 of the Android app stayed on "Starting…": update it.
 - **No ✦ bubble**: connect a model in Settings → Model and check *Model button at the bottom right*.
 - **The model's help answer says the guide does not cover it**: ask with other words (the names the editor uses: *split view*, *fold*, *server*), or open Help (`F1`) → **Guide** and search it.
 - **"Claude did not accept the API key"**: copy it again from the Claude Console (it starts with `sk-ant-`), paste it in Settings → Model → AI provider and **Test and list models**. "Too many requests… or its spending limit": wait a minute, or raise the limit in the Console.

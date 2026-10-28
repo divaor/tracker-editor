@@ -1,8 +1,10 @@
 // Read aloud, one passage at a time, so reading can be paused, skipped and
 // highlighted, with a reader's pauses between passages. Two engines:
-// - device: the device's own voices (Web Speech API). Free and offline; how
-//   natural it sounds depends on the voices installed. The screen stays on
-//   while reading, because phones stop speech when it turns off.
+// - device: the device's own voices (Web Speech API; in the Android app, whose
+//   WebView has none, Android's text to speech through the app: androidApp.js
+//   `tts`). Free and offline; how natural it sounds depends on the voices
+//   installed. The screen stays on while reading, because phones stop speech
+//   when it turns off.
 // - server: a speech server with an OpenAI-compatible API (Kokoro on this
 //   computer, OpenAI, …) for natural voices. Played as audio, the next passage
 //   fetched ahead, with play/pause on the lock screen and the screen free to
@@ -19,6 +21,8 @@ const AHEAD = 2; // speech-server passages fetched ahead of the one playing
 let state = { status: 'idle', key: null, name: '', index: 0, total: 0, lang: '', engine: 'device', loading: false, error: '' };
 let passages = [];
 let highlight = () => {};
+let shownBy = null; // this reading's own highlighter (a document shows its passages itself)
+const show = (passage) => (shownBy ?? highlight)(state.key, passage);
 const listeners = new Set();
 
 let run = 0; // bumped whenever speech is interrupted, so callbacks of the old passage do nothing
@@ -30,8 +34,19 @@ let audioUrls = new Map(); // passage index → Promise of an object URL
 let fetches = null; // AbortController for this reading's server requests
 
 const synth = () => window.speechSynthesis;
-export const canSpeak = () => typeof window !== 'undefined' && Boolean(window.speechSynthesis && window.SpeechSynthesisUtterance);
-export const voices = () => (canSpeak() ? synth().getVoices() : []);
+// Android's text to speech in the app, else the browser's.
+const native = () => (typeof window !== 'undefined' && window.desktop?.android?.tts) || null;
+const webSpeech = () => typeof window !== 'undefined' && Boolean(window.speechSynthesis && window.SpeechSynthesisUtterance);
+export const canSpeak = () => Boolean(native()) || webSpeech();
+export const voices = () => native()?.voices() ?? (webSpeech() ? synth().getVoices() : []);
+/** `fn()` when the list of voices changes (they load after the page). */
+export function onVoicesChanged(fn) {
+  if (native()) return native().onVoicesChanged(fn);
+  const s = webSpeech() && synth();
+  if (!s?.addEventListener) return () => {};
+  s.addEventListener('voiceschanged', fn);
+  return () => s.removeEventListener('voiceschanged', fn);
+}
 export const getReaderState = () => state;
 const usesServer = () => getSettings().tts.engine === 'server';
 
@@ -52,6 +67,7 @@ export function setReaderHighlighter(fn) {
 }
 
 async function keepScreenOn(on) {
+  if (native()) return native().keepAwake(on);
   try {
     if (on && !wakeLock && navigator.wakeLock && document.visibilityState === 'visible') {
       wakeLock = await navigator.wakeLock.request('screen');
@@ -78,13 +94,19 @@ function pickVoice(lang) {
 }
 
 function speakDevice(passage, next, fail) {
-  const u = new SpeechSynthesisUtterance(passage.text);
   const voice = pickVoice(state.lang);
+  const { rate } = getSettings().tts;
+  if (native()) {
+    native()
+      .speak({ text: passage.text, voice: voice?.voiceURI ?? '', lang: voice?.lang ?? state.lang, rate: passage.kind === 'heading' ? rate * 0.92 : rate })
+      .then(next, (err) => err?.code !== 'interrupted' && fail(`Reading stopped: ${err?.message ?? err}.`));
+    return;
+  }
+  const u = new SpeechSynthesisUtterance(passage.text);
   if (voice) {
     u.voice = voice;
     u.lang = voice.lang;
   } else if (state.lang) u.lang = state.lang;
-  const { rate } = getSettings().tts;
   // Headings a touch slower, like a reader announcing a section.
   u.rate = passage.kind === 'heading' ? rate * 0.92 : rate;
   u.onend = next;
@@ -201,7 +223,8 @@ function silence() {
   run++;
   clearTimeout(gapTimer);
   gapTimer = null;
-  if (canSpeak()) synth().cancel();
+  if (native()) native().stop();
+  else if (webSpeech()) synth().cancel();
   if (audio) audio.pause();
   audioIndex = -1;
 }
@@ -210,7 +233,7 @@ function speakCurrent() {
   const passage = passages[state.index];
   if (!passage) return finish();
   const myRun = run;
-  highlight(state.key, passage);
+  show(passage);
   const next = () => {
     if (myRun !== run) return;
     if (state.index + 1 >= passages.length) return finish();
@@ -230,7 +253,8 @@ function speakCurrent() {
 
 function finish(error = '') {
   silence();
-  highlight(state.key, null);
+  show(null);
+  shownBy = null;
   fetches?.abort();
   forgetAudio();
   passages = [];
@@ -242,12 +266,14 @@ function finish(error = '') {
 /**
  * Reads `text` aloud from the passage at `from`; with a selection (to > from),
  * only the selection. Markdown is read as prose. The language (en, es, …) is
- * guessed from the text unless given.
+ * guessed from the text unless given. `onPassage(key, passage | null)` shows the
+ * passages of this reading instead of the editor's highlighter.
  */
-export function startReading({ key, name, text, markdown = false, from = 0, to = 0, lang: language = '' }) {
+export function startReading({ key, name, text, markdown = false, from = 0, to = 0, lang: language = '', onPassage = null }) {
   const engine = usesServer() ? 'server' : 'device';
   if (engine === 'device' && !canSpeak()) throw new Error('This browser cannot read aloud. Choose a speech server in Settings → Read aloud.');
   if (state.status !== 'idle') finish();
+  shownBy = onPassage;
   const lang = language || detectLanguage(text) || (navigator.language || 'en').slice(0, 2).toLowerCase();
   const options = { markdown, lang, maxPassage: MAX_PASSAGE[engine] };
   const selection = to > from;
@@ -256,7 +282,7 @@ export function startReading({ key, name, text, markdown = false, from = 0, to =
   passages = list;
   fetches = new AbortController();
   if (engine === 'device') {
-    synth().cancel(); // clears a queue some browsers keep after a page reload
+    if (!native()) synth().cancel(); // clears a queue some browsers keep after a page reload
     keepScreenOn(true);
   } else setMediaHandlers(true);
   set({ status: 'playing', key, name, index: selection ? 0 : passageAt(list, from), total: list.length, lang, engine, loading: false, error: '' });
@@ -293,7 +319,7 @@ export function skipReading(step) {
   silence();
   set({ index });
   if (state.status === 'playing') speakCurrent();
-  else highlight(state.key, passages[index]);
+  else show(passages[index]);
 }
 
 export function setReadingRate(rate) {

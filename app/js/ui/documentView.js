@@ -8,10 +8,13 @@
 import { html, useEffect, useLayoutEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import DOMPurify from '../../vendor/purify.js';
 import { BOOKMARK_BLOCKS, bookmarkLabel, bookmarkOf, placeAt, topOf, withBookmark, withoutBookmark } from '../docBookmarks.js';
+import { blockAt, firstBelow, joinBlocks, pdfSpeechText, readsAloud } from '../docSpeech.js';
 import { documentLabel } from '../docTypes.js';
-import { isAndroidApp } from '../platform.js';
+import { getReaderState, startReading, stopReading, toggleReading } from '../reader.js';
 import { getSettings, saveSettings } from '../settings.js';
 import { toast } from './components.js';
+import { useFullScreen } from './fullScreen.js';
+import { ReadAloudBar } from './readAloud.js';
 import { Icon } from './icons.js';
 import { Menu } from './menu.js';
 
@@ -32,13 +35,15 @@ const PURIFY = {
 /**
  * `load()` gives the bytes; `version` (the file's time) reads them again when it changes.
  * `compact`: the folders view's preview (a slimmer bar). `onOpenOutside`: its own program.
- * `bookmarkKey` (the file's path) keeps a bookmark for it.
+ * `bookmarkKey` (the file's path) keeps a bookmark for it. Read aloud as `readKey` (the reader's
+ * key: the tab's, or the viewer's); `onReader({ listen } | null)` gives the app its Listen
+ * (Alt+R, the file bar); `listenInBar` puts Listen in the document's own bar too (the viewer).
  */
-export function DocumentView({ name, kind, version, load, onText, onAsText, onOpenOutside, compact = false, bookmarkKey }) {
+export function DocumentView({ name, kind, version, load, onText, onAsText, onOpenOutside, compact = false, bookmarkKey, readKey, onReader, listenInBar = false }) {
   const [state, setState] = useState({ status: 'loading' });
   const [password, setPassword] = useState(null); // { wrong } while one is asked
   const root = useRef(null);
-  const [full, setFull] = useState(false);
+  const [full, setFull] = useFullScreen(root);
   // The view shown says where the reader is and goes to a place: { here(), go(place) }.
   const nav = useRef(null);
   const marked = Boolean(bookmarkKey) && !compact;
@@ -84,34 +89,45 @@ export function DocumentView({ name, kind, version, load, onText, onAsText, onOp
   // A PDF's document is let go with the view.
   useEffect(() => () => state.pdf && closePdf(state.pdf), [state.pdf]);
 
-  // Full screen: the view over the whole window (and the screen itself where the browser lets
-  // it: not in Android's WebView, where the system bars hide instead). Escape or Back leave it.
-  useLayoutEffect(() => {
-    if (!full) return;
-    const el = root.current;
-    let real = false;
-    if (!isAndroidApp() && document.fullscreenEnabled && el?.requestFullscreen) {
-      el.requestFullscreen({ navigationUI: 'hide' }).then(
-        () => (real = true),
-        () => {},
-      );
+  // Read aloud: the blocks of the page (a PDF's pages), from the one at the top of the screen,
+  // or those a selection touches; the one being read is shown and followed.
+  const readable = Boolean(readKey) && !compact && readsAloud(kind);
+  const listen = async () => {
+    const now = getReaderState();
+    if (now.status !== 'idle' && now.key === readKey) return toggleReading();
+    let source;
+    try {
+      source = await nav.current?.reading?.();
+    } catch (err) {
+      return toast(message(err), { kind: 'error' });
     }
-    window.desktop?.android?.bars?.(false);
-    const onKey = (e) => {
-      if (e.key !== 'Escape' || e.defaultPrevented) return;
-      e.preventDefault();
-      setFull(false);
+    if (!source) return;
+    const { text, starts, ends } = joinBlocks(source.texts);
+    let shown = null;
+    const onPassage = (_key, passage) => {
+      shown?.classList.remove('doc-reading');
+      shown = passage ? source.elements[blockAt(starts, passage.from)] : null;
+      if (!shown) return;
+      shown.classList.add('doc-reading');
+      source.follow(shown);
     };
-    const onChange = () => real && !document.fullscreenElement && setFull(false);
-    window.addEventListener('keydown', onKey);
-    document.addEventListener('fullscreenchange', onChange);
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      document.removeEventListener('fullscreenchange', onChange);
-      if (el && document.fullscreenElement === el) document.exitFullscreen().catch(() => {});
-      window.desktop?.android?.bars?.(true);
-    };
-  }, [full]);
+    const from = starts[source.first] ?? 0;
+    const to = source.last != null ? (ends[source.last] ?? text.length) : 0;
+    try {
+      startReading({ key: readKey, name, text, from, to, onPassage });
+    } catch (err) {
+      toast(err.message, { kind: 'error' });
+    }
+  };
+  const listenNow = useRef(listen);
+  listenNow.current = listen;
+  useEffect(() => {
+    if (!readable || state.status !== 'ready') return undefined;
+    onReader?.({ listen: () => listenNow.current() });
+    return () => onReader?.(null);
+  }, [readable, state.status]);
+  // Reading this document stops with its view.
+  useEffect(() => () => readKey && getReaderState().key === readKey && stopReading(), [readKey]);
 
   const setBookmark = () => {
     const place = nav.current?.here();
@@ -131,6 +147,7 @@ export function DocumentView({ name, kind, version, load, onText, onAsText, onOp
     ${!compact && html`<span class="doc-kind">${label}</span>`}
     ${extra}
     <span class="spacer" />
+    ${readable && state.status === 'ready' && (listenInBar || full) && html`<button type="button" class="icon-btn sm doc-listen" aria-label="Listen" title="Read aloud from the top of the screen, or the selection (Alt+R)" onClick=${listen}><${Icon} name="volume" size=${15} /></button>`}
     ${marked && state.status === 'ready' && html`<${BookmarkButton} mark=${mark} onSet=${setBookmark} onGo=${() => nav.current?.go(mark)} onClear=${clearBookmark} />`}
     ${!compact &&
     html`<button type="button" class="icon-btn sm doc-full-btn" aria-pressed=${full} aria-label=${full ? 'Leave full screen' : 'Full screen'} title=${full ? 'Leave full screen (Esc)' : 'Full screen'}
@@ -138,7 +155,8 @@ export function DocumentView({ name, kind, version, load, onText, onAsText, onOp
     ${onAsText && html`<button type="button" class="btn ghost sm doc-aside" title="Its text in the editor (to select, search, copy)" aria-label="As text" onClick=${onAsText}><${Icon} name="file" size=${15} /><span class="label">As text</span></button>`}
     ${onOpenOutside && html`<button type="button" class="btn ghost sm doc-aside" title="Open it with its own program" aria-label="Its program" onClick=${onOpenOutside}><${Icon} name="external" size=${15} /><span class="label">Its program</span></button>`}
   </div>`;
-  const view = (body, cls = '') => html`<div class="doc-view ${cls} ${full ? 'full' : ''}" ref=${root}>${body}</div>`;
+  // In full screen the player comes along (the app's is under it).
+  const view = (body, cls = '') => html`<div class="doc-view ${cls} ${full ? 'fills-screen' : ''}" ref=${root}>${body}${full && html`<${ReadAloudBar} />`}</div>`;
 
   if (state.status === 'error') {
     return view(html`${!compact && bar()}<div class="doc-message"><${Icon} name="alert" size=${compact ? 24 : 32} /><p>${state.error}</p>
@@ -260,6 +278,25 @@ function HtmlDocument({ doc, compact, bar, view, nav, start }) {
       anchor.current = null;
       goTo(place);
     },
+    reading: () => {
+      anchor.current = null;
+      const root = scroller.current;
+      const { elements, texts } = readingBlocks(page.current);
+      if (!root || !elements.length) return null;
+      const touched = selectedBlocks(elements, page.current);
+      const top = root.getBoundingClientRect().top;
+      return {
+        elements,
+        texts,
+        first: touched ? touched[0] : firstBelow(elements.map((e) => e.getBoundingClientRect().bottom - top), 0),
+        last: touched?.[1],
+        follow: (el) => {
+          const r = el.getBoundingClientRect();
+          const box = root.getBoundingClientRect();
+          if (r.top < box.top || r.bottom > box.bottom) root.scrollTop += r.top - box.top - root.clientHeight / 4;
+        },
+      };
+    },
   };
   // Pictures loading above the place push it down: it is put back while kept.
   useEffect(() => {
@@ -336,6 +373,17 @@ function PdfView({ pdf, pdfjs, compact, bar, view, nav, start, onText }) {
   const scroller = useRef(null);
   // The page opened at (the bookmark), kept while the pages' sizes and the fit settle, until the reader scrolls.
   const anchor = useRef(start?.page ? start : null);
+  // Each page's text, read once (the tab's text, and reading aloud).
+  const pageTexts = useRef(null);
+  const gone = useRef(false);
+  const textsOf = () =>
+    (pageTexts.current ??= import('../pdfDoc.js')
+      .then(({ pdfPageTexts }) => pdfPageTexts(pdf, { stop: () => gone.current }))
+      .then((pages) => {
+        if (!pages) pageTexts.current = null;
+        return pages;
+      }));
+  useEffect(() => () => (gone.current = true), []);
   useHandScroll(scroller, () => (anchor.current = null));
   const pagesEl = useRef(null);
   const [sizes, setSizes] = useState(null); // [{ w, h }] in points, per page
@@ -366,13 +414,13 @@ function PdfView({ pdf, pdfjs, compact, bar, view, nav, start, onText }) {
       }
     })().catch(() => {});
     (async () => {
-      const { pdfOutline, pdfText } = await import('../pdfDoc.js');
+      const { pdfOutline } = await import('../pdfDoc.js');
       const items = await pdfOutline(pdf);
       if (!stale) setOutline(items.filter((e) => e.page).map((e) => ({ ...e, hint: String(e.page) })));
       // The text, after the pages show.
       await new Promise((r) => setTimeout(r, 600));
-      const text = await pdfText(pdf, { stop: () => stale });
-      if (!stale && text != null) onText?.(text);
+      const pages = stale ? null : await textsOf();
+      if (!stale && pages) onText?.(pages.join('\n\n'));
     })().catch(() => {});
     return () => {
       stale = true;
@@ -486,6 +534,27 @@ function PdfView({ pdf, pdfjs, compact, bar, view, nav, start, onText }) {
     go: (place) => {
       anchor.current = null;
       if (place?.page) goToPage(place.page, place.into);
+    },
+    reading: async () => {
+      anchor.current = null;
+      const pages = await textsOf();
+      const box = pagesEl.current;
+      if (!pages || !box) return null;
+      // From the page at the top of the screen, or the one a selection starts in.
+      const sel = window.getSelection();
+      const picked = sel && !sel.isCollapsed ? sel.anchorNode?.parentElement?.closest?.('.pdf-page') : null;
+      const first = picked && box.contains(picked) ? Number(picked.dataset.page) - 1 : (here()?.page ?? 1) - 1;
+      return {
+        elements: [...box.children],
+        texts: pages.map(pdfSpeechText),
+        first,
+        follow: (el) => {
+          const root = scroller.current;
+          const r = el.getBoundingClientRect();
+          const frame = root.getBoundingClientRect();
+          if (r.bottom < frame.top + 40 || r.top > frame.bottom - 40) goToPage(Number(el.dataset.page));
+        },
+      };
     },
   };
   // A layout effect: the place is there before the first drawing.
@@ -601,4 +670,54 @@ function PdfView({ pdf, pdfjs, compact, bar, view, nav, start, onText }) {
     </div>`,
     'pdf',
   );
+}
+
+// ---- Reading converted documents aloud ----
+
+// The blocks read one after another; text outside them goes with the nearest block around it.
+const READ_BLOCKS = 'h1, h2, h3, h4, h5, h6, p, li, dt, dd, pre, blockquote, figcaption, caption, td, th';
+const NOT_READ = '.doc-noteref, .doc-noteback, .doc-no-picture';
+
+/** { elements, texts }: each block with text in the page, in order, and its own text (not its inner blocks'). */
+function readingBlocks(article) {
+  const elements = [];
+  const texts = new Map();
+  if (!article) return { elements, texts: [] };
+  const walker = document.createTreeWalker(article, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
+  const blockOf = (el) => el.closest(READ_BLOCKS) ?? el.closest('div, section, article');
+  const add = (block, text) => {
+    if (!texts.has(block)) {
+      texts.set(block, '');
+      elements.push(block);
+    }
+    texts.set(block, texts.get(block) + text);
+  };
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      // Lines broken inside a block still part their words.
+      if (node.tagName === 'BR' && texts.has(blockOf(node))) add(blockOf(node), ' ');
+      continue;
+    }
+    const parent = node.parentElement;
+    if (!parent || !node.nodeValue.trim() || parent.closest(NOT_READ)) continue;
+    add(blockOf(parent) ?? article, node.nodeValue);
+  }
+  return { elements, texts: elements.map((e) => texts.get(e)) };
+}
+
+/** [first, last]: the blocks a selection inside the page starts and ends in, or null. */
+function selectedBlocks(elements, article) {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || !article?.contains(sel.anchorNode) || !article.contains(sel.focusNode)) return null;
+  const index = new Map(elements.map((e, i) => [e, i]));
+  const of = (node) => {
+    for (let el = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement; el && el !== article; el = el.parentElement) {
+      if (index.has(el)) return index.get(el);
+    }
+    return -1;
+  };
+  const a = of(sel.anchorNode);
+  const b = of(sel.focusNode);
+  if (a < 0 || b < 0) return null;
+  return [Math.min(a, b), Math.max(a, b)];
 }

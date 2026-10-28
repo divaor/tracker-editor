@@ -2,6 +2,8 @@ import { html, useEffect, useMemo, useRef, useState } from '../../vendor/preact-
 import { renderMarkdown } from '../markdown.js';
 import { jsonProblem, parseDelimited } from '../previews.js';
 import { toggleChecklistItem } from '../tracker-model.js';
+import { useFullScreen } from './fullScreen.js';
+import { ReadAloudBar } from './readAloud.js';
 import { Icon } from './icons.js';
 
 const MAX_CHILDREN = 200; // children shown at first in a tree node; "Show more" adds more
@@ -192,16 +194,18 @@ export function PreviewBody({ kind, text = '', name, onToggle, onGoTo }) {
 
 export function Preview({ kind, text = '', name, onToggle, onGoTo, full = false, onFull, onClose }) {
   const pane = useRef(null);
+  const [screen, setScreen] = useFullScreen(pane);
   const body = html`<${PreviewBody} kind=${kind} text=${text} name=${name} onToggle=${onToggle} onGoTo=${onGoTo} />`;
-  return html`<div class="preview-pane preview-${kind} ${full ? 'full' : ''}" ref=${pane}>
+  return html`<div class="preview-pane preview-${kind} ${full ? 'full' : ''} ${screen ? 'fills-screen' : ''}" ref=${pane}>
     <div class="preview-head">
       <${Icon} name="eye" size=${14} /><span class="preview-title">Preview</span><span class="spacer" />
-      ${onFull && html`<button type="button" class="icon-btn sm preview-full-btn" aria-pressed=${full} aria-label=${full ? 'Back to the text and preview' : 'Full view'}
+      ${onFull && !screen && html`<button type="button" class="icon-btn sm preview-full-btn" aria-pressed=${full} aria-label=${full ? 'Back to the text and preview' : 'Full view'}
         title=${full ? 'Back to the text and preview' : 'Full view: the preview in the editor’s place'} onClick=${onFull}><${Icon} name=${full ? 'narrow' : 'widen'} size=${15} /></button>`}
-      ${document.fullscreenEnabled && html`<button type="button" class="icon-btn sm" aria-label="Full screen" title="Full screen (Esc to leave)"
-        onClick=${() => (document.fullscreenElement ? document.exitFullscreen() : pane.current.requestFullscreen()).catch(() => {})}><${Icon} name="fullscreen" size=${15} /></button>`}
-      ${onClose && html`<button type="button" class="icon-btn sm" aria-label="Close the preview" title="Close the preview" onClick=${onClose}><${Icon} name="x" size=${15} /></button>`}
+      <button type="button" class="icon-btn sm preview-screen-btn" aria-pressed=${screen} aria-label=${screen ? 'Leave full screen' : 'Full screen'} title=${screen ? 'Leave full screen (Esc)' : 'Full screen (Esc to leave)'}
+        onClick=${() => setScreen(!screen)}><${Icon} name=${screen ? 'fullscreenExit' : 'fullscreen'} size=${15} /></button>
+      ${onClose && !screen && html`<button type="button" class="icon-btn sm" aria-label="Close the preview" title="Close the preview" onClick=${onClose}><${Icon} name="x" size=${15} /></button>`}
     </div>
     <div class="preview-scroll">${body}</div>
+    ${screen && html`<${ReadAloudBar} />`}
   </div>`;
 }

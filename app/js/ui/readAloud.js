@@ -1,6 +1,6 @@
 import { html, useEffect, useState } from '../../vendor/preact-htm.js';
 import { getSettings } from '../settings.js';
-import { RATES, getReaderState, onReaderState, setReadingRate, setReadingVoice, skipReading, stopReading, toggleReading, voices } from '../reader.js';
+import { RATES, getReaderState, onReaderState, onVoicesChanged, setReadingRate, setReadingVoice, skipReading, stopReading, toggleReading, voices } from '../reader.js';
 import { isNaturalVoice, rankVoices, serverVoiceFor } from '../speech.js';
 import { Icon } from './icons.js';
 
@@ -8,13 +8,7 @@ const LANGUAGES = { en: 'English', es: 'Spanish', pt: 'Portuguese', fr: 'French'
 
 export function useVoices() {
   const [list, setList] = useState(voices);
-  useEffect(() => {
-    const synth = window.speechSynthesis;
-    if (!synth?.addEventListener) return undefined;
-    const update = () => setList(voices());
-    synth.addEventListener('voiceschanged', update);
-    return () => synth.removeEventListener('voiceschanged', update);
-  }, []);
+  useEffect(() => onVoicesChanged(() => setList(voices())), []);
   return list;
 }
 

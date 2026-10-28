@@ -176,6 +176,67 @@ async function drain() {
   if (sorted.launched.length) for (const cb of subscribers.launched) cb();
   if (sorted.shared.length) for (const cb of subscribers.shared) cb();
 }
+// ---- Read aloud: Android's own text to speech (the WebView has no speechSynthesis) ----
+
+const interrupted = () => Object.assign(new Error('interrupted'), { code: 'interrupted' });
+
+/**
+ * The reader's device engine on the phone (reader.js): `voices()` (shaped like the Web Speech
+ * API's, loaded the first time they are asked for; `onVoicesChanged` says when they come),
+ * `speak({ text, voice, lang, rate })` resolving when it was spoken, `stop()`, `keepAwake(on)`.
+ */
+function speech() {
+  let list = [];
+  let loading = null;
+  let n = 0;
+  const waiting = new Map(); // utterance id → { resolve, reject }
+  const changed = new Set();
+  cap.addListener(PLUGIN, 'tts', (e) => {
+    const w = waiting.get(e.id);
+    if (!w || e.type === 'start') return;
+    waiting.delete(e.id);
+    if (e.type === 'done') w.resolve();
+    else if (e.type === 'stopped') w.reject(interrupted());
+    else w.reject(new Error(e.message || 'the text-to-speech engine failed'));
+  });
+  const load = () =>
+    (loading ??= call('ttsVoices').then(
+      (r) => {
+        list = (r.voices ?? []).map((v) => ({ voiceURI: v.name, name: v.label || v.name, lang: v.lang, localService: !v.network, default: v.name === r.defaultVoice }));
+        changed.forEach((fn) => fn());
+        return list;
+      },
+      (err) => {
+        loading = null;
+        throw err;
+      },
+    ));
+  return {
+    voices: () => (load().catch(() => {}), list),
+    loadVoices: load,
+    onVoicesChanged(fn) {
+      changed.add(fn);
+      return () => changed.delete(fn);
+    },
+    speak({ text, voice = '', lang = '', rate = 1, pitch = 1 }) {
+      const id = `u${++n}`;
+      return new Promise((resolve, reject) => {
+        waiting.set(id, { resolve, reject });
+        call('ttsSpeak', { id, text, voice, lang, rate, pitch }).catch((err) => {
+          waiting.delete(id);
+          reject(err);
+        });
+      });
+    },
+    stop() {
+      for (const w of waiting.values()) w.reject(interrupted());
+      waiting.clear();
+      return call('ttsStop').catch(() => {});
+    },
+    keepAwake: (on) => call('keepAwake', { on }).catch(() => {}),
+  };
+}
+
 const take = (kind) => queue[kind].splice(0);
 const subscribe = (kind, callback) => {
   subscribers[kind].add(callback);
@@ -532,6 +593,7 @@ function install() {
       barStyle: (dark) => cap.nativePromise('SystemBars', 'setStyle', { style: dark ? 'DARK' : 'LIGHT' }).catch(() => {}),
       // The status and navigation bars hidden (a document in full screen) or shown again.
       bars: (shown) => cap.nativePromise('SystemBars', shown ? 'show' : 'hide', {}).catch(() => {}),
+      tts: speech(),
     },
   };
   const root = document.documentElement;

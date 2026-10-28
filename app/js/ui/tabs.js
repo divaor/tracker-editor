@@ -14,6 +14,7 @@ import { Menu, MenuButton } from './menu.js';
 import { contentPlace, isContentPath, isRemotePath, kindHint, KINDS, kindOfKey, protocolName, remoteAddress, remoteParts, whereState } from '../where.js';
 import { diskReadOnly } from '../diskTabs.js';
 import { documentLabel } from '../docTypes.js';
+import { readsAloud } from '../docSpeech.js';
 import { server, serverStatus } from '../servers.js';
 import { mirrorOf } from '../mirrors.js';
 import { mirrorState } from './mirrors.js';
@@ -542,7 +543,7 @@ export function FileBar({ file, repo, disk, sealed, projects, canPreview, previe
     id && { separator: true },
     id && { label: 'Move to trash', icon: 'trash', danger: true, run: () => actions.remove(id) },
   ];
-  if (disk?.doc) return html`<${DiskBar} disk=${disk} buttons=${[disk.asText && listenButton, shareButton]} moreItems=${docItems} actions=${actions} />`;
+  if (disk?.doc) return html`<${DiskBar} disk=${disk} buttons=${[(disk.asText || readsAloud(disk.doc)) && listenButton, shareButton]} moreItems=${docItems} actions=${actions} />`;
   if (disk) return html`<${DiskBar} disk=${disk} buttons=${[previewButton, listenButton, shareButton]} moreItems=${() => moreItems()} actions=${actions} />`;
   if (repo) {
     // A tracker document: its item's title and project; the path is in the tooltip.

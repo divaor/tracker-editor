@@ -153,6 +153,9 @@ const placeOfKey = (key) => {
   return '';
 };
 
+// The document shown as it looks in the open tab, when it reads aloud: { listen } (ui/documentView.js).
+let docReader = null;
+
 function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setCompare, setUsagesOf, setSearchSeed }) {
   return useMemo(() => {
     const activeFile = () => {
@@ -1352,6 +1355,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       // Reads the active tab aloud from the cursor (or just the selection); again to pause or resume.
       readAloud() {
         if (getReaderState().status !== 'idle') return toggleReading();
+        if (docReader) return docReader.listen();
         const host = hostRef.current;
         host?.flushAll();
         const snap = host?.snapshot();
@@ -3232,7 +3236,7 @@ export function App() {
           ${docShown &&
           html`<${DocumentView} key=${`${activeKey}:${activeDisk.mtimeMs}:${activeDisk.reloads ?? 0}`} name=${activeDisk.name} kind=${activeDisk.doc} version=${activeDisk.mtimeMs}
             load=${() => window.desktop.disk.readBytes(activeDisk.path)} onText=${(text) => actions.documentText(activeDisk.path, text)}
-            onOpenOutside=${() => actions.openOutside(activeDisk.path)} bookmarkKey=${activeDisk.path} />`}
+            onOpenOutside=${() => actions.openOutside(activeDisk.path)} bookmarkKey=${activeDisk.path} readKey=${activeKey} onReader=${(r) => (docReader = r)} />`}
           ${!activeKey && html`<${Welcome} actions=${actions} desktop=${diskAvailable()} hasFiles=${store.live().length + docs.length > 0} configured=${isLocal(settings) || isSyncConfigured(settings)} />`}
         </div>
         ${terminalShown && html`<${TerminalPanel} settings=${settings} actions=${actions} onHide=${() => (setTerminalShown(false), hostRef.current?.focus())} />`}
