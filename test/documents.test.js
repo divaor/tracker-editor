@@ -4,6 +4,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import { convertDocument, documentKind, documentLabel, htmlToText, isDocumentName } from '../app/js/documents.js';
 import { DOCUMENT_TYPES } from '../app/js/docTypes.js';
@@ -36,10 +38,10 @@ test('documents are known by their names, and by their MIME types from other app
 test('the main process knows the same documents (electron/diskFiles.cjs)', () => {
   const disk = require('../electron/diskFiles.cjs');
   assert.deepEqual(disk.DOCUMENT_EXTS, Object.fromEntries(Object.entries(DOCUMENT_TYPES).map(([ext, t]) => [ext, t.kind])));
-  const dir = fs.mkdtempSync(new URL('../node_modules/.cache-doc-', import.meta.url).pathname);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-'));
   try {
-    fs.writeFileSync(`${dir}/book.epub`, Buffer.from([0x50, 0x4b, 3, 4, 0, 0]));
-    const info = disk.readTextFile(`${dir}/book.epub`);
+    fs.writeFileSync(path.join(dir, 'book.epub'), Buffer.from([0x50, 0x4b, 3, 4, 0, 0]));
+    const info = disk.readTextFile(path.join(dir, 'book.epub'));
     assert.equal(info.doc, 'epub');
     assert.equal(info.text, '');
     assert.equal(info.size, 6);
