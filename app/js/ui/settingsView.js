@@ -3,10 +3,11 @@ import { clampFont, DEFAULT_FONT } from '../textSize.js';
 import { DEFAULT_LLM_URL } from '../llm.js';
 import { API_PROVIDERS, connectionOf, createModelClient, keySecret, providerOf } from '../providers.js';
 import { RUN_COMMANDS } from '../runFile.js';
-import { startReading, stopReading } from '../reader.js';
-import { isNaturalVoice, rankVoices } from '../speech.js';
+import { setVoiceEngine, startReading, stopReading, voiceEngines } from '../reader.js';
+import { isNaturalVoice, languageName } from '../speech.js';
 import { useVoices } from './readAloud.js';
-import { getSecret, getSettings, getToken, isLocal, isSyncConfigured, parseSetupCode, saveSettings, setSecret, setToken } from '../settings.js';
+import { VoicePicker } from './voicePicker.js';
+import { TTS_KEY_SECRET, getSecret, getSettings, getToken, isLocal, isSyncConfigured, originOf, parseSetupCode, saveSettings, setSecret, setToken } from '../settings.js';
 import { createAsyncLlmClient, parseProfile, PLACEHOLDERS, PROFILE_EXAMPLE } from '../asyncLlm.js';
 import { localFetch } from '../localFetch.js';
 import { store } from '../store.js';
@@ -759,18 +760,68 @@ const SAMPLE = {
   pt: 'Olá! É assim que eu soo quando leio os seus arquivos. Faço uma pausa curta entre as frases e uma mais longa entre os parágrafos.',
 };
 
+// Where a speech server can be reached from here, when the address will not work as it is.
+function serverReach(url) {
+  const local = /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(url.trim());
+  if (isDesktopApp()) return null;
+  if (isAndroidApp()) return local ? 'localhost is this phone. For Kokoro on your computer, use the computer’s address on your network instead, such as http://192.168.1.20:8880/v1 (both on the same Wi-Fi).' : null;
+  if (/^http:/i.test(url.trim()) && !local) return 'A browser reaches a speech server only on this device (localhost) or at an https address. The desktop and Android apps also reach one elsewhere on your network.';
+  return local ? 'A server at localhost is only reachable from the device it runs on. On a phone, use the Android app with your computer’s address, or a server with an https address, such as OpenAI.' : null;
+}
+
 function ReadAloudCard({ settings, actions }) {
   const { tts } = settings;
   const [server, setServer] = useState(tts.server);
+  // The key is a secret: typed here, saved for this server's origin only.
+  const [key, setKey] = useState('');
+  const [keySaved, setKeySaved] = useState(false);
+  useEffect(() => {
+    getSecret(TTS_KEY_SECRET).then((v) => setKeySaved(Boolean(v)), () => {});
+  }, []);
+  const keyHost = (() => {
+    try {
+      return tts.server.keyOrigin ? new URL(tts.server.keyOrigin).host : '';
+    } catch {
+      return '';
+    }
+  })();
+  const keyHere = keySaved && tts.server.keyOrigin && tts.server.keyOrigin === originOf(server.baseUrl);
+  const saveServer = async () => {
+    const { apiKey: _old, ...rest } = server;
+    let keyOrigin = tts.server.keyOrigin;
+    try {
+      if (key.trim()) {
+        await setSecret(TTS_KEY_SECRET, key);
+        keyOrigin = originOf(server.baseUrl);
+        setKeySaved(true);
+        setKey('');
+      }
+    } catch (err) {
+      return actions.toast(`The key could not be saved: ${err.message}`, { kind: 'error' });
+    }
+    saveSettings({ tts: { server: { ...rest, apiKey: '', keyOrigin }, engine: 'server' } });
+    actions.toast('Speech server saved');
+  };
+  const forgetKey = async () => {
+    await setSecret(TTS_KEY_SECRET, '').catch(() => {});
+    setKeySaved(false);
+    saveSettings({ tts: { server: { keyOrigin: '' } } });
+    actions.toast('The speech server’s key was removed from this device');
+  };
+  const reach = serverReach(server.baseUrl);
   const [sampleLang, setSampleLang] = useState(() => (Object.hasOwn(SAMPLE, navigator.language.slice(0, 2)) ? navigator.language.slice(0, 2) : 'en'));
   const list = useVoices();
-  const ranked = rankVoices(list, sampleLang);
   const natural = list.filter(isNaturalVoice).length;
+  const engines = voiceEngines();
+  const engineLabel = engines?.engines?.find((e) => e.name === engines.engine)?.label;
   const set = (patch) => setServer({ ...server, ...patch });
-  const sample = () => {
+  // A sample in the chosen voice, or in `voice` (heard from the list) in its own language when there is a sample for it.
+  const sample = (voice = null) => {
+    const own = voice?.lang?.slice(0, 2).toLowerCase();
+    const lang = voice && Object.hasOwn(SAMPLE, own) ? own : sampleLang;
     try {
       stopReading();
-      startReading({ key: null, name: 'Voice sample', text: SAMPLE[sampleLang], lang: sampleLang });
+      startReading({ key: null, name: 'Voice sample', text: SAMPLE[lang], lang, voice: voice?.voiceURI ?? '' });
     } catch (err) {
       actions.toast(err.message, { kind: 'error' });
     }
@@ -784,16 +835,15 @@ function ReadAloudCard({ settings, actions }) {
       options=${[{ id: 'device', label: 'This device' }, { id: 'server', label: 'Speech server' }]} />
     ${tts.engine === 'device'
       ? html`<div class="field-grid">
-          <${Field} label="Voice" hint=${list.length ? `${list.length} voices on this device${natural ? `, ${natural} of them natural-sounding (★)` : ''}` : 'This device lists no voices.'} wide>
-            <select value=${tts.voice} onChange=${(e) => saveSettings({ tts: { voice: e.currentTarget.value } })}>
-              <option value="">Automatic: the most natural voice for the text's language</option>
-              ${ranked.map((v) => html`<option key=${v.voiceURI} value=${v.voiceURI}>${isNaturalVoice(v) ? '★ ' : ''}${v.name} (${v.lang})</option>`)}
-            </select>
-          </${Field}>
+          <div class="field span-2"><span>Voice</span>
+            <${VoicePicker} className="wide" voices=${list} value=${tts.voice} lang=${sampleLang} onChange=${(voice) => saveSettings({ tts: { voice } })}
+              engines=${engines} onEngine=${setVoiceEngine} onSample=${sample} />
+            <small class="hint">${list.length ? `${list.length} voices${engineLabel ? ` from ${engineLabel}` : ' on this device'}${natural ? `, ${natural} of them natural-sounding (★)` : ''}. The list shows ${languageName(sampleLang)} first; ▶ plays one.` : 'This device lists no voices.'}</small>
+          </div>
         </div>
         <details class="help"><summary>How do I get more natural voices?</summary>
           <ul>
-            <li><strong>Android:</strong> in Settings, search for <em>Text-to-speech output</em>, choose <em>Speech Services by Google</em>, open its settings, then <em>Install voice data</em>, pick your language and try its voices. The one you pick is used here.</li>
+            <li><strong>Android:</strong> in Settings, search for <em>Text-to-speech output</em>, choose <em>Speech Services by Google</em>, open its settings, then <em>Install voice data</em>, pick your language and try its voices. In the app, another engine you install (VoxSherpa, with Kokoro and Piper voices that work offline) shows under <em>Engine</em> in the voice list: choose it there, or make it the phone's preferred engine.</li>
             <li><strong>iPhone and Mac:</strong> Settings → Accessibility → Spoken Content → Voices, and download an <em>Enhanced</em> or <em>Premium</em> voice.</li>
             <li><strong>Windows:</strong> in Microsoft Edge, the voices named <em>Online (Natural)</em> sound the most human; in Chrome, the <em>Google</em> voices. The desktop app only has the voices installed in Windows, so use a speech server there.</li>
           </ul>
@@ -802,31 +852,33 @@ function ReadAloudCard({ settings, actions }) {
           <div class="field span-2"><span>Server</span>
             <div class="input-row">
               <input value=${server.baseUrl} onInput=${(e) => set({ baseUrl: e.currentTarget.value })} placeholder="http://localhost:8880/v1" spellcheck=${false} />
-              ${SPEECH_PRESETS.map((p) => html`<button type="button" key=${p.id} class="btn sm ${server.baseUrl === p.server.baseUrl ? 'primary' : ''}" onClick=${() => set({ ...p.server, apiKey: p.id === 'openai' ? server.apiKey : '' })}>${p.label}</button>`)}
+              ${SPEECH_PRESETS.map((p) => html`<button type="button" key=${p.id} class="btn sm ${server.baseUrl === p.server.baseUrl ? 'primary' : ''}" onClick=${() => set({ ...p.server })}>${p.label}</button>`)}
             </div>
           </div>
           ${field('model', 'Model', 'kokoro, gpt-4o-mini-tts, tts-1-hd…')}
           ${field('voice', 'Voice', 'Kokoro: af_heart, af_bella, am_michael, bf_emma… OpenAI: coral, sage, nova, onyx…')}
           ${field('otherVoices', 'Voices for other languages', 'Used when a file is in that language, e.g. es=ef_dora, pt=pf_dora', { wide: true, placeholder: 'es=ef_dora, pt=pf_dora' })}
           ${field('instructions', 'Reading style', 'OpenAI gpt-4o-mini-tts only: how to read, in your words', { wide: true })}
-          ${field('apiKey', 'API key', 'Only if the server needs one (OpenAI). Kept on this device.', { type: 'password' })}
+          <${Field} label="API key"
+            hint=${keyHere ? `Saved for ${keyHost}. Type a new one to replace it.` : keySaved && keyHost ? `The saved key is for ${keyHost}, so it is not sent to this server. Type one if this server needs it.` : 'Only if the server needs one (OpenAI). Kept in this device’s secure storage and sent only to this server.'}>
+            <input type="password" value=${key} onInput=${(e) => setKey(e.currentTarget.value)} placeholder=${keyHere ? '••••••••' : ''} autocomplete="off" spellcheck=${false} />
+          </${Field}>
           <div class="form-actions span-2">
-            <button type="button" class="btn primary" onClick=${() => {
-              saveSettings({ tts: { server, engine: 'server' } });
-              actions.toast('Speech server saved');
-            }}>Save</button>
+            <button type="button" class="btn primary" onClick=${saveServer}>Save</button>
+            ${keySaved && html`<button type="button" class="btn ghost" onClick=${forgetKey}>Remove the key</button>`}
           </div>
         </div>
-        ${server.baseUrl.includes('localhost') && html`<p class="notice"><${Icon} name="alert" size=${15} />A server at localhost is only reachable from the computer it runs on. On your phone, use one with an https address, such as OpenAI.</p>`}
+        ${reach && html`<p class="notice"><${Icon} name="alert" size=${15} /><span>${reach}</span></p>`}
         <details class="help"><summary>How do I run Kokoro on my computer?</summary>
           <ol>
             <li>Install Docker Desktop, then run <code>docker run -d -p 8880:8880 --restart unless-stopped ghcr.io/remsky/kokoro-fastapi-cpu:latest</code> (with an NVIDIA graphics card, <code>kokoro-fastapi-gpu</code> is faster).</li>
             <li>Press <strong>Kokoro (this computer)</strong>, then <strong>Save</strong> and <strong>Hear a sample</strong>. It is free and nothing leaves your computer.</li>
             <li>Voices starting with <code>a</code> are American English, <code>b</code> British, <code>e</code> Spanish and <code>p</code> Portuguese; <code>f</code>/<code>m</code> is female or male.</li>
+            <li>On your phone, in the Android app: the same server at the computer’s address on your network, such as <code>http://192.168.1.20:8880/v1</code> (the computer on, both on the same Wi-Fi; away from home, a VPN like Tailscale reaches it).</li>
           </ol>
         </details>`}
     <div class="form-actions">
-      <button type="button" class="btn" onClick=${sample}><${Icon} name="volume" size=${15} />Hear a sample</button>
+      <button type="button" class="btn" onClick=${() => sample()}><${Icon} name="volume" size=${15} />Hear a sample</button>
       <select class="sample-lang" aria-label="Sample language" value=${sampleLang} onChange=${(e) => setSampleLang(e.currentTarget.value)}>
         <option value="en">English</option><option value="es">Español</option><option value="pt">Português</option>
       </select>

@@ -889,17 +889,24 @@ public class TrackerNativePlugin extends Plugin {
         return speech;
     }
 
-    /** { voices: [{ name, label, lang, network, quality }], defaultVoice, engine }. */
+    // The engine the page asks for ("engine": a package, "" for the phone's preferred one).
+    private Speech speech(PluginCall call) {
+        Speech s = speech();
+        s.useEngine(call.getString("engine", ""));
+        return s;
+    }
+
+    /** { engine }: { voices: [{ name, lang, network, quality }], defaultVoice, engine, systemEngine, engines: [{ name, label }] }. */
     @PluginMethod
     public void ttsVoices(PluginCall call) {
-        speech().voices(call::resolve, call::reject);
+        speech(call).voices(call::resolve, call::reject);
     }
 
     /** Speaks { id, text, voice, lang, rate, pitch } now; how it goes comes as "tts" events with that id. */
     @PluginMethod
     public void ttsSpeak(PluginCall call) {
         String id = call.getString("id", "");
-        speech().speak(id, call.getString("text", ""), call.getString("voice", ""), call.getString("lang", ""),
+        speech(call).speak(id, call.getString("text", ""), call.getString("voice", ""), call.getString("lang", ""),
             call.getFloat("rate", 1f), call.getFloat("pitch", 1f), (message) -> {
                 JSObject event = new JSObject();
                 event.put("id", id);
@@ -908,6 +915,13 @@ public class TrackerNativePlugin extends Plugin {
                 notifyListeners("tts", event);
             });
         call.resolve();
+    }
+
+    /** Makes { id, text, voice, lang, rate, pitch } into audio without playing it: { audio (base64 WAV), mime }. */
+    @PluginMethod
+    public void ttsSynthesize(PluginCall call) {
+        speech(call).synthesize(call.getString("id", ""), call.getString("text", ""), call.getString("voice", ""), call.getString("lang", ""),
+            call.getFloat("rate", 1f), call.getFloat("pitch", 1f), call::resolve, call::reject);
     }
 
     @PluginMethod

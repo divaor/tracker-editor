@@ -155,6 +155,8 @@ const placeOfKey = (key) => {
 
 // The document shown as it looks in the open tab, when it reads aloud: { listen } (ui/documentView.js).
 let docReader = null;
+// The Markdown preview's reading (ui/preview.js), used by Alt+R while the preview hides the text.
+let previewReader = null;
 
 function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setCompare, setUsagesOf, setSearchSeed }) {
   return useMemo(() => {
@@ -1356,13 +1358,14 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       readAloud() {
         if (getReaderState().status !== 'idle') return toggleReading();
         if (docReader) return docReader.listen();
+        if (previewReader?.hidesText()) return previewReader.listen();
         const host = hostRef.current;
         host?.flushAll();
         const snap = host?.snapshot();
         if (!snap) return;
         const k = parseKey(snap.key);
         const file = k.kind === 'file' ? store.get(k.id) : null;
-        const name = file?.name ?? store.repoTab(k.path)?.name ?? '';
+        const name = file?.name ?? (k.kind === 'disk' ? store.diskTab(k.path)?.name : store.repoTab(k.path)?.name) ?? '';
         const markdown = findLanguage(name, file?.language)?.name === 'Markdown';
         try {
           startReading({ key: snap.key, name, text: snap.text, markdown, from: snap.from, to: snap.to });
@@ -3222,6 +3225,7 @@ export function App() {
           ${showPreview && !previewFull && splitHandle('Resize the preview')}
           ${showPreview && html`<${Preview} key=${activeKey} kind=${previewType} name=${activeName} text=${activeText()}
             full=${previewFull} onFull=${isNarrow() ? undefined : () => setPreviewFull(!previewFull)} onClose=${actions.togglePreview}
+            readKey=${`preview:${activeKey}`} textHidden=${previewFull || isNarrow()} onReader=${(r) => (previewReader = r)}
             onToggle=${(next) => {
               if (activeFile) store.setText(activeFile.id, next);
               else if (activeDisk) store.setDiskText(activeDisk.path, next, { urgent: true });

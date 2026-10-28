@@ -38,6 +38,7 @@
   /* Where a file lives (where.js): my files, a tracker document, this computer, a server. */
   --kind-synced: #1c8f55;
   --reading-bg: rgba(16, 185, 129, 0.18);
+  --reading-block: rgba(16, 185, 129, 0.07);
   --kind-doc: #2f6fd6;
   --kind-disk: #c47a0a;
   --kind-remote: #b5309a;
@@ -95,6 +96,7 @@
     --bracket-2: #87cefa;
     --kind-synced: #4fc58a;
     --reading-bg: rgba(52, 211, 153, 0.2);
+    --reading-block: rgba(52, 211, 153, 0.08);
     --kind-doc: #6ea2f2;
     --kind-disk: #eba94a;
     --kind-remote: #e27ad0;
@@ -146,6 +148,7 @@
   --bracket-2: #87cefa;
   --kind-synced: #4fc58a;
   --reading-bg: rgba(52, 211, 153, 0.2);
+  --reading-block: rgba(52, 211, 153, 0.08);
   --kind-doc: #6ea2f2;
   --kind-disk: #eba94a;
   --kind-remote: #e27ad0;
@@ -3838,11 +3841,207 @@ button.where-chip:hover {
 }
 
 .read-voice {
-  width: auto;
   max-width: 190px;
+}
+
+/* The voice picker (ui/voicePicker.js): a button, and a list of voices in two lines each. */
+.voice-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
   min-height: 30px;
-  padding: 2px 22px 2px 6px;
+  padding: 2px 6px 2px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.voice-btn:hover {
+  border-color: var(--border-strong);
+}
+
+.voice-btn-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voice-btn svg {
+  flex: none;
+  color: var(--text-2);
+}
+
+.voice-btn.wide {
+  justify-content: space-between;
+  width: 100%;
+  min-height: 36px;
+  font-size: 13.5px;
+}
+
+.voice-list {
+  position: fixed;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  animation: rise 0.1s ease-out;
+}
+
+/* Phones: a sheet from the bottom, above the system's bar. */
+.voice-list.sheet {
+  right: 0;
+  bottom: 0;
+  left: 0;
+  max-height: 72vh;
+  padding-bottom: var(--safe-bottom, 0px);
+  border-radius: 14px 14px 0 0;
+}
+
+.voice-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 69;
+  background: rgba(0, 0, 0, 0.32);
+}
+
+.voice-engines {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px 4px;
+}
+
+.voice-engines-label {
+  color: var(--text-2);
   font-size: 12px;
+}
+
+.voice-engines .chip {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.voice-engines .chip.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.voice-list input.voice-search {
+  flex: none;
+  width: calc(100% - 20px);
+  margin: 8px 10px 4px;
+  font-size: 13px;
+}
+
+.voice-rows {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px;
+  overscroll-behavior: contain;
+}
+
+.voice-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: 8px;
+}
+
+.voice-row:hover,
+.voice-row:focus-within {
+  background: var(--surface-2);
+}
+
+.voice-row.selected {
+  background: var(--accent-soft);
+}
+
+.voice-pick {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 0;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.voice-title {
+  overflow: hidden;
+  font-size: 13.5px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voice-detail {
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 11.5px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.voice-star {
+  margin-right: 4px;
+  color: var(--accent);
+}
+
+.voice-check {
+  flex: none;
+  margin-right: 8px;
+  color: var(--accent);
+}
+
+.voice-sample {
+  flex: none;
+}
+
+.voice-group {
+  padding: 8px 8px 3px;
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.voice-more {
+  width: 100%;
+  margin-top: 4px;
+  padding: 8px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: none;
+  color: var(--accent);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.voice-empty {
+  margin: 8px;
+  color: var(--text-2);
+  font-size: 13px;
 }
 
 .filebar .btn.on {
@@ -8711,11 +8910,25 @@ html[data-native='android'] body:has(.edit-bar) .toasts {
   padding: 0;
 }
 
-/* The passage read aloud in a document: its block (a PDF: its page). */
-.doc-html .doc-reading {
+/* Read aloud in a document or the preview (ui/readAlong.js): the block being read, and in it the
+   sentence (the `reading` highlight; where the browser has no highlights, the block alone, stronger). */
+.doc-html .doc-reading,
+.markdown .doc-reading {
   border-radius: 4px;
   background: var(--reading-bg);
   box-shadow: 0 0 0 4px var(--reading-bg);
+}
+
+@supports selector(::highlight(reading)) {
+  .doc-html .doc-reading,
+  .markdown .doc-reading {
+    background: var(--reading-block);
+    box-shadow: 0 0 0 4px var(--reading-block);
+  }
+}
+
+::highlight(reading) {
+  background-color: var(--reading-bg);
 }
 
 .pdf-page.doc-reading {

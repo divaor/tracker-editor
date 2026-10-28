@@ -130,6 +130,8 @@ const ASSETS = [
   'js/folderIndex.js',
   'js/ui/folderPreview.js',
   'js/ui/fullScreen.js',
+  'js/ui/readAlong.js',
+  'js/ui/voicePicker.js',
   'js/ui/folders.js',
   'js/ui/ocr.js',
   'js/ui/dictation.js',

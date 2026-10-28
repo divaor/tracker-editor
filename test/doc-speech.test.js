@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { blockAt, firstBelow, joinBlocks, pdfSpeechText, readsAloud } from '../app/js/docSpeech.js';
+import { blockAt, firstBelow, joinBlocks, passageInBlock, pdfSpeechText, readsAloud, tidyBlock } from '../app/js/docSpeech.js';
 import { speechPassages } from '../app/js/speech.js';
 
 test('blocks become one text, each passage traced to its block', () => {
@@ -21,6 +21,31 @@ test('blocks become one text, each passage traced to its block', () => {
     [0, 1, 3, 4, 4],
   );
   assert.equal(joinBlocks([]).text, '');
+});
+
+test('each tidied character points back to where it was', () => {
+  const raw = '  Hello,\t  world.\r\n  Next line.\n \n\nAfter a gap. ';
+  const { text, map } = tidyBlock(raw);
+  assert.equal(text, 'Hello, world.\nNext line.\n\nAfter a gap.');
+  assert.equal(map.length, text.length);
+  // Letters map to themselves; a collapsed run maps to where it began.
+  for (let i = 0; i < text.length; i++) if (/\S/.test(text[i])) assert.equal(raw[map[i]], text[i]);
+  assert.equal(map[text.indexOf(' world')], raw.indexOf(',') + 1);
+  assert.deepEqual(tidyBlock(' \n '), { text: '', map: [] });
+});
+
+test('a passage is found again in its block', () => {
+  const texts = ['Title', '  The first sentence is long enough to stand alone.   The second   one follows it, also long. ', '', 'Last.'];
+  const joined = joinBlocks(texts);
+  const passages = speechPassages(joined.text, { maxPassage: 60 });
+  const found = passages.map((p) => passageInBlock(joined, p)).map((r) => r && { block: r.block, text: texts[r.block].slice(r.from, r.to) });
+  assert.deepEqual(found, [
+    { block: 0, text: 'Title' },
+    { block: 1, text: 'The first sentence is long enough to stand alone.' },
+    { block: 1, text: 'The second   one follows it, also long.' },
+    { block: 3, text: 'Last.' },
+  ]);
+  assert.equal(passageInBlock({ ...joined, maps: null }, passages[0]), null);
 });
 
 test('the first block below the top of the screen', () => {

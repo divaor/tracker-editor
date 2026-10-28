@@ -74,6 +74,8 @@ const LANG_WORDS = {
   },
 };
 const words = (lang) => LANG_WORDS[lang || 'en'] ?? null;
+/** What is said for a code block that is skipped, in `lang` (English when it has no words). */
+export const codeSkippedWords = (lang) => words(lang)?.code ?? LANG_WORDS.en.code;
 
 /**
  * Rewrites text the way a person reads it aloud: ISO dates and common
@@ -252,7 +254,7 @@ export function detectLanguage(text) {
 }
 
 // Voices whose names say they are the natural-sounding kind (neural, online, enhanced…).
-const NATURAL = /natural|neural|online|enhanced|premium|wavenet|studio|journey|chirp|network|siri/i;
+const NATURAL = /natural|neural|online|enhanced|premium|wavenet|studio|journey|chirp|network|siri|kokoro|piper|vits/i;
 export const isNaturalVoice = (voice) => NATURAL.test(`${voice.name} ${voice.voiceURI ?? ''}`);
 
 /** Voices ranked for reading `lang`: that language first, then the natural-sounding ones, then the device's default. */
@@ -274,3 +276,71 @@ export function serverVoiceFor({ voice = '', otherVoices = '' } = {}, lang = '')
   }
   return voice;
 }
+
+// ---- Telling voices apart -----------------------------------------------------------
+
+// Kokoro's voices are named <accent><gender>_<name> (af_heart): the accent a American, b British, e Spanish,
+// f French, h Hindi, i Italian, j Japanese, p Brazilian Portuguese, z Mandarin; f female, m male.
+const KOKORO_ACCENTS = { a: ['en', 'American English'], b: ['en', 'British English'], e: ['es', 'Spanish'], f: ['fr', 'French'], h: ['hi', 'Hindi'], i: ['it', 'Italian'], j: ['ja', 'Japanese'], p: ['pt', 'Brazilian Portuguese'], z: ['zh', 'Mandarin Chinese'] };
+const KOKORO_VOICES = (
+  'af_alloy af_aoede af_bella af_heart af_jessica af_kore af_nicole af_nova af_river af_sarah af_sky am_adam am_echo am_eric am_fenrir am_liam ' +
+  'am_michael am_onyx am_puck am_santa bf_alice bf_emma bf_isabella bf_lily bm_daniel bm_fable bm_george bm_lewis ef_dora em_alex em_santa ff_siwis ' +
+  'hf_alpha hf_beta hm_omega hm_psi if_sara im_nicola jf_alpha jf_gongitsune jf_nezumi jf_tebukuro jm_kumo pf_dora pm_alex pm_santa zf_xiaobei ' +
+  'zf_xiaoni zf_xiaoxiao zf_xiaoyi zm_yunjian zm_yunxi zm_yunxia zm_yunyang'
+).split(' ');
+const title = (word) => word.charAt(0).toUpperCase() + word.slice(1);
+
+/**
+ * A Kokoro voice from its key ("af_heart") or the name an engine lists it by ("Heart (Kokoro)",
+ * told apart by the voice's language): { key, name, accent, gender }, or null.
+ */
+export function kokoroVoice(name, lang = '') {
+  const raw = String(name ?? '').trim();
+  let key = /^[abefhijpz][fm]_[a-z]+$/i.test(raw) ? raw.toLowerCase() : null;
+  if (!key) {
+    const m = /^(.+?)\s*\(kokoro\)$/i.exec(raw) ?? /^kokoro[\s_-]+(.+)$/i.exec(raw);
+    if (!m) return null;
+    const wanted = m[1].trim().toLowerCase().replace(/\s+/g, '');
+    const keys = KOKORO_VOICES.filter((k) => k.slice(3) === wanted || k === wanted);
+    const code = String(lang).slice(0, 2).toLowerCase();
+    key = keys.find((k) => KOKORO_ACCENTS[k[0]][0] === code) ?? keys[0] ?? null;
+    if (!key) return { key: null, name: title(m[1].trim()), accent: '', gender: '' };
+  }
+  const [, accent] = KOKORO_ACCENTS[key[0]] ?? [];
+  return { key, name: title(key.slice(3)), accent: accent ?? '', gender: key[1] === 'f' ? 'female' : 'male' };
+}
+
+/** A language tag in words: "en-US" → "American English", "es" → "Spanish" (the tag itself without Intl). */
+export function languageName(tag, uiLang = 'en') {
+  const t = String(tag ?? '').replace('_', '-');
+  if (!t) return '';
+  try {
+    return new Intl.DisplayNames([uiLang], { type: 'language' }).of(t) ?? t;
+  } catch {
+    return t;
+  }
+}
+
+/**
+ * What to show for a voice in a list: { title, detail }. The title is its name (Kokoro's and Piper's
+ * made readable; Android's Google voices by their language and code), the detail its language,
+ * accent, gender, model and whether it needs a connection.
+ */
+export function describeVoice(voice) {
+  const name = String(voice?.name ?? voice?.voiceURI ?? '');
+  const lang = String(voice?.lang ?? '');
+  const online = voice?.localService === false;
+  const where = online ? 'needs internet' : '';
+  const low = voice?.quality && voice.quality < 300 ? 'low quality' : '';
+  const parts = (...xs) => xs.filter(Boolean).join(' · ');
+  const kokoro = kokoroVoice(name, lang);
+  if (kokoro) return { title: kokoro.name, detail: parts(kokoro.accent || languageName(lang), kokoro.gender, 'Kokoro', where) };
+  const piper = /^(?:vits-)?(?:piper-)?([a-z]{2,3})[_-]([A-Z]{2})-([a-z0-9_]+?)-(x_low|low|medium|high)$/.exec(name);
+  if (piper) return { title: title(piper[3].replace(/_/g, ' ')), detail: parts(languageName(`${piper[1]}-${piper[2]}`), `Piper, ${piper[4].replace('x_', 'very ')} quality`, where) };
+  const google = /^([a-z]{2,3})-([a-z]{2,4})-x-([a-z0-9]+)-(local|network)$/i.exec(name);
+  if (google) return { title: `Voice ${google[3].toUpperCase()}`, detail: parts(languageName(`${google[1]}-${google[2].toUpperCase()}`), google[4] === 'network' ? 'needs internet' : 'offline', low) };
+  // Browsers' voices: "Microsoft Aria Online (Natural) - English (United States)".
+  const [own, said] = name.split(/\s+-\s+(?=[^-]+$)/);
+  return { title: own || name, detail: parts(said && languageName(lang) === lang ? said : languageName(lang), where, low) };
+}
+

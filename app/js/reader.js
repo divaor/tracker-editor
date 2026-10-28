@@ -3,22 +3,26 @@
 // - device: the device's own voices (Web Speech API; in the Android app, whose
 //   WebView has none, Android's text to speech through the app: androidApp.js
 //   `tts`). Free and offline; how natural it sounds depends on the voices
-//   installed. The screen stays on while reading, because phones stop speech
+//   installed. In the app the next passages are made into audio while one plays
+//   and played here, so a voice slower than speech (Kokoro on the phone) does not
+//   leave a silence before each sentence; an engine that cannot do that speaks
+//   them itself. The screen stays on while reading, because phones stop speech
 //   when it turns off.
 // - server: a speech server with an OpenAI-compatible API (Kokoro on this
 //   computer, OpenAI, …) for natural voices. Played as audio, the next passage
 //   fetched ahead, with play/pause on the lock screen and the screen free to
 //   turn off.
 import { localFetch } from './localFetch.js';
-import { getSettings, saveSettings } from './settings.js';
-import { detectLanguage, passageAt, rankVoices, serverVoiceFor, speechPassages } from './speech.js';
+import { TTS_KEY_SECRET, getSecret, getSettings, originOf, saveSettings } from './settings.js';
+import { PAUSES, detectLanguage, passageAt, rankVoices, serverVoiceFor, speechPassages } from './speech.js';
 
 export const RATES = [0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
 // Passage size: device voices speak sentence by sentence, a speech server gets whole paragraphs for better intonation.
 const MAX_PASSAGE = { device: 240, server: 700 };
-const AHEAD = 2; // speech-server passages fetched ahead of the one playing
+// Passages made ahead of the one playing: a speech server's (each a request), the phone's voices'.
+const AHEAD = { server: 2, device: 3 };
 
-let state = { status: 'idle', key: null, name: '', index: 0, total: 0, lang: '', engine: 'device', loading: false, error: '' };
+let state = { status: 'idle', key: null, name: '', index: 0, total: 0, lang: '', engine: 'device', voice: '', loading: false, error: '' };
 let passages = [];
 let highlight = () => {};
 let shownBy = null; // this reading's own highlighter (a document shows its passages itself)
@@ -32,13 +36,18 @@ let audio = null; // the server engine's player
 let audioIndex = -1; // the passage loaded in it
 let audioUrls = new Map(); // passage index → Promise of an object URL
 let fetches = null; // AbortController for this reading's server requests
+let direct = false; // this reading's phone voices speak each passage themselves (making audio failed)
 
 const synth = () => window.speechSynthesis;
 // Android's text to speech in the app, else the browser's.
 const native = () => (typeof window !== 'undefined' && window.desktop?.android?.tts) || null;
 const webSpeech = () => typeof window !== 'undefined' && Boolean(window.speechSynthesis && window.SpeechSynthesisUtterance);
 export const canSpeak = () => Boolean(native()) || webSpeech();
-export const voices = () => native()?.voices() ?? (webSpeech() ? synth().getVoices() : []);
+// The Android app speaks with the engine chosen in the settings (the phone's preferred one by default).
+const useEngine = () => native()?.setEngine?.(getSettings().tts.androidEngine ?? '');
+export const voices = () => (useEngine(), native()?.voices() ?? (webSpeech() ? synth().getVoices() : []));
+/** The Android app's engines ({ engine, systemEngine, engines: [{ name, label }] }), elsewhere null. */
+export const voiceEngines = () => native()?.engines?.() ?? null;
 /** `fn()` when the list of voices changes (they load after the page). */
 export function onVoicesChanged(fn) {
   if (native()) return native().onVoicesChanged(fn);
@@ -49,6 +58,8 @@ export function onVoicesChanged(fn) {
 }
 export const getReaderState = () => state;
 const usesServer = () => getSettings().tts.engine === 'server';
+// Played as audio here: a speech server's, and in the Android app the phone's voices made ahead.
+const playsAudio = () => state.engine === 'server' || (state.engine === 'device' && !direct && typeof native()?.synthesize === 'function');
 
 function set(patch) {
   state = { ...state, ...patch };
@@ -84,10 +95,11 @@ async function keepScreenOn(on) {
 
 // ---- Device voices -----------------------------------------------------------------
 
-/** The chosen voice, else the most natural-sounding one for the text's language, else the device default. */
+/** The chosen voice (this reading's own, as for a sample), else the most natural-sounding one for the text's language, else the device default. */
 function pickVoice(lang) {
   const all = voices();
-  const chosen = getSettings().tts.voice && all.find((v) => v.voiceURI === getSettings().tts.voice);
+  const wanted = state.voice || getSettings().tts.voice;
+  const chosen = wanted && all.find((v) => v.voiceURI === wanted);
   if (chosen) return chosen;
   const best = rankVoices(all, lang)[0];
   return best && lang && best.lang.toLowerCase().replace('_', '-').startsWith(lang) ? best : null;
@@ -120,11 +132,13 @@ function speakDevice(passage, next, fail) {
 async function synthesize(text, signal) {
   const s = getSettings().tts.server;
   const base = s.baseUrl.trim().replace(/\/+$/, '');
+  // The key goes only to the server it was saved for (an old one still in the settings, until it moves).
+  const key = s.apiKey || (s.keyOrigin && s.keyOrigin === originOf(base) ? await getSecret(TTS_KEY_SECRET).catch(() => '') : '');
   let res;
   try {
     res = await localFetch(`${base}/audio/speech`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', ...(s.apiKey ? { authorization: `Bearer ${s.apiKey}` } : {}) },
+      headers: { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) },
       body: JSON.stringify({ model: s.model, voice: serverVoiceFor(s, state.lang), input: text, response_format: 'mp3', ...(s.instructions.trim() ? { instructions: s.instructions.trim() } : {}) }),
       signal,
     });
@@ -145,9 +159,17 @@ async function synthesize(text, signal) {
   return URL.createObjectURL(await res.blob());
 }
 
+/** The phone's voice reading one passage, made into audio (not played); resolves to an object URL. */
+async function phoneAudio(passage) {
+  const voice = pickVoice(state.lang);
+  const { rate } = getSettings().tts;
+  const blob = await native().synthesize({ text: passage.text, voice: voice?.voiceURI ?? '', lang: voice?.lang ?? state.lang, rate: passage.kind === 'heading' ? rate * 0.92 : rate });
+  return URL.createObjectURL(blob);
+}
+
 function audioFor(index) {
   if (!audioUrls.has(index)) {
-    const promise = synthesize(passages[index].text, fetches?.signal);
+    const promise = state.engine === 'server' ? synthesize(passages[index].text, fetches?.signal) : phoneAudio(passages[index]);
     promise.catch(() => audioUrls.get(index) === promise && audioUrls.delete(index));
     audioUrls.set(index, promise);
   }
@@ -162,28 +184,37 @@ function forgetAudio(keep = () => false) {
   }
 }
 
-async function playServer(passage, myRun, next, fail) {
+async function playAudio(passage, myRun, next, fail) {
   const index = state.index;
   if (!audioUrls.has(index)) set({ loading: true });
   let url;
   try {
     url = await audioFor(index);
   } catch (err) {
-    if (err?.name !== 'AbortError') fail(err.message);
+    if (err?.name === 'AbortError' || err?.code === 'interrupted' || myRun !== run) return;
+    if (state.engine === 'device' && !direct) {
+      // This phone's engine cannot make audio files: it speaks each passage itself instead.
+      direct = true;
+      forgetAudio();
+      speakCurrent();
+      return;
+    }
+    fail(err.message);
     return;
   } finally {
     if (myRun === run) set({ loading: false });
   }
   if (myRun !== run || state.status !== 'playing') return;
-  for (let i = index + 1; i <= Math.min(index + AHEAD, passages.length - 1); i++) audioFor(i).catch(() => {});
+  for (let i = index + 1; i <= Math.min(index + AHEAD[state.engine], passages.length - 1); i++) audioFor(i).catch(() => {});
   forgetAudio((i) => i >= index - 1);
   audio ??= new Audio();
   audio.src = url;
   audioIndex = index;
-  audio.playbackRate = getSettings().tts.rate;
+  // A server's audio is sped up here; the phone's voices were made at the speed already.
+  audio.playbackRate = state.engine === 'server' ? getSettings().tts.rate : 1;
   audio.preservesPitch = true;
   audio.onended = next;
-  audio.onerror = () => fail('This device cannot play the audio the speech server sent.');
+  audio.onerror = () => fail(state.engine === 'server' ? 'This device cannot play the audio the speech server sent.' : 'This device cannot play the audio its voice made.');
   try {
     await audio.play();
   } catch (err) {
@@ -247,7 +278,7 @@ function speakCurrent() {
     }, gap);
   };
   const fail = (message) => myRun === run && finish(message);
-  if (state.engine === 'server') playServer(passage, myRun, next, fail);
+  if (playsAudio()) playAudio(passage, myRun, next, fail);
   else speakDevice(passage, next, fail);
 }
 
@@ -258,7 +289,7 @@ function finish(error = '') {
   fetches?.abort();
   forgetAudio();
   passages = [];
-  set({ status: 'idle', index: 0, total: 0, loading: false, error });
+  set({ status: 'idle', index: 0, total: 0, voice: '', loading: false, error });
   setMediaHandlers(false);
   keepScreenOn(false);
 }
@@ -267,9 +298,10 @@ function finish(error = '') {
  * Reads `text` aloud from the passage at `from`; with a selection (to > from),
  * only the selection. Markdown is read as prose. The language (en, es, …) is
  * guessed from the text unless given. `onPassage(key, passage | null)` shows the
- * passages of this reading instead of the editor's highlighter.
+ * passages of this reading instead of the editor's highlighter; `kindOf(passage)` may say
+ * what a whole paragraph is (a heading, a list item, a table cell: speech.js PAUSES).
  */
-export function startReading({ key, name, text, markdown = false, from = 0, to = 0, lang: language = '', onPassage = null }) {
+export function startReading({ key, name, text, markdown = false, from = 0, to = 0, lang: language = '', onPassage = null, kindOf = null, voice = '' }) {
   const engine = usesServer() ? 'server' : 'device';
   if (engine === 'device' && !canSpeak()) throw new Error('This browser cannot read aloud. Choose a speech server in Settings → Read aloud.');
   if (state.status !== 'idle') finish();
@@ -277,22 +309,32 @@ export function startReading({ key, name, text, markdown = false, from = 0, to =
   const lang = language || detectLanguage(text) || (navigator.language || 'en').slice(0, 2).toLowerCase();
   const options = { markdown, lang, maxPassage: MAX_PASSAGE[engine] };
   const selection = to > from;
-  const list = selection ? speechPassages(text.slice(from, to), options).map((p) => ({ ...p, from: p.from + from, to: p.to + from })) : speechPassages(text, options);
+  let list = selection ? speechPassages(text.slice(from, to), options).map((p) => ({ ...p, from: p.from + from, to: p.to + from })) : speechPassages(text, options);
+  if (kindOf) {
+    list = list.map((p) => {
+      const kind = p.kind === 'paragraph' ? kindOf(p) : null;
+      return kind && PAUSES[kind] != null ? { ...p, kind, pause: PAUSES[kind] } : p;
+    });
+    // A heading follows a longer silence, like a new section.
+    list.forEach((p, i) => list[i + 1]?.kind === 'heading' && (p.pause = Math.max(p.pause, PAUSES.heading)));
+  }
   if (!list.length) throw new Error('There is nothing to read here.');
   passages = list;
   fetches = new AbortController();
+  direct = false;
   if (engine === 'device') {
     if (!native()) synth().cancel(); // clears a queue some browsers keep after a page reload
     keepScreenOn(true);
   } else setMediaHandlers(true);
-  set({ status: 'playing', key, name, index: selection ? 0 : passageAt(list, from), total: list.length, lang, engine, loading: false, error: '' });
+  useEngine();
+  set({ status: 'playing', key, name, index: selection ? 0 : passageAt(list, from), total: list.length, lang, engine, voice, loading: false, error: '' });
   speakCurrent();
 }
 
 export function pauseReading() {
   if (state.status !== 'playing') return;
-  // The server engine pauses mid-sentence; device voices restart the passage on resume.
-  if (state.engine === 'server' && audioIndex === state.index && !gapTimer) audio.pause();
+  // Audio pauses mid-sentence; voices that speak themselves restart the passage on resume.
+  if (playsAudio() && audioIndex === state.index && !gapTimer) audio.pause();
   else silence();
   set({ status: 'paused' });
   keepScreenOn(false);
@@ -301,11 +343,11 @@ export function pauseReading() {
 export function resumeReading() {
   if (state.status !== 'paused') return;
   set({ status: 'playing' });
-  if (state.engine === 'server' && audio && audioIndex === state.index && !audio.ended) {
+  if (state.engine === 'device') keepScreenOn(true);
+  if (playsAudio() && audio && audioIndex === state.index && !audio.ended) {
     audio.play().catch(() => speakCurrent());
     return;
   }
-  if (state.engine === 'device') keepScreenOn(true);
   speakCurrent();
 }
 
@@ -322,23 +364,34 @@ export function skipReading(step) {
   else show(passages[index]);
 }
 
+// Device voices take a new speed or voice from the start of the current passage (audio made ahead is made again).
+function restartPassage() {
+  silence();
+  forgetAudio();
+  if (state.status === 'playing') speakCurrent();
+}
+
 export function setReadingRate(rate) {
   saveSettings({ tts: { rate } });
-  if (state.engine === 'server' && audio) audio.playbackRate = rate;
-  else if (state.status === 'playing') {
-    // A new speed applies from the start of the current passage.
-    silence();
-    speakCurrent();
-  }
+  if (state.engine === 'server') {
+    if (audio) audio.playbackRate = rate;
+  } else if (state.status !== 'idle') restartPassage();
   set({});
 }
 
 export function setReadingVoice(voice) {
   saveSettings({ tts: { voice } });
-  if (state.engine === 'device' && state.status === 'playing') {
-    silence();
-    speakCurrent();
-  }
+  state = { ...state, voice: '' };
+  if (state.engine === 'device' && state.status !== 'idle') restartPassage();
+  set({});
+}
+
+/** The Android app: speak with the engine of package `name` ('' = the phone's preferred one), its automatic voice. */
+export function setVoiceEngine(name) {
+  const info = voiceEngines();
+  saveSettings({ tts: { androidEngine: name && name === info?.systemEngine ? '' : name, voice: '' } });
+  useEngine();
+  if (state.engine === 'device' && state.status !== 'idle') restartPassage();
   set({});
 }
 

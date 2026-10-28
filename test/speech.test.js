@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { detectLanguage, isNaturalVoice, naturalize, passageAt, PAUSES, rankVoices, serverVoiceFor, speakableMarkdown, speechPassages } from '../app/js/speech.js';
+import { describeVoice, detectLanguage, isNaturalVoice, kokoroVoice, naturalize, passageAt, PAUSES, rankVoices, serverVoiceFor, speakableMarkdown, speechPassages } from '../app/js/speech.js';
 
 test('turns Markdown into words to say', () => {
   assert.equal(speakableMarkdown('## The **setup** today ##'), 'The setup today');
@@ -102,6 +102,24 @@ test('long paragraphs are read sentence by sentence', () => {
 test('plain text keeps its symbols, but not URLs', () => {
   const passages = speechPassages('# not a heading here\nx = a * b  # see https://example.com\n');
   assert.deepEqual(passages.map((p) => p.text), ['# not a heading here x = a * b # see link']);
+});
+
+test('voices told apart: Kokoro and Piper names made readable, accents and genders', () => {
+  assert.deepEqual(kokoroVoice('af_heart'), { key: 'af_heart', name: 'Heart', accent: 'American English', gender: 'female' });
+  // An engine that lists them by name: the language tells Hindi's Alpha from Japanese's.
+  assert.equal(kokoroVoice('Alpha (Kokoro)', 'hi').key, 'hf_alpha');
+  assert.equal(kokoroVoice('Alpha (Kokoro)', 'ja').key, 'jf_alpha');
+  assert.equal(kokoroVoice('Santa (Kokoro)', 'pt-BR').key, 'pm_santa');
+  assert.equal(kokoroVoice('Samantha'), null);
+  const d = (v) => describeVoice(v);
+  assert.deepEqual(d({ name: 'Heart (Kokoro)', lang: 'en' }), { title: 'Heart', detail: 'American English · female · Kokoro' });
+  assert.deepEqual(d({ name: 'George (Kokoro)', lang: 'en' }), { title: 'George', detail: 'British English · male · Kokoro' });
+  assert.deepEqual(d({ name: 'es_MX-claude-high', lang: 'es' }), { title: 'Claude', detail: 'Mexican Spanish · Piper, high quality' });
+  assert.deepEqual(d({ name: 'en-us-x-tpf-local', lang: 'en-US', localService: true }), { title: 'Voice TPF', detail: 'American English · offline' });
+  assert.deepEqual(d({ name: 'en-gb-x-gbd-network', lang: 'en-GB', localService: false }), { title: 'Voice GBD', detail: 'British English · needs internet' });
+  assert.deepEqual(d({ name: 'Microsoft Aria Online (Natural) - English (United States)', lang: 'en-US', localService: false }), { title: 'Microsoft Aria Online (Natural)', detail: 'American English · needs internet' });
+  assert.deepEqual(d({ name: 'Samantha', lang: 'en-US', localService: true }), { title: 'Samantha', detail: 'American English' });
+  assert.ok(isNaturalVoice({ name: 'Heart (Kokoro)' }), 'Kokoro counts as natural');
 });
 
 test('a speech server reads each language with its own voice', () => {

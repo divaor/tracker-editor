@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { API_PROVIDERS, connectionOf, createModelClient, keySecret, LLM_KEY_SECRETS, providerOf } from '../app/js/providers.js';
-import { SECRET_NAMES } from '../app/js/settings.js';
+import { SECRET_NAMES, TTS_KEY_SECRET } from '../app/js/settings.js';
 
 test('connections and their keys', () => {
   assert.equal(connectionOf({ provider: 'openai', service: 'local' }), 'local');
@@ -23,6 +23,7 @@ test('every key has a secret the page and the desktop app allow', () => {
   const main = readFileSync(new URL('../electron/main.cjs', import.meta.url), 'utf8');
   const allowed = /const SECRET_KEYS = new Set\(\[([^\]]*)\]\)/.exec(main)[1];
   for (const name of LLM_KEY_SECRETS) assert.ok(allowed.includes(`'${name}'`), `${name} in main.cjs SECRET_KEYS`);
+  assert.ok(SECRET_NAMES.includes(TTS_KEY_SECRET) && allowed.includes(`'${TTS_KEY_SECRET}'`), 'the speech server key is a secret on desktop too');
 });
 
 test('the client: Claude through its SDK, the rest OpenAI-style, the key read when asked', async () => {

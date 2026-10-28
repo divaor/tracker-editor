@@ -189,6 +189,8 @@ function speech() {
   let list = [];
   let loading = null;
   let n = 0;
+  let engine = ''; // the engine asked for: a package, '' for the phone's preferred one
+  let info = { engine: '', systemEngine: '', engines: [] };
   const waiting = new Map(); // utterance id → { resolve, reject }
   const changed = new Set();
   cap.addListener(PLUGIN, 'tts', (e) => {
@@ -200,9 +202,10 @@ function speech() {
     else w.reject(new Error(e.message || 'the text-to-speech engine failed'));
   });
   const load = () =>
-    (loading ??= call('ttsVoices').then(
+    (loading ??= call('ttsVoices', { engine }).then(
       (r) => {
-        list = (r.voices ?? []).map((v) => ({ voiceURI: v.name, name: v.label || v.name, lang: v.lang, localService: !v.network, default: v.name === r.defaultVoice }));
+        list = (r.voices ?? []).map((v) => ({ voiceURI: v.name, name: v.name, lang: v.lang, localService: !v.network, quality: v.quality, default: v.name === r.defaultVoice }));
+        info = { engine: r.engine ?? '', systemEngine: r.systemEngine ?? '', engines: r.engines ?? [] };
         changed.forEach((fn) => fn());
         return list;
       },
@@ -214,6 +217,16 @@ function speech() {
   return {
     voices: () => (load().catch(() => {}), list),
     loadVoices: load,
+    /** { engine (in use), systemEngine (the phone's preferred), engines: [{ name, label }] }, once the voices loaded. */
+    engines: () => info,
+    /** Speaks with the engine of package `name` ('' = the phone's preferred one); its voices load. */
+    setEngine(name = '') {
+      if (name === engine) return;
+      engine = name;
+      loading = null;
+      list = [];
+      load().catch(() => {});
+    },
     onVoicesChanged(fn) {
       changed.add(fn);
       return () => changed.delete(fn);
@@ -222,11 +235,21 @@ function speech() {
       const id = `u${++n}`;
       return new Promise((resolve, reject) => {
         waiting.set(id, { resolve, reject });
-        call('ttsSpeak', { id, text, voice, lang, rate, pitch }).catch((err) => {
+        call('ttsSpeak', { id, text, voice, lang, rate, pitch, engine }).catch((err) => {
           waiting.delete(id);
           reject(err);
         });
       });
+    },
+    /** Makes `text` into audio without playing it: a WAV Blob (after the passages asked for before). */
+    synthesize({ text, voice = '', lang = '', rate = 1, pitch = 1 }) {
+      // Not through call(): its code ("interrupted" for a stop) is needed here.
+      return cap.nativePromise(PLUGIN, 'ttsSynthesize', { id: `s${++n}`, text, voice, lang, rate, pitch, engine }).then(
+        (r) => new Blob([Uint8Array.from(atob(r.audio ?? ''), (c) => c.charCodeAt(0))], { type: r.mime || 'audio/wav' }),
+        (err) => {
+          throw err?.code === 'interrupted' ? interrupted() : new Error(err?.message || 'the text-to-speech engine failed');
+        },
+      );
     },
     stop() {
       for (const w of waiting.values()) w.reject(interrupted());

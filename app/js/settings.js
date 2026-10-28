@@ -141,9 +141,12 @@ export const DEFAULT_SETTINGS = {
   tts: {
     engine: 'device',
     voice: '',
+    // The Android app's text-to-speech engine (a package, e.g. VoxSherpa's), '' = the phone's preferred one.
+    androidEngine: '',
     rate: 1,
     // otherVoices: voices for other languages, as "es=ef_dora, pt=pf_dora" (Kokoro voices speak one language each).
-    server: { baseUrl: 'http://localhost:8880/v1', apiKey: '', model: 'kokoro', voice: 'af_heart', otherVoices: 'es=ef_dora, pt=pf_dora', instructions: '' },
+    // The server's API key is a secret (TTS_KEY_SECRET), sent only to the origin it was saved for (`keyOrigin`).
+    server: { baseUrl: 'http://localhost:8880/v1', apiKey: '', keyOrigin: '', model: 'kokoro', voice: 'af_heart', otherVoices: 'es=ef_dora, pt=pf_dora', instructions: '' },
   },
   // Typing into another window (desktop app): seconds to switch windows, speed (typing.js), whether the
   // other editor indents new lines by itself, and whether to minimize this window meanwhile.
@@ -242,8 +245,19 @@ export async function setToken(value) {
 }
 
 // Other secrets (the model service's API key and webhook secret, the API key of each model
-// connection: providers.js): the keychain on desktop, this browser's storage on the web.
-export const SECRET_NAMES = ['llm-api-key', 'llm-webhook-secret', ...LLM_KEY_SECRETS];
+// connection: providers.js, the speech server's key): the keychain on desktop, this browser's
+// storage on the web.
+export const TTS_KEY_SECRET = 'tts-server-key';
+export const SECRET_NAMES = ['llm-api-key', 'llm-webhook-secret', ...LLM_KEY_SECRETS, TTS_KEY_SECRET];
+
+/** The origin of a server address ('' when it is not one). */
+export function originOf(url) {
+  try {
+    return new URL(String(url ?? '').trim()).origin;
+  } catch {
+    return '';
+  }
+}
 const secretCache = new Map();
 
 export async function getSecret(name) {
@@ -292,6 +306,14 @@ if (settings.llm.apiKey) {
   const key = settings.llm.apiKey;
   setSecret(keySecret('local'), key).then(
     () => saveSettings({ llm: { apiKey: '' } }),
+    () => {},
+  );
+}
+// The speech server's key too: from then on it goes only to the server it was saved for.
+if (settings.tts.server.apiKey) {
+  const { apiKey, baseUrl } = settings.tts.server;
+  setSecret(TTS_KEY_SECRET, apiKey).then(
+    () => saveSettings({ tts: { server: { apiKey: '', keyOrigin: originOf(baseUrl) } } }),
     () => {},
   );
 }

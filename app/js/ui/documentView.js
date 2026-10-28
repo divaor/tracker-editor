@@ -8,12 +8,13 @@
 import { html, useEffect, useLayoutEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import DOMPurify from '../../vendor/purify.js';
 import { BOOKMARK_BLOCKS, bookmarkLabel, bookmarkOf, placeAt, topOf, withBookmark, withoutBookmark } from '../docBookmarks.js';
-import { blockAt, firstBelow, joinBlocks, pdfSpeechText, readsAloud } from '../docSpeech.js';
+import { pdfSpeechText, readsAloud } from '../docSpeech.js';
 import { documentLabel } from '../docTypes.js';
 import { getReaderState, startReading, stopReading, toggleReading } from '../reader.js';
 import { getSettings, saveSettings } from '../settings.js';
 import { toast } from './components.js';
 import { useFullScreen } from './fullScreen.js';
+import { pageSource, readAlong } from './readAlong.js';
 import { ReadAloudBar } from './readAloud.js';
 import { Icon } from './icons.js';
 import { Menu } from './menu.js';
@@ -102,19 +103,8 @@ export function DocumentView({ name, kind, version, load, onText, onAsText, onOp
       return toast(message(err), { kind: 'error' });
     }
     if (!source) return;
-    const { text, starts, ends } = joinBlocks(source.texts);
-    let shown = null;
-    const onPassage = (_key, passage) => {
-      shown?.classList.remove('doc-reading');
-      shown = passage ? source.elements[blockAt(starts, passage.from)] : null;
-      if (!shown) return;
-      shown.classList.add('doc-reading');
-      source.follow(shown);
-    };
-    const from = starts[source.first] ?? 0;
-    const to = source.last != null ? (ends[source.last] ?? text.length) : 0;
     try {
-      startReading({ key: readKey, name, text, from, to, onPassage });
+      startReading({ key: readKey, name, ...readAlong(source) });
     } catch (err) {
       toast(err.message, { kind: 'error' });
     }
@@ -280,22 +270,7 @@ function HtmlDocument({ doc, compact, bar, view, nav, start }) {
     },
     reading: () => {
       anchor.current = null;
-      const root = scroller.current;
-      const { elements, texts } = readingBlocks(page.current);
-      if (!root || !elements.length) return null;
-      const touched = selectedBlocks(elements, page.current);
-      const top = root.getBoundingClientRect().top;
-      return {
-        elements,
-        texts,
-        first: touched ? touched[0] : firstBelow(elements.map((e) => e.getBoundingClientRect().bottom - top), 0),
-        last: touched?.[1],
-        follow: (el) => {
-          const r = el.getBoundingClientRect();
-          const box = root.getBoundingClientRect();
-          if (r.top < box.top || r.bottom > box.bottom) root.scrollTop += r.top - box.top - root.clientHeight / 4;
-        },
-      };
+      return pageSource(page.current, scroller.current, { notRead: NOT_READ });
     },
   };
   // Pictures loading above the place push it down: it is put back while kept.
@@ -672,52 +647,7 @@ function PdfView({ pdf, pdfjs, compact, bar, view, nav, start, onText }) {
   );
 }
 
-// ---- Reading converted documents aloud ----
+// ---- Reading converted documents aloud (ui/readAlong.js) ----
 
-// The blocks read one after another; text outside them goes with the nearest block around it.
-const READ_BLOCKS = 'h1, h2, h3, h4, h5, h6, p, li, dt, dd, pre, blockquote, figcaption, caption, td, th';
+// Footnote marks and missing pictures are not read.
 const NOT_READ = '.doc-noteref, .doc-noteback, .doc-no-picture';
-
-/** { elements, texts }: each block with text in the page, in order, and its own text (not its inner blocks'). */
-function readingBlocks(article) {
-  const elements = [];
-  const texts = new Map();
-  if (!article) return { elements, texts: [] };
-  const walker = document.createTreeWalker(article, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
-  const blockOf = (el) => el.closest(READ_BLOCKS) ?? el.closest('div, section, article');
-  const add = (block, text) => {
-    if (!texts.has(block)) {
-      texts.set(block, '');
-      elements.push(block);
-    }
-    texts.set(block, texts.get(block) + text);
-  };
-  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    if (node.nodeType === Node.ELEMENT_NODE) {
-      // Lines broken inside a block still part their words.
-      if (node.tagName === 'BR' && texts.has(blockOf(node))) add(blockOf(node), ' ');
-      continue;
-    }
-    const parent = node.parentElement;
-    if (!parent || !node.nodeValue.trim() || parent.closest(NOT_READ)) continue;
-    add(blockOf(parent) ?? article, node.nodeValue);
-  }
-  return { elements, texts: elements.map((e) => texts.get(e)) };
-}
-
-/** [first, last]: the blocks a selection inside the page starts and ends in, or null. */
-function selectedBlocks(elements, article) {
-  const sel = window.getSelection();
-  if (!sel || sel.isCollapsed || !article?.contains(sel.anchorNode) || !article.contains(sel.focusNode)) return null;
-  const index = new Map(elements.map((e, i) => [e, i]));
-  const of = (node) => {
-    for (let el = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement; el && el !== article; el = el.parentElement) {
-      if (index.has(el)) return index.get(el);
-    }
-    return -1;
-  };
-  const a = of(sel.anchorNode);
-  const b = of(sel.focusNode);
-  if (a < 0 || b < 0) return null;
-  return [Math.min(a, b), Math.max(a, b)];
-}

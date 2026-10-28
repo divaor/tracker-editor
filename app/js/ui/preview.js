@@ -1,9 +1,12 @@
 import { html, useEffect, useMemo, useRef, useState } from '../../vendor/preact-htm.js';
 import { renderMarkdown } from '../markdown.js';
 import { jsonProblem, parseDelimited } from '../previews.js';
+import { getReaderState, startReading, stopReading, toggleReading } from '../reader.js';
 import { toggleChecklistItem } from '../tracker-model.js';
+import { toast } from './components.js';
 import { useFullScreen } from './fullScreen.js';
-import { ReadAloudBar } from './readAloud.js';
+import { pageSource, readAlong } from './readAlong.js';
+import { ReadAloudBar, useReader } from './readAloud.js';
 import { Icon } from './icons.js';
 
 const MAX_CHILDREN = 200; // children shown at first in a tree node; "Show more" adds more
@@ -173,15 +176,10 @@ function TablePreview({ text, delimiter }) {
 }
 
 /**
- * The reading view of a file, next to (or, on phones, instead of) the text.
- * kind comes from previewKind(); onToggle(text) edits the text (Markdown
- * checklists); onGoTo(line, column) shows a place in the text.
+ * The reading view of a file, without the pane around it (the folders view shows it too, read-only).
+ * kind comes from previewKind(); onToggle(text) edits the text (Markdown checklists);
+ * onGoTo(line, column) shows a place in the text.
  */
-/**
- * The preview next to the text. `full` fills the editor's place (`onFull` switches);
- * Full screen shows only the preview; `onClose` hides it.
- */
-/** The reading view itself, without the pane around it (the folders view shows it too, read-only). */
 export function PreviewBody({ kind, text = '', name, onToggle, onGoTo }) {
   if (kind === 'markdown') return html`<${MarkdownPreview} text=${text} onToggle=${onToggle} />`;
   if (kind === 'html') return html`<${HtmlPreview} text=${text} name=${name} />`;
@@ -192,20 +190,54 @@ export function PreviewBody({ kind, text = '', name, onToggle, onGoTo }) {
   return null;
 }
 
-export function Preview({ kind, text = '', name, onToggle, onGoTo, full = false, onFull, onClose }) {
+/**
+ * The preview next to (on phones, instead of) the text. `full` fills the editor's place (`onFull`
+ * switches); Full screen shows only the preview; `onClose` hides it. Markdown is read aloud as
+ * `readKey` from the top of the preview or its selection, followed as it goes (ui/readAlong.js);
+ * `onReader({ listen, hidesText })` lets Alt+R start it while the text is hidden (`textHidden`).
+ */
+export function Preview({ kind, text = '', name, onToggle, onGoTo, full = false, onFull, onClose, readKey, onReader, textHidden = false }) {
   const pane = useRef(null);
+  const scroll = useRef(null);
   const [screen, setScreen] = useFullScreen(pane);
+  const reader = useReader();
+  const readable = kind === 'markdown' && Boolean(readKey);
+  const mine = readable && reader.status !== 'idle' && reader.key === readKey;
+  const listen = () => {
+    const now = getReaderState();
+    if (now.status !== 'idle' && now.key === readKey) return toggleReading();
+    const source = pageSource(scroll.current?.querySelector('.markdown'), scroll.current, { skip: 'pre' });
+    try {
+      if (!source) throw new Error('There is nothing to read here.');
+      startReading({ key: readKey, name, ...readAlong(source) });
+    } catch (err) {
+      toast(err.message, { kind: 'error' });
+    }
+  };
+  const latest = useRef(null);
+  latest.current = { listen, hides: textHidden || screen };
+  useEffect(() => {
+    if (!readable) return undefined;
+    onReader?.({ listen: () => latest.current.listen(), hidesText: () => latest.current.hides });
+    return () => onReader?.(null);
+  }, [readable]);
+  // Reading the preview stops with it (what it marks is gone).
+  useEffect(() => () => readKey && getReaderState().key === readKey && stopReading(), [readKey]);
   const body = html`<${PreviewBody} kind=${kind} text=${text} name=${name} onToggle=${onToggle} onGoTo=${onGoTo} />`;
   return html`<div class="preview-pane preview-${kind} ${full ? 'full' : ''} ${screen ? 'fills-screen' : ''}" ref=${pane}>
     <div class="preview-head">
       <${Icon} name="eye" size=${14} /><span class="preview-title">Preview</span><span class="spacer" />
+      ${readable &&
+      html`<button type="button" class="btn ghost sm preview-listen" aria-pressed=${mine && reader.status === 'playing'}
+        title=${mine ? (reader.status === 'playing' ? 'Pause reading (Alt+R)' : 'Go on reading (Alt+R)') : 'Read aloud from the top of the preview, or the selection, following along'}
+        onClick=${listen}><${Icon} name=${mine && reader.status === 'playing' ? 'pause' : 'volume'} size=${15} /><span class="label">${mine ? (reader.status === 'playing' ? 'Pause' : 'Resume') : 'Listen'}</span></button>`}
       ${onFull && !screen && html`<button type="button" class="icon-btn sm preview-full-btn" aria-pressed=${full} aria-label=${full ? 'Back to the text and preview' : 'Full view'}
         title=${full ? 'Back to the text and preview' : 'Full view: the preview in the editor’s place'} onClick=${onFull}><${Icon} name=${full ? 'narrow' : 'widen'} size=${15} /></button>`}
       <button type="button" class="icon-btn sm preview-screen-btn" aria-pressed=${screen} aria-label=${screen ? 'Leave full screen' : 'Full screen'} title=${screen ? 'Leave full screen (Esc)' : 'Full screen (Esc to leave)'}
         onClick=${() => setScreen(!screen)}><${Icon} name=${screen ? 'fullscreenExit' : 'fullscreen'} size=${15} /></button>
       ${onClose && !screen && html`<button type="button" class="icon-btn sm" aria-label="Close the preview" title="Close the preview" onClick=${onClose}><${Icon} name="x" size=${15} /></button>`}
     </div>
-    <div class="preview-scroll">${body}</div>
+    <div class="preview-scroll" ref=${scroll}>${body}</div>
     ${screen && html`<${ReadAloudBar} />`}
   </div>`;
 }

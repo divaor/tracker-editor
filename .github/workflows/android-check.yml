@@ -1,6 +1,7 @@
 # Runs the Android app in an emulator and checks, in its real WebView, what a desktop browser
 # cannot stand in for: text from images (tesseract's worker and models as the APK holds them),
-# PDFs (pdf.js and its worker) and documents converted on the page (scripts/android-check.mjs).
+# the phone's text to speech, Kokoro served from this machine as from a computer on the phone's
+# network, PDFs (pdf.js and its worker) and documents converted on the page (scripts/android-check.mjs).
 # Run it by hand from Actions → Android check. Its APK is a debug build with WebView debugging
 # on, for this check only: the release's setting stays off.
 name: Android check
@@ -41,6 +42,13 @@ jobs:
       - run: npm run android:node
       - run: ./gradlew assembleDebug --no-daemon --stacktrace
         working-directory: android
+      # Kokoro on this machine, as on a computer next to the phone: the emulator reaches it at 10.0.2.2.
+      - name: Kokoro speech server
+        run: |
+          docker run -d --name kokoro -p 8880:8880 ghcr.io/remsky/kokoro-fastapi-cpu:v0.9.1
+          for i in $(seq 1 60); do curl -sf http://localhost:8880/health && exit 0; sleep 5; done
+          docker logs kokoro | tail -40
+          exit 1
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -54,7 +62,7 @@ jobs:
           target: google_apis
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: node scripts/android-check.mjs $(ls android/app/build/outputs/apk/debug/*.apk)
+          script: KOKORO=http://10.0.2.2:8880/v1 node scripts/android-check.mjs $(ls android/app/build/outputs/apk/debug/*.apk)
       - uses: actions/upload-artifact@v7
         if: always()
         with:

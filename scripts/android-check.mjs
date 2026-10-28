@@ -2,9 +2,11 @@
 // WebView debugging on) on the emulator that is running, opens the app and checks, inside its
 // real WebView over Chrome's DevTools protocol, what a desktop browser cannot stand in for:
 // text from an image (tesseract's worker, core and models as the APK holds them), text to speech
-// (Android's, through the app), a PDF (pdf.js and its worker) and converted documents. Writes android-check/report.json, a screenshot and
-// the WebView's console lines from logcat; exits 1 when a check fails.
-//   node scripts/android-check.mjs path/to/app-debug.apk
+// (Android's, through the app: spoken, and made into audio ahead for the page to play), a speech
+// server on the computer next to the phone (KOKORO=its /v1 address, as the emulator reaches it),
+// a PDF (pdf.js and its worker) and converted documents. Writes android-check/report.json, a
+// screenshot and the WebView's console lines from logcat; exits 1 when a check fails.
+//   [KOKORO=http://10.0.2.2:8880/v1] node scripts/android-check.mjs path/to/app-debug.apk
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -108,6 +110,72 @@ try {
   });
 
   // A PDF: opened by pdf.js, its first page drawn, its worker a real one.
+  // Reading a few sentences to the end with the reader (reader.js), in the engine the settings name:
+  // how many passages there were, how many audios started, the error if any.
+  const readThrough = (tts) =>
+    page.evaluate(async (tts) => {
+      const { startReading, getReaderState, onReaderState, stopReading } = await import('/js/reader.js');
+      const { saveSettings } = await import('/js/settings.js');
+      saveSettings({ tts });
+      const played = [];
+      const play = HTMLMediaElement.prototype.play;
+      HTMLMediaElement.prototype.play = function () {
+        played.push(Math.round(performance.now()));
+        return play.call(this);
+      };
+      const t0 = performance.now();
+      const end = new Promise((resolve) => {
+        const off = onReaderState((s) => s.status === 'idle' && (off(), resolve(s)));
+      });
+      try {
+        startReading({ key: 'check', name: 'Check', lang: 'en', text: 'This is the first sentence the phone reads aloud here, and it goes on a little. Then a second one follows it, made while the first one was playing. And a third one closes the check, so that there is more than one passage to read.' });
+        const total = getReaderState().total;
+        const state = await Promise.race([end, new Promise((r) => setTimeout(() => r({ error: 'no end in 90 s' }), 90_000))]);
+        return { total, played: played.length, ms: Math.round(performance.now() - t0), error: state.error ?? '' };
+      } catch (err) {
+        return { error: err?.message ?? String(err) };
+      } finally {
+        stopReading();
+        HTMLMediaElement.prototype.play = play;
+        saveSettings({ tts: { engine: 'device' } });
+      }
+    }, tts);
+
+  await part('the phone’s voices made ahead', async () => {
+    const made = await page.evaluate(async () => {
+      const t = window.desktop.android.tts;
+      try {
+        const blob = await t.synthesize({ text: 'Made into audio, not spoken.', lang: 'en-US' });
+        const head = new Uint8Array(await blob.slice(0, 4).arrayBuffer());
+        return { size: blob.size, type: blob.type, riff: String.fromCharCode(...head), engines: t.engines() };
+      } catch (err) {
+        return { error: err?.message ?? String(err), code: err?.code, engines: t.engines() };
+      }
+    });
+    if (/no text-to-speech engine/.test(made.error ?? '')) return check('the phone’s voices made ahead (no engine on this emulator)', true, made);
+    check('the phone’s voices: a passage made into audio, not spoken', made.size > 1000 && made.riff === 'RIFF', made);
+    check('…the phone’s engines listed', made.engines?.engines?.some((e) => e.name === made.engines.engine), made.engines);
+    const run = await readThrough({ engine: 'device', voice: '' });
+    check('…a reading played through, each passage made ahead', !run.error && run.total >= 2 && run.played === run.total, run);
+  });
+
+  if (process.env.KOKORO) await part('Kokoro on the computer', async () => {
+    const base = process.env.KOKORO;
+    const got = await page.evaluate(async (base) => {
+      const { localFetch } = await import('/js/localFetch.js');
+      try {
+        const res = await localFetch(`${base}/audio/speech`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'kokoro', voice: 'af_heart', input: 'Hello from Kokoro on the computer.', response_format: 'mp3' }) });
+        const blob = await res.blob();
+        return { status: res.status, type: res.headers.get('content-type'), size: blob.size };
+      } catch (err) {
+        return { error: err?.message ?? String(err) };
+      }
+    }, base);
+    check('Kokoro on the computer answers the phone app (plain http on its network)', got.status === 200 && got.size > 1000, got);
+    const run = await readThrough({ engine: 'server', server: { baseUrl: base, model: 'kokoro', voice: 'af_heart' } });
+    check('…and reads a text through to the end', !run.error && run.total >= 1 && run.played === run.total, run);
+  });
+
   await part('a PDF is drawn', async () => {
     const pdf = await page.evaluate(async (b64) => {
       const bytes = Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0));

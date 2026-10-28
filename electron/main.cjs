@@ -22,7 +22,7 @@ const APP_ORIGIN = 'app://editor';
 const LINK_SCHEME = 'tracker-editor';
 const REPO_URL = 'https://github.com/divaor/tracker-editor';
 // The model connections' keys are providers.js's LLM_KEY_SECRETS (test/providers.test.js checks the list).
-const SECRET_KEYS = new Set(['github-token', 'llm-api-key', 'llm-webhook-secret', 'llm-key-local', 'llm-key-anthropic', 'llm-key-openai', 'llm-key-gemini', 'llm-key-openrouter', 'llm-key-mistral', 'llm-key-groq', 'llm-key-custom']);
+const SECRET_KEYS = new Set(['github-token', 'llm-api-key', 'llm-webhook-secret', 'llm-key-local', 'llm-key-anthropic', 'llm-key-openai', 'llm-key-gemini', 'llm-key-openrouter', 'llm-key-mistral', 'llm-key-groq', 'llm-key-custom', 'tts-server-key']);
 const MAX_FILE = 5 * 1024 * 1024;
 
 protocol.registerSchemesAsPrivileged([
