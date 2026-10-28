@@ -1,7 +1,8 @@
 // What older WebViews (Android System WebView before Chrome 124) lack that the vendored
 // libraries use without bringing it themselves: pdf.js's legacy build calls
-// Promise.withResolvers (Chrome 119) and reads streams with `for await` (Chrome 124).
-// Imported before them, on the page and in pdf.js's worker (pdfWorker.js).
+// ArrayBuffer#transferToFixedLength (Chrome 114), Promise.withResolvers (Chrome 119) and reads
+// streams with `for await` (Chrome 124). Imported before them, on the page and in pdf.js's
+// worker (pdfWorker.js); checked in Chrome 113 and by the Android check.
 if (typeof Promise.withResolvers !== 'function') {
   Promise.withResolvers = function withResolvers() {
     let resolve;
@@ -41,4 +42,19 @@ if (typeof ReadableStream === 'function' && !ReadableStream.prototype[Symbol.asy
     };
   };
   ReadableStream.prototype[Symbol.asyncIterator] = ReadableStream.prototype.values;
+}
+
+// A copy where the browser cannot move the memory (the old buffer stays usable: only memory differs).
+for (const name of ['transfer', 'transferToFixedLength']) {
+  if (typeof ArrayBuffer.prototype[name] !== 'function') {
+    Object.defineProperty(ArrayBuffer.prototype, name, {
+      configurable: true,
+      writable: true,
+      value(length = this.byteLength) {
+        const copy = new ArrayBuffer(length);
+        new Uint8Array(copy).set(new Uint8Array(this, 0, Math.min(length, this.byteLength)));
+        return copy;
+      },
+    });
+  }
 }
