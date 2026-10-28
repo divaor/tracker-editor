@@ -38,6 +38,10 @@ let device;
 try {
   console.log(adb('shell', 'getprop', 'ro.product.cpu.abilist').trim(), '| WebView', adb('shell', 'dumpsys', 'package', 'com.google.android.webview').match(/versionName=(\S+)/)?.[1] ?? '?');
   adb('install', '-r', '-g', apk);
+  // The screen on and unlocked (an emulator started from a snapshot may have it off).
+  adb('shell', 'svc', 'power', 'stayon', 'true');
+  adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP');
+  adb('shell', 'wm', 'dismiss-keyguard');
   adb('logcat', '-c');
   adb('shell', 'am', 'start', '-W', '-n', `${PKG}/.MainActivity`);
   [device] = await android.devices({ omitDriverInstall: true });
@@ -46,7 +50,7 @@ try {
   page.setDefaultTimeout(120_000);
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
-  await page.waitForSelector('.topbar');
+  await page.waitForSelector('.topbar', { state: 'attached' });
   check('the app’s page loads', true, await page.evaluate(() => `${location.href} · ${navigator.userAgent.match(/Chrome\/[\d.]+/)?.[0]}`));
 
   // Text from an image: a picture drawn here, read in English and in Spanish.
