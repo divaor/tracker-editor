@@ -128,10 +128,11 @@ try {
         const off = onReaderState((s) => s.status === 'idle' && (off(), resolve(s)));
       });
       try {
-        startReading({ key: 'check', name: 'Check', lang: 'en', text: 'This is the first sentence the phone reads aloud here, and it goes on a little. Then a second one follows it, made while the first one was playing. And a third one closes the check, so that there is more than one passage to read.' });
+        // Over 240 characters, so the phone's voices read it sentence by sentence.
+        startReading({ key: 'check', name: 'Check', lang: 'en', text: 'This is the first sentence the phone reads aloud here, and it goes on for a little while longer. Then a second one follows it, made into audio while the first one was still playing. And a third one closes the check, so that there is more than one passage to read through.' });
         const total = getReaderState().total;
         const state = await Promise.race([end, new Promise((r) => setTimeout(() => r({ error: 'no end in 90 s' }), 90_000))]);
-        return { total, played: played.length, ms: Math.round(performance.now() - t0), error: state.error ?? '' };
+        return { total, played: played.length, starts: played.map((t) => t - Math.round(t0)), ms: Math.round(performance.now() - t0), error: state.error ?? '' };
       } catch (err) {
         return { error: err?.message ?? String(err) };
       } finally {
