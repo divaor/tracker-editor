@@ -1,5 +1,5 @@
 import { html, useEffect, useRef, useState } from '../../vendor/preact-htm.js';
-import { serverLabel } from '../lspTools.js';
+import { serverLabel, whereLabel } from '../lspTools.js';
 import { Modal } from './components.js';
 import { FileIcon } from './fileIcon.js';
 import { Icon } from './icons.js';
@@ -25,7 +25,7 @@ export function LanguageServersPanel({ lsp, tick, actions, onClose }) {
       <button type="button" class="icon-btn sm" aria-label="Close" onClick=${onClose}><${Icon} name="x" size=${16} /></button>
     </div>
     <div class="panel-body">
-      <p class="muted small">They check code as you type and know its types, for files opened from Folders: TypeScript and JavaScript, Python, Go, Rust, C and C++, JSON, CSS, HTML, YAML, Bash, and servers of your own (Settings → Language servers). Each runs for one project folder.</p>
+      <p class="muted small">They check code as you type and know its types: TypeScript and JavaScript, Python, Go, Rust, C and C++, Java, C#, JSON, CSS, HTML, YAML, Bash, and servers of your own (Settings → Language servers). Each runs for one project folder: on this computer for files opened from Folders, on the server for files on an SSH server, and here for your synced files, each on its own.</p>
       ${rows === null && html`<p class="muted small">Loading…</p>`}
       ${rows?.length === 0 && html`<p class="muted small">None running. Open a code file (.ts, .py, .go, .json…) from Folders to start one.</p>`}
       ${rows?.map((r) => {
@@ -36,7 +36,7 @@ export function LanguageServersPanel({ lsp, tick, actions, onClose }) {
             <strong>${r.server}</strong>
             <span class="muted small">${serverLabel({ server: '', state, progress: r.progress }).slice(3)}</span>
           </div>
-          <p class="muted small server-root" title=${r.root}>${baseName(r.root)} · ${r.files === 1 ? '1 open file' : `${r.files} open files`}</p>
+          <p class="muted small server-root" title=${r.root}>${r.where?.kind === 'notes' ? 'Your synced files' : baseName(r.root)} · ${whereLabel(r.where)} · ${r.files === 1 ? '1 open file' : `${r.files} open files`}</p>
           ${(r.failed || r.message) && html`<p class="small server-message">${r.failed || r.message}</p>`}
           <div class="server-actions">
             <button type="button" class="btn sm" onClick=${() => actions.restartLanguageServer(r.id)}><${Icon} name="rotate" size=${14} />Restart</button>
@@ -52,8 +52,9 @@ export function LanguageServersPanel({ lsp, tick, actions, onClose }) {
 }
 
 /**
- * A file whose language server is not installed: what to install, typed into a terminal on
- * this computer for the person to run (nothing is downloaded or run behind their back).
+ * A file whose language server is not installed: what to install, typed into a terminal (on
+ * this computer, or on the SSH server the file is on) for the person to run (nothing is
+ * downloaded or run behind their back).
  */
 export function SetupServerDialog({ missing, actions, onClose }) {
   if (missing.custom)
@@ -67,12 +68,12 @@ export function SetupServerDialog({ missing, actions, onClose }) {
   return html`<${Modal} title=${`Set up ${missing.language}`} onClose=${onClose}
     footer=${html`<button type="button" class="btn" onClick=${onClose}>Close</button>
       <button type="button" class="btn primary" onClick=${() => (onClose(), actions.retryLanguageServer())}>It is installed: start it</button>`}>
-    <p>Type checking, completion with types, hover and project-wide F12 / Shift+F12 / F2 come from a <strong>language server</strong>, a program on this computer. Install one with:</p>
+    <p>Type checking, completion with types, hover and project-wide F12 / Shift+F12 / F2 come from a <strong>language server</strong>, a program ${missing.where?.kind === 'remote' ? html`on the server, <strong>${missing.where.name}</strong>, that runs there for its files` : 'on this computer'}. Install one with:</p>
     ${missing.install.map(
       (command) => html`<div class="setup-command" key=${command}>
         <code>${command}</code>
         <span class="spacer" />
-        <button type="button" class="btn sm" title="Opens a terminal with the command typed in: press Enter to run it" onClick=${() => (onClose(), actions.typeInTerminal(command, missing.root))}><${Icon} name="terminal" size=${14} />Type it in a terminal</button>
+        <button type="button" class="btn sm" title=${`Opens a terminal ${whereLabel(missing.where)} with the command typed in: press Enter to run it`} onClick=${() => (onClose(), actions.typeInTerminal(command, missing.root, missing.where?.kind === 'remote' ? missing.where.id : 'local'))}><${Icon} name="terminal" size=${14} />Type it in a terminal</button>
         <button type="button" class="icon-btn sm" aria-label=${`Copy ${command}`} title="Copy" onClick=${() => actions.copyText(command)}><${Icon} name="copy" size=${14} /></button>
       </div>`,
     )}
@@ -172,7 +173,7 @@ export function WorkspaceEditDialog({ title, entries, rel = (p) => p, onDone }) 
     <p class="muted small">Files that are open change like an edit of yours (not saved yet). The others are saved to disk now, each only if it did not change since it was read. Undo, in the message afterwards, takes it all back.</p>
     <div class="edit-files" role="list">
       ${entries.map((e) => {
-        const name = String(e.path).split(/[\\/]/).pop();
+        const name = e.name ?? String(e.path).split(/[\\/]/).pop();
         return html`<section class="edit-file ${e.error ? 'failed' : ''}" role="listitem" key=${e.path}>
           <div class="edit-file-head">
             <input type="checkbox" checked=${!e.error && ticked.has(e.path)} disabled=${Boolean(e.error)} aria-label=${`Change ${name}`} onChange=${() => toggle(ticked, setTicked, e.path)} />
@@ -180,7 +181,7 @@ export function WorkspaceEditDialog({ title, entries, rel = (p) => p, onDone }) 
               <${Icon} name=${open.has(e.path) ? 'chevronDown' : 'chevronRight'} size=${13} />
               <${FileIcon} name=${name} size=${15} />
               <span class="edit-name">${name}</span>
-              <span class="muted small edit-rel">${rel(e.path)}</span>
+              <span class="muted small edit-rel">${e.name ? 'My files' : rel(e.path)}</span>
             </button>
             <span class="spacer" />
             <span class="muted small">${e.error ? e.error : `${e.edits.length} · ${KIND_WORDS[e.kind] ?? ''}`}</span>

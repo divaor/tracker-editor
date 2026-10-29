@@ -1,6 +1,8 @@
 // Language servers in the editor (desktop): one CodeMirror LSP client (vendor/cm/lsp.js,
 // loaded when the first server starts) per server running in the main process (lsp.cjs),
-// talking through the lsp:* IPC. The files are disk tabs on this computer:
+// talking through the lsp:* IPC. The files are disk tabs on this computer, disk tabs on SSH
+// servers (the server runs there: remote://id/x is file:///x to it, `where` says so) and
+// synced files and tracker documents (a path under the notes folder that exists only here):
 // - our Workspace keeps a file open on the server while its tab is open, shown or not (the
 //   editor swaps tab states in one view), and sends its text when it changed;
 // - problems come pushed (publishDiagnostics) or are asked for after each change (pull,
@@ -12,6 +14,7 @@ import DOMPurify from '../vendor/purify.js';
 import { Decoration, EditorView, keymap, languages, LanguageDescription, StateEffect, StateField, ViewPlugin, WidgetType } from '../vendor/cm/codemirror.js';
 import { serverProblems } from './editor.js';
 import { fileUri, locations, pathKey, progressText, rangesTouch, symbolRows, toProblems, uriPath, withWorkspaceFolder } from './lspTools.js';
+import { isRemotePath, remoteParts, toRemoteUri } from './where.js';
 
 let lib = null; // the client's module, once loaded
 const loadLib = async () => (lib ??= await import('../vendor/cm/lsp.js'));
@@ -121,14 +124,30 @@ class BulbWidget extends WidgetType {
 }
 
 /**
- * The language servers of the open disk tabs. `host`: the editor host; `onChange()`: their
- * state changed (the status bar, the panel); `onMessage(text, kind)`: a server's message
- * worth a toast; `openPath(path)`: shows a file (a definition in another file).
+ * Where a server's paths are (its `where` from lsp.cjs): a path the editor uses (on disk, or
+ * remote://id/x) as the URI the server knows, and back. Notes have no path: their tabs say.
  */
-export function createLanguageServers({ host, bridge = window.desktop?.lsp, onChange = () => {}, onMessage = () => {}, openPath, applyEdit, onQuickFix }) {
+const serverUri = (where, path) => (where?.kind === 'remote' ? fileUri(remoteParts(path).path) : fileUri(path));
+function serverPath(where, uri, root = '') {
+  if (where?.kind === 'remote') {
+    const p = uriPath(uri);
+    return p ? toRemoteUri(where.id, p) : null;
+  }
+  return uriPath(uri, { windows: /^[A-Za-z]:[\\/]|^\\\\/.test(root) });
+}
+
+/**
+ * The language servers of the open tabs. `host`: the editor host; `onChange()`: their
+ * state changed (the status bar, the panel); `onMessage(text, kind)`: a server's message
+ * worth a toast; `openPath(path)`: shows a file (a definition in another file); `openKey(key)`:
+ * shows a tab (a synced file).
+ */
+export function createLanguageServers({ host, bridge = window.desktop?.lsp, onChange = () => {}, onMessage = () => {}, openPath, openKey, applyEdit, onQuickFix }) {
   const servers = new Map(); // id → server
   const connecting = new Map(); // id → Promise<server>
-  const tabs = new Map(); // key → { path, id, uri, languageId } | { path, pending } | { path, none } | { path, missing } | { path, stopped }
+  // key → { how, id, uri, languageId } | { how, pending } | { how, none } | { how, missing } | { how, stopped }
+  // `how`: { path, stop } (a disk tab, here or on a server) or { note } (a synced file's name).
+  const tabs = new Map();
   if (!bridge) return null;
 
   bridge.onMessage(({ id, data }) => servers.get(id)?.deliver(data));
@@ -156,7 +175,7 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
     s.client.disconnect();
     for (const [key, t] of tabs) {
       if (t.id !== s.id) continue;
-      tabs.set(key, { path: t.path, stopped: message || `${s.info.server} stopped.` });
+      tabs.set(key, { how: t.how, stopped: message || `${s.info.server} stopped.` });
       host.setLanguageServer(key, []);
       host.refreshProblems(key);
     }
@@ -217,7 +236,7 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
         }
         // Edits the server wants made (after a command, or a code action it carries out itself).
         if (msg.id != null && msg.method === 'workspace/applyEdit') {
-          Promise.resolve(applyEdit ? applyEdit(msg.params?.edit, { label: msg.params?.label ?? '', server: info.server }) : { applied: false, failureReason: 'Not supported' })
+          Promise.resolve(applyEdit ? applyEdit(msg.params?.edit, { label: msg.params?.label ?? '', server: info.server, placeOf: (uri) => placeIn(s, uri) }) : { applied: false, failureReason: 'Not supported' })
             .catch((err) => ({ applied: false, failureReason: err?.message ?? String(err) }))
             .then((result) => answer(result ?? { applied: false }));
           return;
@@ -298,8 +317,12 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
         return updates;
       }
       async displayFile(uri) {
-        const t = [...tabs.values()].find((x) => x.uri === uri);
-        const path = t?.path ?? null;
+        const { key, path } = placeIn(s, uri) ?? {};
+        if (key && tabs.get(key)?.how.note) {
+          if (!openKey) return null;
+          await openKey(key);
+          return host.viewFor(key);
+        }
         if (!path || !openPath) return null;
         await openPath(path);
         return host.viewFor(keyOfUri(uri));
@@ -327,7 +350,12 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
         '$/progress': (_client, { token, value }) => {
           if (value?.kind === 'begin') s.tasks.set(token, { title: value.title, message: value.message, percentage: value.percentage });
           else if (value?.kind === 'report' && s.tasks.has(token)) s.tasks.set(token, { ...s.tasks.get(token), ...value });
-          else if (value?.kind === 'end') s.tasks.delete(token);
+          else if (value?.kind === 'end') {
+            s.tasks.delete(token);
+            // Done loading or indexing (csharp-ls loads its projects after it answers): what it
+            // says about the open files now, for servers that are asked.
+            if (!s.tasks.size) for (const file of s.client.workspace.files) pull(s, file);
+          }
           onChange();
           return true;
         },
@@ -429,35 +457,59 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
     const t = tabs.get(key);
     return t?.id ? { s: servers.get(t.id), t } : null;
   };
+  /** Where a URI a server answered with is for the editor: { key, path } (key: its tab's, when open; path: null for notes). */
+  function placeIn(s, uri) {
+    const open = [...tabs].find(([, t]) => t.id === s.id && t.uri === uri);
+    if (open?.[1].how.note) return { key: open[0], path: null };
+    const path = serverPath(s.info.where, uri, s.info.root);
+    if (!path) return null;
+    return { key: open?.[0] ?? `d:${path}`, path };
+  }
+
+  async function start(key, how) {
+    tabs.set(key, { how, pending: true });
+    onChange();
+    let info;
+    try {
+      info = how.note ? await bridge.startNote(key, how.note) : await bridge.start(how.path, how.stop ? { stop: how.stop } : undefined);
+    } catch (err) {
+      if (tabs.get(key)?.how === how) tabs.set(key, { how, stopped: String(err?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '') });
+      return onChange();
+    }
+    if (tabs.get(key)?.how !== how) return; // closed (or changed) meanwhile
+    if (info.none) return void tabs.set(key, { how, none: true }), onChange();
+    if (info.missing) return void tabs.set(key, { how, missing: info.missing }), onChange();
+    let s = servers.get(info.id);
+    if (!s) {
+      if (!connecting.has(info.id)) connecting.set(info.id, connect(info).finally(() => connecting.delete(info.id)));
+      s = await connecting.get(info.id);
+    }
+    if (tabs.get(key)?.how !== how) return;
+    const uri = how.note ? fileUri(info.path) : serverUri(info.where, how.path);
+    tabs.set(key, { how, id: s.id, uri, languageId: info.languageId });
+    clearTimeout(s.idle);
+    host.setLanguageServer(key, extensionFor(s, uri, info.languageId));
+    onChange();
+  }
 
   return {
-    /** A disk tab on this computer, shown: its server (started when needed). */
-    async attach(key, path) {
+    /**
+     * A disk tab shown (on this computer, or on an SSH server: `stop` is the folder shown there,
+     * which the project search does not go above): its server, started when needed.
+     */
+    async attach(key, path, { stop = '' } = {}) {
       const known = tabs.get(key);
-      if (known && known.path === path) return;
-      tabs.set(key, { path, pending: true });
-      onChange();
-      let info;
-      try {
-        info = await bridge.start(path);
-      } catch (err) {
-        if (tabs.get(key)?.path === path) tabs.set(key, { path, stopped: String(err?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '') });
-        return onChange();
-      }
-      if (tabs.get(key)?.path !== path) return; // closed meanwhile
-      if (info.none) return void tabs.set(key, { path, none: true }), onChange();
-      if (info.missing) return void tabs.set(key, { path, missing: info.missing }), onChange();
-      let s = servers.get(info.id);
-      if (!s) {
-        if (!connecting.has(info.id)) connecting.set(info.id, connect(info).finally(() => connecting.delete(info.id)));
-        s = await connecting.get(info.id);
-      }
-      if (tabs.get(key)?.path !== path) return;
-      const uri = fileUri(path);
-      tabs.set(key, { path, id: s.id, uri, languageId: info.languageId });
-      clearTimeout(s.idle);
-      host.setLanguageServer(key, extensionFor(s, uri, info.languageId));
-      onChange();
+      if (known && known.how.path === path) return;
+      if (known?.id) this.detach(key);
+      return start(key, { path, stop });
+    },
+    /** A synced file or tracker document shown, named `name`: a server for it alone (single-file mode). */
+    async attachNote(key, name) {
+      const known = tabs.get(key);
+      if (known && known.how.note === name) return;
+      // Renamed (another kind of file): the old server lets it go.
+      if (known?.id) this.detach(key);
+      return start(key, { note: name });
     },
 
     /** The tab was closed or its editor state dropped: the server forgets the file. */
@@ -466,6 +518,13 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
       tabs.delete(key);
       if (t?.id) servers.get(t.id)?.client.workspace.forget(t.uri);
       if (t) onChange();
+    },
+    /** The tab goes on without a server (a synced file encrypted): it forgets the file, and the editor its help. */
+    detach(key) {
+      if (!tabs.has(key)) return;
+      this.forget(key);
+      host.setLanguageServer(key, []);
+      host.refreshProblems(key);
     },
 
     /** Tries again: a server that stopped after crashes starts again; else (after Set up…) it is looked for again. */
@@ -479,7 +538,20 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
         return onChange();
       }
       tabs.delete(key);
-      await this.attach(key, t.path);
+      await start(key, t.how);
+    },
+    /** A server connected again: its tabs whose language server stopped with the connection start it again. */
+    reconnected(connId) {
+      for (const [key, t] of [...tabs]) {
+        const s = t.id ? servers.get(t.id) : null;
+        if (s?.info.where?.kind === 'remote' && s.info.where.id === connId && (s.state === 'stopped' || s.failed)) {
+          s.failed = '';
+          bridge.restart(s.id);
+        } else if (!t.id && (t.stopped || t.missing) && t.how.path && isRemotePath(t.how.path) && remoteParts(t.how.path).id === connId) {
+          tabs.delete(key);
+        }
+      }
+      onChange();
     },
 
     has: (key) => Boolean(serverOf(key)?.s?.ready),
@@ -493,9 +565,10 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
       if (t.stopped) return { stopped: t.stopped };
       const s = servers.get(t.id);
       if (!s) return null;
-      if (s.failed || s.state === 'stopped') return { id: s.id, server: s.info.server, stopped: s.failed || s.message || `${s.info.server} stopped.` };
+      const where = s.info.where ?? { kind: 'local' };
+      if (s.failed || s.state === 'stopped') return { id: s.id, server: s.info.server, where, stopped: s.failed || s.message || `${s.info.server} stopped.` };
       const state = s.ready && s.state !== 'restarting' ? 'running' : s.state;
-      return { id: s.id, server: s.info.server, language: s.info.language, state, progress: progressText(s.tasks), message: s.failed || s.message };
+      return { id: s.id, server: s.info.server, language: s.info.language, where, state, progress: progressText(s.tasks), message: s.failed || s.message };
     },
 
     /** The running servers, for the panel: lsp.cjs's list with what the page knows. */
@@ -580,7 +653,7 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
         const result = await Promise.race([asking, new Promise((resolve) => setTimeout(() => resolve(null), 4000))]);
         return symbolRows(result)
           .slice(0, 300)
-          .map((r) => ({ ...r, path: uriPath(r.uri, { windows: /^[A-Za-z]:[\\/]|^\\\\/.test(s.info.root) }), server: s.info.server }))
+          .map((r) => ({ ...r, path: s.info.where?.kind === 'notes' ? null : serverPath(s.info.where, r.uri, s.info.root), server: s.info.server }))
           .filter((r) => r.path);
       });
       return (await Promise.allSettled(asked)).flatMap((r) => (r.status === 'fulfilled' ? r.value : []));
@@ -593,22 +666,31 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
     filesChanged(paths, { created = [] } = {}) {
       const inside = (root, p) => pathKey(p).startsWith(`${pathKey(root).replace(/[\\/]+$/, '')}${/^[A-Za-z]:|^\\\\/.test(root) ? '\\' : '/'}`);
       for (const s of servers.values()) {
-        if (!s.ready) continue;
-        const changes = [...created.map((p) => ({ p, type: 1 })), ...paths.map((p) => ({ p, type: 2 }))].filter(({ p }) => inside(s.info.root, p)).map(({ p, type }) => ({ uri: fileUri(p), type }));
+        const where = s.info.where ?? { kind: 'local' };
+        if (!s.ready || where.kind === 'notes') continue;
+        // A server sees its own place's files, under the paths it knows them by.
+        const own = (p) => (where.kind === 'remote' ? isRemotePath(p) && remoteParts(p).id === where.id && inside(s.info.root, remoteParts(p).path) : !isRemotePath(p) && inside(s.info.root, p));
+        const changes = [...created.map((p) => ({ p, type: 1 })), ...paths.map((p) => ({ p, type: 2 }))].filter(({ p }) => own(p)).map(({ p, type }) => ({ uri: serverUri(where, p), type }));
         if (changes.length) s.client.notification('workspace/didChangeWatchedFiles', { changes });
       }
     },
 
-    /** Servers set up again (a custom one added or removed): tabs without one look again (`key`, shown, at once). */
-    refresh(key, path) {
+    /** Servers set up again (a custom one added or removed): tabs without one look again (the shown one, `key`, at once). */
+    refresh(key) {
+      const shown = key ? tabs.get(key) : null;
       for (const [k, t] of [...tabs]) if (!t.id) tabs.delete(k);
       onChange();
-      if (key && path && !tabs.has(key)) return this.attach(key, path);
+      if (shown && !shown.id) return start(key, shown.how);
     },
 
     /** The open tab showing a file:// URI, if any. */
     keyOfUri(uri) {
       return [...tabs].find(([, t]) => t.uri === uri)?.[0] ?? null;
+    },
+    /** Where a URI the server of tab `key` answered with is: { key, path } (path null for notes), or null. */
+    placeOf(key, uri) {
+      const found = serverOf(key);
+      return found?.s ? placeIn(found.s, uri) : null;
     },
     /** The text the server had for an open file when it answered (positions in answers refer to it). */
     syncedText(key) {

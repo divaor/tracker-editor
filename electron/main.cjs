@@ -252,7 +252,10 @@ const remote = remoteFiles.createRemote({
 
 ipcMain.handle('remote:connections', guard(() => remote.connections()));
 ipcMain.handle('remote:save', guard((_e, conn, secrets) => remote.saveConnection(conn ?? {}, secrets ?? {})));
-ipcMain.handle('remote:delete', guard((_e, id) => remote.deleteConnection(id)));
+ipcMain.handle('remote:delete', guard((_e, id) => {
+  lspHost.stopRemote(id);
+  return remote.deleteConnection(id);
+}));
 ipcMain.handle('remote:test', guard((_e, conn, secrets) => remote.test(conn ?? {}, secrets ?? {})));
 ipcMain.handle('remote:connect', guard((_e, id) => remote.connect(id)));
 ipcMain.handle('remote:disconnect', guard((_e, id) => remote.disconnect(id)));
@@ -580,9 +583,10 @@ ipcMain.handle('term:keys', guard((event, own) => {
 }));
 
 // ---- Language servers (lsp.cjs) ------------------------------------------------
-// For files on this computer inside what the person opened: the page names the file, and
-// lsp.cjs picks the server from its catalog (found on PATH or in the project). A page
-// reloaded or closed stops its servers.
+// For files on this computer inside what the person opened, files on SSH servers (the server
+// runs there) and synced files (single files under the notes folder): the page names the
+// file, and lsp.cjs picks the server from its catalog (found on PATH or in the project). A
+// page reloaded or closed stops its servers.
 const lsp = require('./lsp.cjs');
 const localStore = require('./localStore.cjs');
 
@@ -627,20 +631,56 @@ const lspHost = lsp.createLspHost({
   },
   // The person's own servers (prefs.json) come before the catalog's.
   catalog: () => [...(prefs?.lspCustom ?? []).map(lsp.customEntry), ...lsp.CATALOG],
+  // Files on SSH servers: their server is looked for and runs there, over the same connection.
+  remote: {
+    run: (id, script) => remote.run(id, script),
+    exec: (id, command) => remote.exec(id, command),
+    label: (id) => remote.connections().find((c) => c.id === id)?.name ?? 'the server',
+    connected: (id) => remote.isConnected(id),
+  },
 });
 const lspPages = new WeakSet();
-ipcMain.handle('lsp:start', guard(async (event, file) => {
-  if (typeof file !== 'string' || isRemote(file)) return { none: true };
-  checkFile(file);
-  const sender = event.sender;
+function lspSender(sender) {
   if (!lspPages.has(sender)) {
     lspPages.add(sender);
     sender.on('did-navigate', () => lspHost.stopAll(sender));
     sender.once('destroyed', () => lspHost.stopAll(sender));
   }
+  return sender;
+}
+ipcMain.handle('lsp:start', guard(async (event, file, opts = {}) => {
+  if (typeof file !== 'string') return { none: true };
+  if (isRemote(file)) {
+    // On a server: the project search stops at the folder the page shows there, else at home.
+    const { id, path: where } = remoteFiles.parseUri(file);
+    const shown = typeof opts?.stop === 'string' && isRemote(opts.stop) ? remoteFiles.parseUri(opts.stop) : null;
+    return lspHost.start(lspSender(event.sender), where, { remote: id, stop: shown?.id === id ? shown.path : '' });
+  }
+  checkFile(file);
   // The project folder is looked for up to the folder the person picked, not above it.
   const stop = allowedFolders.find((f) => folders.allowedBy([f], file)) ?? '';
-  return lspHost.start(sender, file, { stop });
+  return lspHost.start(lspSender(event.sender), file, { stop });
+}));
+// A synced file or tracker document (`key`, the tab's): a file that exists only in the editor,
+// named `name`, in a folder of its own under the notes folder (empty folders: the servers look
+// around a file). The page gets the path the server knows it by.
+const lspNotesDir = () => path.join(app.getPath('userData'), 'lsp-notes');
+let lspNotesTidied = false;
+ipcMain.handle('lsp:start-note', guard(async (event, key, name) => {
+  if (typeof key !== 'string' || typeof name !== 'string' || !key || key.length > 1000) return { none: true };
+  const root = lspNotesDir();
+  // What earlier runs left (empty folders only) goes first.
+  if (!lspNotesTidied) {
+    lspNotesTidied = true;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+  const safe = name.replace(/[<>:"|?*\\/\u0000-\u001f]/g, '_').replace(/^\.+$/, '_').slice(-120) || 'note';
+  const dir = path.join(root, crypto.createHash('sha1').update(key).digest('hex').slice(0, 12));
+  const file = path.join(dir, safe);
+  if (!lsp.catalogFor(file, [...(prefs?.lspCustom ?? []).map(lsp.customEntry), ...lsp.CATALOG])) return { none: true };
+  fs.mkdirSync(dir, { recursive: true });
+  const info = await lspHost.start(lspSender(event.sender), file, { note: true, root });
+  return info.id ? { ...info, path: file } : info;
 }));
 ipcMain.on('lsp:send', (event, id, message) => {
   if (fromApp(event)) lspHost.write(id, message, event.sender);

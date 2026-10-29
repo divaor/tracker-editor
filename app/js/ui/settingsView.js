@@ -240,7 +240,7 @@ function EditorCard({ settings }) {
 }
 
 // Desktop only: typing a selection or file into another window (Alt+T).
-const BUILT_IN_SERVERS = 'TypeScript and JavaScript, Python, Go, Rust, C and C++, JSON, CSS, HTML, YAML and Bash';
+const BUILT_IN_SERVERS = 'TypeScript and JavaScript, Python, Go, Rust, C and C++, Java, C#, JSON, CSS, HTML, YAML and Bash';
 const quoteArg = (a) => (/[\s"']/.test(a) || !a ? `"${a.replace(/"/g, '\\"')}"` : a);
 const ipcMessage = (err) => String(err?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
 
@@ -284,6 +284,13 @@ function LanguageServersCard({ settings, actions }) {
     <${Check} checked=${settings.languageServers !== false} label="Language servers for code"
       hint=${`Type errors, completion with types, hover, quick fixes (Ctrl+.) and F12 / Shift+F12 / F2 across the project, for files opened from Folders. Built in: ${BUILT_IN_SERVERS}, each once installed on this computer (the status bar offers Set up… when one is missing).`}
       onChange=${(v) => saveSettings({ languageServers: v })} />
+    ${settings.languageServers !== false &&
+    html`<${Check} checked=${settings.languageServersRemote !== false} label="Also for files on SSH servers"
+        hint="The server runs on that server, over the same connection, when it is installed there (Set up… types the command into its terminal). Not on Windows servers or over FTP."
+        onChange=${(v) => saveSettings({ languageServersRemote: v })} />
+      <${Check} checked=${settings.languageServersNotes !== false} label="Also for my files and tracker documents"
+        hint="Each one on its own (no project around it), with the servers on this computer. Encrypted files never go to one."
+        onChange=${(v) => saveSettings({ languageServersNotes: v })} />`}
     <div class="field-grid">
       <div class="field span-2"><span>Format document (Shift+Alt+F) uses first</span>
         <${Segmented} small label="Formatter" value=${settings.formatter === 'builtin' ? 'builtin' : 'server'} onChange=${(formatter) => saveSettings({ formatter })}

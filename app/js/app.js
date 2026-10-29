@@ -133,6 +133,14 @@ const folderRoots = (settings) =>
         isRemotePath(dir) ? { dir, kind: 'remote', label: server(remoteParts(dir).id)?.name ?? 'Server' } : { dir, kind: 'disk', label: folderLabel(dir) },
       )
     : [];
+/** The name a tab shows: a synced file's, a tracker document's, a file's on disk. */
+const tabName = (key) => {
+  const k = parseKey(key);
+  if (k?.kind === 'file') return store.get(k.id)?.name ?? 'file';
+  if (k?.kind === 'repo') return store.repoTab(k.path)?.name ?? k.path.split('/').pop();
+  if (k?.kind === 'disk') return k.path.split(/[\\/]/).pop();
+  return String(key);
+};
 // A path as "folder/inside/it" when it is in one of the folders open in Folders, else as it is.
 const relInFolders = (path, settings) => {
   const root = folderRoots(settings).find((r) => path.startsWith(`${r.dir.replace(/[\\/]+$/, '')}/`) || path.startsWith(`${r.dir.replace(/[\\/]+$/, '')}\\`));
@@ -1510,7 +1518,13 @@ export function App() {
   }, []);
   // Servers (desktop): their status shows on tabs; when one connects again, its tabs are looked at again.
   useEffect(() => {
-    const offStatus = watchServers({ onConnected: recheckServerTabs });
+    const offStatus = watchServers({
+      onConnected: (id) => {
+        recheckServerTabs(id);
+        // Language servers that stopped with the connection start again.
+        lspRef.current?.reconnected(id);
+      },
+    });
     const offList = onServers(rerender);
     return () => (offStatus(), offList());
   }, []);
@@ -1678,8 +1692,10 @@ export function App() {
       onChange: () => setLspTick((n) => n + 1),
       onMessage: (text, kind) => toast(text, { kind, timeout: 8000 }),
       openPath: (path) => actions.openDiskPath(path),
+      // A synced file or tracker document (its tab key).
+      openKey: (key) => actions.openFile(key.startsWith('f:') ? key.slice(2) : key),
       // Edits a server asks for (after a command): shown first when they reach files not open.
-      applyEdit: (edit, { label, server }) => actions.applyWorkspaceEdit(edit, { title: label || `Changes from ${server}`, userEvent: 'input.codeaction' }),
+      applyEdit: (edit, { label, server, placeOf }) => actions.applyWorkspaceEdit(edit, { title: label || `Changes from ${server}`, userEvent: 'input.codeaction', placeOf }),
       onQuickFix: () => actions.quickFix(),
     });
   }, []);
@@ -1689,11 +1705,7 @@ export function App() {
   }, [settings.languageServers]);
   // A server of your own added or removed (Settings): the tabs without one look again.
   useEffect(() => {
-    const onChanged = () => {
-      const key = store.session.active;
-      const disk = key?.startsWith('d:') ? store.diskTab(key.slice(2)) : null;
-      lspRef.current?.refresh(disk && !isRemotePath(disk.path) && getSettings().languageServers !== false ? key : null, disk?.path);
-    };
+    const onChanged = () => lspRef.current?.refresh(getSettings().languageServers !== false ? store.session.active : null);
     window.addEventListener('lsp:servers-changed', onChanged);
     return () => window.removeEventListener('lsp:servers-changed', onChanged);
   }, []);
@@ -1807,18 +1819,60 @@ export function App() {
     // A followed file, or the tail of a huge one, is read-only.
     if (activeDisk) host.setReadOnly(activeKey, diskReadOnly(activeDisk));
     setBig(host.isBig(activeKey));
-    // Code on this computer gets its language server (started when needed).
-    if (activeDisk && !activeDisk.doc && !isRemotePath(activeDisk.path) && getSettings().languageServers !== false && !host.isBig(activeKey)) lspRef.current?.attach(activeKey, activeDisk.path);
+    // Code gets its language server (started when needed).
+    attachLanguageServer(activeKey);
     if (!isNarrow()) host.focus();
   }, [activeKey, view, Boolean(activeFile || activeRepo || activeDisk), activeSealed, docShown]);
+
+  /**
+   * The language server of a tab shown: a disk tab's on this computer, or on its SSH server
+   * (where it runs; its project is looked for up to the home folder there), or for a synced file
+   * or tracker document alone (on this computer; never an encrypted one). Settings can leave the
+   * last two out.
+   */
+  function attachLanguageServer(key) {
+    const lsp = lspRef.current;
+    const s = getSettings();
+    if (!lsp || !key || s.languageServers === false || hostRef.current?.isBig(key)) return;
+    const k = parseKey(key);
+    if (k?.kind === 'disk') {
+      const disk = store.diskTab(k.path);
+      if (!disk || disk.doc) return;
+      if (!isRemotePath(disk.path)) return lsp.attach(key, disk.path);
+      if (s.languageServersRemote === false || server(remoteParts(disk.path).id)?.protocol !== 'sftp') return;
+      return lsp.attach(key, disk.path);
+    }
+    if (s.languageServersNotes === false) return;
+    if (k?.kind === 'file') {
+      const f = store.get(k.id);
+      // Encrypted text never goes to a server (one it had is let go).
+      if (!f || f.encrypted || store.isSealed(f.id)) return lsp.detach(key);
+      return lsp.attachNote(key, f.name);
+    }
+    if (k?.kind === 'repo') {
+      const r = store.repoTab(k.path);
+      if (r) return lsp.attachNote(key, r.name);
+    }
+  }
+  // Renamed (another kind of file), encrypted, or a kind of file turned on or off in Settings.
+  const lspPlaces = useRef(null);
+  useEffect(() => {
+    const now = `${settings.languageServersRemote !== false}/${settings.languageServersNotes !== false}`;
+    if (lspPlaces.current && lspPlaces.current !== now) lspRef.current?.detachAll();
+    lspPlaces.current = now;
+    if (activeKey) attachLanguageServer(activeKey);
+  }, [activeName, Boolean(activeFile?.encrypted), settings.languageServersRemote, settings.languageServersNotes]);
 
   // ---- Language servers (desktop): F12, Shift+F12 and F2 ask the file's server first ----
   // The editor's own ways (codeNav.js: the declarations it recognizes) when there is none.
   const ownWays = useRef(null);
   ownWays.current ??= { goToDefinition: actions.goToDefinition, findUsages: actions.findUsages, renameSymbol: actions.renameSymbol };
   const serverOf = (key) => (lspRef.current?.has(key) ? lspRef.current : null);
-  /** Places a server answered with ([{ uri, range }]) as { path, line, column, length, text } (the line, when it can be read). */
-  actions.serverPlaces = async (locs) => {
+  /**
+   * Places the server of tab `key` answered with ([{ uri, range }]) as { path, line, column,
+   * length, text } (the line, when it can be read); a synced file's also carry its `id`.
+   */
+  actions.serverPlaces = async (locs, key) => {
     const texts = new Map();
     const textOf = async (path) => {
       if (!texts.has(path)) {
@@ -1831,22 +1885,29 @@ export function App() {
     };
     const out = [];
     for (const l of locs.slice(0, 500)) {
-      const path = uriPath(l.uri);
-      if (!path) continue;
-      const text = await textOf(path);
+      const place = lspRef.current?.placeOf(key, l.uri);
+      if (!place) continue;
       const { start, end } = l.range;
-      out.push({ path, line: start.line + 1, column: start.character + 1, length: end.line === start.line ? end.character - start.character : 0, text: text == null ? null : lineOf(text, start.line) });
+      const at = { line: start.line + 1, column: start.character + 1, length: end.line === start.line ? end.character - start.character : 0 };
+      if (!place.path) {
+        // A synced file (open in its tab): shown by its name.
+        const text = hostRef.current?.stateOf(place.key)?.doc.toString() ?? null;
+        out.push({ ...at, id: place.key.startsWith('f:') ? place.key.slice(2) : place.key, path: tabName(place.key), text: text == null ? null : lineOf(text, start.line) });
+        continue;
+      }
+      const text = await textOf(place.path);
+      out.push({ ...at, path: place.path, text: text == null ? null : lineOf(text, start.line) });
     }
     return out;
   };
-  actions.openPlace = (p) => actions.openDiskPath(p.path, { line: p.line, column: p.column, length: p.length });
+  actions.openPlace = (p) => (p.id ? actions.openFile(p.id, { line: p.line, column: p.column, length: p.length }) : actions.openDiskPath(p.path, { line: p.line, column: p.column, length: p.length }));
   actions.goToDefinition = async () => {
     const w = actions.codeWord();
     if (!w) return;
     const lsp = serverOf(w.ctx.key);
     if (lsp) {
       try {
-        const places = await actions.serverPlaces(lsp.locations(await lsp.request(w.ctx.key, 'textDocument/definition', w.from, {}, 'definitionProvider')));
+        const places = await actions.serverPlaces(lsp.locations(await lsp.request(w.ctx.key, 'textDocument/definition', w.from, {}, 'definitionProvider')), w.ctx.key);
         if (places.length === 1) return actions.openPlace(places[0]);
         if (places.length > 1) return setDialog({ type: 'declarations', word: w.word, places: places.map((p) => ({ ...p, text: p.text?.trim() ?? '' })) });
       } catch {
@@ -1862,9 +1923,9 @@ export function App() {
     if (lsp) {
       try {
         const result = await lsp.request(w.ctx.key, 'textDocument/references', w.from, { context: { includeDeclaration: true } }, 'referencesProvider');
-        const here = parseKey(w.ctx.key)?.path;
+        const here = parseKey(w.ctx.key)?.path ?? tabName(w.ctx.key);
         // This file first, then the others by name; each by line.
-        const list = (await actions.serverPlaces(lsp.locations(result))).sort((a, b) => (b.path === here) - (a.path === here) || a.path.localeCompare(b.path) || a.line - b.line || a.column - b.column);
+        const list = (await actions.serverPlaces(lsp.locations(result), w.ctx.key)).sort((a, b) => (b.path === here) - (a.path === here) || a.path.localeCompare(b.path) || a.line - b.line || a.column - b.column);
         if (list.length) {
           setRefs({ word: w.word, list, server: lsp.statusOf(w.ctx.key)?.server ?? 'the language server' });
           return setPanel('references');
@@ -1903,7 +1964,7 @@ export function App() {
       return toast(`Could not rename “${word}”: ${err?.message ?? err}`, { kind: 'error', timeout: 8000 });
     }
     if (!edit || !editPlan(edit).files.length) return toast(`The language server has nothing to rename for “${word}”.`);
-    return actions.applyWorkspaceEdit(edit, { title: `Rename “${word}” to “${newName}”`, preview: 'always', userEvent: 'input.rename' });
+    return actions.applyWorkspaceEdit(edit, { title: `Rename “${word}” to “${newName}”`, preview: 'always', userEvent: 'input.rename', placeOf: (uri) => lspRef.current?.placeOf(key, uri) });
   };
 
   /**
@@ -1913,11 +1974,12 @@ export function App() {
    * - files not open are written to disk, each only if it did not change since it was read;
    *   new files are made inside the folders you opened (renaming or deleting files: not done);
    * - `preview` 'always' shows the changes first when they reach other files, 'auto' when they
-   *   reach files not open, 'never' does not.
+   *   reach files not open, 'never' does not;
+   * - `placeOf(uri)` says where a file is ({ key, path }: on a server, or a synced file's tab).
    * Undo (in the message) takes it all back where nothing changed since. Returns
    * { applied, failureReason }, the answer to workspace/applyEdit.
    */
-  actions.applyWorkspaceEdit = async (edit, { title = 'Changes', preview = 'auto', userEvent = 'input' } = {}) => {
+  actions.applyWorkspaceEdit = async (edit, { title = 'Changes', preview = 'auto', userEvent = 'input', placeOf = null } = {}) => {
     const plan = editPlan(edit);
     if (plan.unsupported.length) {
       toast(`${title}: this would ${plan.unsupported.join(' and ')} files, which the editor does not do. Nothing was changed.`, { kind: 'error', timeout: 9000 });
@@ -1929,16 +1991,30 @@ export function App() {
     host.flushAll();
     // Line breaks as the editor keeps them (files with \r\n are written back with theirs).
     const clean = (edits) => edits.map((e) => ({ ...e, newText: String(e.newText ?? '').replace(/\r\n?/g, '\n') }));
+    const where = (uri) => {
+      if (placeOf) return placeOf(uri);
+      const path = uriPath(uri);
+      return path ? { key: diskKey(path), path } : null;
+    };
     const entries = [];
     for (const c of plan.creates) {
-      const path = uriPath(c.uri);
+      const path = where(c.uri)?.path;
       if (path) entries.push({ path, kind: 'new', create: c, base: '', edits: [] });
     }
     for (const f of plan.files) {
-      const path = uriPath(f.uri);
+      const place = where(f.uri);
+      const path = place?.path;
       const edits = clean(f.edits);
+      if (place && !path) {
+        // A synced file: only while its tab is open (the server knows no other).
+        const state = host.stateOf(place.key);
+        const text = state?.doc.toString();
+        const synced = lsp?.syncedText(place.key);
+        entries.push(state ? { path: place.key, name: tabName(place.key), key: place.key, kind: 'tab', base: text, edits, ...(synced != null && synced !== text ? { error: 'changed since the server looked: try again' } : {}) } : { path: place.key, name: tabName(place.key), error: 'not open', edits });
+        continue;
+      }
       if (!path) {
-        entries.push({ path: f.uri, error: 'not a file on this computer', edits });
+        entries.push({ path: f.uri, error: 'not a file the editor can reach', edits });
         continue;
       }
       const made = entries.find((e) => e.kind === 'new' && e.path === path);
@@ -2016,7 +2092,7 @@ export function App() {
       }
     }
     if (written.length || made.length) lsp?.filesChanged(written, { created: made });
-    const nameOf = (p) => String(p).split(/[\\/]/).pop();
+    const nameOf = (p) => (/^[fr]:/.test(p) ? tabName(p) : String(p).split(/[\\/]/).pop());
     const undoAll = async () => {
       const failed = [];
       const back = [];
@@ -2126,7 +2202,7 @@ export function App() {
       if (typeof item.command === 'string') return void (await lsp.executeCommand(key, item));
       const action = await lsp.resolveCodeAction(key, item);
       if (action.edit) {
-        const done = await actions.applyWorkspaceEdit(action.edit, { title: action.title, userEvent: 'input.codeaction' });
+        const done = await actions.applyWorkspaceEdit(action.edit, { title: action.title, userEvent: 'input.codeaction', placeOf: (uri) => lsp.placeOf(key, uri) });
         if (!done.applied) return;
       }
       if (action.command) await lsp.executeCommand(key, action.command);
@@ -2161,12 +2237,12 @@ export function App() {
     await lspRef.current?.stop(id).catch(() => {});
     setLspTick((n) => n + 1);
   };
-  /** Opens a terminal on this computer with `command` typed in, for the person to run. */
-  actions.typeInTerminal = async (command, cwd = '') => {
+  /** Opens a terminal (on this computer, or on the server `connId`) with `command` typed in, for the person to run. */
+  actions.typeInTerminal = async (command, cwd = '', connId = 'local') => {
     if (!terminalsAvailable()) return toast('Terminals work in the desktop app.', { kind: 'error' });
     setTerminalShown(true);
     try {
-      await runInTerminal('local', { cwd, line: command, label: 'Set up', enter: false });
+      await runInTerminal(connId, { cwd, line: command, label: 'Set up', enter: false });
       setTimeout(() => focusTerminal(), 100);
       toast('The command is typed in the terminal: press Enter to run it. Then start the server from the status bar.', { timeout: 10000 });
     } catch (err) {

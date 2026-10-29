@@ -58,6 +58,9 @@ export const DEFAULT_SETTINGS = {
   inlineSuggest: false,
   // Language servers for code files on this computer (desktop): types, completion, F12 across files.
   languageServers: true,
+  // Files on SSH servers get theirs there; synced files and tracker documents one of their own.
+  languageServersRemote: true,
+  languageServersNotes: true,
   // Run this file (F5): "extension: command" lines that replace or add to runFile.js's.
   runCommands: '',
   indentGuides: true,

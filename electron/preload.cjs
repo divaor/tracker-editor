@@ -260,9 +260,10 @@ contextBridge.exposeInMainWorld('desktop', {
       return () => ipcRenderer.removeListener('term:exit', listener);
     },
   },
-  // Language servers for files on this computer (lsp.cjs): the page names a file, never a program.
+  // Language servers (lsp.cjs) for files here, on SSH servers and synced: the page names a file, never a program.
   lsp: {
-    start: (path) => ipcRenderer.invoke('lsp:start', path),
+    start: (path, opts) => ipcRenderer.invoke('lsp:start', path, opts),
+    startNote: (key, name) => ipcRenderer.invoke('lsp:start-note', key, name),
     send: (id, message) => ipcRenderer.send('lsp:send', id, message),
     stop: (id) => ipcRenderer.invoke('lsp:stop', id),
     restart: (id) => ipcRenderer.invoke('lsp:restart', id),

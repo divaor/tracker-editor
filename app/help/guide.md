@@ -135,7 +135,7 @@ Not a full IDE, but enough to find your way in a code file (**Edit → Code** on
 
 ### Language servers (desktop): code that knows its types
 
-For code files opened from **Folders** on this computer, the editor uses a **language server**, the same kind of program VS Code uses, when one is installed:
+For code files, the editor uses a **language server**, the same kind of program VS Code uses, when one is installed: for files opened from **Folders** on this computer, for files on an **SSH server** (the server runs there), and for **your own files and tracker documents**:
 
 | Files | Server | Install it with |
 | --- | --- | --- |
@@ -147,6 +147,8 @@ For code files opened from **Folders** on this computer, the editor uses a **lan
 | JSON, CSS/SCSS/Less, HTML | vscode-langservers-extracted | `npm install -g vscode-langservers-extracted` |
 | YAML | yaml-language-server | `npm install -g yaml-language-server` |
 | Bash | bash-language-server (problems from ShellCheck) | `npm install -g bash-language-server` |
+| Java | Eclipse JDT (jdtls); needs Java 25 and Python 3 | `brew install jdtls`, `scoop install jdtls`, or download it |
+| C# | csharp-ls; needs the .NET SDK | `dotnet tool install --global csharp-ls` |
 
 The status bar names it (**TypeScript 7.0.2 · ready**, **gopls · ready**, **Pyright · Indexing 40%**). Then:
 
@@ -169,6 +171,12 @@ The status bar names it (**TypeScript 7.0.2 · ready**, **gopls · ready**, **Py
 - Each server runs for one **project folder** (the nearest folder with a `package.json`, `go.mod`, `Cargo.toml`, `pyproject.toml`…, never above the folder you opened in Folders); JSON, CSS, HTML, YAML and Bash run once for the whole folder you opened. At most six run at once, and one stops 10 minutes after its last file is closed.
 - Click the server in the status bar for the **Language servers** panel: what runs for which folder, **Restart**, **Stop**, and **Show its messages** for when something goes wrong. A server that keeps crashing stops after three times; the status bar then offers **Start**.
 - Turn them off in **Settings → Language servers**.
+
+**Files on an SSH server.** A code file opened from a server (SFTP) gets the server's own language server, running **there**: it sees the project as it is on the server, with its packages, so problems, completion, `F12` and renames are the real ones. The editor looks for it in the server's login PATH, the usual install folders (`~/.local/bin`, `~/.npm-global/bin`, `~/go/bin`, `~/.cargo/bin`, `~/.dotnet/tools`…) and the project's `node_modules`. The project folder is the nearest one with its markers, up to your home folder there. When none is installed, **Set up…** types the install command into a terminal **on that server**. Only the servers in the table run there (never one of your own), nothing is installed by itself, and the status bar says where: **Pyright on Box · ready**. If the connection drops, the server stops; it starts again when the connection is back. FTP and Windows servers have none. Turn it off with **Also for files on SSH servers** in Settings.
+
+**Your own files and tracker documents.** A synced file or a tracker document with a code name (`script.py`, `query.ts`) gets a server on this computer too, for that one file: problems, completion, hover, and `F2` within the file. There is no project around it, so imports of your other files are not known. Encrypted files never go to a server. Turn it off with **Also for my files and tracker documents**.
+
+**Java and C#** take a while the first time: they read the whole project (Maven or Gradle for Java, the `.sln` or `.csproj` for C#) before problems show. jdtls keeps what it learns in a cache folder of its own, not in your project.
 
 ---
 
@@ -705,6 +713,10 @@ Turn them on in **Settings → Desktop**.
 - **`python3` (or `node`…) is not found when running a file**: the terminal uses your usual shell and its PATH; install the program, or put its full path in **Run commands**.
 - **The status bar says "Set up TypeScript…" but it is installed**: the editor looks on the PATH of your login shell and in the project's `node_modules`. For TypeScript it needs version 7 or later (`tsc --version`), or `typescript-language-server` with an older one. Install it for everyone (`npm install -g typescript`), then **It is installed: start it**.
 - **A language server says nothing, or stopped**: click it in the status bar → **Show its messages**; **Restart** starts it again. For Python, open the project's folder (the one with `pyproject.toml`) so Pyright reads its settings there (`[tool.pyright]`, or a `pyrightconfig.json`, which also says which virtual environment to use).
+- **"Set up Python…" for a file on a server, but it is installed there**: the editor looks on the server's login PATH and the usual folders (`~/.local/bin`, `~/.npm-global/bin`…). Check with `command -v pyright-langserver` in the server's terminal; a program in a folder of its own needs that folder on the PATH your `~/.profile` (or `~/.bashrc`) sets.
+- **"The connection to Box closed. Restart … once it is connected again"**: the server's connection dropped; it starts by itself when the connection is back, or click **Restart** then.
+- **Java says nothing, or "requires Java 25"**: current jdtls versions need Java 25 (`java -version`; `JAVA_HOME` wins over `java` on PATH). The first look at a big project takes a minute or two.
+- **C#: "csharp-ls" will not install**: the newest csharp-ls wants the newest .NET SDK. With .NET 8, install an older one: `dotnet tool install --global csharp-ls --version 0.16.0`. Problems show once it has loaded the solution.
 - **No grey suggestions**: turn on **Settings → Editor → Suggest the rest as you type**, connect a model in Settings → Model (a local one; a service that answers later can't), and type at the end of a line. Slow ones: pick a small code model as **Model for suggestions**.
 - **A mirror says the folder is empty or missing**: one side looks wiped out (a drive not plugged in, a server folder moved), so nothing was changed. Fix it, or remove the mirror and set it up again.
 - **A mirror waits with "deleted here: delete on the server too?"**: click **Review** and choose.

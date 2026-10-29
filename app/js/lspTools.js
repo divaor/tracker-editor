@@ -233,8 +233,15 @@ export function progressText(tasks) {
   return `${busy.title || busy.message || 'Working'}${pct}`;
 }
 
-/** The status bar's words for a server: "TypeScript 7.0.2 · ready", "Pyright · Indexing 40%". */
-export function serverLabel({ server, state, progress = '' }) {
+/** The status bar's words for a server: "TypeScript 7.0.2 · ready", "Pyright on Box · Indexing 40%". */
+export function serverLabel({ server, state, progress = '', where = null }) {
   const what = state === 'running' ? progress || 'ready' : state === 'starting' ? 'starting…' : state === 'restarting' ? 'restarting…' : state === 'stopped' ? 'stopped' : state;
-  return `${server} · ${what}`;
+  return `${server}${where?.kind === 'remote' ? ` on ${where.name}` : ''} · ${what}`;
+}
+
+/** Where a server runs, in words: "on this computer", "on Box" (an SSH server), or for a synced file alone. */
+export function whereLabel(where) {
+  if (where?.kind === 'remote') return `on ${where.name}`;
+  if (where?.kind === 'notes') return 'on this computer, for single files';
+  return 'on this computer';
 }

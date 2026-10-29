@@ -335,6 +335,11 @@ class SftpSession {
     });
   }
 
+  /** A command on the server without a terminal (a language server): resolves with its channel. */
+  exec(command) {
+    return new Promise((resolve, reject) => this.client.exec(command, (err, stream) => (err ? reject(err) : resolve(stream))));
+  }
+
   call(method, ...args) {
     return new Promise((resolve, reject) => this.sftp[method](...args, (err, result) => (err ? reject(err) : resolve(result))));
   }
@@ -1180,6 +1185,59 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
       const s = await session(id);
       try {
         return await s.shell({ cols, rows, cwd });
+      } catch (err) {
+        throw friendlyError(err, conn);
+      }
+    },
+
+    // ---- Language servers (lsp.cjs, lspRemote.cjs): only on SSH servers that are not Windows ----
+    /** The SSH session for running programs on a server (connecting when needed). */
+    async commandSession(id) {
+      const conn = find(id);
+      if (conn.protocol !== 'sftp') throw new Error(`${conn.name} is an ${protocolLabel(conn.protocol)} server; programs run only over SSH (SFTP).`);
+      const s = await session(id);
+      if (await s.windows()) throw new Error(`${conn.name} runs Windows: language servers run there only on Linux and macOS servers.`);
+      return s;
+    },
+    /** Runs a shell script on the server: its output (`max` bytes at most), within `timeout` ms. */
+    async run(id, script, { timeout = 30000, max = 256 * 1024 } = {}) {
+      const conn = find(id);
+      const s = await this.commandSession(id);
+      let stream;
+      try {
+        stream = await s.exec(`sh -c ${shellQuote(script)}`);
+      } catch (err) {
+        throw friendlyError(err, conn);
+      }
+      return new Promise((resolve, reject) => {
+        const chunks = [];
+        let size = 0;
+        const timer = setTimeout(() => {
+          stream.close();
+          reject(new Error(`${conn.name} did not answer in ${Math.round(timeout / 1000)} s.`));
+        }, timeout);
+        timer.unref?.();
+        stream.on('data', (chunk) => {
+          if (size < max) chunks.push(chunk);
+          size += chunk.length;
+        });
+        stream.stderr.on('data', () => {});
+        stream.on('close', () => {
+          clearTimeout(timer);
+          resolve(Buffer.concat(chunks).toString('utf8').slice(0, max));
+        });
+        stream.on('error', (err) => {
+          clearTimeout(timer);
+          reject(err);
+        });
+      });
+    },
+    /** A program on the server with its input and output over the channel (no terminal). */
+    async exec(id, command) {
+      const conn = find(id);
+      const s = await this.commandSession(id);
+      try {
+        return await s.exec(command);
       } catch (err) {
         throw friendlyError(err, conn);
       }

@@ -2,12 +2,17 @@
 // spoken to over stdio with the Language Server Protocol. This module finds them on the
 // computer (CATALOG: what is on PATH or in the project, never a program the page names),
 // picks the project folder, starts one per (server, folder), frames the messages and keeps
-// the processes in check (four at most, restarted after a crash, stopped after three).
-// The page's CodeMirror client (app/js/lsp.js) talks through main.cjs's lsp:* IPC.
+// the processes in check (six at most, restarted after a crash, stopped after three).
+// Servers run in one of three places: here for files on this computer; on an SSH server for
+// files there (lspRemote.cjs: found and started over the same connection); and here for the
+// synced files and tracker documents, each as a file that exists only in the editor (a path
+// under the notes folder, `note`). The page's CodeMirror client (app/js/lsp.js) talks through
+// main.cjs's lsp:* IPC.
 const { spawn: spawnProcess, execFile } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { probeScript, parseProbe, remoteContext, remoteCommand, channelProcess } = require('./lspRemote.cjs');
 
 // ---- Messages: "Content-Length: n\r\n\r\n" then n bytes of JSON ----
 
@@ -88,10 +93,13 @@ const KUBERNETES_GLOBS = ['k8s/**/*.yaml', 'k8s/**/*.yml', 'kubernetes/**/*.yaml
 
 // A server installed with npm (or in the project's node_modules): `name` started with `args`.
 const npmServer = (name, args, label = name) =>
-  async function find(ctx) {
-    const found = ctx.projectBin(name) ?? (await ctx.onPath(name));
-    return found ? { name: label, ...ctx.runnable(found), args } : null;
-  };
+  Object.assign(
+    async function find(ctx) {
+      const found = ctx.projectBin(name) ?? (await ctx.onPath(name));
+      return found ? { name: label, ...ctx.runnable(found), args } : null;
+    },
+    { programs: [name] },
+  );
 
 /**
  * The servers this app knows. `find(ctx)` looks for one on this computer (ctx: the project
@@ -101,7 +109,10 @@ const npmServer = (name, args, label = name) =>
  * know. `scope: 'folder'`: one server for the whole folder opened (light servers for single
  * files: JSON, CSS…) rather than one per project inside it. `settings` answer the server's
  * workspace/configuration and also go to it once started (didChangeConfiguration, which the
- * JSON server reads them from); `init` are its initializationOptions.
+ * JSON server reads them from); `init` are its initializationOptions. `markers` are file names
+ * or patterns (*.csproj), or groups of them tried in order (the first group anywhere up the
+ * folders wins). `programs`: the names find() looks for, which a probe on an SSH server asks
+ * about (npmServer's carry theirs); `verify`: those run with --version there first.
  */
 const CATALOG = [
   {
@@ -110,6 +121,7 @@ const CATALOG = [
     exts: ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'],
     languageIds: { '.ts': 'typescript', '.mts': 'typescript', '.cts': 'typescript', '.tsx': 'typescriptreact', '.js': 'javascript', '.mjs': 'javascript', '.cjs': 'javascript', '.jsx': 'javascriptreact' },
     markers: ['tsconfig.json', 'jsconfig.json', 'package.json'],
+    programs: ['typescript-language-server', 'tsc'],
     // TypeScript 7 has its language server built in (tsc --lsp).
     install: ['npm install -g typescript'],
     // Answers to workspace/configuration, by section: F2 renames the symbol everywhere rather
@@ -141,6 +153,7 @@ const CATALOG = [
     languageIds: { '.py': 'python', '.pyi': 'python' },
     markers: ['pyproject.toml', 'pyrightconfig.json', 'setup.py', 'setup.cfg', 'requirements.txt'],
     install: ['npm install -g pyright', 'pip install pyright'],
+    programs: ['pyright-langserver', 'basedpyright-langserver'],
     async find(ctx) {
       for (const name of ['pyright-langserver', 'basedpyright-langserver']) {
         const found = ctx.projectBin(name) ?? (await ctx.onPath(name));
@@ -157,6 +170,7 @@ const CATALOG = [
     markers: ['go.work', 'go.mod'],
     install: ['go install golang.org/x/tools/gopls@latest'],
     note: 'It needs Go (go.dev/dl).',
+    programs: ['gopls'],
     async find(ctx) {
       const found = await ctx.onPath('gopls');
       return found ? { name: 'gopls', ...ctx.runnable(found), args: [] } : null;
@@ -170,6 +184,8 @@ const CATALOG = [
     markers: ['Cargo.toml'],
     install: ['rustup component add rust-analyzer'],
     note: 'It needs Rust (rustup.rs).',
+    programs: ['rust-analyzer'],
+    verify: ['rust-analyzer'],
     async find(ctx) {
       const found = await ctx.onPath('rust-analyzer');
       // rustup puts a stand-in on PATH that fails until the component is added.
@@ -185,9 +201,40 @@ const CATALOG = [
     markers: ['compile_commands.json', 'compile_flags.txt', '.clangd'],
     install: { win32: ['winget install LLVM.LLVM'], darwin: ['xcode-select --install', 'brew install llvm'], default: ['sudo apt install clangd', 'sudo dnf install clang-tools-extra'] },
     note: 'For a project built with CMake or make, a compile_commands.json (cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON) tells it the flags.',
+    programs: ['clangd'],
     async find(ctx) {
       const found = await ctx.onPath('clangd');
       return found ? { name: 'clangd', ...ctx.runnable(found), args: [] } : null;
+    },
+  },
+  {
+    id: 'java',
+    label: 'Java (jdtls)',
+    exts: ['.java'],
+    languageIds: { '.java': 'java' },
+    // A Gradle build's top folder first (its settings file), else the nearest project.
+    markers: [['settings.gradle', 'settings.gradle.kts'], ['pom.xml', 'build.gradle', 'build.gradle.kts', '.project']],
+    install: { darwin: ['brew install jdtls'], win32: ['scoop install jdtls'], default: ['brew install jdtls'] },
+    note: 'It needs a recent Java (25 for current versions: the one JAVA_HOME names, else java on PATH) and Python 3, which starts it. Or download it from download.eclipse.org/jdtls/milestones, unpack it and put its bin folder on PATH. It keeps what it learns about each project in its own cache folder, not in the project. The first time it reads a project can take a minute.',
+    programs: ['jdtls'],
+    async find(ctx) {
+      const found = await ctx.onPath('jdtls');
+      return found ? { name: 'jdtls', ...ctx.runnable(found), args: [] } : null;
+    },
+  },
+  {
+    id: 'csharp',
+    label: 'C# (csharp-ls)',
+    exts: ['.cs', '.csx'],
+    languageIds: { '.cs': 'csharp', '.csx': 'csharp' },
+    // The solution first: the nearest project alone misses the others it uses.
+    markers: [['*.sln', '*.slnx'], ['*.csproj']],
+    install: ['dotnet tool install --global csharp-ls'],
+    note: 'It needs the .NET SDK (dotnet.microsoft.com/download). The newest csharp-ls wants the newest SDK; with .NET 8 add --version 0.16.0. dotnet puts it in ~/.dotnet/tools, which the editor looks in.',
+    programs: ['csharp-ls'],
+    async find(ctx) {
+      const found = await ctx.onPath('csharp-ls');
+      return found ? { name: 'csharp-ls', ...ctx.runnable(found), args: [] } : null;
     },
   },
   {
@@ -323,17 +370,30 @@ function customEntry(def) {
 /**
  * The project a file belongs to: the nearest folder up from it with one of `markers` (or a
  * .git), never above `stop` (the folder the person picked); else the file's own folder.
+ * Markers may be patterns (*.sln: `list` gives a folder's names), or groups tried in order.
  */
-function findRoot(file, markers, { stop = '', exists = fs.existsSync } = {}) {
+function findRoot(file, markers, { stop = '', exists = fs.existsSync, list = listNames } = {}) {
   const start = path.dirname(file);
   const limit = stop && isInside(stop, start) ? path.resolve(stop) : null;
+  const groups = markers.length && Array.isArray(markers[0]) ? markers : [markers];
+  const has = (dir, m) => (/[*?]/.test(m) ? list(dir).some((name) => globRegex(m).test(name)) : exists(path.join(dir, m)));
   let gitRoot = null;
-  for (let dir = start; ; dir = path.dirname(dir)) {
-    if (markers.some((m) => exists(path.join(dir, m)))) return dir;
-    if (!gitRoot && exists(path.join(dir, '.git'))) gitRoot = dir;
-    if (!limit || dir === limit || path.dirname(dir) === dir) break;
+  for (const [i, group] of groups.entries()) {
+    for (let dir = start; ; dir = path.dirname(dir)) {
+      if (group.some((m) => has(dir, m))) return dir;
+      if (i === 0 && !gitRoot && exists(path.join(dir, '.git'))) gitRoot = dir;
+      if (!limit || dir === limit || path.dirname(dir) === dir) break;
+    }
   }
   return gitRoot ?? start;
+}
+const globRegex = (pattern) => new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`, 'i');
+function listNames(dir) {
+  try {
+    return fs.readdirSync(dir);
+  } catch {
+    return [];
+  }
 }
 const isInside = (parent, child) => {
   const rel = path.relative(path.resolve(parent), path.resolve(child));
@@ -364,8 +424,9 @@ function isFile(p) {
 
 /**
  * How to run a program that was found: Node scripts (an npm link, or the script an npm
- * .cmd shim names) on Electron's own Node; anything else as it is, by the path it was found at
- * (rustup's rust-analyzer is a link to rustup, which picks the program by the name it is run as).
+ * .cmd shim names) on Electron's own Node; other .cmd and .bat files through cmd.exe (Node
+ * starts them no other way); anything else as it is, by the path it was found at (rustup's
+ * rust-analyzer is a link to rustup, which picks the program by the name it is run as).
  */
 function runnable(found, { platform = process.platform, realpath = (p) => fs.realpathSync(p), read = (p) => fs.readFileSync(p, 'utf8').slice(0, 4096) } = {}) {
   let real = found;
@@ -375,7 +436,7 @@ function runnable(found, { platform = process.platform, realpath = (p) => fs.rea
     // keep the path as found
   }
   if (/\.(c|m)?js$/i.test(real)) return { script: real };
-  if (platform === 'win32' && /\.cmd$/i.test(real)) {
+  if (platform === 'win32' && /\.(cmd|bat)$/i.test(real)) {
     const shim = /"%~?dp0%?\\([^"]+)"\s+%\*/i.exec(safeRead(read, real));
     if (shim) return { script: path.win32.join(path.win32.dirname(real), shim[1]) };
     return { command: real, shell: true };
@@ -440,12 +501,12 @@ function shellPath({ env = process.env, platform = process.platform, run = execF
 function searchEnv(env, extra, platform = process.platform, known = true) {
   const sep = platform === 'win32' ? ';' : ':';
   const home = os.homedir();
-  // npm's global folder, Go's and Cargo's bin folders, LLVM's (clangd).
+  // npm's global folder, Go's, Cargo's and dotnet's tool folders, LLVM's (clangd), scoop's shims.
   const goBin = env.GOPATH ? [path.join(String(env.GOPATH).split(sep)[0], 'bin')] : [];
   const places = !known
     ? []
     : platform === 'win32'
-      ? [env.APPDATA && path.win32.join(env.APPDATA, 'npm'), ...goBin, env.USERPROFILE && path.win32.join(env.USERPROFILE, 'go', 'bin'), env.USERPROFILE && path.win32.join(env.USERPROFILE, '.cargo', 'bin'), env.ProgramFiles && path.win32.join(env.ProgramFiles, 'LLVM', 'bin')]
+      ? [env.APPDATA && path.win32.join(env.APPDATA, 'npm'), ...goBin, env.USERPROFILE && path.win32.join(env.USERPROFILE, 'go', 'bin'), env.USERPROFILE && path.win32.join(env.USERPROFILE, '.cargo', 'bin'), env.USERPROFILE && path.win32.join(env.USERPROFILE, '.dotnet', 'tools'), env.USERPROFILE && path.win32.join(env.USERPROFILE, 'scoop', 'shims'), env.ProgramFiles && path.win32.join(env.ProgramFiles, 'LLVM', 'bin')]
       : [
           path.join(home, '.local', 'bin'),
           path.join(home, '.npm-global', 'bin'),
@@ -454,6 +515,7 @@ function searchEnv(env, extra, platform = process.platform, known = true) {
           ...goBin,
           path.join(home, 'go', 'bin'),
           path.join(home, '.cargo', 'bin'),
+          path.join(home, '.dotnet', 'tools'),
           ...(platform === 'darwin' ? ['/opt/homebrew/opt/llvm/bin', '/usr/local/opt/llvm/bin', '/Library/Developer/CommandLineTools/usr/bin'] : []),
         ];
   const dirs = [...String(env.PATH ?? env.Path ?? '').split(sep), ...String(extra || '').split(sep), ...places].filter(Boolean);
@@ -479,12 +541,12 @@ function serverEnv(env) {
 
 /**
  * Looks for the server for a file's project: { entry, root, found, env } (found null when
- * missing). `login: false` looks only on `env`'s PATH (the tests).
+ * missing). `login: false` looks only on `env`'s PATH (the tests); `root` sets the folder.
  */
-async function locate(file, { stop = '', env = process.env, platform = process.platform, login = true, entries = CATALOG, nodePath = process.execPath, run = execFile } = {}) {
+async function locate(file, { stop = '', root: rootGiven = '', env = process.env, platform = process.platform, login = true, entries = CATALOG, nodePath = process.execPath, run = execFile } = {}) {
   const entry = catalogFor(file, entries);
   if (!entry) return null;
-  const root = rootFor(entry, file, { stop });
+  const root = rootGiven || rootFor(entry, file, { stop });
   const searchIn = searchEnv(env, login ? await shellPath({ env, platform }) : '', platform, login);
   const binIn = (dir, name) => {
     const bin = path.join(dir, 'node_modules', '.bin', name);
@@ -520,18 +582,21 @@ async function locate(file, { stop = '', env = process.env, platform = process.p
   return { entry, root, found, env: searchIn };
 }
 
+
 // ---- Running them ----
 
 const MAX_SERVERS = 6;
 const STDERR_LINES = 200;
 const CRASH_WINDOW = 5 * 60 * 1000;
+const MAX_QUEUED = 200; // messages kept for a server still starting on an SSH server
 
 /**
  * The running servers. `send(sender, channel, payload)` reaches the page; `spawn` and
  * `nodePath` (the program that runs Node scripts: Electron with ELECTRON_RUN_AS_NODE) stand in
- * for the real ones in the tests.
+ * for the real ones in the tests. `remote` (main.cjs, over remote.cjs): `run(id, script)` →
+ * its output, `exec(id, command)` → an exec channel, `label(id)`, `connected(id)`.
  */
-function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath, env = process.env, platform = process.platform, now = Date.now, locateServer = locate, catalog = () => CATALOG } = {}) {
+function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath, env = process.env, platform = process.platform, now = Date.now, locateServer = locate, catalog = () => CATALOG, remote = null } = {}) {
   const servers = new Map(); // id → server
   let nextId = 1;
 
@@ -541,10 +606,18 @@ function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath
     send(s.sender, 'lsp:status', { id: s.id, state, message, server: s.name, generation: s.generation });
   };
 
+  // Each start is a new process: the page connects to it again (initialize, open files).
+  function newGeneration(s) {
+    s.generation = (s.generation ?? 0) + 1;
+    s.queue = [];
+    s.stopping = false;
+  }
+
   function launch(s) {
+    if (s.where.kind === 'remote') return launchRemote(s);
     const { found } = s;
     const base = serverEnv(s.env);
-    // A .cmd that is not an npm shim goes through cmd.exe (shell), its path quoted.
+    // A .cmd or .bat that is not an npm shim goes through cmd.exe (shell), its path quoted.
     const program = found.shell ? `"${found.command}"` : found.command;
     const [command, args, extraEnv] = found.script ? [nodePath, [found.script, ...found.args], { ELECTRON_RUN_AS_NODE: '1' }] : [program, found.args, {}];
     s.commandLine = [found.script ? 'node' : command, ...(found.script ? [found.script, ...found.args] : args)].join(' ');
@@ -555,11 +628,35 @@ function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath
       status(s, 'stopped', `Could not start ${s.name}: ${err.message}`);
       return;
     }
-    s.proc = proc;
-    s.stopping = false;
-    // Each start is a new process: the page connects to it again (initialize, open files).
-    s.generation = (s.generation ?? 0) + 1;
+    newGeneration(s);
+    wire(s, proc);
     status(s, 'starting');
+  }
+
+  // On an SSH server: an exec channel of the files' connection runs it there. Messages the
+  // page sends meanwhile wait for the channel.
+  async function launchRemote(s) {
+    const { found, where } = s;
+    s.commandLine = `${[found.command, ...found.args].join(' ')} (on ${where.name})`;
+    newGeneration(s);
+    const generation = s.generation;
+    status(s, 'starting');
+    let stream;
+    try {
+      stream = await remote.exec(where.id, remoteCommand({ root: s.root, command: found.command, args: found.args, path: s.path }));
+    } catch (err) {
+      if (s.generation === generation && !s.removed) status(s, 'stopped', `Could not start ${s.name} on ${where.name}: ${err.message}`);
+      return;
+    }
+    if (s.removed || s.generation !== generation) {
+      stream.close();
+      return;
+    }
+    wire(s, channelProcess(stream));
+  }
+
+  function wire(s, proc) {
+    s.proc = proc;
     const read = createReader(
       (text) => send(s.sender, 'lsp:message', { id: s.id, data: text }),
       (problem) => {
@@ -569,7 +666,7 @@ function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath
     );
     proc.stdout.on('data', read);
     let partial = '';
-    proc.stderr.on('data', (chunk) => {
+    proc.stderr?.on('data', (chunk) => {
       const lines = (partial + chunk.toString('utf8')).split(/\r?\n/);
       partial = lines.pop();
       for (const line of lines) addStderr(s, line);
@@ -580,6 +677,8 @@ function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath
       exited(s, proc, null);
     });
     proc.on('exit', (code) => exited(s, proc, code));
+    // What the page sent while it was starting.
+    for (const text of s.queue.splice(0)) proc.stdin.write(frame(text));
   }
 
   function addStderr(s, line) {
@@ -594,6 +693,8 @@ function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath
       if (!s.removed) status(s, 'stopped', '');
       return;
     }
+    // The connection went: it starts again once the person reconnects (Restart), not by itself.
+    if (s.where.kind === 'remote' && !remote.connected(s.where.id)) return status(s, 'stopped', `The connection to ${s.where.name} closed. Restart ${s.name} once it is connected again.`);
     const t = now();
     s.crashes = s.crashes.filter((c) => t - c < CRASH_WINDOW).concat(t);
     if (s.crashes.length >= 3) return status(s, 'stopped', `${s.name} stopped working (it ended ${s.crashes.length} times in 5 minutes${code != null ? `, last with code ${code}` : ''}). Restart it from the Language servers panel.`);
@@ -608,8 +709,8 @@ function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath
   function stopProcess(s) {
     clearTimeout(s.retry);
     const proc = s.proc;
-    if (!proc) return;
     s.stopping = true;
+    if (!proc) return;
     try {
       proc.stdin.write(frame(JSON.stringify({ jsonrpc: '2.0', id: '__shutdown__', method: 'shutdown', params: null })));
       proc.stdin.write(frame(JSON.stringify({ jsonrpc: '2.0', method: 'exit', params: null })));
@@ -622,7 +723,7 @@ function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath
     kill.unref?.();
   }
 
-  // The fifth server stops the one used longest ago.
+  // The seventh server stops the one used longest ago.
   function makeRoom() {
     const live = [...servers.values()].filter((s) => !s.removed);
     if (live.length < MAX_SERVERS) return;
@@ -630,23 +731,62 @@ function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath
     stop(oldest.id, `${oldest.name} was stopped: at most ${MAX_SERVERS} language servers run at once.`);
   }
 
-  async function start(sender, file, { stop: stopDir = '' } = {}) {
-    const entries = catalog();
+  const sameWhere = (a, b) => a.kind === b.kind && (a.kind !== 'remote' || a.id === b.id);
+  function running(sender, entry, root, where) {
+    for (const s of servers.values()) {
+      if (s.entry.id === entry.id && s.root === root && s.sender === sender && sameWhere(s.where, where) && !s.removed) {
+        s.used = now();
+        return s;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * The server for a file, started when needed: its info, `{ none }` (no server for this
+   * kind of file) or `{ missing }` (none installed: what Set up… offers). `stop`: the folder
+   * the project search does not go above (on an SSH server, '' is its home folder). `remote`:
+   * the SSH connection the file is on (`file` its path there); `note`: `file` exists only in the
+   * editor, and `root` is the notes folder.
+   */
+  async function start(sender, file, { stop: stopDir = '', remote: connId = '', note = false, root: noteRoot = '' } = {}) {
+    // Servers of your own were confirmed to run on this computer: not on SSH servers.
+    const entries = connId ? catalog().filter((e) => !e.custom) : catalog();
     const entry = catalogFor(file, entries);
     if (!entry) return { none: true };
     const languageId = entry.languageIds[path.extname(file).toLowerCase()];
-    const root = rootFor(entry, file, { stop: stopDir });
-    for (const s of servers.values()) {
-      if (s.entry.id === entry.id && s.root === root && s.sender === sender && !s.removed) {
-        s.used = now();
-        // Stopped after crashes: Restart in the panel brings it back, not every file opened.
-        return info(s, languageId);
-      }
+    if (connId) return startRemote(sender, file, entry, languageId, connId, stopDir);
+    const where = note ? { kind: 'notes' } : { kind: 'local' };
+    const root = note ? noteRoot : rootFor(entry, file, { stop: stopDir });
+    // Stopped after crashes: Restart in the panel brings it back, not every file opened.
+    const known = running(sender, entry, root, where);
+    if (known) return info(known, languageId);
+    const located = await locateServer(file, { stop: stopDir, root: note ? noteRoot : '', env, platform, entries, nodePath });
+    if (!located?.found) return { missing: { id: entry.id, language: entry.label, install: installFor(entry, platform), note: entry.note ?? '', custom: Boolean(entry.custom), command: entry.command ?? '', root, where } };
+    return add({ entry, root, found: located.found, env: located.env ?? env, sender, where }, languageId);
+  }
+
+  async function startRemote(sender, file, entry, languageId, connId, stopDir) {
+    if (!remote) return { none: true };
+    const where = { kind: 'remote', id: connId, name: remote.label(connId) };
+    const script = probeScript({ file, markers: entry.markers, stop: stopDir, scope: entry.scope, programs: entry.programs ?? entry.find.programs ?? [], verify: entry.verify ?? [], typescript: entry.id === 'typescript' });
+    let probe;
+    try {
+      probe = parseProbe(await remote.run(connId, script));
+    } catch (err) {
+      throw new Error(`Could not look for ${entry.label} on ${where.name}: ${err.message}`);
     }
-    const located = await locateServer(file, { stop: stopDir, env, platform, entries, nodePath });
-    if (!located?.found) return { missing: { id: entry.id, language: entry.label, install: installFor(entry, platform), note: entry.note ?? '', custom: Boolean(entry.custom), command: entry.command ?? '', root } };
+    if (!probe.complete || !probe.root) throw new Error(`Could not look for ${entry.label} on ${where.name}: its shell did not answer as expected.`);
+    const known = running(sender, entry, probe.root, where);
+    if (known) return info(known, languageId);
+    const found = await entry.find(remoteContext(probe));
+    if (!found) return { missing: { id: entry.id, language: entry.label, install: installFor(entry, 'linux'), note: entry.note ?? '', custom: false, command: '', root: probe.root, where } };
+    return add({ entry, root: probe.root, found, path: probe.path, sender, where }, languageId);
+  }
+
+  function add(fields, languageId) {
     makeRoom();
-    const s = { id: `lsp${nextId++}`, entry, root, name: located.found.name, found: located.found, env: located.env ?? env, sender, stderr: [], crashes: [], used: now(), state: 'starting', message: '' };
+    const s = { id: `lsp${nextId++}`, name: fields.found.name, stderr: [], crashes: [], used: now(), state: 'starting', message: '', generation: 0, queue: [], ...fields };
     servers.set(s.id, s);
     launch(s);
     return info(s, languageId);
@@ -658,6 +798,7 @@ function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath
     language: s.entry.label,
     root: s.root,
     languageId,
+    where: s.where,
     init: s.entry.init || s.found.init ? { ...s.entry.init, ...s.found.init } : null,
     settings: s.entry.settings ?? null,
     state: s.state,
@@ -673,8 +814,14 @@ function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath
 
   function write(id, text, sender) {
     const s = own(id, sender);
-    if (!s?.proc || typeof text !== 'string' || text.length > MAX_MESSAGE) return false;
+    if (!s || typeof text !== 'string' || text.length > MAX_MESSAGE) return false;
     s.used = now();
+    if (!s.proc) {
+      // Starting on an SSH server: it gets them once its channel is open.
+      if (s.where.kind !== 'remote' || s.state !== 'starting' || s.queue.length >= MAX_QUEUED) return false;
+      s.queue.push(text);
+      return true;
+    }
     try {
       s.proc.stdin.write(frame(text));
       return true;
@@ -711,7 +858,7 @@ function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath
   const list = (sender) =>
     [...servers.values()]
       .filter((s) => !sender || s.sender === sender)
-      .map((s) => ({ id: s.id, server: s.name, language: s.entry.label, root: s.root, state: s.state, message: s.message, command: s.commandLine, pid: s.proc?.pid ?? null, stderr: s.stderr.slice(-60) }));
+      .map((s) => ({ id: s.id, server: s.name, language: s.entry.label, root: s.root, where: s.where, state: s.state, message: s.message, command: s.commandLine, pid: s.proc?.pid ?? null, stderr: s.stderr.slice(-60) }));
 
   const stopAll = (sender) => {
     for (const s of [...servers.values()]) if (!sender || s.sender === sender) stop(s.id);
@@ -720,8 +867,12 @@ function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath
   const stopEntry = (entryId, message = '') => {
     for (const s of [...servers.values()]) if (s.entry.id === entryId) stop(s.id, message);
   };
+  /** Stops the servers on an SSH server (it was disconnected or removed). */
+  const stopRemote = (connId, message = '') => {
+    for (const s of [...servers.values()]) if (s.where.kind === 'remote' && s.where.id === connId) stop(s.id, message);
+  };
 
-  return { start, write, stop, restart, list, stopAll, stopEntry };
+  return { start, write, stop, restart, list, stopAll, stopEntry, stopRemote };
 }
 
 module.exports = { frame, createReader, CATALOG, JSON_SCHEMAS, catalogFor, installFor, findRoot, rootFor, searchPath, runnable, typescriptIn, searchEnv, serverEnv, shellPath, locate, createLspHost, parseArgs, cleanCustom, customEntry, MAX_SERVERS };

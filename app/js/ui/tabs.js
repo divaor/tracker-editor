@@ -7,7 +7,7 @@ import { syncNow } from '../syncManager.js';
 import { projectKey } from '../tracker-model.js';
 import { dismissToast, ProjectChip } from './components.js';
 import { Icon } from './icons.js';
-import { serverLabel } from '../lspTools.js';
+import { serverLabel, whereLabel } from '../lspTools.js';
 import { dictationSupported } from './dictation.js';
 import { canDragOut, draggedTab, dropped, isOwnDrop, onDragOutEnd, startDragOut } from '../dragOut.js';
 import { Menu, MenuButton } from './menu.js';
@@ -714,14 +714,14 @@ const changedLines = (changes) => (changes ?? []).reduce((n, c) => n + (c.kind =
 function ServerStatus({ lsp, open, actions }) {
   if (lsp.pending) return html`<span class="status-item status-lsp muted" title="Looking for a language server">Language server…</span>`;
   if (lsp.missing)
-    return html`<button type="button" class="status-item status-btn-text status-lsp state-missing" title=${`No ${lsp.missing.language} language server on this computer: what to install`} onClick=${() => actions.setUpLanguageServer(lsp.missing)}>
+    return html`<button type="button" class="status-item status-btn-text status-lsp state-missing" title=${`No ${lsp.missing.language} language server ${whereLabel(lsp.missing.where)}: what to install`} onClick=${() => actions.setUpLanguageServer(lsp.missing)}>
       <${Icon} name="code" size=${13} /><span>Set up ${lsp.missing.language}…</span>
     </button>`;
   if (lsp.stopped)
     return html`<button type="button" class="status-item status-btn-text status-lsp state-stopped" title=${`${lsp.stopped} Click to start it again.`} onClick=${() => actions.retryLanguageServer()}>
       <${Icon} name="code" size=${13} /><span>${lsp.server ?? "Language server"} stopped · Start</span>
     </button>`;
-  return html`<button type="button" class=${`status-item status-btn-text status-lsp state-${lsp.state}`} aria-pressed=${Boolean(open)} title=${`${lsp.server}: ${lsp.state === 'running' ? 'checks this file and answers F12, Shift+F12, F2, completion and hover' : lsp.message || lsp.state}. Click for the Language servers panel.`} onClick=${() => actions.showLanguageServers()}>
+  return html`<button type="button" class=${`status-item status-btn-text status-lsp state-${lsp.state}`} aria-pressed=${Boolean(open)} title=${`${lsp.server} (${whereLabel(lsp.where)}): ${lsp.state === 'running' ? 'checks this file and answers F12, Shift+F12, F2, completion and hover' : lsp.message || lsp.state}. Click for the Language servers panel.`} onClick=${() => actions.showLanguageServers()}>
     <span class="server-dot state-${lsp.state}" aria-hidden="true" /><span>${serverLabel(lsp)}</span>
   </button>`;
 }
