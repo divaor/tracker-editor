@@ -15,7 +15,7 @@ import { binName, DeleteDialog, ExistsDialog, NameField } from './folders.js';
 import { FileViewer } from './folderPreview.js';
 import { Icon } from './icons.js';
 import { Menu, MenuButton } from './menu.js';
-import { PHONE, SidewaysButton, useMedia } from './phone.js';
+import { SidewaysButton, usePhoneLayout } from './phone.js';
 
 const message = (err) => String(err?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
 const fail = (err) => toast(message(err), { kind: 'error', timeout: 8000 });
@@ -594,7 +594,7 @@ export function PanesTab({ id, record, settings, actions, star = null }) {
   }, []);
 
   // A phone held upright: one pane at a time, a switch between them, the rest in ⋯.
-  const phone = useMedia(PHONE);
+  const phone = usePhoneLayout();
   const to = other(active);
   const arrow = active === 'left' ? 'arrowRight' : 'arrowLeft';
   const label = (text) => (active === 'left' ? html`<span class="label">${text}</span><${Icon} name=${arrow} size=${14} />` : html`<${Icon} name=${arrow} size=${14} /><span class="label">${text}</span>`);
@@ -618,7 +618,7 @@ export function PanesTab({ id, record, settings, actions, star = null }) {
   ];
 
   // The bar's buttons do not take the focus: the keys stay with the list in use (F5 elsewhere runs a file).
-  return html`<div class="panes-tab" role="region" aria-label="Two panes">
+  return html`<div class="panes-tab ${phone ? 'phone' : ''}" role="region" aria-label="Two panes">
     <div class="ccmp-bar panes-bar" onMouseDown=${(ev) => ev.target.closest('button') && ev.preventDefault()}>
       ${star}
       <${SidewaysButton} />

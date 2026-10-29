@@ -1,4 +1,5 @@
 import { html, useEffect, useRef, useState } from '../../vendor/preact-htm.js';
+import { isAndroidApp } from '../platform.js';
 import { getSettings, saveSettings } from '../settings.js';
 import { toast } from './components.js';
 import { Icon } from './icons.js';
@@ -22,9 +23,36 @@ export function useMedia(query) {
   return matches;
 }
 
+// A touch screen (some emulators' WebViews say their pointer is fine: the Android app is touch).
+const touchScreen = () => isAndroidApp() || matchMedia('(pointer: coarse)').matches;
 // A phone (or a small tablet): touch, and a short side a phone's. The window's size, in CSS
 // pixels everywhere: older Android WebViews give `screen.width` in the device's own pixels.
-const phoneScreen = () => matchMedia('(pointer: coarse)').matches && Math.min(innerWidth, innerHeight) <= 640;
+const phoneScreen = () => touchScreen() && Math.min(innerWidth, innerHeight) <= 640;
+// The device turned sideways (not the window's shape, which the keyboard changes too).
+const deviceSideways = () => touchScreen() && Boolean(globalThis.screen?.orientation?.type?.startsWith('landscape'));
+
+/** Whether the phone (or tablet) is turned sideways, following it as it turns. */
+export function useSideways() {
+  const [sideways, setSideways] = useState(deviceSideways);
+  useEffect(() => {
+    const onChange = () => setSideways(deviceSideways());
+    onChange();
+    screen.orientation?.addEventListener?.('change', onChange);
+    addEventListener('resize', onChange);
+    return () => {
+      screen.orientation?.removeEventListener?.('change', onChange);
+      removeEventListener('resize', onChange);
+    };
+  }, []);
+  return sideways;
+}
+
+/** The phone layouts: a narrow window, unless the phone is turned sideways (both sides then). */
+export function usePhoneLayout() {
+  const narrow = useMedia(PHONE);
+  const sideways = useSideways();
+  return narrow && !sideways;
+}
 
 /**
  * Turns the app sideways (`on`) or lets it follow the phone again. The Android app asks Android
@@ -62,7 +90,7 @@ export async function turnSideways(on) {
 let goingUpright = null;
 
 export function SidewaysButton() {
-  const portrait = useMedia('(orientation: portrait)');
+  const portrait = !useSideways();
   const [on, setOn] = useState(false);
   const onRef = useRef(false);
   const phone = phoneScreen();

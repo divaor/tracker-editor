@@ -289,7 +289,8 @@ try {
     for (let i = 0; i < 20 && !/\$\s*$/.test((shown = await screen()) ?? ''); i++) await page.waitForTimeout(500);
     check('the terminal panel shows the shell’s prompt', /\$/.test(shown ?? ''), (shown ?? 'no terminal screen').trim().slice(0, 300));
     await page.focus('.terminal-screen:not([hidden]) .xterm-helper-textarea');
-    await page.keyboard.type('echo ui-$((6*7))');
+    // A little apart: an older WebView can swap keys typed at once.
+    await page.keyboard.type('echo ui-$((6*7))', { delay: 60 });
     await page.keyboard.press('Enter');
     for (let i = 0; i < 10 && !/ui-42/.test((shown = await screen()) ?? ''); i++) await page.waitForTimeout(500);
     check('…and runs what is typed', /ui-42/.test(shown ?? ''), (shown ?? '').trim().slice(-300));

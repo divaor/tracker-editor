@@ -10493,37 +10493,39 @@ html[data-native='android'] body:has(.edit-bar) .toasts {
   border-left: 0;
 }
 
-@media (max-width: 640px) {
-  /* The bars wrap rather than hide their ends; buttons keep their icons. */
-  .ccmp-bar {
-    flex-wrap: wrap;
-    row-gap: 2px;
-    overflow-x: visible;
-  }
+/* The phone layouts (the classes follow usePhoneLayout, so a phone turned sideways gets the
+   wide one even at 640 px): the bars wrap rather than hide their ends; buttons keep their icons. */
+.ccmp.unified .ccmp-bar,
+.fcmp.phone .ccmp-bar,
+.panes-tab.phone .ccmp-bar {
+  flex-wrap: wrap;
+  row-gap: 2px;
+  overflow-x: visible;
+}
 
-  .ccmp-bar .btn .label.wide {
-    display: none;
-  }
+.panes-tab.phone .ccmp-bar .btn .label.wide {
+  display: none;
+}
 
-  .ccmp-count {
-    min-width: 0;
-  }
+.ccmp.unified .ccmp-count,
+.fcmp.phone .ccmp-count {
+  min-width: 0;
+}
 
-  .fcmp-break {
-    display: block;
-    flex-basis: 100%;
-    height: 0;
-  }
+.fcmp.phone .fcmp-break {
+  display: block;
+  flex-basis: 100%;
+  height: 0;
+}
 
-  .fcmp-heads {
-    grid-template-columns: minmax(0, 1fr);
-  }
+.fcmp.phone .fcmp-heads {
+  grid-template-columns: minmax(0, 1fr);
+}
 
-  .fcmp-head {
-    min-height: 28px;
-  }
+.fcmp.phone .fcmp-head {
+  min-height: 28px;
+}
 
-  .fcmp-head + .fcmp-head {
-    border-top-width: 1px;
-  }
+.fcmp.phone .fcmp-head + .fcmp-head {
+  border-top-width: 1px;
 }

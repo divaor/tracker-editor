@@ -16,7 +16,7 @@ import { MenuButton } from './menu.js';
 import { Modal } from './components.js';
 import { Splitter } from './splitter.js';
 import { PanesTab } from './twoPanes.js';
-import { PHONE, SidewaysButton, useMedia } from './phone.js';
+import { SidewaysButton, usePhoneLayout } from './phone.js';
 
 const message = (err) => String(err?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
 const sideOf = (s) => s?.path ?? s?.key ?? `text:${s?.label ?? ''}`;
@@ -38,7 +38,7 @@ export function FileCompare({ left, right, settings, actions, onSaved, onDirty, 
   const [saving, setSaving] = useState(null);
   const theme = resolvedTheme(settings.theme);
   // On a phone held upright: one text with the changes marked (the left side's lines removed in place).
-  const unified = useMedia(PHONE);
+  const unified = usePhoneLayout();
   // The texts now, edits too: kept when the editor is made again (another layout, theme, wrap).
   const texts = useRef(null);
   useEffect(() => {
@@ -204,7 +204,7 @@ function FoldersTab({ id, record, settings, actions }) {
   const show = record.show ?? 'diff';
   const opts = { all: Boolean(record.all), hidden: settings.showHidden !== false };
   // A phone held upright: one tree, each name once, both sides' size and date under it.
-  const phone = useMedia(PHONE);
+  const phone = usePhoneLayout();
 
   // Both folders listed (again after copies, saves, Refresh).
   useEffect(() => {
