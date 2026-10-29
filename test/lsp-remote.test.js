@@ -56,8 +56,10 @@ function serverHome() {
 // (No login shell: this machine's profile would add its own programs.)
 const runHere = (home) => (script) => execFileSync('sh', ['-c', script], { env: { HOME: home, SHELL: '/bin/false', PATH: `${home}/bin:/usr/bin:/bin` }, encoding: 'utf8' });
 const probe = (home, opts) => remote.parseProbe(runHere(home)(remote.probeScript(opts)));
+// What runs on the server (the probe, the stand-in server) needs a POSIX sh, as a Linux server has.
+const onServer = { skip: process.platform === 'win32' && 'the server side runs in a POSIX sh' };
 
-test('a probe finds the project by its markers, up to the home folder', () => {
+test('a probe finds the project by its markers, up to the home folder', onServer, () => {
   const home = serverHome();
   const python = lsp.CATALOG.find((e) => e.id === 'python');
   const p = probe(home, { file: `${home}/proj/pkg/main.py`, markers: python.markers, programs: python.programs });
@@ -71,20 +73,20 @@ test('a probe finds the project by its markers, up to the home folder', () => {
   assert.equal(probe(home, { file: `${home}/proj/pkg/main.py`, markers: python.markers, stop: `${home}/proj/pkg` }).root, `${home}/proj/pkg`);
 });
 
-test('a probe takes marker patterns and groups: the solution before the nearest project', () => {
+test('a probe takes marker patterns and groups: the solution before the nearest project', onServer, () => {
   const home = serverHome();
   const csharp = lsp.CATALOG.find((e) => e.id === 'csharp');
   assert.equal(probe(home, { file: `${home}/sln/app/Program.cs`, markers: csharp.markers }).root, `${home}/sln`);
   assert.equal(probe(home, { file: `${home}/sln/app/Program.cs`, markers: [['*.csproj']] }).root, `${home}/sln/app`);
 });
 
-test('a probe gives light servers the Git repository, else the file’s folder', () => {
+test('a probe gives light servers the Git repository, else the file’s folder', onServer, () => {
   const home = serverHome();
   assert.equal(probe(home, { file: `${home}/repo/conf/deep/settings.json`, markers: [], scope: 'folder' }).root, `${home}/repo`);
   assert.equal(probe(home, { file: `${home}/loose/notes/data.json`, markers: [], scope: 'folder' }).root, `${home}/loose/notes`);
 });
 
-test('a probe finds a project’s own programs, checks stand-ins, and TypeScript’s versions', () => {
+test('a probe finds a project’s own programs, checks stand-ins, and TypeScript’s versions', onServer, () => {
   const home = serverHome();
   const ts = lsp.CATALOG.find((e) => e.id === 'typescript');
   const p = probe(home, { file: `${home}/web/src/app.ts`, markers: ts.markers, programs: ts.programs, typescript: true });
@@ -185,7 +187,7 @@ function remoteHost(home, { connected = () => true, delay = 0 } = {}) {
   return { host, events, next, children };
 }
 
-test('a server on an SSH server: found there, started there, messages waiting for its channel', async () => {
+test('a server on an SSH server: found there, started there, messages waiting for its channel', onServer, async () => {
   const home = serverHome();
   const { host, events, next } = remoteHost(home, { delay: 150 });
   const sender = { id: 'page' };
@@ -209,7 +211,7 @@ test('a server on an SSH server: found there, started there, messages waiting fo
   assert.ok(events.some((e) => e.payload.state === 'starting'));
 });
 
-test('nothing installed there: Set up… for that server, with Linux’s commands', async () => {
+test('nothing installed there: Set up… for that server, with Linux’s commands', onServer, async () => {
   const home = serverHome();
   const { host } = remoteHost(home);
   const missing = await host.start({ id: 'page' }, `${home}/proj/tool.go`, { remote: 'box1' });
@@ -220,7 +222,7 @@ test('nothing installed there: Set up… for that server, with Linux’s command
   assert.deepEqual(await host.start({ id: 'page' }, `${home}/proj/notes.txt`, { remote: 'box1' }), { none: true });
 });
 
-test('the connection went: the server is left stopped (not started again by itself)', async () => {
+test('the connection went: the server is left stopped (not started again by itself)', onServer, async () => {
   const home = serverHome();
   let up = true;
   const { host, next, children } = remoteHost(home, { connected: () => up });
@@ -237,15 +239,20 @@ test('the connection went: the server is left stopped (not started again by itse
 
 test('a synced file: one server for all of them, in the notes folder', async () => {
   const notes = realpathSync(mkdtempSync(path.join(tmpdir(), 'lsp-notes-')));
-  const bin = realpathSync(mkdtempSync(path.join(tmpdir(), 'lsp-bin-')));
-  exe(`${bin}/pyright-langserver`, `#!/bin/sh\nexec "${process.execPath}" "${FAKE}" "$@"\n`);
-  const host = lsp.createLspHost({ send: () => {}, env: { PATH: `${bin}:/usr/bin:/bin` }, locateServer: (f, opts) => lsp.locate(f, { ...opts, login: false }) });
+  // Pyright found: the fake server, run by Node (on any platform).
+  const located = [];
+  const locateServer = async (f, opts) => {
+    located.push(opts.root);
+    return { entry: lsp.catalogFor(f, opts.entries), root: opts.root, found: { name: 'Pyright', command: FAKE, script: FAKE, args: [] }, env: process.env };
+  };
+  const host = lsp.createLspHost({ send: () => {}, locateServer });
   const sender = { id: 'page' };
   try {
     const a = await host.start(sender, `${notes}/aaa/one.py`, { note: true, root: notes });
     const b = await host.start(sender, `${notes}/bbb/two.py`, { note: true, root: notes });
     assert.equal(a.id, b.id);
     assert.equal(a.root, notes);
+    assert.deepEqual(located, [notes]);
     assert.deepEqual(a.where, { kind: 'notes' });
   } finally {
     host.stopAll();
