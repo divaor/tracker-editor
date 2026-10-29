@@ -118,6 +118,8 @@ export const DEFAULT_SETTINGS = {
   // the share of a folder comparison its tree takes (0 = the usual).
   savedCompares: [],
   compareSplit: 0,
+  // On a phone: folder comparisons and two panes turn the app sideways by themselves (Sideways / Upright).
+  compareSideways: false,
   // Sizes dragged by hand: the sidebar's width in pixels (0 = the default), and the share of
   // the editor next to a preview or the side view.
   sidebarWidth: 0,

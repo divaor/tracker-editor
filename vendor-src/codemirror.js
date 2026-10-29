@@ -87,4 +87,4 @@ export { linter, lintGutter, forEachDiagnostic, diagnosticCount, nextDiagnostic,
 export { tags } from '@lezer/highlight';
 export { languages } from '@codemirror/language-data';
 export { oneDark, oneDarkHighlightStyle } from '@codemirror/theme-one-dark';
-export { MergeView, unifiedMergeView, getChunks, goToNextChunk, goToPreviousChunk, diff } from '@codemirror/merge';
+export { MergeView, unifiedMergeView, getChunks, goToNextChunk, goToPreviousChunk, diff, acceptChunk, rejectChunk, getOriginalDoc } from '@codemirror/merge';

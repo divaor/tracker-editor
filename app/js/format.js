@@ -25,3 +25,15 @@ export function formatBytes(bytes) {
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
+
+const timeFormat = new Intl.DateTimeFormat(undefined, { timeStyle: 'short' });
+const dayFormat = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' });
+
+/** A date in few characters (a phone's lists): the time today, the day this year, else with the year. */
+export function shortDate(ms, now = Date.now()) {
+  if (!ms) return '';
+  const when = new Date(ms);
+  const today = new Date(now);
+  if (when.toDateString() === today.toDateString()) return timeFormat.format(when);
+  return when.getFullYear() === today.getFullYear() ? dayFormat.format(when) : dayYearFormat.format(when);
+}

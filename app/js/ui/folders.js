@@ -51,7 +51,7 @@ const shortDate = (ms) => {
 const touchScreen = () => matchMedia('(pointer: coarse)').matches;
 // "this computer", or "this device" in the Android app.
 const hereName = () => KINDS.disk.label.toLowerCase();
-const binName = () => (window.desktop?.platform === 'win32' ? 'the Recycle Bin' : 'the Trash');
+export const binName = () => (window.desktop?.platform === 'win32' ? 'the Recycle Bin' : 'the Trash');
 
 // Cut or copied in this view (kept while you move between folders): { op: 'cut' | 'copy', paths, text }.
 // `text` (the paths) also goes on the system clipboard; a paste whose text differs came from elsewhere.

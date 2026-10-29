@@ -4,9 +4,10 @@
 // text from an image (tesseract's worker, core and models as the APK holds them), text to speech
 // (Android's, through the app: spoken, and made into audio ahead for the page to play), a speech
 // server on the computer next to the phone (KOKORO=its /v1 address, as the emulator reaches it),
-// a PDF (pdf.js and its worker), converted documents and a shell on the phone (its Node.js and
-// pty addon, directly and through the terminal panel). Writes android-check/report.json, a
-// screenshot, the WebView's console lines and Node's from logcat; exits 1 when a check fails.
+// a PDF (pdf.js and its worker), converted documents, a shell on the phone (its Node.js and
+// pty addon, directly and through the terminal panel) and turning the app sideways. Writes
+// android-check/report.json, screenshots, the WebView's console lines and Node's from logcat;
+// exits 1 when a check fails.
 //   [KOKORO=http://10.0.2.2:8880/v1] node scripts/android-check.mjs path/to/app-debug.apk
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -28,6 +29,26 @@ const check = (name, ok, detail = '') => {
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${detail ? `  ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`.slice(0, 600) : ''}`);
 };
 const fixture = (name) => fs.readFileSync(path.join(ROOT, 'test/fixtures/documents', name)).toString('base64');
+// Taps the text a native dialog shows (uiautomator's dump of the screen); false when it never shows.
+const tapText = async (text, ms = 20_000) => {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    try {
+      adb('shell', 'uiautomator', 'dump', '/sdcard/window.xml');
+      const xml = adb('shell', 'cat', '/sdcard/window.xml');
+      const m = new RegExp(`text="${text}"[^>]*bounds="\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]"`).exec(xml);
+      if (m) {
+        adb('shell', 'input', 'tap', String((Number(m[1]) + Number(m[3])) >> 1), String((Number(m[2]) + Number(m[4])) >> 1));
+        return true;
+      }
+    } catch {
+      // the screen was busy (an animation): look again
+    }
+    await new Promise((r) => setTimeout(r, 700));
+  }
+  return false;
+};
+const screencap = (name) => fs.writeFileSync(path.join(OUT, name), execFileSync('adb', ['exec-out', 'screencap', '-p'], { maxBuffer: 64 * 1024 * 1024 }));
 // One part failing does not stop the others.
 const part = async (name, run) => {
   try {
@@ -274,8 +295,81 @@ try {
     check('…and runs what is typed', /ui-42/.test(shown ?? ''), (shown ?? '').trim().slice(-300));
   });
 
+  // Turning sideways (a folder comparison or two panes on a phone held upright): the app asks
+  // Android for landscape, and lets it turn back. Rotation by hand, upright, so back is portrait.
+  await part('turning sideways', async () => {
+    adb('shell', 'settings', 'put', 'system', 'accelerometer_rotation', '0');
+    adb('shell', 'settings', 'put', 'system', 'user_rotation', '0');
+    const look = () => page.evaluate(() => ({ type: screen.orientation?.type, w: innerWidth, h: innerHeight }));
+    const turned = async (way) => {
+      let now;
+      for (let i = 0; i < 20 && !(now = await look()).type?.startsWith(way); i++) await page.waitForTimeout(500);
+      return now;
+    };
+    const before = await look();
+    await page.evaluate(() => window.desktop.android.sideways(true));
+    const side = await turned('landscape');
+    check('Sideways turns the app to landscape', side.type?.startsWith('landscape') && side.w > side.h, { before, side });
+    await page.evaluate(() => window.desktop.android.sideways(false));
+    const back = await turned('portrait');
+    check('…and Upright lets it turn back', back.type?.startsWith('portrait') && back.h > back.w, back);
+  });
+
+  // Two folders compared on the phone: Download picked in the app's own chooser (tapped there),
+  // two folders in it compared through the bridge and in a tab (one tree upright, two columns
+  // sideways, with the bar's Sideways and Upright), then as two panes (one at a time).
+  await part('a folder comparison on the phone', async () => {
+    const base = '/storage/emulated/0/Download';
+    const [A, B] = [`${base}/cmp-a`, `${base}/cmp-b`];
+    adb('shell', `rm -rf ${A} ${B}; mkdir -p ${A} ${B} && echo one > ${A}/same.txt && echo one > ${B}/same.txt && echo left > ${A}/only-left.md && echo a > ${A}/changed.txt && echo bbb > ${B}/changed.txt`);
+    await page.evaluate(() => {
+      window.__picked = window.desktop.folders.pick().catch((err) => ({ error: err.message }));
+    });
+    const tapped = await tapText('Download');
+    const picked = await page.evaluate(() => window.__picked);
+    check('the folder chooser picks Download', tapped && picked === base, { tapped, picked });
+    const scan = await page.evaluate(([a, b]) => window.desktop.compare.scan(a, b).catch((err) => ({ error: err.message })), [A, B]);
+    const names = (side) => (scan?.[side]?.entries ?? scan?.[side] ?? []).map?.((e) => e.rel ?? e.name).sort?.() ?? [];
+    check('the comparison lists both folders', !scan?.error && JSON.stringify(scan).includes('only-left.md') && JSON.stringify(scan).includes('changed.txt'), scan?.error ?? { left: names('left'), right: names('right') });
+    const looks = () => page.evaluate(() => ({ one: document.querySelectorAll('.fcmp-row.one').length, two: document.querySelectorAll('.fcmp-cell.left').length, btn: document.querySelector('.sideways-btn')?.textContent?.trim() ?? null, type: screen.orientation?.type, w: innerWidth, h: innerHeight }));
+    const until = async (test, ms = 15_000) => {
+      let now;
+      for (const end = Date.now() + ms; Date.now() < end; await page.waitForTimeout(400)) if (test((now = await looks()))) break;
+      return now;
+    };
+    const key = await page.evaluate(async ([a, b]) => {
+      const { store } = await import('/js/store.js');
+      store.openCompare({ mode: 'folders', left: { path: a }, right: { path: b }, show: 'diff' });
+      return store.session.active;
+    }, [A, B]);
+    const upright = await until((l) => l.one >= 2);
+    check('upright: one tree, with Sideways in the bar', upright.one >= 2 && upright.two === 0 && upright.btn === 'Sideways', upright);
+    screencap('compare-upright.png');
+    await page.click('.sideways-btn');
+    const side = await until((l) => l.type?.startsWith('landscape') && l.two >= 2);
+    check('Sideways: the app turns, the two folders side by side', side.type?.startsWith('landscape') && side.w > side.h && side.two >= 2 && side.one === 0 && side.btn === 'Upright', side);
+    screencap('compare-sideways.png');
+    await page.click('.sideways-btn');
+    const again = await until((l) => l.type?.startsWith('portrait') && l.one >= 2);
+    check('Upright: back to one tree', again.type?.startsWith('portrait') && again.one >= 2, again);
+    const copied = await page.evaluate(([a, b]) => window.desktop.compare.copy(a, b, ['only-left.md']).then(() => true, (err) => err.message), [A, B]);
+    check('copying across writes the other folder', copied === true && adb('shell', `cat ${B}/only-left.md`).trim() === 'left', copied);
+    // Two panes: one at a time, a switch between them.
+    const panes = await page.evaluate(async ([a, b, k]) => {
+      const { store } = await import('/js/store.js');
+      store.close(k);
+      store.openCompare({ mode: 'panes', left: { path: a }, right: { path: b } });
+      for (let i = 0; i < 40 && !document.querySelector('.panes.one .pane-row'); i++) await new Promise((r) => setTimeout(r, 300));
+      const shown = [...document.querySelectorAll('.pane')].filter((p) => p.offsetWidth > 0).length;
+      const out = { one: Boolean(document.querySelector('.panes.one')), shown, tabs: document.querySelector('.panes-switch')?.textContent ?? null };
+      store.close(store.session.active);
+      return out;
+    }, [A, B, key]);
+    check('two panes: one at a time, with the switch', panes.one && panes.shown === 1 && /cmp-a/.test(panes.tabs ?? '') && /cmp-b/.test(panes.tabs ?? ''), panes);
+  });
+
   // The screen as Android shows it (a page screenshot fails on some older WebViews).
-  fs.writeFileSync(path.join(OUT, 'app.png'), execFileSync('adb', ['exec-out', 'screencap', '-p'], { maxBuffer: 64 * 1024 * 1024 }));
+  screencap('app.png');
   check('no page errors', errors.length === 0, errors.join(' | '));
 } catch (err) {
   check('ran', false, err.stack ?? String(err));

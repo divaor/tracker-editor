@@ -580,6 +580,13 @@ function install() {
     },
     // The folders view: folders on the phone's storage and on servers (as on the desktop).
     folders: foldersBridge(),
+    // Two folders compared, and two panes (as on the desktop).
+    compare: {
+      scan: (left, right, opts) => nodeInvoke('compare:scan', left, right, opts),
+      same: (left, right, rels) => nodeInvoke('compare:same', left, right, rels),
+      copy: (from, to, rels) => nodeInvoke('compare:copy', from, to, rels),
+      remove: (root, rels) => nodeInvoke('compare:remove', root, rels),
+    },
     remote: remoteBridge(),
     mirrors: {
       list: () => nodeInvoke('mirror:list'),
@@ -627,6 +634,8 @@ function install() {
       barStyle: (dark) => cap.nativePromise('SystemBars', 'setStyle', { style: dark ? 'DARK' : 'LIGHT' }).catch(() => {}),
       // The status and navigation bars hidden (a document in full screen) or shown again.
       bars: (shown) => cap.nativePromise('SystemBars', shown ? 'show' : 'hide', {}).catch(() => {}),
+      // The app turned to landscape (a folder comparison, two panes) or following the phone again.
+      sideways: (on) => call('sideways', { on }).catch(() => {}),
       tts: speech(),
     },
   };

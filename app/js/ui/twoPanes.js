@@ -8,12 +8,14 @@ import { getSettings, saveSettings } from '../settings.js';
 import { server, servers, serverStatus } from '../servers.js';
 import { onTransfers, running } from '../transfers.js';
 import { isRemotePath, remoteParts, remoteRoot } from '../where.js';
+import { isAndroidApp } from '../platform.js';
 import { toast } from './components.js';
 import { FileIcon } from './fileIcon.js';
-import { DeleteDialog, ExistsDialog, NameField } from './folders.js';
+import { binName, DeleteDialog, ExistsDialog, NameField } from './folders.js';
 import { FileViewer } from './folderPreview.js';
 import { Icon } from './icons.js';
 import { Menu, MenuButton } from './menu.js';
+import { PHONE, SidewaysButton, useMedia } from './phone.js';
 
 const message = (err) => String(err?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
 const fail = (err) => toast(message(err), { kind: 'error', timeout: 8000 });
@@ -507,7 +509,7 @@ export function PanesTab({ id, record, settings, actions, star = null }) {
       actions.closeDiskPaths(gone);
       await reloadAll();
       after();
-      toast(isRemotePath(entries[0]?.path) ? `Deleted ${count(gone.length)}` : `Moved ${count(gone.length)} to ${window.desktop?.platform === 'win32' ? 'the Recycle Bin' : 'the Trash'}`);
+      toast(isRemotePath(entries[0]?.path) || isAndroidApp() ? `Deleted ${count(gone.length)}` : `Moved ${count(gone.length)} to ${binName()}`);
     } catch (err) {
       fail(err);
       reloadAll();
@@ -591,10 +593,21 @@ export function PanesTab({ id, record, settings, actions, star = null }) {
     return () => window.removeEventListener('dragend', end);
   }, []);
 
+  // A phone held upright: one pane at a time, a switch between them, the rest in ⋯.
+  const phone = useMedia(PHONE);
   const to = other(active);
   const arrow = active === 'left' ? 'arrowRight' : 'arrowLeft';
   const label = (text) => (active === 'left' ? html`<span class="label">${text}</span><${Icon} name=${arrow} size=${14} />` : html`<${Icon} name=${arrow} size=${14} /><span class="label">${text}</span>`);
   const moreItems = () => [
+    ...(phone
+      ? [
+          { label: 'New folder', icon: 'folderPlus', run: () => command('newFolder') },
+          { label: 'Rename', icon: 'edit', run: () => command('rename') },
+          { label: 'Delete', icon: 'trash', danger: true, run: () => command('delete') },
+          { label: 'Read both folders again', icon: 'sync', run: reloadAll },
+          { separator: true },
+        ]
+      : []),
     { label: 'Swap the sides', icon: 'rotate', run: () => actions.updateCompare(id, { left: record.right, right: record.left }) },
     { label: 'The left folder on the right too', icon: 'arrowRight', disabled: left === right, run: () => go('right', left) },
     { label: 'The right folder on the left too', icon: 'arrowLeft', disabled: left === right, run: () => go('left', right) },
@@ -608,21 +621,31 @@ export function PanesTab({ id, record, settings, actions, star = null }) {
   return html`<div class="panes-tab" role="region" aria-label="Two panes">
     <div class="ccmp-bar panes-bar" onMouseDown=${(ev) => ev.target.closest('button') && ev.preventDefault()}>
       ${star}
+      <${SidewaysButton} />
       <button type="button" class="btn ghost sm" title="Compare the two folders shown: what differs, file by file (and back to the two panes from there)"
-        onClick=${() => actions.updateCompare(id, { mode: 'folders', show: record.show ?? 'diff', expanded: [] })}><${Icon} name="compare" size=${15} /><span class="label">Compare these folders</span></button>
+        onClick=${() => actions.updateCompare(id, { mode: 'folders', show: record.show ?? 'diff', expanded: [] })}><${Icon} name="compare" size=${15} /><span class="label wide">Compare these folders</span></button>
       <span class="ccmp-gap" />
       <button type="button" class="btn ghost sm" title=${`Copy what is picked on the ${active} to the ${to} (F5)`} onClick=${() => command('copy')}>${label('Copy')}</button>
       <button type="button" class="btn ghost sm" title=${`Move what is picked on the ${active} to the ${to} (F6)`} onClick=${() => command('move')}>${label('Move')}</button>
-      <span class="ccmp-gap" />
-      <button type="button" class="icon-btn sm" aria-label="New folder (F7)" title="New folder (F7)" onClick=${() => command('newFolder')}><${Icon} name="folderPlus" size=${16} /></button>
-      <button type="button" class="icon-btn sm" aria-label="Rename (F2)" title="Rename (F2)" onClick=${() => command('rename')}><${Icon} name="edit" size=${15} /></button>
-      <button type="button" class="icon-btn sm" aria-label="Delete (F8)" title="Delete (F8)" onClick=${() => command('delete')}><${Icon} name="trash" size=${15} /></button>
+      ${!phone &&
+      html`<span class="ccmp-gap" />
+        <button type="button" class="icon-btn sm" aria-label="New folder (F7)" title="New folder (F7)" onClick=${() => command('newFolder')}><${Icon} name="folderPlus" size=${16} /></button>
+        <button type="button" class="icon-btn sm" aria-label="Rename (F2)" title="Rename (F2)" onClick=${() => command('rename')}><${Icon} name="edit" size=${15} /></button>
+        <button type="button" class="icon-btn sm" aria-label="Delete (F8)" title="Delete (F8)" onClick=${() => command('delete')}><${Icon} name="trash" size=${15} /></button>`}
       <span class="spacer" />
-      <span class="muted small panes-keys">Tab: the other side · F5 copy · F6 move</span>
-      <button type="button" class="icon-btn sm" aria-label="Read both folders again" title="Read both folders again" onClick=${reloadAll}><${Icon} name="sync" size=${15} /></button>
+      ${!phone &&
+      html`<span class="muted small panes-keys">Tab: the other side · F5 copy · F6 move</span>
+        <button type="button" class="icon-btn sm" aria-label="Read both folders again" title="Read both folders again" onClick=${reloadAll}><${Icon} name="sync" size=${15} /></button>`}
       <${MenuButton} label="More" items=${moreItems} />
     </div>
-    <div class="panes">
+    ${phone &&
+    html`<div class="panes-switch" role="tablist" aria-label="Which side shows">
+      ${['left', 'right'].map(
+        (side) => html`<button type="button" key=${side} role="tab" aria-selected=${active === side} class="panes-switch-btn ${side} ${active === side ? 'on' : ''} kind-${isRemotePath(pathOf(side)) ? 'remote' : 'disk'}"
+          onClick=${() => activate(side)}><span class="panes-switch-mark">${side === 'left' ? '◧' : '◨'}</span><span class="panes-switch-name">${pathName(pathOf(side))}</span></button>`,
+      )}
+    </div>`}
+    <div class="panes ${phone ? 'one' : ''}">
       ${['left', 'right'].map(
         (side) => html`<${Pane} key=${side} side=${side} path=${pathOf(side)} root=${roots ? rootFor(pathOf(side)) : null} active=${active === side} settings=${settings} actions=${actions}
           handle=${panes[side]} sort=${sortOf(side)} onSort=${(s) => actions.updateCompare(id, { sorts: { ...sorts, [side]: s } }, { silent: false })}

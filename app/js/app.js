@@ -1265,14 +1265,14 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       },
       /** Two folders compared in a tab; without `right`, a dialog asks for it. */
       compareFolders(left, right = null) {
-        if (!window.desktop?.compare) return toast('Folders are compared in the desktop app.', { kind: 'error' });
+        if (!window.desktop?.compare) return toast('Folders are compared in the desktop and Android apps.', { kind: 'error' });
         if (!right) return setDialog({ type: 'compareFolder', other: left, side: 'right', onPick: (p) => actions.compareFolders(left, p) });
         store.openCompare({ mode: 'folders', left: { path: left }, right: { path: right }, show: 'diff' });
         setView('editor');
       },
       /** Two folders side by side in a tab (two panes, like WinSCP); without `right`, a dialog asks for it. */
       twoPanes(left, right = null) {
-        if (!window.desktop?.compare) return toast('Two panes are in the desktop app.', { kind: 'error' });
+        if (!window.desktop?.compare) return toast('Two panes are in the desktop and Android apps.', { kind: 'error' });
         if (!right) return setDialog({ type: 'compareFolder', other: left, side: 'right', panes: true, onPick: (p) => actions.twoPanes(left, p) });
         store.openCompare({ mode: 'panes', left: { path: left }, right: { path: right } });
         setView('editor');

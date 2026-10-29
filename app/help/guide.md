@@ -2,7 +2,7 @@
 
 Tracker Editor is a Notepad++-style editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs. Everything is saved the moment you paste or type, on this computer with the tracker, or, once you turn on sync, in the same private GitHub data repo as the tracker, so your files are on your computers and your phone.
 
-Version 0.32.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.32.0 · Web app: https://divaor.github.io/tracker-editor/
+Version 0.33.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.33.0 · Web app: https://divaor.github.io/tracker-editor/
 
 ---
 
@@ -14,9 +14,9 @@ Download from **https://github.com/divaor/tracker-editor/releases/latest**:
 
 | System | File |
 | --- | --- |
-| Windows | `Tracker Editor Setup 0.32.0.exe` (installer) or `Tracker Editor-0.32.0-portable.exe` (no install, no admin rights) |
-| macOS | `Tracker Editor-0.32.0-arm64.dmg` |
-| Linux | `Tracker Editor-0.32.0.AppImage` |
+| Windows | `Tracker Editor Setup 0.33.0.exe` (installer) or `Tracker Editor-0.33.0-portable.exe` (no install, no admin rights) |
+| macOS | `Tracker Editor-0.33.0-arm64.dmg` |
+| Linux | `Tracker Editor-0.33.0.AppImage` |
 
 The builds are not code-signed, so the first launch warns you. On Windows, choose *More info → Run anyway*. On macOS, right-click the app → *Open*. Installing the desktop app also registers `tracker-editor://` links, so the tracker's **Open in editor** opens files straight in it.
 
@@ -27,13 +27,14 @@ The builds are not code-signed, so the first launch warns you. On Windows, choos
 The editor as an Android app, with what a web page cannot do: **Open with** from other apps, **Folders** on the phone, **servers** and **terminals**. For Android 7 and later on 64-bit phones (nearly all from the last ten years).
 
 1. Install **Obtainium** (from https://github.com/ImranR98/Obtainium/releases or F-Droid). It installs apps from their GitHub releases and keeps them up to date.
-2. In Obtainium: **Add app**, paste `https://github.com/divaor/tracker-editor`, **Add**, then **Install** (`Tracker-Editor-0.32.0.apk`). The first time, Android asks to let Obtainium install apps: allow it.
+2. In Obtainium: **Add app**, paste `https://github.com/divaor/tracker-editor`, **Add**, then **Install** (`Tracker-Editor-0.33.0.apk`). The first time, Android asks to let Obtainium install apps: allow it.
 3. Obtainium tells you when there is a new version and installs it over the old one; your files and settings stay. (Or download the `.apk` from the releases page and open it; then updates are by hand.)
 
 What the app adds:
 - **Open with**: in Files, a file manager, Gmail or Drive, open a text or code file with **Tracker Editor**: it opens as a tab edited where it is, and **Save** writes it back (a file the other app only lets you read says **Read-only**). The tab's ⋯ → **Open with another app** hands it on. PDFs, e-books, Word, OpenDocument, RTF, spreadsheets and presentations open too, shown as they look (see [Documents](#documents-pdfs-e-books-word-and-more)).
 - **Share** text, links or files to **Tracker Editor**: they become new files. Select text in any app → ⋮ → **Tracker Editor**: a new note with it. Long-press the app's icon for **New note** and **Voice note**.
 - **Folders** (the sidebar's **Folders**): folders on the phone and its memory card, as on a computer (see [Folders](#folders-a-file-explorer)). **Open a folder…** asks the first time for **All files access** (Android's permission for file managers: allow it for Tracker Editor, then come back and tap it again; the editor only opens the folders you pick). Then choose **Phone storage**, **Documents**, **Download**, the memory card, or **Another folder…**. **Tap** a folder or a file to open it; a **long press** gives its menu, where **Select** lets you tap others to pick them too (**Done** when finished). **Delete** is for good here: Android has no Trash for these files.
+- **Compare two folders** and **two panes** (a folder's long-press menu): on the phone, on a server or one of each, laid out for a phone, and **Sideways** turns the app to landscape for them (see [Comparisons on a phone](#comparisons-on-a-phone)).
 - **Servers**: SFTP, FTP and FTPS, their terminals, find in a folder, transfers and mirrors, as on a computer (see 11). Saved passwords are encrypted with a key kept in the phone's secure hardware.
 - **A terminal on the phone**: the status bar's **Terminal** opens Android's own shell in the open file's folder, with its basic commands (`ls`, `cat`, `grep`, `cp`, `mv`…). With an SSH server set up, **+** in the panel opens a terminal there.
 - **A model on your computer** (Ollama, LM Studio) answers the phone over your network, without CORS settings: see [Option A](#option-a-a-model-on-this-computer-ollama-lm-studio).
@@ -288,9 +289,9 @@ The two files open **in a tab of their own** (indigo, with the compare icon, nam
 
 History, a fix from the model and **Compare** in "changed on disk" still open over the file, with their own buttons (**Restore this version**, **Accept**, **Keep mine and save**).
 
-### Compare two folders (desktop)
+### Compare two folders (desktop, Android app)
 
-Right-click a folder in Folders (or empty space in it, or a header when several are shown) → **Compare with another folder…**, then pick the other one: the folders next to it (another copy of the project), the ones in Folders, picked before, favorites and recent ones, a server's start folder or recent folders there, a path on a server (its folders are suggested as you type), or **Pick a folder…**. With two folders shown side by side, the menu offers **Compare with *the other one*** at once; with two folders selected, **Compare the two folders**. Also ⋯ → **Compare this folder with another…** and `Ctrl+Shift+P` → **Compare two folders…**. A folder on this computer and one on a server compare like any two.
+Right-click a folder in Folders (long-press it in the Android app; or empty space in it, or a header when several are shown) → **Compare with another folder…**, then pick the other one: the folders next to it (another copy of the project), the ones in Folders, picked before, favorites and recent ones, a server's start folder or recent folders there, a path on a server (its folders are suggested as you type), or **Pick a folder…**. With two folders shown side by side, the menu offers **Compare with *the other one*** at once; with two folders selected, **Compare the two folders**. Also ⋯ → **Compare this folder with another…** and `Ctrl+Shift+P` → **Compare two folders…**. A folder on this computer and one on a server compare like any two.
 
 The comparison opens in a tab: the first folder on the left, the other on the right, in one tree that lines them up file by file (size and date on each side), with a mark between them: **≠** different, **◧** only on the left, **◨** only on the right, **=** the same. A folder takes the mark of what is inside it.
 
@@ -298,16 +299,16 @@ The comparison opens in a tab: the first folder on the left, the other on the ri
 - **Same size, another date**: those files are compared byte for byte in the background (**Checking contents…**), so a copy with a new date shows as the same.
 - **Pick a file** (click, or `↑` `↓`): it shows compared below the tree, with everything above (go through the changes, copy them across, save either side). A file on one side only shows its text, with **Copy to the right** (or left). Drag the line between the tree and the file to share the space. Double-click (or `Enter`) opens the two files in a comparison tab of their own. Edited below and not saved? Picking another file asks first.
 - **Next difference**: `Alt+↓` / `Alt+↑` (or the arrows in the bar), opening the folders on the way.
-- **Copy across**: select files or folders (`Ctrl`+click, `Shift`+click, `Ctrl+A`), then **Copy →** or **← Copy**. A folder goes with what is different or missing inside it. Before replacing anything, it says how many; the old ones go to the Recycle Bin (on a server they are deleted). Copies to and from a server run in the background (see Transfers); the tree reads both sides again when they end.
+- **Copy across**: select files or folders (`Ctrl`+click, `Shift`+click, `Ctrl+A`), then **Copy →** or **← Copy**. A folder goes with what is different or missing inside it. Before replacing anything, it says how many; the old ones go to the Recycle Bin (on a server, and in the Android app, they are deleted). Copies to and from a server run in the background (see Transfers); the tree reads both sides again when they end.
 - **Make one side like the other**: ⋯ → **Make the right like the left…** (or the left like the right) lists what is copied, and what is only on that side. Those are deleted only when you tick **Delete them too**.
 - **Change a side**: the pencil in a folder's header picks another folder for that side. ⋯ → **Swap the sides**, **Open both folders in Folders**; ⟳ reads both again.
 - **Two panes** (the button next to ☆): the same two folders as two file lists, to browse them and move files around (below); **Compare these folders** there comes back.
 
-### Two panes: two folders side by side (desktop)
+### Two panes: two folders side by side (desktop, Android app)
 
 Two folders in a tab, each a file list you browse on its own, like WinSCP or Total Commander: your project here and its copy on the server, two projects, a folder and a backup. Files go from one to the other with a key.
 
-Open it from Folders: right-click a folder → **Open in two panes…** and pick the other one (the folders next to it, the ones in Folders, favorites and recent ones, a server's folder or a path on a server, or **Pick a folder…**). With two folders shown side by side in Folders, a header's menu offers **Two panes with *the other one***; with two folders selected, **Open the two in two panes**. Also Folders' ⋯ → **Two panes…** and `Ctrl+Shift+P` → **Two panes: two folders side by side…**. The tab is named after both (`site | site`), and its name follows as you go into folders.
+Open it from Folders: right-click a folder (long-press it in the Android app) → **Open in two panes…** and pick the other one (the folders next to it, the ones in Folders, favorites and recent ones, a server's folder or a path on a server, or **Pick a folder…**). With two folders shown side by side in Folders, a header's menu offers **Two panes with *the other one***; with two folders selected, **Open the two in two panes**. Also Folders' ⋯ → **Two panes…** and `Ctrl+Shift+P` → **Two panes: two folders side by side…**. The tab is named after both (`site | site`), and its name follows as you go into folders.
 
 Each side has its header (in the color of where it is: amber this computer, pink a server, with its connection dot), the path to click back up, and **Name**, **Size** and **Modified** columns that sort. `..` at the top goes up (not above the folder you picked in Folders; on a server, up to `/`). The side in use is the stronger one; `Tab` goes to the other.
 
@@ -328,6 +329,15 @@ Each side has its header (in the color of where it is: amber this computer, pink
 - Copies and moves on this computer have **Undo** in their message. To and from servers they go on in the background (the **Transfers** card), and both sides are read again when they end.
 - Both lists follow changes made elsewhere (on a server, every few seconds while connected); ⟳ reads both again.
 - **☆** saves the tab like a comparison (the folders shown when you save it), to open again from the ▾ tab list, `Ctrl+Shift+P` or Folders' ⋯.
+
+### Comparisons on a phone
+
+Held upright, a phone has room for one side, so comparisons change their layout (in a narrow window too):
+
+- **Two files**: one text with the changes marked: the left side's lines in red, above the right side's in green. The text you edit is the right side. By each change, **→** puts the left side's lines there (the right becomes like the left) and **←** takes the change into the left side. **Save** above either side, as before. Turn the phone and the two sides show next to each other again; what you typed stays.
+- **Two folders**: one tree, each name once, with each side's size and date under it (◧ the left, ◨ the right, "not here" where it is missing). The bar takes two lines, and the folders' headers are one under the other. Pick a file and it shows compared below, as one text.
+- **Two panes**: one pane at a time. The switch above them (◧ and ◨, with the folders' names) shows the other one; **Copy →** and **Move →** send what is picked to the side not shown. **New folder**, **Rename**, **Delete** and **Read both folders again** are in **⋯**.
+- **Sideways** (the bar of a folder comparison or two panes, on a phone held upright): turns the app to landscape while that tab shows, so the two folders fit side by side. **Upright** lets the phone turn again. It is remembered: the next comparison turns by itself until you press **Upright**. Leaving the tab gives the phone back its own way (going from a comparison to its two panes keeps it sideways). In a phone's browser it goes full screen first (browsers only turn there); where it cannot (an iPhone), it says to turn the phone yourself, with the screen's rotation unlocked.
 
 ### Saved comparisons
 
@@ -753,6 +763,8 @@ Turn them on in **Settings → Desktop**.
 - **Android app: "The app's file access did not start"**: Folders, servers and terminals need it; the rest of the editor works without it. **Send a log** (the message's reason is in it too).
 - **Android app: "The app's access to files and servers stopped"**: Android ended its file access while the app was in the background. Do it again: it starts again. Terminals on the phone and on servers end with it.
 - **Android app: the terminal opens blank, with only the cursor**: before 0.28.1 the shell's prompt could be lost on fast phones. Update the app; in an older one, press `Enter` and the prompt shows. "Starting the shell…" while it waits means the app's file access is starting (the first time after opening the app).
+- **Android app: no Compare with another folder… or Two panes in a folder's menu**: they came to the app in 0.33.0: update it.
+- **Sideways does nothing, or says to turn the phone**: in a browser it needs full screen, which some (an iPhone's) do not give a page. Turn the phone yourself (unlock the screen's rotation in the quick settings); the layout follows. In the Android app, Sideways works even with rotation locked.
 - **Android app: a file opened with Tracker Editor is Read-only**: the app that gave it allows reading only (Gmail attachments, many file managers' "Open with"). Save a copy with ⋯ → **Download**, or open it from Folders instead.
 - **A document shows a message instead of its pages**: "protected (DRM)": only the app it was bought for opens it. "damaged or is not what its name says": the file is broken, or a different format with that name (an old `.doc` renamed `.docx`, say). Either way **Its program** tries the app made for it.
 - **A document looks plainer than in Word or LibreOffice**: this view shows its text, structure and pictures, not its fonts, colors or page layout. **Its program** shows all of it.

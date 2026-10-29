@@ -10311,3 +10311,219 @@ html[data-native='android'] body:has(.edit-bar) .toasts {
     display: none;
   }
 }
+
+/* ---- Comparisons and two panes on a phone held upright (ui/phone.js) ------------- */
+.fcmp-break {
+  display: none;
+}
+
+.sideways-btn.on {
+  color: var(--accent);
+}
+
+/* The folder comparison as one tree: the name once, each side's size and date under it. */
+.fcmp-row.one {
+  grid-template-columns: minmax(0, 1fr) 30px;
+  min-height: 40px;
+}
+
+.fcmp-cell.one {
+  padding-block: 3px;
+}
+
+.fcmp-lines {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.fcmp-lines .fcmp-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fcmp-sides {
+  display: flex;
+  gap: 12px;
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+
+.fcmp-side.absent {
+  font-style: italic;
+  opacity: 0.75;
+}
+
+.fcmp-row.one.state-left .fcmp-name,
+.fcmp-row.one.state-left .fcmp-side.left {
+  color: var(--danger);
+}
+
+.fcmp-row.one.state-right .fcmp-name,
+.fcmp-row.one.state-right .fcmp-side.right {
+  color: var(--done);
+}
+
+.fcmp-head-mark {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+
+/* Files compared as one text: which side is which colour, and the → ← by each change. */
+.ccmp-legend {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 3px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.ccmp-legend span::before {
+  content: '';
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 5px;
+  border-radius: 2px;
+  vertical-align: -1px;
+}
+
+.ccmp-legend .was::before {
+  background: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+
+.ccmp-legend .now::before {
+  background: color-mix(in srgb, var(--done) 45%, transparent);
+}
+
+.ccmp-body > .cm-editor {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+}
+
+.ccmp-body .cm-chunkButtons {
+  display: flex;
+  gap: 6px;
+  padding: 3px 4px;
+}
+
+.ccmp-body .cm-chunkButtons .cm-merge-copy-one {
+  display: grid;
+  place-items: center;
+  min-width: 34px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ccmp-body .cm-chunkButtons .cm-merge-copy-one:hover,
+.ccmp-body .cm-chunkButtons .cm-merge-copy-one:active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text, #fff);
+}
+
+.ccmp-body .cm-merge-copy-one[hidden] {
+  display: none;
+}
+
+/* → (the left side's lines) before ←, as the two sides are named. */
+.ccmp-body .cm-merge-copy-one.to-right {
+  order: -1;
+}
+
+/* Two panes: one at a time, a switch between them. */
+.panes-switch {
+  display: grid;
+  flex-shrink: 0;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.panes-switch-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 38px;
+  padding: 4px 10px;
+  border: 0;
+  border-top: 2px solid transparent;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.panes-switch-btn.on {
+  border-top-color: var(--kc);
+  background: color-mix(in srgb, var(--kc) 10%, var(--surface));
+  color: var(--text);
+  font-weight: 600;
+}
+
+.panes-switch-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panes.one {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.panes.one .pane:not(.active) {
+  display: none;
+}
+
+.panes.one .pane + .pane {
+  border-left: 0;
+}
+
+@media (max-width: 640px) {
+  /* The bars wrap rather than hide their ends; buttons keep their icons. */
+  .ccmp-bar {
+    flex-wrap: wrap;
+    row-gap: 2px;
+    overflow-x: visible;
+  }
+
+  .ccmp-bar .btn .label.wide {
+    display: none;
+  }
+
+  .ccmp-count {
+    min-width: 0;
+  }
+
+  .fcmp-break {
+    display: block;
+    flex-basis: 100%;
+    height: 0;
+  }
+
+  .fcmp-heads {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .fcmp-head {
+    min-height: 28px;
+  }
+
+  .fcmp-head + .fcmp-head {
+    border-top-width: 1px;
+  }
+}

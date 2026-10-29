@@ -1,19 +1,22 @@
 import { html, useEffect, useLayoutEffect, useMemo, useRef, useState } from '../../vendor/preact-htm.js';
 import { createMergeEditor } from '../editor.js';
 import { childPath, compareListings, copyPlan, countStates, nextDifference, SHOW, SHOW_LABELS, STATE_LABELS, syncPlan, toCheck, treeRows } from '../folderCompare.js';
-import { formatBytes, formatDateTime } from '../format.js';
+import { formatBytes, formatDateTime, shortDate } from '../format.js';
 import { pathName, sideName, sideWhere } from '../compares.js';
 import { getSettings, resolvedTheme, saveSettings } from '../settings.js';
 import { diskKey } from '../store.js';
 import { onTransfers, running } from '../transfers.js';
 import { isRemotePath, remoteParts } from '../where.js';
 import { server } from '../servers.js';
+import { isAndroidApp } from '../platform.js';
 import { FileIcon } from './fileIcon.js';
+import { binName } from './folders.js';
 import { Icon } from './icons.js';
 import { MenuButton } from './menu.js';
 import { Modal } from './components.js';
 import { Splitter } from './splitter.js';
 import { PanesTab } from './twoPanes.js';
+import { PHONE, SidewaysButton, useMedia } from './phone.js';
 
 const message = (err) => String(err?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
 const sideOf = (s) => s?.path ?? s?.key ?? `text:${s?.label ?? ''}`;
@@ -34,6 +37,10 @@ export function FileCompare({ left, right, settings, actions, onSaved, onDirty, 
   const [reload, setReload] = useState(0);
   const [saving, setSaving] = useState(null);
   const theme = resolvedTheme(settings.theme);
+  // On a phone held upright: one text with the changes marked (the left side's lines removed in place).
+  const unified = useMedia(PHONE);
+  // The texts now, edits too: kept when the editor is made again (another layout, theme, wrap).
+  const texts = useRef(null);
   useEffect(() => {
     let stale = false;
     setSides(null);
@@ -48,23 +55,30 @@ export function FileCompare({ left, right, settings, actions, onSaved, onDirty, 
   useEffect(() => onDirty?.(dirty), [dirty.left, dirty.right]);
   useLayoutEffect(() => {
     if (!sides || sides.error || !el.current) return;
-    base.current = { left: sides.left.text, right: sides.right.text };
-    setDirty({ left: false, right: false });
+    if (texts.current?.from !== sides) {
+      texts.current = { from: sides, left: sides.left.text, right: sides.right.text };
+      base.current = { left: sides.left.text, right: sides.right.text };
+      setDirty({ left: false, right: false });
+    }
     api.current = createMergeEditor(el.current, {
-      left: sides.left.text,
-      right: sides.right.text,
+      left: texts.current.left,
+      right: texts.current.right,
       name: names?.right ?? sideName(right),
       dark: theme === 'dark',
-      wrap: Boolean(settings.wordWrap),
+      unified,
+      wrap: Boolean(settings.wordWrap) || unified,
       readOnly: { left: sides.left.readOnly, right: sides.right.readOnly },
-      onChange: (side, text) => setDirty((d) => (d[side] === (text !== base.current[side]) ? d : { ...d, [side]: text !== base.current[side] })),
+      onChange: (side, text) => {
+        texts.current[side] = text;
+        setDirty((d) => (d[side] === (text !== base.current[side]) ? d : { ...d, [side]: text !== base.current[side] }));
+      },
       onCursor: setPos,
     });
     return () => {
       api.current?.destroy();
       api.current = null;
     };
-  }, [sides, theme, settings.wordWrap]);
+  }, [sides, theme, settings.wordWrap, unified]);
 
   const save = async (side) => {
     const desc = side === 'left' ? left : right;
@@ -76,6 +90,7 @@ export function FileCompare({ left, right, settings, actions, onSaved, onDirty, 
       if (!info) return;
       sides[side].info = info;
       base.current[side] = text;
+      texts.current[side] = text;
       setDirty((d) => ({ ...d, [side]: false }));
       onSaved?.(side);
     } finally {
@@ -113,7 +128,7 @@ export function FileCompare({ left, right, settings, actions, onSaved, onDirty, 
     left?.key && { label: `Open ${names?.left ?? sideName(left)} in a tab`, icon: 'file', run: () => actions.openCompareSide(left) },
     right?.key && { label: `Open ${names?.right ?? sideName(right)} in a tab`, icon: 'file', run: () => actions.openCompareSide(right) },
   ];
-  return html`<div class="ccmp" role="region" aria-label="Files compared">
+  return html`<div class="ccmp ${unified ? 'unified' : ''}" role="region" aria-label="Files compared">
     <div class="ccmp-bar">
       ${extra}
       <span class="muted small ccmp-count" aria-live="polite">${sides && !sides.error ? where : ''}</span>
@@ -128,6 +143,7 @@ export function FileCompare({ left, right, settings, actions, onSaved, onDirty, 
       <${MenuButton} label="More" items=${moreItems} />
     </div>
     <div class="ccmp-heads">${head('left')}${head('right')}</div>
+    ${unified && html`<p class="ccmp-legend muted small"><span class="was">Left: lines in red</span><span class="now">Right: the text, changes in green</span></p>`}
     ${sides?.error && html`<p class="notice error ccmp-note" role="alert"><${Icon} name="alert" size=${15} /><span>${sides.error}</span></p>`}
     ${!sides && html`<p class="muted small ccmp-note">Reading…</p>`}
     <div class="ccmp-body" ref=${el} hidden=${!sides || Boolean(sides.error)} />
@@ -187,6 +203,8 @@ function FoldersTab({ id, record, settings, actions }) {
   const body = useRef(null);
   const show = record.show ?? 'diff';
   const opts = { all: Boolean(record.all), hidden: settings.showHidden !== false };
+  // A phone held upright: one tree, each name once, both sides' size and date under it.
+  const phone = useMedia(PHONE);
 
   // Both folders listed (again after copies, saves, Refresh).
   useEffect(() => {
@@ -286,7 +304,7 @@ function FoldersTab({ id, record, settings, actions }) {
     const { copy: list, same } = copyPlan(entries, picked, from);
     if (!list.length) return setNote({ text: same ? 'Those are the same on both sides already.' : `Nothing to copy: ${picked.length === 1 ? 'it is' : 'they are'} not on the ${from}.` });
     const replaced = list.filter((r) => entries.get(r)?.[to]).length;
-    if (replaced && !confirm(`Copy ${list.length} item${list.length === 1 ? '' : 's'} to the ${to}? ${replaced} there ${replaced === 1 ? 'is' : 'are'} replaced (${isRemotePath(record[to].path) ? 'on a server: for good' : 'the old ones go to the Recycle Bin'}).`)) return;
+    if (replaced && !confirm(`Copy ${list.length} item${list.length === 1 ? '' : 's'} to the ${to}? ${replaced} there ${replaced === 1 ? 'is' : 'are'} replaced (${forGoodOn(record[to].path) ? `on ${forGoodOn(record[to].path)}: for good` : `the old ones go to ${binName()}`}).`)) return;
     setBusy('copy');
     setNote(null);
     try {
@@ -361,13 +379,32 @@ function FoldersTab({ id, record, settings, actions }) {
       <span class="fcmp-date">${dateOf(s)}</span>
     </div>`;
   };
+  // On a phone: the name once, then each side's size and date (or that it is not there).
+  const both = (e) => {
+    const s = e.left ?? e.right;
+    const side = (key, mark) => {
+      const x = e[key];
+      const text = !x ? 'not here' : x.dir ? 'folder' : [sizeOf(x), shortDate(x.mtimeMs)].filter(Boolean).join(' · ');
+      return html`<span class="fcmp-side ${key} ${x ? '' : 'absent'}" title=${x ? `${key === 'left' ? 'Left' : 'Right'}: ${[sizeOf(x), dateOf(x)].filter(Boolean).join(', ')}` : `Not on the ${key}`}>${mark} ${text}</span>`;
+    };
+    return html`<div class="fcmp-cell one">
+      <span class="fcmp-indent" style=${{ width: `${e.depth * 14}px` }} />
+      ${s.dir
+        ? html`<button type="button" class="fcmp-twist ${expanded.has(e.rel) ? 'open' : ''}" tabindex="-1" aria-label=${expanded.has(e.rel) ? 'Close' : 'Open'} onClick=${(ev) => (ev.stopPropagation(), toggle(e.rel))}><${Icon} name="chevronRight" size=${13} /></button><${Icon} name="folder" size=${15} class="fcmp-icon" />`
+        : html`<span class="fcmp-twist" /><${FileIcon} name=${e.name} size=${15} plain=${settings.fileIcons === false} />`}
+      <span class="fcmp-lines">
+        <span class="fcmp-name">${e.name}</span>
+        ${!(s.dir && e.left && e.right) && html`<span class="fcmp-sides">${side('left', '◧')}${side('right', '◨')}</span>`}
+      </span>
+    </div>`;
+  };
   const row = (e) => html`<div key=${e.rel} data-rel=${e.rel} role="treeitem" aria-selected=${selected.has(e.rel)} aria-level=${e.depth + 1} aria-expanded=${e.dir ? expanded.has(e.rel) : undefined}
-      class="fcmp-row state-${e.state} ${selected.has(e.rel) ? 'selected' : ''} ${cursor === e.rel ? 'cursor' : ''}"
+      class="fcmp-row state-${e.state} ${phone ? 'one' : ''} ${selected.has(e.rel) ? 'selected' : ''} ${cursor === e.rel ? 'cursor' : ''}"
       onClick=${(ev) => pick(e.rel, ev)}
       onDblClick=${() => (e.dir ? toggle(e.rel) : e.left && e.right && actions.compareFiles({ key: diskKey(childPath(left, e.rel)) }, { key: diskKey(childPath(right, e.rel)) }))}>
-      ${cell(e, 'left')}
-      <div class="fcmp-mark" title=${STATE_LABELS[e.state]}>${MARKS[e.state]}</div>
-      ${cell(e, 'right')}
+      ${phone
+        ? html`${both(e)}<div class="fcmp-mark" title=${STATE_LABELS[e.state]}>${MARKS[e.state]}</div>`
+        : html`${cell(e, 'left')}<div class="fcmp-mark" title=${STATE_LABELS[e.state]}>${MARKS[e.state]}</div>${cell(e, 'right')}`}
     </div>`;
 
   const total = counts.changed + counts.left + counts.right + counts.kind + counts.unsure;
@@ -375,6 +412,7 @@ function FoldersTab({ id, record, settings, actions }) {
   const head = (side) => {
     const p = record[side].path;
     return html`<div class="fcmp-head ${side} ${isRemotePath(p) ? 'kind-remote' : 'kind-disk'}" title=${p}>
+      ${phone && html`<span class="fcmp-head-mark">${side === 'left' ? '◧' : '◨'}</span>`}
       <${Icon} name=${isRemotePath(p) ? 'server' : 'folder'} size=${15} />
       <span class="fcmp-head-name">${pathName(p)}</span>
       <span class="fcmp-head-where"><bdi>${rootWhere(p)}</bdi></span>
@@ -394,9 +432,10 @@ function FoldersTab({ id, record, settings, actions }) {
   ];
 
   const startSplit = useRef(split);
-  return html`<div class="fcmp" role="region" aria-label="Folders compared" style=${{ '--fcmp-split': `${(split * 100).toFixed(1)}%` }} ref=${body}>
+  return html`<div class="fcmp ${phone ? 'phone' : ''}" role="region" aria-label="Folders compared" style=${{ '--fcmp-split': `${(split * 100).toFixed(1)}%` }} ref=${body}>
     <div class="ccmp-bar fcmp-bar">
       <${SaveStar} id=${id} record=${record} actions=${actions} />
+      <${SidewaysButton} />
       <button type="button" class="icon-btn sm" aria-label="Two panes" title="Two panes: browse both folders side by side and copy or move files between them"
         onClick=${() => leaveFile() && (actions.compareDirty(id, false), actions.updateCompare(id, { mode: 'panes' }))}><${Icon} name="panes" size=${16} /></button>
       <select class="fcmp-show" aria-label="Show" value=${show} onChange=${(e) => actions.updateCompare(id, { show: e.currentTarget.value })}>
@@ -406,6 +445,7 @@ function FoldersTab({ id, record, settings, actions }) {
         ${scanning ? html`<span class="muted small">Reading both folders…</span>` : scan?.error ? '' : total === 0 && !checking ? html`<span class="muted small">The same on both sides</span>` : html`${chip('changed', counts.changed + counts.kind)}${chip('left', counts.left)}${chip('right', counts.right)}${chip('unsure', counts.unsure)}`}
         ${checking && html`<span class="muted small">Checking contents… ${checking.done} of ${checking.total}</span>`}
       </span>
+      <span class="fcmp-break" />
       <button type="button" class="icon-btn sm" aria-label="Previous difference" title="Previous difference (Alt+↑)" disabled=${!total} onClick=${() => go(-1)}><${Icon} name="chevronDown" size=${16} class="up" /></button>
       <button type="button" class="icon-btn sm" aria-label="Next difference" title="Next difference (Alt+↓)" disabled=${!total} onClick=${() => go(1)}><${Icon} name="chevronDown" size=${16} /></button>
       <span class="ccmp-gap" />
@@ -415,7 +455,7 @@ function FoldersTab({ id, record, settings, actions }) {
       <button type="button" class="icon-btn sm" aria-label="Read both folders again" title="Read both folders again" disabled=${scanning} onClick=${() => setTick((t) => t + 1)}><${Icon} name="sync" size=${15} /></button>
       <${MenuButton} label="More" items=${moreItems} />
     </div>
-    <div class="fcmp-heads">${head('left')}<div class="fcmp-mark" />${head('right')}</div>
+    <div class="fcmp-heads">${head('left')}${!phone && html`<div class="fcmp-mark" />`}${head('right')}</div>
     ${note && html`<p class="notice ${note.error ? 'error' : ''} fcmp-note" role="status"><${Icon} name=${note.error ? 'alert' : 'info'} size=${15} /><span>${note.text}</span>
       <button type="button" class="icon-btn xs" aria-label="Close" onClick=${() => setNote(null)}><${Icon} name="x" size=${13} /></button></p>`}
     ${scan?.error && html`<p class="notice error fcmp-note" role="alert"><${Icon} name="alert" size=${15} /><span>${scan.error}</span></p>`}
@@ -461,21 +501,25 @@ function OneSide({ side, file, name, actions, settings, onCopy }) {
   </div>`;
 }
 
+// What a copy replaces, or a sync deletes, is gone for good on a server and on a phone (the
+// Android app has no Recycle Bin); here it goes to the Recycle Bin (the Trash).
+const forGoodOn = (path) => (isRemotePath(path) ? 'a server' : isAndroidApp() ? 'the phone' : '');
+
 /** Making one side like the other: what is copied, and what is only there (deleted only when ticked). */
 function SyncDialog({ plan, record, entries, onRun, onClose }) {
   const [remove, setRemove] = useState(false);
   const { to, copy, extra } = plan;
   const from = to === 'right' ? 'left' : 'right';
-  const server = isRemotePath(record[to].path);
+  const gone = forGoodOn(record[to].path);
   const list = (rels) => html`<ul class="fcmp-plan">${rels.slice(0, 200).map((r) => html`<li key=${r}><${Icon} name=${entries.get(r)?.dir ? 'folder' : 'file'} size=${13} /><span>${r}</span></li>`)}${rels.length > 200 && html`<li class="muted">…and ${rels.length - 200} more</li>`}</ul>`;
   return html`<${Modal} title=${`Make the ${to} like the ${from}`} onClose=${onClose}
     footer=${html`<span class="spacer" /><button type="button" class="btn" onClick=${onClose}>Cancel</button>
       <button type="button" class="btn primary" disabled=${!copy.length && !(remove && extra.length)} onClick=${() => onRun({ ...plan, remove })}>${remove && extra.length ? `Copy ${copy.length} and delete ${extra.length}` : `Copy ${copy.length}`}</button>`}>
-    ${copy.length ? html`<p>${copy.length} item${copy.length === 1 ? '' : 's'} copied to the ${to} (different or missing there; the ones replaced ${server ? 'are deleted on the server' : 'go to the Recycle Bin'}):</p>${list(copy)}` : html`<p class="muted">Nothing to copy: the ${to} has everything the ${from} has.</p>`}
+    ${copy.length ? html`<p>${copy.length} item${copy.length === 1 ? '' : 's'} copied to the ${to} (different or missing there; the ones replaced ${gone ? `are deleted for good (on ${gone})` : `go to ${binName()}`}):</p>${list(copy)}` : html`<p class="muted">Nothing to copy: the ${to} has everything the ${from} has.</p>`}
     ${extra.length > 0 &&
     html`<p>${extra.length} item${extra.length === 1 ? ' is' : 's are'} only on the ${to}:</p>${list(extra)}
       <label class="check"><input type="checkbox" checked=${remove} onChange=${(e) => setRemove(e.currentTarget.checked)} />
-        <span>Delete ${extra.length === 1 ? 'it' : 'them'} too (${server ? 'on a server: for good' : 'to the Recycle Bin'})</span></label>`}
+        <span>Delete ${extra.length === 1 ? 'it' : 'them'} too (${gone ? `on ${gone}: for good` : `to ${binName()}`})</span></label>`}
   </${Modal}>`;
 }
 

@@ -1,7 +1,8 @@
 # Runs the Android app in an emulator and checks, in its real WebView, what a desktop browser
 # cannot stand in for: text from images (tesseract's worker and models as the APK holds them),
 # the phone's text to speech, Kokoro served from this machine as from a computer on the phone's
-# network, PDFs (pdf.js and its worker) and documents converted on the page (scripts/android-check.mjs).
+# network, PDFs (pdf.js and its worker), documents converted on the page, a shell on the phone,
+# and folder comparisons laid out for a phone and turned sideways (scripts/android-check.mjs).
 # Run it by hand from Actions → Android check. Its APK is a debug build with WebView debugging
 # on, for this check only: the release's setting stays off.
 name: Android check
