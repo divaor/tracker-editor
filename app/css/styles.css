@@ -7950,9 +7950,9 @@ svg.up {
 
 .terminal-screens {
   position: relative;
+  display: flex;
   flex: 1;
   min-height: 0;
-  padding: 4px 0 0 8px;
   background: #ffffff;
 }
 
@@ -7966,9 +7966,152 @@ svg.up {
   }
 }
 
+/* The panel's two sides: the left one alone fills it until the panel is split. */
+.terminal-half {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.terminal-half[hidden] {
+  display: none;
+}
+
+.terminal-screens.split > .terminal-half.left {
+  flex: 0 0 var(--terminal-split, 50%);
+}
+
+.terminal-half-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
 .terminal-screen {
   position: absolute;
   inset: 4px 0 0 8px;
+}
+
+.terminal-split::before {
+  content: '';
+  position: absolute;
+  inset: 0 4px;
+  background: var(--border);
+}
+
+/* While split: each side's name, dragged back onto the tabs to show it alone. */
+.terminal-half-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  height: 24px;
+  padding: 0 4px 0 6px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: grab;
+}
+
+.terminal-half-head.active {
+  box-shadow: inset 0 -2px 0 var(--kc);
+  color: var(--text);
+}
+
+.terminal-half-head .grip {
+  flex: none;
+  color: var(--text-3);
+}
+
+.terminal-half-name {
+  min-width: 0;
+  padding: 2px 4px;
+  overflow: hidden;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* A tab held over the screens: the side it would go to. */
+.terminal-drop-zones {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 6px;
+  pointer-events: none;
+}
+
+.terminal-drop-zone {
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--border-strong, var(--border));
+  border-radius: var(--radius);
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.terminal-drop-zone.on {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--text);
+}
+
+.terminal-drop-zone span {
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.terminal-tab.dragging {
+  opacity: 0.45;
+}
+
+.terminal-tab-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.terminal-side {
+  flex: none;
+  color: var(--kc);
+  font-size: 11px;
+}
+
+/* Where a dragged tab goes along the strip. */
+.terminal-tab-drop {
+  flex: none;
+  width: 2px;
+  margin: 4px -2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+.terminal-tab-name.editing {
+  cursor: text;
+}
+
+.terminal-tab-input {
+  width: 160px;
+  min-width: 0;
+  padding: 1px 4px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  outline: none;
 }
 
 .terminal-screen[hidden] {
@@ -7985,6 +8128,9 @@ svg.up {
 }
 
 .terminal-empty {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: flex-start;

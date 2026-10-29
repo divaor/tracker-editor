@@ -2,7 +2,7 @@
 
 Tracker Editor is a Notepad++-style editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs. Everything is saved the moment you paste or type, on this computer with the tracker, or, once you turn on sync, in the same private GitHub data repo as the tracker, so your files are on your computers and your phone.
 
-Version 0.31.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.31.0 · Web app: https://divaor.github.io/tracker-editor/
+Version 0.32.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.32.0 · Web app: https://divaor.github.io/tracker-editor/
 
 ---
 
@@ -14,9 +14,9 @@ Download from **https://github.com/divaor/tracker-editor/releases/latest**:
 
 | System | File |
 | --- | --- |
-| Windows | `Tracker Editor Setup 0.31.0.exe` (installer) or `Tracker Editor-0.31.0-portable.exe` (no install, no admin rights) |
-| macOS | `Tracker Editor-0.31.0-arm64.dmg` |
-| Linux | `Tracker Editor-0.31.0.AppImage` |
+| Windows | `Tracker Editor Setup 0.32.0.exe` (installer) or `Tracker Editor-0.32.0-portable.exe` (no install, no admin rights) |
+| macOS | `Tracker Editor-0.32.0-arm64.dmg` |
+| Linux | `Tracker Editor-0.32.0.AppImage` |
 
 The builds are not code-signed, so the first launch warns you. On Windows, choose *More info → Run anyway*. On macOS, right-click the app → *Open*. Installing the desktop app also registers `tracker-editor://` links, so the tracker's **Open in editor** opens files straight in it.
 
@@ -27,7 +27,7 @@ The builds are not code-signed, so the first launch warns you. On Windows, choos
 The editor as an Android app, with what a web page cannot do: **Open with** from other apps, **Folders** on the phone, **servers** and **terminals**. For Android 7 and later on 64-bit phones (nearly all from the last ten years).
 
 1. Install **Obtainium** (from https://github.com/ImranR98/Obtainium/releases or F-Droid). It installs apps from their GitHub releases and keeps them up to date.
-2. In Obtainium: **Add app**, paste `https://github.com/divaor/tracker-editor`, **Add**, then **Install** (`Tracker-Editor-0.31.0.apk`). The first time, Android asks to let Obtainium install apps: allow it.
+2. In Obtainium: **Add app**, paste `https://github.com/divaor/tracker-editor`, **Add**, then **Install** (`Tracker-Editor-0.32.0.apk`). The first time, Android asks to let Obtainium install apps: allow it.
 3. Obtainium tells you when there is a new version and installs it over the old one; your files and settings stay. (Or download the `.apk` from the releases page and open it; then updates are by hand.)
 
 What the app adds:
@@ -522,6 +522,19 @@ It types real key presses into whichever window has the focus when the countdown
 - **`file:line` opens the file there**: in a terminal, the places programs print (`src/app.js:12:5`, `File "main.py", line 7`, `Foo.cs:line 42`, `a.ts(12,5)`) are links; click one. In the text (a log, a pasted stack trace), `Ctrl+click` one. Relative paths start from the terminal's folder, or the file's. Files outside the folders you opened in Folders do not open (open their folder first).
 - **When it fails**, ✦ in the terminal's bar asks the model about the error, and offers to fix the file it points to: see [Help with errors](#help-with-errors).
 
+### Terminal tabs: names, order, two side by side (desktop)
+
+Each terminal is a tab in the panel. With a few open (a server, this computer, a build running), these keep them apart:
+
+- **Rename**: double-click a tab (or right-click it → **Rename…**, or the command **Rename the terminal** for the one in use). Type the name and press `Enter`; `Escape` keeps the old one. An empty name goes back to the usual one (**This computer · folder**, or the server's name). Hover a renamed tab to see where it is.
+- **Reorder**: drag a tab along the others; a line shows where it goes. Right-click → **Move left** / **Move right** does the same.
+- **Two side by side**: drag a tab onto the left or right half of the panel (the two halves light up while you hold it there), or right-click it → **Show on the left** / **Show on the right**, or the panel's **Two side by side** button (the one in use and the next one), or the command **Two terminals side by side**, which with only one terminal opens a second one in the same place. Each side has its name on top, and its tab a ◧ or ◨.
+  - Click into a side to type there; that one is in use (its name is underlined). Clicking a tab that is not showing puts it on the side in use.
+  - Drag the line between them to give one side more room (double-click it: halves again). The width is remembered.
+  - Drag a side's name onto the other side to swap them, or onto the tabs to show that one alone. **Show only this one** (⛶ on a side's name), the panel's **One terminal again** button and the command do the same.
+  - Closing a terminal on a side puts the next one there; with no other left, the panel shows one again.
+- Phones and narrow windows show one terminal at a time.
+
 ### Folders: a file explorer
 
 The sidebar has two views on the desktop: **My files** (synced) and **Folders** (on this computer). **View → Folders** (`Ctrl+Shift+E`) shows it; **File → Open Folder…** or the welcome screen's **Open a folder** adds one. Pick a folder in the system dialog (the buttons start it in Documents, Desktop or Downloads). The editor can only reach what is inside the folders you picked.
@@ -615,7 +628,7 @@ Working there:
 
 `` Ctrl+` `` (or **View → Terminal**, or right-click a folder on an SFTP server → **Open a terminal here**, or ⋯ in a server file's bar → **Open a terminal in its folder**): a shell on the server opens in a panel under the editor, in that folder, signed in like its files. (Terminals on this computer work the same way: see [A terminal, and running a file](#a-terminal-and-running-a-file).)
 
-- **+** opens another (one tab each); drag the panel's top edge to make it taller.
+- **+** opens another (one tab each); drag the panel's top edge to make it taller. Tabs can be renamed, reordered and shown two side by side: see [Terminal tabs](#terminal-tabs-names-order-two-side-by-side-desktop).
 - Its colors follow the app's theme. In light mode each of the shell's colors is a darker shade, so green and yellow text (prompts, `ls`, test results) stays readable on white.
 - Keys go to the shell: `Ctrl+C` stops a command (copies if text is selected), `Ctrl+V` pastes; `Ctrl+Shift+C` / `Ctrl+Shift+V` also copy and paste; right-click for Copy, Paste, Clear.
 - `` Ctrl+` `` again (or ⌄) hides the panel; the shells keep running. When one ends (`exit`), `Enter` starts it again. **×** on a tab closes that shell.
@@ -680,6 +693,7 @@ Turn them on in **Settings → Desktop**.
 | `Tab` / `Ctrl+→` / `Escape` | With a grey suggestion: take it / take a word / drop it |
 | `Ctrl+click` on `file:line` | Open that file at that line (in a terminal, a plain click) |
 | In the terminal | `Ctrl+Shift+C` / `Ctrl+Shift+V` copy / paste; `Ctrl+C` copies a selection, `Ctrl+V` pastes |
+| Terminal tabs | Double-click: rename; drag along the tabs: reorder; drag onto the left or right half: two side by side; a side's name back onto the tabs: one again |
 | `F1` | Help: every command and shortcut (and this guide) |
 | `Ctrl+Shift+P` (or `Ctrl+P`, then `>`) | Run a command by name |
 | `Tab` in HTML, XML, JSX | Expand an Emmet abbreviation (`ul>li*3`, `div.card`, `!`) |
@@ -779,6 +793,7 @@ Turn them on in **Settings → Desktop**.
 - **"No SSH agent is running"**: on Windows start the *OpenSSH Authentication Agent* service (and `ssh-add` your key), or sign in with a key file.
 - **"Box could not reach …"**: the jump host is connected but can't reach the server behind it; check that server's host and port as seen from the jump host.
 - **`Ctrl+W` doesn't close the tab**: the terminal has the keys (it's the shell's "delete word"). Click into the editor first.
+- **Typing goes to the other terminal** (two side by side): the keys go to the side in use, the one with its name underlined. Click into the side you want.
 - **F5 says "No run command for …"**: add one for that type in **Settings → Editor → Run commands** (`rs: cargo run`). "Run works on files in a folder": open the file from Folders (a synced file has no folder to run in).
 - **`python3` (or `node`…) is not found when running a file**: the terminal uses your usual shell and its PATH; install the program, or put its full path in **Run commands**.
 - **The status bar says "Set up TypeScript…" but it is installed**: the editor looks on the PATH of your login shell and in the project's `node_modules`. For TypeScript it needs version 7 or later (`tsc --version`), or `typescript-language-server` with an older one. Install it for everyone (`npm install -g typescript`), then **It is installed: start it**.

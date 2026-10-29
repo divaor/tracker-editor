@@ -112,6 +112,8 @@ export const DEFAULT_SETTINGS = {
   showPermissions: false,
   // The terminal panel's height (desktop), in pixels.
   terminalHeight: 280,
+  // The left terminal's share when two show side by side (0 = half).
+  terminalSplit: 0,
   // Comparisons in tabs: the ones saved (☆: { id, name, mode, left, right, show?, all? }) and
   // the share of a folder comparison its tree takes (0 = the usual).
   savedCompares: [],

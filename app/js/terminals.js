@@ -3,14 +3,17 @@
 // loaded the first time one opens. The sessions live here, outside the panel, so hiding
 // the panel keeps them; the panel attaches their screens (attach) and fits them to its size.
 // "file:line" in the output is a link (fileRefs.js) that the app opens (setRefHandler).
+// The tabs' order, the one in use and the panel split in two follow terminalTabs.js.
 import { outputTail } from './errorHelp.js';
 import { findFileRefs } from './fileRefs.js';
 import { getSettings, resolvedTheme } from './settings.js';
+import { addTab, closeTab, EMPTY_TABS, moveTab, shown, splitTab, unsplit, useTab } from './terminalTabs.js';
 
 let lib = null; // { Terminal, FitAddon }
-const sessions = []; // { key, id, connId, cwd, label, title, term, fit, el, exited, code, starting, shell, runner }
+const sessions = []; // { key, id, connId, cwd, label, name, title, term, fit, el, exited, code, starting, shell, runner }, in the tabs' order
 const listeners = new Set();
 let active = null;
+let tabs = EMPTY_TABS;
 let wired = false;
 let lastSize = { cols: 100, rows: 24 };
 let onToggle = () => {};
@@ -19,6 +22,14 @@ let onRef = null;
 const bridge = () => window.desktop?.terminal;
 const changed = () => listeners.forEach((l) => l());
 const byId = (id) => sessions.find((s) => s.id === id);
+const byKey = (key) => sessions.find((s) => s.key === key) ?? null;
+// The tabs as they are now: the sessions in their order, the one in use.
+function setTabs(next) {
+  tabs = next;
+  sessions.sort((a, b) => tabs.order.indexOf(a.key) - tabs.order.indexOf(b.key));
+  active = byKey(tabs.active);
+  changed();
+}
 // Output and ends that come before their session knows its id: in the Android app the answer
 // to open and the shell's first output (its prompt) travel separately, and either may come
 // first. Kept a while for start() to take; others are dropped (a session closed meanwhile).
@@ -44,6 +55,10 @@ const message = (err) => String(err?.message ?? err).replace(/^Error invoking re
 export const terminalsAvailable = () => Boolean(bridge());
 export const terminals = () => sessions;
 export const activeTerminal = () => active;
+/** The two terminals side by side ({ left, right }) while the panel is split, else null. */
+export const splitTerminals = () => (tabs.split ? { left: byKey(tabs.split.left), right: byKey(tabs.split.right) } : null);
+/** Whether a terminal's screen shows (the one in use, or one of the two side by side). */
+export const terminalShown = (s) => Boolean(s) && shown(tabs, s.key);
 export function onTerminals(callback) {
   listeners.add(callback);
   return () => listeners.delete(callback);
@@ -246,8 +261,7 @@ export async function openTerminal(connId, { cwd = '', label = 'Terminal', runne
     return true;
   });
   sessions.push(s);
-  active = s;
-  changed();
+  setTabs(addTab(tabs, s.key));
   await start(s);
   return s;
 }
@@ -259,7 +273,11 @@ export function attach(s, container) {
     s.el.className = 'terminal-screen';
     s.el.dataset.key = s.key;
     // While a terminal has the focus, the window's menu shortcuts go to the shell.
-    s.el.addEventListener('focusin', () => bridge()?.ownKeys(true));
+    s.el.addEventListener('focusin', () => {
+      bridge()?.ownKeys(true);
+      // Clicked into one of the two side by side: that one is in use.
+      if (active !== s && sessions.includes(s)) setTabs(useTab(tabs, s.key));
+    });
     s.el.addEventListener('focusout', () => bridge()?.ownKeys(false));
     // Keys typed here are the shell's: the app's shortcuts (Ctrl+P, Escape…) do not see them.
     for (const type of ['keydown', 'keypress', 'keyup']) s.el.addEventListener(type, (e) => e.stopPropagation());
@@ -285,8 +303,30 @@ export function focusTerminal(s = active) {
   s?.term.focus();
 }
 
+/** A terminal in use (shown; while split, in place of the one in use before when it was not showing). */
 export function setActiveTerminal(s) {
-  active = s;
+  if (s) setTabs(useTab(tabs, s.key));
+}
+
+/** A terminal shown on one side of the panel ('left', 'right'), the panel split in two. */
+export function showTerminalOn(s, side) {
+  if (s) setTabs(splitTab(tabs, s.key, side));
+}
+
+/** One terminal in the panel again: `keep` (by default the one in use). */
+export function unsplitTerminals(keep = active) {
+  setTabs(unsplit(tabs, keep?.key));
+}
+
+/** A terminal's tab moved to `index` among the others. */
+export function moveTerminal(s, index) {
+  if (s) setTabs(moveTab(tabs, s.key, index));
+}
+
+/** A terminal's tab named (an empty name: what it is and where, again). */
+export function renameTerminal(s, name) {
+  if (!s) return;
+  s.name = String(name ?? '').trim().slice(0, 60);
   changed();
 }
 
@@ -299,9 +339,8 @@ export function closeTerminal(s) {
   s.term.dispose();
   s.el?.remove();
   sessions.splice(at, 1);
-  if (active === s) active = sessions[Math.min(at, sessions.length - 1)] ?? null;
   bridge()?.ownKeys(false);
-  changed();
+  setTabs(closeTab(tabs, s.key));
 }
 
 /**

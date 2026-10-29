@@ -1,6 +1,17 @@
 import { html, useLayoutEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import { Icon } from './icons.js';
 
+// Items left out (false) and the separators they leave at the ends or next to each other.
+function tidyItems(items) {
+  const out = [];
+  for (const item of items) {
+    if (!item || (item.separator && (!out.length || out.at(-1).separator))) continue;
+    out.push(item);
+  }
+  if (out.at(-1)?.separator) out.pop();
+  return out;
+}
+
 /**
  * A small menu at a point: { x, y }, or { x, y, right: true } to end at x
  * (under a button at the window's edge), `above: true` to end at y (over the status bar). Fixed, so bars that scroll sideways
@@ -40,7 +51,7 @@ export function Menu({ items, at, onClose, label = 'Menu', owner, className = ''
     };
   }, []);
   return html`<div class="menu ${className}" role="menu" aria-label=${label} ref=${ref} style=${{ left: `${pos.left}px`, top: `${pos.top}px` }}>
-    ${items.filter(Boolean).map((item, i) =>
+    ${tidyItems(items).map((item, i) =>
       item.separator
         ? html`<div class="menu-separator" key=${`s${i}`} role="separator" />`
         : item.heading

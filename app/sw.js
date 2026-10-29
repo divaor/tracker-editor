@@ -4,7 +4,7 @@
 // Text recognition (vendor/ocr/, about 9 MB), the terminal (vendor/xterm/,
 // desktop only), the formatters (vendor/format/) and pdf.js (vendor/pdf/, about 6 MB) are
 // cached the first time they are used.
-const CACHE = 'editor-v0.31.0';
+const CACHE = 'editor-v0.32.0';
 const INBOX = 'editor-inbox'; // shared files waiting for the app (see js/inbox.js)
 const ASSETS = [
   './',
@@ -163,6 +163,7 @@ const ASSETS = [
   'vendor/marked.js',
   'vendor/preact-htm.js',
   'vendor/purify.js',
+  'js/terminalTabs.js',
   'js/terminals.js',
   'js/ui/terminal.js',
   'js/ui/folderSearch.js',

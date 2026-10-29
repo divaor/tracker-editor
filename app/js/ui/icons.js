@@ -103,6 +103,7 @@ const PATHS = {
   bookmark: () => html`<path d="M6 4h12v16l-6-4.5L6 20z" />`,
   xCircle: () => html`<circle cx="12" cy="12" r="9" /><path d="m15 9-6 6M9 9l6 6" />`,
   indent: () => html`<path d="M3 5h18M11 10h10M11 15h10M3 20h18M3 9.5l3 2.5-3 2.5" />`,
+  grip: () => html`<path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01" stroke-width="3" />`,
   branch: () => html`<circle cx="6" cy="5" r="2" /><circle cx="6" cy="19" r="2" /><circle cx="18" cy="7" r="2" /><path d="M6 7v10M18 9c0 5-5 4-11 9" />`,
 };
 

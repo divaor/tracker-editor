@@ -16,7 +16,7 @@ import { diskAvailable, diskReadOnly, openDiskFiles, recheckServerTabs, reloadDi
 import { isContentPath, isRemotePath, kindOfKey, remoteAddress, remoteParts, remoteRoot, toRemoteUri } from './where.js';
 import { onServers, server, watchServers } from './servers.js';
 import { HostKeyDialog, PromptDialog, ServerDialog, SshImportDialog } from './ui/servers.js';
-import { activeTerminal, focusTerminal, openTerminal, retheme, runInTerminal, setActiveTerminal, setRefHandler, setToggleHandler, terminals, terminalsAvailable, terminalText } from './terminals.js';
+import { activeTerminal, focusTerminal, openTerminal, retheme, runInTerminal, setActiveTerminal, setRefHandler, setToggleHandler, showTerminalOn, splitTerminals, terminals, terminalsAvailable, terminalText, unsplitTerminals } from './terminals.js';
 import { parseRunCommands, runCommandFor, runLine } from './runFile.js';
 import { findFileRefs, pastedPath, resolveRef } from './fileRefs.js';
 import { claudeAppPrompt, claudeAppUrl, codeAround, errorContextText, EXPLAIN_ERROR, explainProblemAction, fixForErrorAction, fixProblemsAction } from './errorHelp.js';
@@ -2643,9 +2643,10 @@ export function App() {
     if (conn && conn.protocol !== 'sftp') return toast(`${conn.name} is an FTP server; terminals need SSH (SFTP).`, { kind: 'error' });
     setTerminalShown(true);
     try {
-      await openTerminal(connId, { cwd });
+      return await openTerminal(connId, { cwd });
     } catch (err) {
       toast(ipcMessage(err), { kind: 'error', timeout: 8000 });
+      return null;
     }
   };
   /** Where a terminal on this computer starts: the open file's folder, else the one shown in Folders. */
@@ -2688,6 +2689,29 @@ export function App() {
     setActiveTerminal(there);
     setTerminalShown(true);
     requestAnimationFrame(() => focusTerminal(there));
+  };
+  /**
+   * Two terminals side by side, or one again: the one in use and the next; with only one,
+   * a second one in the same place on the right.
+   */
+  actions.splitTerminal = async () => {
+    if (!terminalsAvailable()) return;
+    if (splitTerminals()) return (unsplitTerminals(), setTerminalShown(true));
+    const list = terminals();
+    if (!list.length) return actions.toggleTerminal();
+    if (matchMedia('(max-width: 640px)').matches) return toast('Two terminals side by side need a wider window.');
+    setTerminalShown(true);
+    const s = activeTerminal();
+    if (list.length > 1) return showTerminalOn(s, 'left');
+    const other = await actions.openTerminal(s.connId, s.cwd);
+    if (other) showTerminalOn(other, 'right');
+  };
+  /** Rename the terminal in use (its tab shows a field). */
+  actions.renameTerminal = () => {
+    if (!terminalsAvailable()) return;
+    if (!terminals().length) return toast('No terminal is open: Ctrl+` opens one.');
+    setTerminalShown(true);
+    requestAnimationFrame(() => window.dispatchEvent(new Event('terminal:rename')));
   };
   /** A folder: a terminal there in the editor (on a server, or this computer). */
   actions.terminalHere = (dir) => (isRemotePath(dir) ? actions.openTerminal(remoteParts(dir).id, remoteParts(dir).path) : actions.openTerminal('local', dir));
@@ -3213,6 +3237,8 @@ export function App() {
       'server-add': () => actions.editServer(),
       'servers-ssh': () => actions.importSshConfig(),
       terminal: () => actions.toggleTerminal(),
+      'terminal-split': () => actions.splitTerminal(),
+      'terminal-rename': () => actions.renameTerminal(),
       'run-file': () => actions.runFile(),
       'explain-error': () => actions.explainTerminalError(),
       'fix-problems': () => actions.fixProblems(),
