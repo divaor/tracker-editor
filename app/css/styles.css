@@ -42,6 +42,7 @@
   --kind-doc: #2f6fd6;
   --kind-disk: #c47a0a;
   --kind-remote: #b5309a;
+  --kind-compare: #5b5bd6;
   --ft-yellow: #b08300;
   --ft-orange: #cf6512;
   --ft-red: #d03b33;
@@ -100,6 +101,7 @@
     --kind-doc: #6ea2f2;
     --kind-disk: #eba94a;
     --kind-remote: #e27ad0;
+    --kind-compare: #9d9df5;
     --ft-yellow: #e8c14a;
     --ft-orange: #f0924a;
     --ft-red: #f2756d;
@@ -152,6 +154,7 @@
   --kind-doc: #6ea2f2;
   --kind-disk: #eba94a;
   --kind-remote: #e27ad0;
+  --kind-compare: #9d9df5;
   --ft-yellow: #e8c14a;
   --ft-orange: #f0924a;
   --ft-red: #f2756d;
@@ -3011,6 +3014,10 @@ button.folder-col:hover {
   --kc: var(--kind-remote);
 }
 
+.kind-compare {
+  --kc: var(--kind-compare);
+}
+
 .where-chip {
   display: inline-flex;
   flex-shrink: 0;
@@ -5790,6 +5797,513 @@ mark {
   background: var(--surface-2);
   color: var(--text-2);
   font-size: 12px;
+}
+
+/* ---- Comparisons in tabs of their own (ui/compareTab.js) ------------------------------
+   Over the editor's place, as documents are (no z-index: their menus rise over the frame). */
+.editor-area > .ccmp,
+.editor-area > .fcmp {
+  position: absolute;
+  inset: 0;
+  background: var(--surface);
+}
+
+.ccmp {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.ccmp-bar {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  min-height: 38px;
+  padding: 3px 8px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  scrollbar-width: none;
+}
+
+.ccmp-bar > * {
+  flex-shrink: 0;
+}
+
+.ccmp-count {
+  min-width: 7.5em;
+  white-space: nowrap;
+}
+
+.ccmp-gap {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--border);
+}
+
+.ccmp-star.on {
+  color: var(--warn);
+}
+
+.ccmp-star.on svg {
+  fill: currentColor;
+}
+
+.ccmp-heads {
+  display: grid;
+  flex-shrink: 0;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 12px;
+}
+
+.ccmp-side {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 2px 6px 2px 12px;
+  white-space: nowrap;
+}
+
+.ccmp-side + .ccmp-side {
+  border-left: 1px solid var(--border);
+}
+
+.ccmp-name {
+  flex-shrink: 0;
+  max-width: 50%;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+
+/* Where the file is: the end of the path stays in view (it tells two files apart). */
+.ccmp-where {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  direction: rtl;
+  text-align: left;
+  text-overflow: ellipsis;
+}
+
+.ccmp-side .spacer {
+  flex: 1;
+}
+
+.ccmp-note {
+  margin: 10px 12px;
+}
+
+.ccmp-body {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.ccmp-body[hidden] {
+  display: none;
+}
+
+.ccmp-body > .cm-mergeView {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  overflow: auto;
+}
+
+.ccmp-body .cm-mergeViewEditors {
+  min-height: 100%;
+}
+
+.ccmp-body .cm-editor {
+  background: var(--surface);
+}
+
+/* → and ← beside each change (the gap MergeView keeps between the sides). */
+.ccmp-body .cm-mergeView .cm-merge-revert {
+  width: 46px;
+  background: var(--surface-2);
+}
+
+.cm-merge-copy {
+  position: absolute;
+  display: flex;
+  gap: 2px;
+  justify-content: center;
+  width: 46px;
+}
+
+/* CodeMirror's own revert button is absolute and full width: these two sit side by side. */
+.ccmp-body .cm-merge-revert .cm-merge-copy button {
+  position: static;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ccmp-body .cm-merge-revert .cm-merge-copy button:hover {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-text, #fff);
+}
+
+.ccmp-plain {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 8px 12px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: var(--editor-font-size, 14px);
+  white-space: pre;
+}
+
+.ccmp-plain.wrap {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Two folders: one aligned tree (left | mark | right), the picked file compared below. */
+.fcmp {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.fcmp > * {
+  flex-shrink: 0;
+}
+
+.fcmp-show {
+  width: auto;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.fcmp-chips {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 4px;
+}
+
+.fcmp-chip {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.fcmp-heads,
+.fcmp-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 26px minmax(0, 1fr);
+}
+
+.fcmp-heads {
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 12px;
+}
+
+.fcmp-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 2px 6px 2px 10px;
+  border-top: 2px solid var(--kc, var(--border));
+  white-space: nowrap;
+}
+
+.fcmp-head svg {
+  flex-shrink: 0;
+  color: var(--kc);
+}
+
+.fcmp-head-name {
+  flex-shrink: 0;
+  max-width: 45%;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+
+.fcmp-head-where {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  direction: rtl;
+  text-align: left;
+  text-overflow: ellipsis;
+}
+
+.fcmp-head .spacer {
+  flex: 1;
+}
+
+.fcmp-note {
+  margin: 6px 10px;
+}
+
+.fcmp-note .icon-btn {
+  margin-left: auto;
+}
+
+.fcmp-tree {
+  flex: 0 0 var(--fcmp-split, 45%);
+  min-height: 60px;
+  overflow: auto;
+  outline: none;
+  font-size: 13px;
+}
+
+.fcmp-tree:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.fcmp-row {
+  min-height: 26px;
+  cursor: default;
+  user-select: none;
+}
+
+.fcmp-row:hover {
+  background: var(--surface-2);
+}
+
+.fcmp-row.selected {
+  background: var(--accent-soft);
+}
+
+.fcmp-row.cursor {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.fcmp-cell {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 0 8px 0 6px;
+  white-space: nowrap;
+}
+
+.fcmp-cell.absent {
+  background: repeating-linear-gradient(135deg, transparent 0 6px, color-mix(in srgb, var(--border) 45%, transparent) 6px 7px);
+}
+
+.fcmp-indent {
+  flex-shrink: 0;
+}
+
+.fcmp-twist {
+  display: grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-3);
+}
+
+.fcmp-twist.open svg {
+  transform: rotate(90deg);
+}
+
+.fcmp-icon {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+
+.fcmp-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fcmp-size,
+.fcmp-date {
+  flex-shrink: 0;
+  color: var(--text-3);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.fcmp-size {
+  margin-left: auto;
+}
+
+.fcmp-date {
+  min-width: 9.5em;
+  text-align: right;
+}
+
+.fcmp-mark {
+  display: grid;
+  place-items: center;
+  border-inline: 1px solid var(--border);
+  color: var(--text-3);
+  font-weight: 700;
+}
+
+/* The state of a row, in the mark and the names: different (amber), only on one side
+   (the side's color: left red, right green), not checked yet (muted). */
+.fcmp-row.state-changed .fcmp-mark,
+.fcmp-row.state-kind .fcmp-mark,
+.fcmp-chip.state-changed {
+  color: var(--warn);
+}
+
+.fcmp-row.state-changed .fcmp-name,
+.fcmp-row.state-kind .fcmp-name {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.fcmp-row.state-left .fcmp-mark,
+.fcmp-row.state-left .fcmp-cell.left .fcmp-name,
+.fcmp-chip.state-left {
+  color: var(--danger);
+}
+
+.fcmp-row.state-right .fcmp-mark,
+.fcmp-row.state-right .fcmp-cell.right .fcmp-name,
+.fcmp-chip.state-right {
+  color: var(--done);
+}
+
+.fcmp-row.state-unsure .fcmp-mark,
+.fcmp-chip.state-unsure {
+  color: var(--text-3);
+}
+
+.fcmp-empty,
+.fcmp-hint {
+  margin: 16px;
+  text-align: center;
+}
+
+.fcmp-splitter.horizontal {
+  height: 5px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+  cursor: row-resize;
+}
+
+.fcmp-file {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 80px;
+  overflow: hidden;
+}
+
+.fcmp-file > .ccmp {
+  flex: 1;
+}
+
+.fcmp-plan {
+  max-height: 180px;
+  margin: 4px 0 10px;
+  padding: 6px 8px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  font-family: var(--mono);
+  font-size: 12px;
+  list-style: none;
+}
+
+.fcmp-plan li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+/* Saved comparisons (☆). */
+.saved-compares {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.saved-compare {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.saved-compare-open {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  text-align: left;
+}
+
+.saved-compare-open:hover {
+  background: var(--surface-2);
+}
+
+.saved-compare-name {
+  font-weight: 600;
+}
+
+.saved-compare-rename {
+  display: flex;
+  flex: 1;
+  gap: 6px;
+}
+
+.saved-compare-rename input {
+  flex: 1;
+  min-width: 0;
+}
+
+.saved-compare-sides {
+  white-space: pre-line;
 }
 
 .icon-btn .up,

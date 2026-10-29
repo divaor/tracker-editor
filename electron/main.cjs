@@ -1303,6 +1303,67 @@ ipcMain.handle('folder:trash', guard(async (_e, paths) => {
   }
   return done;
 }));
+// ---- Folder comparisons (the page's comparison tab): two folders, here or on servers ----
+// Both are folders the person opened (picked here, or on a connected server); the page names
+// what is inside them only by relative paths, made of plain names (folderCompare.safeRel).
+const folderCompare = require('./folderCompare.cjs');
+const compareRoot = (root) => {
+  if (typeof root !== 'string' || !root) throw new Error('Pick a folder to compare.');
+  return isRemote(root) ? root : checkDir(root);
+};
+const compareRels = (rels, max = 5000) => {
+  if (!Array.isArray(rels) || !rels.length || rels.length > max || !rels.every(folderCompare.safeRel)) throw new Error('Nothing to do.');
+  return rels;
+};
+const inRoot = (root, rel) => {
+  const full = folderCompare.joinRel(root, rel, isRemote);
+  return isRemote(full) ? full : checkFile(full);
+};
+ipcMain.handle('compare:scan', guard(async (_e, left, right, opts = {}) => {
+  const io = { remote, isRemote, skip: folderCompare.skipper({ all: Boolean(opts?.all), hidden: opts?.hidden !== false }) };
+  const [l, r] = await Promise.all([folderCompare.listSide(compareRoot(left), io), folderCompare.listSide(compareRoot(right), io)]);
+  return { left: l, right: r };
+}));
+// Files with the same size and another date: the same bytes? { rel: true | false | null (could not tell) }.
+ipcMain.handle('compare:same', guard(async (_e, left, right, rels) => {
+  compareRoot(left);
+  compareRoot(right);
+  const out = {};
+  for (const rel of compareRels(rels, 200)) out[rel] = await folderCompare.sameFiles(inRoot(left, rel), inRoot(right, rel), { remote, isRemote });
+  return out;
+}));
+// Copies what `rels` name from one folder to the same places in the other: folders made as
+// needed, files there replaced (the old ones to the Recycle Bin here; on a server, deleted).
+// Through a server it runs as a transfer ({ transfer: id }), as Folders' copies do.
+ipcMain.handle('compare:copy', guard(async (_e, from, to, rels) => {
+  compareRoot(from);
+  compareRoot(to);
+  const groups = folderCompare.byParent(compareRels(rels));
+  const work = async (job) => {
+    const results = [];
+    for (const [parent, list] of groups) {
+      const dir = parent ? inRoot(to, parent) : to;
+      if (isRemote(dir)) await remote.mkdirp(dir);
+      else fs.mkdirSync(dir, { recursive: true });
+      const sources = list.map((rel) => inRoot(from, rel));
+      results.push(
+        ...(await placeWithExisting(sources, dir, 'replace', (items) => (!isRemote(dir) && !items.some(isRemote) ? folders.copyInto(items, dir) : copyAcross(items, dir, job)))),
+      );
+    }
+    return results;
+  };
+  if (isRemote(from) || isRemote(to)) return startTransfer({ op: 'copy', kind: !isRemote(to) ? 'download' : isRemote(from) ? 'copy' : 'upload', paths: rels.map((rel) => inRoot(from, rel)), dir: to }, work);
+  return work(null);
+}));
+// What is only on one side, when the person ticked it: here to the Recycle Bin, on a server for good.
+ipcMain.handle('compare:remove', guard(async (_e, root, rels) => {
+  compareRoot(root);
+  const paths = compareRels(rels).map((rel) => inRoot(root, rel));
+  if (isRemote(root)) return remote.remove(paths);
+  for (const p of paths) await shell.trashItem(checkEntry(p));
+  return paths;
+}));
+
 // A file the editor cannot show, with its default program; a folder in the file explorer.
 // Programs, scripts and shortcuts are never started (folders.canOpenExternally).
 ipcMain.handle('folder:open-external', guard(async (_e, file) => {

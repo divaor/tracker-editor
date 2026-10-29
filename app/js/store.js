@@ -21,8 +21,13 @@ let repoTabs = new Map(); // path → { path, name, text, baseSha, dirty }
 // stale (text not read yet after a restart) }.
 let diskTabs = new Map();
 let docTexts = new Map(); // blob sha → text of a tracker document (for search and offline reading)
+// Comparisons in tabs of their own (c:<id>): id → { id, mode: 'files' | 'folders', left, right,
+// savedId?, show? }. A side of folders is { path }; of files { key } (a tab key: f:, r:, d:) or
+// { text, label, detail } (the clipboard, a file picked from this device). Kept while their
+// tab is open or among the recently closed ones (Ctrl+Shift+T).
+let compares = new Map();
 let docs = { items: null, list: [] }; // trackerDocs(trackerItems), computed once per sync
-// Tab keys are "f:<id>" | "r:<path>". Pinned tabs come first in `open`; `side` is
+// Tab keys are "f:<id>" | "r:<path>" | "d:<path>" | "c:<compare id>". Pinned tabs come first in `open`; `side` is
 // the tab in the split view's second pane (never the active one); `collapsed`
 // lists project keys whose tab group is folded.
 // view: the tab groups the bar shows (null: all); viewActive: each view's last tab; assigned: tabs
@@ -38,10 +43,12 @@ const author = () => getSettings().device || '';
 export const fileKey = (id) => `f:${id}`;
 export const repoKey = (path) => `r:${path}`;
 export const diskKey = (path) => `d:${path}`;
+export const compareKey = (id) => `c:${id}`;
 export const parseKey = (key) =>
   key?.startsWith('r:') ? { kind: 'repo', path: key.slice(2) }
   : key?.startsWith('f:') ? { kind: 'file', id: key.slice(2) }
   : key?.startsWith('d:') ? { kind: 'disk', path: key.slice(2) }
+  : key?.startsWith('c:') ? { kind: 'compare', id: key.slice(2) }
   : null;
 
 // ---- Persistence (debounced) -------------------------------------------------
@@ -72,6 +79,7 @@ const persist = {
   session: (ms) => later('session', () => kvSet('session', session), ms),
   repo: (ms) => later('repoTabs', () => kvSet('repoTabs', [...repoTabs.values()]), ms),
   disk: (ms) => later('diskTabs', () => kvSet('diskTabs', savedDiskTabs()), ms),
+  compares: (ms) => later('compares', () => kvSet('compares', [...compares.values()]), ms),
   rest: () => later('rest', () => Promise.all([kvSet('projects', projects), kvSet('trackerItems', trackerItems), kvSet('trackerOps', trackerOps), kvSet('meta', meta)])),
   docs: () => later('docTexts', () => kvSet('docTexts', [...docTexts])),
 };
@@ -175,6 +183,8 @@ export const store = {
     session = { ...EMPTY_SESSION(), ...((await kvGet('session')) ?? {}) };
     repoTabs = new Map(((await kvGet('repoTabs')) ?? []).map((t) => [t.path, t]));
     diskTabs = new Map(((await kvGet('diskTabs')) ?? []).map((t) => [t.path, t]));
+    // Edits in a comparison are not kept across a restart: nothing is unsaved there now.
+    compares = new Map(((await kvGet('compares')) ?? []).map((c) => [c.id, { ...c, dirty: false }]));
     projects = (await kvGet('projects')) ?? [];
     trackerItems = (await kvGet('trackerItems')) ?? [];
     trackerOps = (await kvGet('trackerOps')) ?? [];
@@ -183,8 +193,10 @@ export const store = {
     trashed = new Set(((await kvGet('trashIds')) ?? []).filter((id) => files.get(id)?.deleted));
     // Drop tabs whose file is gone.
     session.open = session.open.filter((k) =>
-      k.startsWith('r:') ? repoTabs.has(k.slice(2)) : k.startsWith('d:') ? diskTabs.has(k.slice(2)) : files.get(k.slice(2)) && !files.get(k.slice(2)).deleted,
+      k.startsWith('r:') ? repoTabs.has(k.slice(2)) : k.startsWith('d:') ? diskTabs.has(k.slice(2)) : k.startsWith('c:') ? compares.has(k.slice(2)) : files.get(k.slice(2)) && !files.get(k.slice(2)).deleted,
     );
+    // Comparisons neither open nor recently closed are let go.
+    for (const id of compares.keys()) if (!session.open.includes(`c:${id}`) && !session.closed.includes(`c:${id}`)) compares.delete(id);
     if (!session.open.includes(session.active)) session.active = session.open[0] ?? null;
     tidySession();
     emit('load');
@@ -355,6 +367,29 @@ export const store = {
     changed('local', { id });
   },
 
+  // ---- Comparisons (tabs of their own) ----
+
+  compare(id) {
+    return compares.get(id) ?? null;
+  },
+  /** Opens a comparison in a tab of its own (next to the open one) and returns its key. */
+  openCompare(record) {
+    const id = record.id ?? newId();
+    // The tab it was opened from comes back when it closes.
+    compares.set(id, { from: session.active, ...record, id });
+    persist.compares(0);
+    store.open(compareKey(id));
+    return compareKey(id);
+  },
+  /** Changes a comparison (its sides, what it shows, whether it is saved); `silent` does not re-render. */
+  updateCompare(id, patch, { silent = false } = {}) {
+    const c = compares.get(id);
+    if (!c) return;
+    compares.set(id, { ...c, ...patch });
+    persist.compares();
+    if (!silent) emit('session');
+  },
+
   // ---- Tabs ----
 
   open(key, { silent = false } = {}) {
@@ -379,7 +414,8 @@ export const store = {
     if (session.side === key) session.side = null;
     if (session.active === key) {
       const rest = session.open.filter((k) => k !== session.side);
-      session.active = rest[Math.min(at, rest.length - 1)] ?? null;
+      const from = key.startsWith('c:') && compares.get(key.slice(2))?.from;
+      session.active = (from && rest.includes(from) ? from : rest[Math.min(at, rest.length - 1)]) ?? null;
     }
     tidySession();
     if (key.startsWith('r:') && !repoTabs.get(key.slice(2))?.dirty) {
@@ -390,12 +426,17 @@ export const store = {
       diskTabs.delete(key.slice(2));
       persist.disk(0);
     }
+    if (key.startsWith('c:')) {
+      // Kept for Ctrl+Shift+T while it is among the recently closed tabs.
+      for (const id of compares.keys()) if (!session.open.includes(`c:${id}`) && !session.closed.includes(`c:${id}`)) compares.delete(id);
+      persist.compares();
+    }
     persist.session();
     if (!silent) emit('session');
   },
 
   reopenClosed() {
-    const key = session.closed.find((k) => (k.startsWith('f:') ? store.get(k.slice(2)) : repoTabs.has(k.slice(2))));
+    const key = session.closed.find((k) => (k.startsWith('f:') ? store.get(k.slice(2)) : k.startsWith('c:') ? compares.has(k.slice(2)) : repoTabs.has(k.slice(2))));
     if (key) {
       session.closed = session.closed.filter((k) => k !== key);
       store.open(key);

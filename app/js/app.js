@@ -46,6 +46,10 @@ import { QuickOpen, SearchPanel } from './ui/panels.js';
 import { Preview } from './ui/preview.js';
 import { HelpDialog } from './ui/help.js';
 import { CompareView } from './ui/compare.js';
+import { CompareTab } from './ui/compareTab.js';
+import { CompareFolderDialog } from './ui/compareFolderPick.js';
+import { SaveCompareDialog, SavedComparesDialog } from './ui/savedCompares.js';
+import { canSave, sameSides } from './compares.js';
 import { ComparePicker } from './ui/comparePicker.js';
 import { revealInFolders } from './ui/folders.js';
 import { HistoryPanel } from './ui/history.js';
@@ -285,6 +289,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         const vs = store.session.active === key && store.session.view ? tabViewState() : null;
         const shown = vs ? [...vs.keys, ...vs.guests].filter((x) => x !== store.session.side) : [];
         const file = k?.kind === 'file' ? store.get(k.id) : null;
+        if (k?.kind === 'compare' && store.compare(k.id)?.dirty && !discard && !confirm('Close the comparison? Your edits in it that are not saved go.')) return;
         if (k?.kind === 'disk') {
           hostRef.current?.flushAll();
           // Unsaved changes to a file on disk: ask first.
@@ -864,16 +869,8 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         }
       },
       /** Two files on disk side by side: the second opens in a tab, compared with the first. */
-      async compareDiskFiles(a, b) {
-        let left;
-        try {
-          left = await window.desktop.disk.read(a);
-        } catch (err) {
-          return toast(`${a.split(/[\\/]/).pop()}: ${ipcMessage(err)}`, { kind: 'error' });
-        }
-        if (await actions.openDiskPath(b)) return;
-        const tab = store.diskTab(b);
-        setCompare({ key: diskKey(b), name: tab.name, language: '', left: { label: left.name, text: left.text }, right: { label: tab.name, text: tab.text }, actions: [] });
+      compareDiskFiles(a, b) {
+        actions.compareFiles({ key: diskKey(a) }, { key: diskKey(b) });
       },
       /** Open tabs follow files and folders renamed or moved in the folders view ([{ from, to }]). */
       followDiskMoves(moves) {
@@ -1259,6 +1256,154 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
           ],
         });
       },
+      // ---- Comparisons in tabs of their own (c:<id>; ui/compareTab.js) ----
+      /** Two files compared in a tab: sides { key } (a file) or { text, label, detail }. */
+      compareFiles(left, right) {
+        hostRef.current?.flushAll();
+        store.openCompare({ mode: 'files', left, right });
+        setView('editor');
+      },
+      /** Two folders compared in a tab; without `right`, a dialog asks for it. */
+      compareFolders(left, right = null) {
+        if (!window.desktop?.compare) return toast('Folders are compared in the desktop app.', { kind: 'error' });
+        if (!right) return setDialog({ type: 'compareFolder', other: left, side: 'right', onPick: (p) => actions.compareFolders(left, p) });
+        store.openCompare({ mode: 'folders', left: { path: left }, right: { path: right }, show: 'diff' });
+        setView('editor');
+      },
+      /** Another folder on one side of a folder comparison. */
+      pickCompareFolder({ id, side }) {
+        const c = store.compare(id);
+        if (!c) return;
+        const other = c[side === 'left' ? 'right' : 'left'].path;
+        setDialog({ type: 'compareFolder', other, side, onPick: (p) => store.updateCompare(id, { [side]: { path: p }, expanded: [] }) });
+      },
+      updateCompare: (id, patch, opts) => store.updateCompare(id, patch, opts),
+      /** Unsaved edits in a files comparison: the tab's dot. */
+      compareDirty(id, dirty) {
+        if (Boolean(store.compare(id)?.dirty) !== dirty) store.updateCompare(id, { dirty });
+      },
+      compareScan: (left, right, opts) => window.desktop.compare.scan(left, right, opts),
+      compareSame: (left, right, rels) => window.desktop.compare.same(left, right, rels),
+      async compareCopy(from, to, rels) {
+        const r = await window.desktop.compare.copy(from, to, rels);
+        window.dispatchEvent(new CustomEvent('folders:reload'));
+        return r;
+      },
+      async compareRemove(root, rels) {
+        const r = await window.desktop.compare.remove(root, rels);
+        window.dispatchEvent(new CustomEvent('folders:reload'));
+        return r;
+      },
+      /**
+       * A side of a files comparison, read: { text, info, readOnly, savable, saveLabel }. A file
+       * open in a tab gives its text there (unsaved edits too); a file on disk or a server not
+       * open is read (its format kept in `info` for saving back).
+       */
+      async readCompareSide(side) {
+        if (side.text != null) return { text: side.text, readOnly: false, savable: false };
+        const k = parseKey(side.key);
+        if (k?.kind === 'file') {
+          const f = store.get(k.id);
+          if (!f || f.deleted) throw new Error('That file is not in my files any more.');
+          if (store.isSealed(k.id)) throw new Error(`${f.name} is encrypted and locked on this device: unlock it first.`);
+          return { text: hostRef.current?.stateOf(side.key)?.doc.toString() ?? store.text(k.id), readOnly: false, savable: true, saveLabel: 'in my files' };
+        }
+        if (k?.kind === 'repo') {
+          let text = store.repoTab(k.path)?.text ?? store.docText(k.path);
+          if (text == null) {
+            const { client, branch } = await syncedClient();
+            text = (await client.getFile(k.path, branch))?.text ?? '';
+          }
+          return { text, readOnly: false, savable: true, saveLabel: 'to the tracker' };
+        }
+        if (k?.kind === 'disk') {
+          const tab = store.diskTab(k.path);
+          if (tab && !tab.stale && !tab.doc) return { text: hostRef.current?.stateOf(side.key)?.doc.toString() ?? tab.text, readOnly: diskReadOnly(tab), savable: true, info: { open: true }, saveLabel: isRemotePath(k.path) ? 'to the server' : 'to disk' };
+          const info = await window.desktop.disk.read(k.path);
+          if (info.doc) throw new Error(`${k.path.split(/[\\/]/).pop()} is a document (shown as it looks), not text to compare.`);
+          return { text: info.text, readOnly: Boolean(info.truncated), savable: !info.truncated, info, saveLabel: isRemotePath(k.path) ? 'to the server' : 'to disk' };
+        }
+        throw new Error('That file cannot be read here.');
+      },
+      /**
+       * Saves a side's text where it came from: my files and tracker documents as an edit (open
+       * tabs follow), a file on disk or a server written back (an open tab through its own save,
+       * which refuses when the file changed meanwhile). Returns the side's new `info`, or null.
+       */
+      async saveCompareSide(side, text, info) {
+        const k = parseKey(side.key);
+        try {
+          if (k?.kind === 'file') {
+            store.setText(k.id, text, { urgent: true });
+            hostRef.current?.replaceText(side.key, text);
+            toast(`Saved ${store.get(k.id)?.name ?? 'the file'}.`);
+            return info ?? {};
+          }
+          if (k?.kind === 'repo') {
+            store.setRepoText(k.path, text, { urgent: true });
+            hostRef.current?.replaceText(side.key, text);
+            toast('Saved the tracker document.');
+            return info ?? {};
+          }
+          if (k?.kind === 'disk') {
+            const name = k.path.split(/[\\/]/).pop();
+            if (store.diskTab(k.path)) {
+              store.setDiskText(k.path, text, { urgent: true });
+              hostRef.current?.replaceText(side.key, text);
+              const done = await saveDiskTab(k.path);
+              if (done === 'conflict') {
+                toast(`${name} changed ${isRemotePath(k.path) ? 'on the server' : 'on disk'} meanwhile: your text is in its tab, not saved. Open it there to choose.`, { kind: 'error', timeout: 10000 });
+                return null;
+              }
+              toast(`Saved ${name}.`);
+              return { open: true };
+            }
+            const format = { eol: info?.eol, bom: info?.bom, encoding: info?.encoding };
+            const w = await window.desktop.disk.write(k.path, text, { ...format, expectedMtime: info?.mtimeMs, expectedSize: info?.size });
+            if (w.conflict) {
+              toast(`${name} changed ${isRemotePath(k.path) ? 'on the server' : 'on disk'} since it was read: read both again (⋯) and copy your changes over.`, { kind: 'error', timeout: 10000 });
+              return null;
+            }
+            toast(`Saved ${name}.`);
+            return { ...info, ...w };
+          }
+        } catch (err) {
+          toast(ipcMessage(err), { kind: 'error' });
+          return null;
+        }
+        return null;
+      },
+      /** The saved comparison a comparison is (by its id, or the same two places), or null. */
+      savedCompareOf(record) {
+        const list = getSettings().savedCompares ?? [];
+        return (record && (list.find((x) => x.id === record.savedId) ?? list.find((x) => sameSides(x, record)))) || null;
+      },
+      canSaveCompare: (key) => canSave(store.compare(parseKey(key)?.id)),
+      /** ☆: names a comparison to keep it (or renames or removes the saved one). */
+      saveCompare(key) {
+        const id = parseKey(key)?.id;
+        if (!store.compare(id)) return;
+        if (!canSave(store.compare(id)) && !actions.savedCompareOf(store.compare(id))) return toast('A comparison with text taken once (the clipboard, a file picked from this device) cannot be saved.');
+        setDialog({ type: 'saveCompare', id });
+      },
+      /** A saved comparison opened again (its tab, when it is open already), read fresh. */
+      openSavedCompare(saved) {
+        const open = store.session.open.find((k) => k.startsWith('c:') && actions.savedCompareOf(store.compare(k.slice(2)))?.id === saved.id);
+        if (open) store.open(open);
+        else store.openCompare({ mode: saved.mode, left: saved.left, right: saved.right, show: saved.show ?? 'diff', all: Boolean(saved.all), savedId: saved.id, name: saved.name });
+        setView('editor');
+      },
+      showSavedCompares() {
+        if (!(getSettings().savedCompares ?? []).length) return toast('No saved comparisons yet: open one (a folder’s menu → Compare with another folder…, or Compare with…) and click its ☆.');
+        setDialog({ type: 'savedCompares' });
+      },
+      /** A side of a comparison opened in its own tab. */
+      openCompareSide(side) {
+        const k = parseKey(side?.key);
+        if (k?.kind === 'disk') return store.diskTab(k.path) ? store.open(side.key) : actions.openDiskPath(k.path);
+        if (k?.kind === 'repo') return actions.openRepoFile(k.path);
+        if (k?.kind === 'file') return actions.openFile(k.id);
+      },
       compareWith() {
         if (!store.session.active) return;
         hostRef.current?.flushAll();
@@ -1272,33 +1417,8 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       async compareWithEntry(entry) {
         const now = activeInfo();
         if (!now) return;
-        const k = entry.browsed ? null : parseKey(entry.id);
-        let other = entry.browsed ? entry.text : null;
-        try {
-          if (k?.kind === 'file') other = store.text(k.id);
-          else if (k?.kind === 'disk') {
-            const tab = store.diskTab(k.path);
-            other = tab && !tab.stale ? tab.text : ((await window.desktop.disk.read(k.path))?.text ?? '');
-          } else if (k?.kind === 'repo') {
-            other = store.docText(k.path);
-            if (other === null) {
-              const { client, branch } = await syncedClient();
-              other = (await client.getFile(k.path, branch))?.text ?? '';
-            }
-          }
-        } catch (err) {
-          return toast(err.message, { kind: 'error' });
-        }
-        if (other === null) return;
-        const openIt = k && entry.id !== now.key ? [{ label: `Open ${entry.name}`, icon: 'file', run: () => (setCompare(null), k.kind === 'disk' && !store.diskTab(k.path) ? actions.openDiskPath(k.path) : store.open(entry.id)) }] : [];
-        setCompare({
-          key: now.key,
-          name: now.name,
-          language: now.language,
-          left: { label: entry.name, detail: entry.detail ?? (k ? placeOfKey(entry.id) : ''), text: other },
-          right: { label: now.name, detail: placeOfKey(now.key), text: now.text },
-          actions: openIt,
-        });
+        // The open file on the left, the other one on the right, in a comparison tab.
+        actions.compareFiles({ key: now.key }, entry.browsed ? { text: entry.text, label: entry.name, detail: entry.detail ?? '' } : { key: entry.id });
       },
       /** Compare with… any file: the open dialog (desktop), else the browser's file picker. */
       async compareBrowse() {
@@ -1342,14 +1462,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
           return toast('The clipboard could not be read here. Allow it, or paste into a new file and use Compare with….', { kind: 'error' });
         }
         if (!clip) return toast('The clipboard has no text.');
-        setCompare({
-          key: now.key,
-          name: now.name,
-          language: now.language,
-          left: { label: 'Clipboard', text: clip },
-          right: { label: now.name, text: now.text },
-          actions: [{ label: 'Use the clipboard text', icon: 'rotate', run: () => actions.restoreText(now.key, clip, '', 'Replaced the text with the clipboard') }],
-        });
+        actions.compareFiles({ key: now.key }, { text: clip.replace(/\r\n?/g, '\n'), label: 'Clipboard', detail: 'Copied text' });
       },
       /** The checklist in the selection (or the file) as tracker tasks. */
       sendChecklist() {
@@ -1789,10 +1902,12 @@ export function App() {
   const activeFile = active?.kind === 'file' ? store.get(active.id) : null;
   const activeRepo = active?.kind === 'repo' ? store.repoTab(active.path) : null;
   const activeDisk = active?.kind === 'disk' ? store.diskTab(active.path) : null;
+  // A comparison in its tab (two files or two folders) takes the editor's place.
+  const activeCompare = active?.kind === 'compare' ? store.compare(active.id) : null;
   const activeName = activeFile?.name ?? activeRepo?.name ?? activeDisk?.name ?? '';
   // The text of the open tab, whatever its kind.
   const activeText = () => (activeFile ? store.text(activeFile.id) : (activeRepo ?? activeDisk)?.text ?? '');
-  const languageName = activeKey ? (findLanguage(activeName, activeFile?.language)?.name ?? PLAIN_TEXT) : '';
+  const languageName = activeKey && !activeCompare ? (findLanguage(activeName, activeFile?.language)?.name ?? PLAIN_TEXT) : '';
   const previewType = activeKey ? previewKind(activeName, languageName) : '';
   // An encrypted file this device cannot read yet shows a lock instead of the editor.
   const activeSealed = Boolean(activeFile && store.isSealed(activeFile.id));
@@ -3158,6 +3273,8 @@ export function App() {
       'help-ask': () => actions.openAssist({ mode: 'help' }),
       'compare-with': () => actions.compareWith(),
       'compare-clipboard': () => actions.compareWithClipboard(),
+      'compare-folders': () => (getSettings().folder ? actions.compareFolders(getSettings().folder) : toast('Open a folder in Folders first (Ctrl+Shift+E), then compare it with another one.')),
+      'compare-saved': () => actions.showSavedCompares(),
     };
     if (run[command]) return run[command]();
     // Editing commands (editor.js COMMANDS): upper case, sort lines, duplicate line…
@@ -3273,7 +3390,7 @@ export function App() {
       ${view === 'settings' && html`<${SettingsView} settings=${settings} sync=${sync} actions=${actions} />`}
       <div class="editor-view" hidden=${view === 'settings'}>
         <${TabBar} session=${store.session} projects=${projects} settings=${settings} actions=${actions} />
-        ${activeKey && html`<${FileBar} file=${activeFile} repo=${activeRepo} disk=${activeDisk} sealed=${activeSealed} projects=${projects} language=${languageName} sync=${sync}
+        ${activeKey && !activeCompare && html`<${FileBar} file=${activeFile} repo=${activeRepo} disk=${activeDisk} sealed=${activeSealed} projects=${projects} language=${languageName} sync=${sync}
           canPreview=${Boolean(previewType)} preview=${showPreview} settings=${settings} actions=${actions} />`}
         ${activeKey && filterKeys.has(activeKey) && !compare && !activeSealed &&
         html`<${FilterBar} key=${activeKey} tabKey=${activeKey} actions=${actions} onClose=${actions.toggleFilter} />`}
@@ -3282,8 +3399,8 @@ export function App() {
         <div class="editor-area ${showPreview ? 'split' : ''} ${showPreview && previewFull ? 'preview-full' : ''} ${showSide ? 'side-split' : ''} ${compare ? 'comparing' : ''} ${settings.whereFrame && activeKey ? 'framed' : ''}"
           data-kind=${kindOfKey(activeKey) ?? undefined} ref=${areaEl} style=${{ '--split': `${((settings.splitRatio || 0.5) * 100).toFixed(2)}%` }}>
           <div class="editor-host" ref=${editorEl} />
-          ${assist && (activeKey || assistStart) && view === 'editor' && !compare && !activeSealed && html`<${AssistPanel} key=${`${activeKey}:${assistStart?.id ?? 0}`} scope=${assistScope} start=${assistStart} hasFile=${Boolean(activeKey)} actions=${actions} onClose=${() => (setAssist(false), setAssistStart(null), hostRef.current?.focus())} />`}
-          ${!assist && modelReady && settings.assistBubble && activeKey && !compare && !activeSealed && !docShown && !typingJob && html`<${AssistBubble} onOpen=${() => setAssist(true)} />`}
+          ${assist && ((activeKey && !activeCompare) || assistStart) && view === 'editor' && !compare && !activeSealed && html`<${AssistPanel} key=${`${activeKey}:${assistStart?.id ?? 0}`} scope=${assistScope} start=${assistStart} hasFile=${Boolean(activeKey)} actions=${actions} onClose=${() => (setAssist(false), setAssistStart(null), hostRef.current?.focus())} />`}
+          ${!assist && modelReady && settings.assistBubble && activeKey && !activeCompare && !compare && !activeSealed && !docShown && !typingJob && html`<${AssistBubble} onOpen=${() => setAssist(true)} />`}
           ${showSide && splitHandle('Resize the side view')}
           ${showSide &&
           html`<div class="side-pane" aria-label=${`Side view: ${sideFile?.name ?? sideRepo.name}`}>
@@ -3313,6 +3430,7 @@ export function App() {
               setTimeout(() => hostRef.current?.reveal(line, column, 1), 60);
             }} />`}
           ${activeSealed && html`<${LockedFile} file=${activeFile} actions=${actions} />`}
+          ${activeCompare && view === 'editor' && html`<${CompareTab} key=${activeKey} id=${active.id} record=${activeCompare} settings=${settings} actions=${actions} />`}
           ${docShown &&
           html`<${DocumentView} key=${`${activeKey}:${activeDisk.mtimeMs}:${activeDisk.reloads ?? 0}`} name=${activeDisk.name} kind=${activeDisk.doc} version=${activeDisk.mtimeMs}
             load=${() => window.desktop.disk.readBytes(activeDisk.path)} onText=${(text) => actions.documentText(activeDisk.path, text)}
@@ -3321,9 +3439,9 @@ export function App() {
         </div>
         ${terminalShown && html`<${TerminalPanel} settings=${settings} actions=${actions} onHide=${() => (setTerminalShown(false), hostRef.current?.focus())} />`}
         <${ReadAloudBar} />
-        ${editing && activeKey && !activeSealed && !compare && hostRef.current
+        ${editing && activeKey && !activeSealed && !compare && !activeCompare && hostRef.current
           ? html`<${EditBar} host=${hostRef.current} actions=${actions} save=${activeDisk ? 'Save' : isLocal(settings) ? null : 'Sync'} />`
-          : html`<${StatusBar} recording=${recording} big=${big && Boolean(activeKey) && !docShown} cursor=${activeKey && !docShown ? cursor : null} language=${languageName} file=${activeFile} repo=${activeRepo} disk=${activeDisk} settings=${settings} sync=${sync} actions=${actions} group=${activeGroup}
+          : html`<${StatusBar} recording=${recording} big=${big && Boolean(activeKey) && !docShown} cursor=${activeKey && !docShown && !activeCompare ? cursor : null} language=${languageName} file=${activeFile} repo=${activeRepo} disk=${activeDisk} settings=${settings} sync=${sync} actions=${actions} group=${activeGroup}
           problems=${settings.problems !== false && activeKey ? problems[activeKey] : null} problemsOpen=${panel === 'problems'}
           lsp=${activeKey && settings.languageServers !== false ? lspRef.current?.statusOf(activeKey) : null} lspOpen=${panel === 'servers'}
           git=${activeKey && gitHeads[activeKey] ? { ...gitHeads[activeKey], changes: hostRef.current?.gitChanges(activeKey)?.changes ?? null } : null} />`}
@@ -3348,6 +3466,9 @@ export function App() {
     ${dialog?.type === 'quickOpen' &&
     html`<${QuickOpen} files=${store.live()} docs=${docs} openTabs=${openDiskTabs()} actions=${actions} initial=${dialog.query ?? ''} symbols=${() => (activeKey ? (hostRef.current?.codeContext()?.symbols ?? []) : [])}
       roots=${folderRoots(settings)} hidden=${Boolean(settings.showHidden)} onSymbol=${(entry) => actions.revealSymbol(entry)} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'compareFolder' && html`<${CompareFolderDialog} other=${dialog.other} side=${dialog.side} onPick=${dialog.onPick} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'saveCompare' && html`<${SaveCompareDialog} id=${dialog.id} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'savedCompares' && html`<${SavedComparesDialog} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'compare' && activeKey &&
     html`<${ComparePicker} ...${compareSources()} roots=${folderRoots(settings)} hidden=${Boolean(settings.showHidden)} detailOf=${placeOfPath} plainIcons=${settings.fileIcons === false}
       onPick=${(entry) => actions.compareWithEntry(entry)} onBrowse=${() => actions.compareBrowse()} onClose=${() => setDialog(null)} />`}

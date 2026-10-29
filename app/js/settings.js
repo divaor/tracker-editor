@@ -112,6 +112,10 @@ export const DEFAULT_SETTINGS = {
   showPermissions: false,
   // The terminal panel's height (desktop), in pixels.
   terminalHeight: 280,
+  // Comparisons in tabs: the ones saved (☆: { id, name, mode, left, right, show?, all? }) and
+  // the share of a folder comparison its tree takes (0 = the usual).
+  savedCompares: [],
+  compareSplit: 0,
   // Sizes dragged by hand: the sidebar's width in pixels (0 = the default), and the share of
   // the editor next to a preview or the side view.
   sidebarWidth: 0,

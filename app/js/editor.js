@@ -13,6 +13,7 @@ import {
   LanguageDescription,
   MatchDecorator,
   MergeView,
+  Prec,
   StateEffect,
   StateField,
   autocompletion,
@@ -666,6 +667,134 @@ export function createCompareView(parent, { left, right, name = '', language = '
     next: () => goToNextChunk(target()),
     previous: () => goToPreviousChunk(target()),
     changes: () => getChunks(target().state)?.chunks.length ?? 0,
+  };
+}
+
+/**
+ * Two texts compared and edited side by side (a comparison's tab). Both sides can be edited
+ * (unless `readOnly.left` / `.right`); next to each change, → and ← copy it to the other side,
+ * and Alt+→ / Alt+← copy the change at the cursor; Alt+↓ / Alt+↑ go to the next / previous one.
+ * `onChange(side, text)` after each edit of a side; `onCursor({ index, count })` when the
+ * change at the cursor (index, -1 for none) or the number of changes moves.
+ */
+export function createMergeEditor(parent, { left, right, name = '', language = '', dark = false, wrap = false, readOnly = {}, onChange = () => {}, onCursor = () => {} }) {
+  const lang = new Compartment();
+  let merge = null;
+  let last = 'right'; // the side typed in or clicked last
+  const viewOf = (side) => (side === 'left' ? merge.a : merge.b);
+  // The change the cursor of the side used last is in (or touches): its index, else -1.
+  const atCursor = () => {
+    if (!merge) return -1;
+    const view = viewOf(last);
+    const pos = view.state.selection.main.head;
+    return merge.chunks.findIndex((c) => (last === 'left' ? pos >= c.fromA && pos <= Math.max(c.fromA, c.toA - 1) : pos >= c.fromB && pos <= Math.max(c.fromB, c.toB - 1)));
+  };
+  let reported = '';
+  const report = () => {
+    if (!merge) return;
+    const now = { index: atCursor(), count: merge.chunks.length };
+    const key = `${now.index}:${now.count}`;
+    if (key === reported) return;
+    reported = key;
+    onCursor(now);
+  };
+  /** Copies change `i` to the other side: `toRight` from left to right, else from right to left. */
+  const copyChunk = (i, toRight) => {
+    const ch = merge?.chunks[i];
+    if (!ch || readOnly[toRight ? 'right' : 'left']) return false;
+    const [src, dst, fromS, toS, fromD, toD] = toRight ? [merge.a, merge.b, ch.fromA, ch.toA, ch.fromB, ch.toB] : [merge.b, merge.a, ch.fromB, ch.toB, ch.fromA, ch.toA];
+    // As MergeView's own revert does: whole lines, the last line break kept where it was.
+    let insert = src.state.sliceDoc(fromS, Math.max(fromS, toS - 1));
+    if (fromS !== toS && toD <= dst.state.doc.length) insert += src.state.lineBreak;
+    dst.dispatch({ changes: { from: fromD, to: Math.min(dst.state.doc.length, toD), insert }, userEvent: 'input.copy', scrollIntoView: true });
+    return true;
+  };
+  const copyHere = (toRight) => {
+    const i = atCursor();
+    return i >= 0 && copyChunk(i, toRight);
+  };
+  const move = (step) => {
+    const view = viewOf(last);
+    (step > 0 ? goToNextChunk : goToPreviousChunk)(view);
+    view.focus();
+    report();
+    return true;
+  };
+  const keys = (side) =>
+    Prec.high(
+      keymap.of([
+        { key: 'Alt-ArrowRight', run: () => ((last = side), copyHere(true)) },
+        { key: 'Alt-ArrowLeft', run: () => ((last = side), copyHere(false)) },
+        { key: 'Alt-ArrowDown', run: () => ((last = side), move(1)) },
+        { key: 'Alt-ArrowUp', run: () => ((last = side), move(-1)) },
+      ]),
+    );
+  const extensions = (side) => [
+    lineNumbers(),
+    highlightActiveLineGutter(),
+    highlightSpecialChars(),
+    history(),
+    drawSelection(),
+    highlightActiveLine(),
+    bracketMatching(),
+    keys(side),
+    keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
+    readOnly[side] ? [EditorState.readOnly.of(true)] : [],
+    baseTheme(dark),
+    syntaxHighlighting(dark ? DARK_STYLE : LIGHT_STYLE, { fallback: true }),
+    wrap ? EditorView.lineWrapping : [],
+    lang.of([]),
+    EditorView.updateListener.of((u) => {
+      if (u.focusChanged && u.view.hasFocus) last = side;
+      if (u.docChanged) onChange(side, u.state.doc.toString());
+      if (u.docChanged || u.selectionSet || u.focusChanged) queueMicrotask(report);
+    }),
+  ];
+  // → and ← beside each change (MergeView places them; a click is handled here, both ways).
+  const control = () => {
+    const box = document.createElement('div');
+    box.className = 'cm-merge-copy';
+    for (const [toRight, label, glyph] of [[true, 'Copy this change to the right', '→'], [false, 'Copy this change to the left', '←']]) {
+      if (readOnly[toRight ? 'right' : 'left']) continue;
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = glyph;
+      b.title = label;
+      b.setAttribute('aria-label', label);
+      b.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        copyChunk(Number(box.dataset.chunk), toRight);
+      });
+      box.append(b);
+    }
+    return box;
+  };
+  merge = new MergeView({ a: { doc: left, extensions: extensions('left') }, b: { doc: right, extensions: extensions('right') }, parent, highlightChanges: true, gutter: true, revertControls: 'a-to-b', renderRevertControl: control });
+  const desc = findLanguage(name, language);
+  desc?.load().then((support) => [merge.a, merge.b].forEach((v) => v.dispatch({ effects: lang.reconfigure(support) })), () => {});
+  queueMicrotask(report);
+  return {
+    destroy: () => merge.destroy(),
+    next: () => move(1),
+    previous: () => move(-1),
+    count: () => merge.chunks.length,
+    current: atCursor,
+    /** The change at the cursor copied to the right (`toRight`) or the left; false when there is none. */
+    copyHere,
+    /** One whole side copied over the other. */
+    copyAll: (toRight) => {
+      const [src, dst] = toRight ? [merge.a, merge.b] : [merge.b, merge.a];
+      if (readOnly[toRight ? 'right' : 'left']) return;
+      dst.dispatch({ changes: { from: 0, to: dst.state.doc.length, insert: src.state.doc.toString() }, userEvent: 'input.copy' });
+    },
+    text: (side) => viewOf(side).state.doc.toString(),
+    /** A side's text replaced (read again), as an edit Ctrl+Z takes back. */
+    setText: (side, text) => {
+      const view = viewOf(side);
+      if (view.state.doc.toString() !== text) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text }, userEvent: 'input.reload' });
+    },
+    focus: (side = last) => viewOf(side).focus(),
   };
 }
 

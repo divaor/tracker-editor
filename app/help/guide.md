@@ -2,7 +2,7 @@
 
 Tracker Editor is a Notepad++-style editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs. Everything is saved the moment you paste or type, on this computer with the tracker, or, once you turn on sync, in the same private GitHub data repo as the tracker, so your files are on your computers and your phone.
 
-Version 0.29.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.29.0 · Web app: https://divaor.github.io/tracker-editor/
+Version 0.30.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.30.0 · Web app: https://divaor.github.io/tracker-editor/
 
 ---
 
@@ -14,9 +14,9 @@ Download from **https://github.com/divaor/tracker-editor/releases/latest**:
 
 | System | File |
 | --- | --- |
-| Windows | `Tracker Editor Setup 0.29.0.exe` (installer) or `Tracker Editor-0.29.0-portable.exe` (no install, no admin rights) |
-| macOS | `Tracker Editor-0.29.0-arm64.dmg` |
-| Linux | `Tracker Editor-0.29.0.AppImage` |
+| Windows | `Tracker Editor Setup 0.30.0.exe` (installer) or `Tracker Editor-0.30.0-portable.exe` (no install, no admin rights) |
+| macOS | `Tracker Editor-0.30.0-arm64.dmg` |
+| Linux | `Tracker Editor-0.30.0.AppImage` |
 
 The builds are not code-signed, so the first launch warns you. On Windows, choose *More info → Run anyway*. On macOS, right-click the app → *Open*. Installing the desktop app also registers `tracker-editor://` links, so the tracker's **Open in editor** opens files straight in it.
 
@@ -27,7 +27,7 @@ The builds are not code-signed, so the first launch warns you. On Windows, choos
 The editor as an Android app, with what a web page cannot do: **Open with** from other apps, **Folders** on the phone, **servers** and **terminals**. For Android 7 and later on 64-bit phones (nearly all from the last ten years).
 
 1. Install **Obtainium** (from https://github.com/ImranR98/Obtainium/releases or F-Droid). It installs apps from their GitHub releases and keeps them up to date.
-2. In Obtainium: **Add app**, paste `https://github.com/divaor/tracker-editor`, **Add**, then **Install** (`Tracker-Editor-0.29.0.apk`). The first time, Android asks to let Obtainium install apps: allow it.
+2. In Obtainium: **Add app**, paste `https://github.com/divaor/tracker-editor`, **Add**, then **Install** (`Tracker-Editor-0.30.0.apk`). The first time, Android asks to let Obtainium install apps: allow it.
 3. Obtainium tells you when there is a new version and installs it over the old one; your files and settings stay. (Or download the `.apk` from the releases page and open it; then updates are by hand.)
 
 What the app adds:
@@ -219,6 +219,7 @@ The **switcher at the left end of the tab bar** (it appears once there are two g
 | Pin / Unpin | Pinned tabs go first, have no close button and stay when you close others. |
 | Open to the side | Shows the tab in a second pane next to the current one (wide screens). |
 | History, Compare with… | See section 5. |
+| Save this comparison… | On a comparison tab: keep it, to open it again later (see [Saved comparisons](#saved-comparisons)). |
 | Copy for Claude | A file on disk: its path, which Claude Code reads where it is. Other files: the name and the text in a code block, to paste into a chat. |
 | Copy path, Show its folder in Folders, Show in the file explorer, Open a terminal in its folder | Files on disk and on servers (desktop). **Show its folder in Folders** puts the file's folder in the Folders view next to the others (or opens the folders down to it in one shown already) with the file picked; a folder you have not opened here before is asked about first. A server file's path is `user@host:/path`. |
 | Close, Close others, Close tabs to the right, Close the *Project* tabs, Close all | Pinned tabs are kept, except by Close. In a view, they work on the tabs showing. |
@@ -227,7 +228,7 @@ The **switcher at the left end of the tab bar** (it appears once there are two g
 
 - `Ctrl+W` closes a tab (desktop), and so does a **middle-click** on it; `Ctrl+Shift+T` reopens the last closed one, `Ctrl+Tab` goes to the next one. **Double-click a tab to pin it** (again to unpin). Drag tabs to reorder them.
 - **Many tabs open**: scroll the tab bar with the mouse wheel (or swipe sideways on a touchpad or a phone). At its ends, an arrow with a number says how many tabs are past it; click it to scroll that way.
-- **Lost the open tab?** When it is scrolled out of sight, the arrow on its side says **open tab**: click it and the tab comes back into view. The **▾** at the end of the tab bar lists every open tab (the open one checked); pick one to go to it. Both are in Help (`F1`) and the **View** menu too.
+- **Lost the open tab?** When it is scrolled out of sight, the arrow on its side says **open tab**: click it and the tab comes back into view. The **▾** at the end of the tab bar lists every open tab (the open one checked), and your saved comparisons under them; pick one to go to it. Both are in Help (`F1`) and the **View** menu too.
 - **Drag a tab out of the window** (desktop) to give it to another app as a file. The app decides what to do with it:
   - **Desktop or a folder**: a copy (a synced file is copied under its tab name). The original is never moved.
   - **A terminal with Claude Code**: its path is typed in (for a synced file, the path of a copy), so Claude reads it.
@@ -274,7 +275,42 @@ History comes from your data repo, so it needs sync set up and shows only versio
 - **In your folders** (desktop), as you type: files in the folders open in Folders, like `Ctrl+P`.
 - **My files** and **Tracker documents**, the latest first.
 
-Each row shows the whole name, the folder it is in under it in grey (for a file on disk, the full path; for my files, the project), and the color of its project or folder, as in the tab bar. Type to narrow every section down (part of the name, a folder, a project); `↑` `↓` and `Enter`. Nothing there? **Browse…** picks any file (on a computer, also when nothing matches: `Enter`). The comparison's headers say where each file is; **Open *name*** opens the other file. Close the comparison with ✕.
+Each row shows the whole name, the folder it is in under it in grey (for a file on disk, the full path; for my files, the project), and the color of its project or folder, as in the tab bar. Type to narrow every section down (part of the name, a folder, a project); `↑` `↓` and `Enter`. Nothing there? **Browse…** picks any file (on a computer, also when nothing matches: `Enter`).
+
+The two files open **in a tab of their own** (indigo, with the compare icon, named "left ↔ right"): this file on the left, the other on the right, side by side with the changes marked. Both sides can be edited, as in any tab. Their headers say where each file is.
+
+- **Go through the changes**: `Alt+↓` / `Alt+↑` (or the arrows in the bar) go to the next / previous one; the bar says which (**Change 2 of 5**).
+- **Copy a change across**: the **→** and **←** buttons between the sides, next to each change, copy it to the other side. `Alt+→` / `Alt+←` copy the change at the cursor; so do **Copy →** and **← Copy** in the bar.
+- **Copy a whole file across**: **⋯** → **Copy the whole left side to the right** (or the right to the left). ⋯ also has **Swap the sides**, **Read both again** and **Open *name* in a tab**.
+- **Save** above a side writes it where it came from: one of my files or a tracker document as an edit (its tab, if open, follows; `Ctrl+Z` there takes it back), a file on disk or on a server back to it. When the file changed meanwhile, saving is refused: **Read both again** and copy your changes over. A side with unsaved changes puts a dot on the tab, and closing the tab asks first.
+- **Compare with clipboard** (⋯) works the same way, the clipboard on the right. That side has **Copy** instead of Save. To use the clipboard text: ⋯ → **Copy the whole right side to the left**, then **Save**.
+- Close the tab like any other (`Ctrl+W`): you are back in the file you compared. `Ctrl+Shift+T` reopens it.
+
+History, a fix from the model and **Compare** in "changed on disk" still open over the file, with their own buttons (**Restore this version**, **Accept**, **Keep mine and save**).
+
+### Compare two folders (desktop)
+
+Right-click a folder in Folders (or empty space in it, or a header when several are shown) → **Compare with another folder…**, then pick the other one: the folders next to it (another copy of the project), the ones in Folders, picked before, favorites and recent ones, a server's start folder or recent folders there, a path on a server (its folders are suggested as you type), or **Pick a folder…**. With two folders shown side by side, the menu offers **Compare with *the other one*** at once; with two folders selected, **Compare the two folders**. Also ⋯ → **Compare this folder with another…** and `Ctrl+Shift+P` → **Compare two folders…**. A folder on this computer and one on a server compare like any two.
+
+The comparison opens in a tab: the first folder on the left, the other on the right, in one tree that lines them up file by file (size and date on each side), with a mark between them: **≠** different, **◧** only on the left, **◨** only on the right, **=** the same. A folder takes the mark of what is inside it.
+
+- **What shows**: the list in the bar: **Differences** (the start), **Everything**, **Only on the left**, **Only on the right**. The counts next to it add up the differences. `.git`, `node_modules` and the like are left out unless ⋯ → **Include .git, node_modules…**; hidden files follow ⋯ → **Show hidden files**.
+- **Same size, another date**: those files are compared byte for byte in the background (**Checking contents…**), so a copy with a new date shows as the same.
+- **Pick a file** (click, or `↑` `↓`): it shows compared below the tree, with everything above (go through the changes, copy them across, save either side). A file on one side only shows its text, with **Copy to the right** (or left). Drag the line between the tree and the file to share the space. Double-click (or `Enter`) opens the two files in a comparison tab of their own.
+- **Next difference**: `Alt+↓` / `Alt+↑` (or the arrows in the bar), opening the folders on the way.
+- **Copy across**: select files or folders (`Ctrl`+click, `Shift`+click, `Ctrl+A`), then **Copy →** or **← Copy**. A folder goes with what is different or missing inside it. Before replacing anything, it says how many; the old ones go to the Recycle Bin (on a server they are deleted). Copies to and from a server run in the background (see Transfers); the tree reads both sides again when they end.
+- **Make one side like the other**: ⋯ → **Make the right like the left…** (or the left like the right) lists what is copied, and what is only on that side. Those are deleted only when you tick **Delete them too**.
+- **Change a side**: the pencil in a folder's header picks another folder for that side. ⋯ → **Swap the sides**, **Open both folders in Folders**; ⟳ reads both again.
+
+### Saved comparisons
+
+A comparison you come back to (your project here and on the server, two copies of a site) can be kept: click **☆** at the start of its bar, give it a name (it is the tab's name too) and **Save**. Open it again from:
+
+- the **▾** at the end of the tab bar: **Saved comparisons**, below the open tabs (**Rename or remove…** under them);
+- `Ctrl+Shift+P` → **Open a saved comparison…**;
+- Folders' **⋯** → **Saved comparisons…**.
+
+It reads both sides fresh each time, with what it showed and whether it included `.git` and the like. The filled ☆ means it is saved; click it to rename it or **Remove** it (the folders and files stay). A comparison with the clipboard, or a file picked with Browse…, cannot be saved (that text was taken once).
 
 ### Trash
 
@@ -438,7 +474,7 @@ It types real key presses into whichever window has the focus when the countdown
 - **Snippets** (`Alt+I`): mark a file as a snippet (⋯ → **Use as a snippet**), or select text and choose **Save as snippet**. Write `{{name}}` where a value changes (`{{name:default}}` for a default), plus `{{date}}`, `{{time}}`, `{{clipboard}}`, `{{selection}}` and `{{cursor}}`. `Alt+I` finds a snippet by name, asks for its fields, then **Insert**, **Copy** or **Type into another window**.
 - **Outline and links** (`Ctrl+Shift+O`): the headings of a Markdown file, or the classes, functions and tables of code; click one to jump there. Write `[[another note]]` to link notes: `Ctrl+click` opens it (or offers to create it), typing `[[` suggests names, and the panel lists this file's links and the files that link to it.
 - **Macros**: `Ctrl+Shift+R` starts recording your typing and shortcuts, `Ctrl+Shift+R` again stops. `Alt+Shift+P` plays it from the cursor; **⋯ → Run the macro…** runs it N times or to the end of the file.
-- **Compare with clipboard** (⋯): what you copied against the file, with **Use the clipboard text**.
+- **Compare with clipboard** (⋯): what you copied against the file, in a comparison tab (see [Compare two files](#compare-two-files)).
 - **Send checklist to tracker** (⋯): the open `- [ ]` items of the selection or the file become tracker tasks linking back to the line; dates like `(due 2026-10-30)` become due dates, and items already sent start unticked.
 
 ## 10. Logs, files on disk and folders (desktop, Android app)
@@ -483,7 +519,7 @@ The sidebar has two views on the desktop: **My files** (synced) and **Folders** 
 | Preview | The eye button: the file you pick shows under the list: pictures, documents (PDFs, e-books, Word…), Markdown, HTML, CSV and JSON as they look, the start of any other text file; other formats say what they are, with **Open with its program**. Drag the top edge of the preview to make it taller. On a phone, while the preview shows, a tap on a file shows it there; tap it again to open it (folders open with one tap). For a picture, the scan button in the preview's bar reads its text (**Text from the image**). |
 | View large | `Space` (or right-click → **View it large**, or ⛶ in the preview): the file over the whole window (the whole screen on a phone), like Quick Look. `←` / `→` go through the folder's files, `Enter` opens it (a document in its tab, a picture with its program), `Space` or `Escape` closes it. For a picture, the scan button reads its text (**Text from the image**). |
 | Already there | When names you paste, drop or move are already in that folder, it asks once for all of them: **Replace** (the old ones go to the Recycle Bin; on a server they are deleted), **Keep both** (the new ones get " (2)") or **Skip** (those are left out). **Cancel** does nothing. Moving something into the folder it is already in says so. |
-| Compare | Select two text files, right-click → **Compare the two**: side by side, the second one opens in a tab. |
+| Compare | Select two text files, right-click → **Compare the two**: side by side in a comparison tab. Two folders: right-click one → **Compare with another folder…** (see [Compare two folders](#compare-two-folders-desktop)). |
 | Zip | Right-click → **Compress to name.zip** (or **Compress N items to a zip**: `Archive.zip`) makes it next to them. On a `.zip`: **Extract into a new folder** unpacks it beside it ("name", or "name (2)" when taken). Unsafe names (that would land outside that folder) are left out, and an archive that unpacks to far more than its size is refused. On this computer only. |
 | Pictures | Right-click → **Text from the image…** reads the text on this computer; **Save as photo.txt here** keeps it next to the picture (or insert it, copy it, or make a synced file). |
 | Find text | `Ctrl+Shift+F` in the list (or 🔍, or right-click a folder → **Find in this folder…**): type, `Enter`. It looks in the folder and the folders inside it; **Files** narrows it (`*.log, !debug*`), **Hidden** includes dot files. Click a line to open the file there. **Stop** stops a long one. `.git`, `node_modules`, non-text and very large files are skipped. |
@@ -623,6 +659,7 @@ Turn them on in **Settings → Desktop**.
 | `Ctrl+L` | Select the line (again: the next one too); or click its number for Copy, Cut, Paste, Select all |
 | `Ctrl+F` / `Ctrl+H` | Find / replace in this file (`Enter` next, `Shift+Enter` previous, `Alt+Enter` select all; in the replace field `Enter` replaces, `Ctrl+Enter` replaces all) |
 | `Ctrl+G` | Go to line |
+| In a comparison | `Alt+↓` / `Alt+↑` the next / previous change (folders: difference), `Alt+→` / `Alt+←` copy the change at the cursor to the right / left |
 | `Ctrl+Shift+M` / `F8` / `Shift+F8` | Problems in this file / the next one / the one before |
 | `F12` / `Shift+F12` / `F2` | In code: go to the declaration / its usages / rename it (with a language server: across the project) |
 | `Ctrl+.` | Quick fixes and refactorings here (language server) |
@@ -697,6 +734,9 @@ Turn them on in **Settings → Desktop**.
 - **Pasting a file copied in Explorer or Finder pastes nothing (web app)**: the browser can't open files where they are. Use the desktop app, or drop the file on the window to add a copy to my files.
 - **`Ctrl+=` zooms the whole window, or does nothing**: it changes the text's size in the editor (an older desktop version zoomed the window). In a browser, click into the text first. To zoom the whole window: **View → Zoom the Whole Window In**.
 - **Compare with… doesn't list a file on disk**: type part of its name (files in the folders open in Folders show as you type), or use **Browse…**.
+- **Two files show as different in a folder comparison, but the comparison below finds no changes**: their sizes differ in what you don't see, usually line endings (Windows' CRLF against LF) or a byte order mark. Copy one across to make them the same.
+- **"More than 50,000 files and folders"** when comparing folders: compare a folder further down, or leave out `.git`, `node_modules` and the like (⋯ → **Include .git, node_modules…** unticked).
+- **A folder comparison doesn't show a copy you made to a server yet**: copies to and from servers run in the background; the tree reads both sides again when they end (⟳ reads them now).
 - **A folder says "That file was not opened here"**: it is a link to a place outside the folder you picked, or the folder was forgotten. Open that place with **Open another folder…**.
 - **Dragging a tab out does nothing**: encrypted files are never written out (their tabs only move within the bar); use **Copy for Claude** or copy the text instead.
 - **"A program or a script; the editor does not start those"**: open it from your file explorer (**Show in the file explorer**).

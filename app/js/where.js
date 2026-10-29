@@ -64,6 +64,8 @@ export const KINDS = {
     },
   },
   remote: { label: 'Server', icon: 'server', hint: 'A file on a server, saved back to it: not synced.' },
+  // Not where a file lives: a comparison's tab (its sides are files or folders of the kinds above).
+  compare: { label: 'Comparison', icon: 'compare', hint: 'Two files or two folders compared, side by side.' },
 };
 
 // In local mode (no GitHub) my files and tracker documents stay on this computer.

@@ -30,6 +30,13 @@ export function sectionFolders(settings = getSettings()) {
 /** { key, kind, project, path } of an open tab. */
 export function tabFacts(key) {
   const k = parseKey(key);
+  // A comparison goes with its left side (else its right): the folder or file it is about.
+  if (k?.kind === 'compare') {
+    const c = store.compare(k.id);
+    const side = [c?.left, c?.right].find((s) => s?.path || s?.key);
+    if (side?.path) return { key, kind: isRemotePath(side.path) ? 'remote' : 'disk', project: '', path: side.path };
+    return side?.key ? { ...tabFacts(side.key), key } : { key, kind: 'disk', project: '', path: '' };
+  }
   const kind = kindOfKey(key);
   if (k?.kind === 'file') return { key, kind, project: store.get(k.id)?.project ?? '' };
   if (k?.kind === 'disk') return { key, kind, project: '', path: k.path };

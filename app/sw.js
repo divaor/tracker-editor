@@ -4,7 +4,7 @@
 // Text recognition (vendor/ocr/, about 9 MB), the terminal (vendor/xterm/,
 // desktop only), the formatters (vendor/format/) and pdf.js (vendor/pdf/, about 6 MB) are
 // cached the first time they are used.
-const CACHE = 'editor-v0.29.0';
+const CACHE = 'editor-v0.30.0';
 const INBOX = 'editor-inbox'; // shared files waiting for the app (see js/inbox.js)
 const ASSETS = [
   './',
@@ -44,6 +44,8 @@ const ASSETS = [
   'js/outline.js',
   'js/codeNav.js',
   'js/comparePick.js',
+  'js/compares.js',
+  'js/folderCompare.js',
   'js/columnSelect.js',
   'js/tabGroups.js',
   'js/localRepo.js',
@@ -99,6 +101,8 @@ const ASSETS = [
   'js/ui/askSelection.js',
   'js/ui/assistant.js',
   'js/ui/compare.js',
+  'js/ui/compareFolderPick.js',
+  'js/ui/compareTab.js',
   'js/ui/comparePicker.js',
   'js/ui/components.js',
   'js/ui/dialogs.js',
@@ -143,6 +147,7 @@ const ASSETS = [
   'js/ui/preview.js',
   'js/ui/readAloud.js',
   'js/ui/settingsView.js',
+  'js/ui/savedCompares.js',
   'js/ui/share.js',
   'js/ui/snippets.js',
   'js/ui/splitter.js',

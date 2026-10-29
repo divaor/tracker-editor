@@ -102,7 +102,8 @@ export function SideBySideDialog({ onClose, actions }) {
   const startTyping = async () => {
     if (!srv || connected || busy) return;
     const root = await connect(srv);
-    if (root && !path) setPath(`${innerPath(root) || ''}/`);
+    // What was typed meanwhile stays.
+    if (root) setPath((typed) => typed || `${innerPath(root) || ''}/`);
     pathField.current?.focus();
   };
   const addTyped = async (ev) => {

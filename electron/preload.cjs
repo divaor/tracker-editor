@@ -77,6 +77,13 @@ contextBridge.exposeInMainWorld('desktop', {
       return () => ipcRenderer.removeListener('disk:launched', listener);
     },
   },
+  // Two folders compared (here or on servers): listed, files checked byte for byte, copies and removals by relative path.
+  compare: {
+    scan: (left, right, opts) => ipcRenderer.invoke('compare:scan', left, right, opts),
+    same: (left, right, rels) => ipcRenderer.invoke('compare:same', left, right, rels),
+    copy: (from, to, rels) => ipcRenderer.invoke('compare:copy', from, to, rels),
+    remove: (root, rels) => ipcRenderer.invoke('compare:remove', root, rels),
+  },
   // Folders picked in the open dialog: their files can be listed and opened.
   folders: {
     pick: (defaultPath) => ipcRenderer.invoke('folder:pick', defaultPath),

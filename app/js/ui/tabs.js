@@ -24,6 +24,7 @@ import { tabViewState } from '../tabViews.js';
 import { TabViewMenu } from './tabViews.js';
 import { terminalsAvailable } from '../terminals.js';
 import { clampFont, DEFAULT_FONT, MAX_FONT, MIN_FONT } from '../textSize.js';
+import { compareName, compareTitle } from '../compares.js';
 
 /** The server of a file on one ({ conn, status }), or null. */
 const serverOf = (path) => {
@@ -33,6 +34,10 @@ const serverOf = (path) => {
 
 function tabInfo(key) {
   const k = parseKey(key);
+  if (k?.kind === 'compare') {
+    const c = store.compare(k.id);
+    return c && { kind: 'compare', name: compareName(c), project: '', unsynced: Boolean(c.dirty), dotTitle: 'Not saved', title: compareTitle(c) };
+  }
   const kind = kindOfKey(key);
   if (k?.kind === 'file') {
     const f = store.get(k.id);
@@ -212,17 +217,20 @@ export function TabBar({ session, projects, settings, actions }) {
     const closable = (keys) => keys.filter((k) => !session.pinned.includes(k));
     const others = closable(inBar.filter((k) => k !== key));
     const right = closable(inBar.slice(at + 1));
+    const isCompare = parseKey(key)?.kind === 'compare';
     return [
       { label: isPinned ? 'Unpin' : 'Pin', icon: 'pin', run: () => store.pin(key, !isPinned) },
-      !narrowScreen() &&
+      isCompare && { label: 'Save this comparison…', icon: 'star', disabled: !actions.canSaveCompare(key), run: () => actions.saveCompare(key) },
+      !isCompare &&
+        !narrowScreen() &&
         (key === session.side
           ? { label: 'Close the side view', icon: 'columns', run: actions.closeSide }
           : { label: 'Open to the side', icon: 'columns', disabled: session.open.length < 2, run: () => actions.openSide(key) }),
-      { label: 'History', icon: 'history', run: () => (actions.showInMain(key), actions.showHistory()) },
-      { label: 'Compare with…', icon: 'columns', run: () => (actions.showInMain(key), actions.compareWith()) },
-      { label: 'Compare with clipboard', icon: 'copy', run: () => (actions.showInMain(key), actions.compareWithClipboard()) },
+      !isCompare && { label: 'History', icon: 'history', run: () => (actions.showInMain(key), actions.showHistory()) },
+      !isCompare && { label: 'Compare with…', icon: 'columns', run: () => (actions.showInMain(key), actions.compareWith()) },
+      !isCompare && { label: 'Compare with clipboard', icon: 'copy', run: () => (actions.showInMain(key), actions.compareWithClipboard()) },
       { separator: true },
-      { label: 'Copy for Claude', icon: 'claude', run: () => actions.copyForClaude(key) },
+      !isCompare && { label: 'Copy for Claude', icon: 'claude', run: () => actions.copyForClaude(key) },
       parseKey(key)?.kind === 'disk' && !isContentPath(parseKey(key).path) && { label: 'Copy path', icon: 'copy', run: () => actions.copyPath(parseKey(key).path) },
       parseKey(key)?.kind === 'disk' && inFolders(parseKey(key).path) && { label: 'Show its folder in Folders', icon: 'folderOpen', run: () => actions.showFolderOf(parseKey(key).path) },
       parseKey(key)?.kind === 'disk' && !isRemotePath(parseKey(key).path) && window.desktop?.disk?.show && { label: 'Show in the file explorer', icon: 'external', run: () => actions.showOnDisk(parseKey(key).path) },
@@ -371,10 +379,19 @@ export function TabBar({ session, projects, settings, actions }) {
   // Every open tab, by group when there are several (the view's groups first).
   const listItems = () => {
     const shownFirst = [...vs.groups].sort((a, b) => Number(!vs.view || vs.view.includes(b.id)) - Number(!vs.view || vs.view.includes(a.id)));
+    // Saved comparisons (☆), to open again.
+    const saved = settings.savedCompares ?? [];
     return [
       { label: 'Show the open tab', icon: 'eye', disabled: !session.active, run: reveal },
       { separator: true },
       ...(vs.groups.length > 1 ? shownFirst.flatMap((g) => [{ heading: true, key: `h:${g.id}`, label: g.name, color: g.color }, ...g.keys.map(listItem)]) : session.open.map(listItem)),
+      ...(saved.length
+        ? [
+            { heading: true, key: 'h:saved-compares', label: 'Saved comparisons' },
+            ...saved.slice(0, 12).map((c) => ({ key: `s:${c.id}`, label: c.name, icon: 'compare', hint: c.mode === 'folders' ? 'folders' : 'files', run: () => actions.openSavedCompare(c) })),
+            { key: 's:manage', label: saved.length > 12 ? `All ${saved.length}, rename, remove…` : 'Rename or remove…', icon: 'star', run: actions.showSavedCompares },
+          ]
+        : []),
     ];
   };
   const overflowing = edges.moreLeft || edges.moreRight;
@@ -408,8 +425,8 @@ export function TabBar({ session, projects, settings, actions }) {
     <button type="button" class="tab-new" aria-label="New file" title="New file (Alt+N)" onClick=${() => actions.newFile()}><${Icon} name="plus" size=${16} /></button>
     ${menu && session.open.includes(menu.key) && html`<${Menu} items=${menuItems(menu.key)} at=${menu.at} label="Tab" onClose=${() => setMenu(null)} />`}
   </div>${hint('right')}</div>
-    ${overflowing &&
-    html`<button type="button" class="tab-list-btn ${edges.activeSide ? 'has-active' : ''}" ref=${listButton} aria-label="All open tabs" title=${`All open tabs (${session.open.length})${edges.activeSide ? ' · your open tab is out of sight' : ''}`}
+    ${(overflowing || (settings.savedCompares ?? []).length > 0) &&
+    html`<button type="button" class="tab-list-btn ${edges.activeSide ? 'has-active' : ''}" ref=${listButton} aria-label="All open tabs" title=${`All open tabs (${session.open.length})${edges.activeSide ? ' · your open tab is out of sight' : ''}${(settings.savedCompares ?? []).length ? ' · saved comparisons' : ''}`}
       aria-haspopup="menu" aria-expanded=${Boolean(list)} onClick=${() => (list ? setList(null) : openList())}>
       <${Icon} name="chevronDown" size=${15} /><span class="tab-list-count">${session.open.length}</span>
     </button>`}
