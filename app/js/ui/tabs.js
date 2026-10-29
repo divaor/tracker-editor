@@ -36,7 +36,7 @@ function tabInfo(key) {
   const k = parseKey(key);
   if (k?.kind === 'compare') {
     const c = store.compare(k.id);
-    return c && { kind: 'compare', name: compareName(c), project: '', unsynced: Boolean(c.dirty), dotTitle: 'Not saved', title: compareTitle(c) };
+    return c && { kind: 'compare', icon: c.mode === 'panes' ? 'panes' : null, name: compareName(c), project: '', unsynced: Boolean(c.dirty), dotTitle: 'Not saved', title: compareTitle(c) };
   }
   const kind = kindOfKey(key);
   if (k?.kind === 'file') {
@@ -332,7 +332,7 @@ export function TabBar({ session, projects, settings, actions }) {
         onKeyDown=${(e) => (e.key === 'Enter' || e.key === ' ') && actions.activate(key)}>
       ${isPinned && html`<${Icon} name="pin" size=${12} class="tab-pin" />`}
       ${isSide && html`<${Icon} name="columns" size=${13} class="tab-side" />`}
-      <${Icon} name=${info.follow ? 'follow' : KINDS[info.kind].icon} size=${13} class="tab-kind" />
+      <${Icon} name=${info.follow ? 'follow' : (info.icon ?? KINDS[info.kind].icon)} size=${13} class="tab-kind" />
       ${info.encrypted && html`<${Icon} name="lock" size=${12} class="tab-lock" />`}
       ${info.snippet && html`<${Icon} name="snippet" size=${12} class="tab-lock" />`}
       <span class="tab-name">${info.name}</span>
@@ -374,7 +374,7 @@ export function TabBar({ session, projects, settings, actions }) {
   const listItem = (key) => {
     const info = tabInfo(key);
     const hidden = !inBar.includes(key);
-    return info && { key, label: info.name, icon: session.pinned.includes(key) ? 'pin' : KINDS[info.kind].icon, hint: hidden ? 'not in this view' : KINDS[info.kind].label, checked: key === session.active, run: () => actions.activate(key) };
+    return info && { key, label: info.name, icon: session.pinned.includes(key) ? 'pin' : (info.icon ?? KINDS[info.kind].icon), hint: hidden ? 'not in this view' : KINDS[info.kind].label, checked: key === session.active, run: () => actions.activate(key) };
   };
   // Every open tab, by group when there are several (the view's groups first).
   const listItems = () => {
@@ -388,7 +388,7 @@ export function TabBar({ session, projects, settings, actions }) {
       ...(saved.length
         ? [
             { heading: true, key: 'h:saved-compares', label: 'Saved comparisons' },
-            ...saved.slice(0, 12).map((c) => ({ key: `s:${c.id}`, label: c.name, icon: 'compare', hint: c.mode === 'folders' ? 'folders' : 'files', run: () => actions.openSavedCompare(c) })),
+            ...saved.slice(0, 12).map((c) => ({ key: `s:${c.id}`, label: c.name, icon: c.mode === 'panes' ? 'panes' : 'compare', hint: c.mode === 'panes' ? 'two panes' : c.mode === 'folders' ? 'folders' : 'files', run: () => actions.openSavedCompare(c) })),
             { key: 's:manage', label: saved.length > 12 ? `All ${saved.length}, rename, remove…` : 'Rename or remove…', icon: 'star', run: actions.showSavedCompares },
           ]
         : []),

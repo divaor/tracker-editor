@@ -13,6 +13,7 @@ import { Icon } from './icons.js';
 import { MenuButton } from './menu.js';
 import { Modal } from './components.js';
 import { Splitter } from './splitter.js';
+import { PanesTab } from './twoPanes.js';
 
 const message = (err) => String(err?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
 const sideOf = (s) => s?.path ?? s?.key ?? `text:${s?.label ?? ''}`;
@@ -179,6 +180,9 @@ function FoldersTab({ id, record, settings, actions }) {
   const [plan, setPlan] = useState(null); // making a side like the other: { to, copy, extra }
   const [tick, setTick] = useState(0);
   const [split, setSplit] = useState(() => getSettings().compareSplit || 0.45);
+  // The file compared below has edits not saved: asked before another one takes its place.
+  const lowerDirty = useRef(false);
+  const leaveFile = () => !lowerDirty.current || confirm('The file below has changes that are not saved. Leave them?');
   const tree = useRef(null);
   const body = useRef(null);
   const show = record.show ?? 'diff';
@@ -250,6 +254,7 @@ function FoldersTab({ id, record, settings, actions }) {
     setExpanded(next);
   };
   const pick = (rel, ev) => {
+    if (rel !== cursor && !leaveFile()) return;
     if (ev?.ctrlKey || ev?.metaKey) {
       const next = new Set(selected);
       if (next.has(rel)) next.delete(rel);
@@ -266,7 +271,7 @@ function FoldersTab({ id, record, settings, actions }) {
     // The next difference among everything under open or closed folders: its folders open.
     const all = treeRows(entries, { expanded: new Set([...entries.values()].filter((e) => e.dir).map((e) => e.rel)), show });
     const rel = nextDifference(all, cursor, step);
-    if (!rel) return;
+    if (!rel || !leaveFile()) return;
     reveal(rel);
     setSelected(new Set([rel]));
     setCursor(rel);
@@ -375,7 +380,7 @@ function FoldersTab({ id, record, settings, actions }) {
       <span class="fcmp-head-where"><bdi>${rootWhere(p)}</bdi></span>
       <span class="spacer" />
       <button type="button" class="icon-btn xs" title=${`Compare another folder on the ${side}`} aria-label=${`Change the ${side} folder`}
-        onClick=${() => actions.pickCompareFolder({ id, side })}><${Icon} name="edit" size=${13} /></button>
+        onClick=${() => leaveFile() && actions.pickCompareFolder({ id, side })}><${Icon} name="edit" size=${13} /></button>
     </div>`;
   };
   const moreItems = () => [
@@ -392,6 +397,8 @@ function FoldersTab({ id, record, settings, actions }) {
   return html`<div class="fcmp" role="region" aria-label="Folders compared" style=${{ '--fcmp-split': `${(split * 100).toFixed(1)}%` }} ref=${body}>
     <div class="ccmp-bar fcmp-bar">
       <${SaveStar} id=${id} record=${record} actions=${actions} />
+      <button type="button" class="icon-btn sm" aria-label="Two panes" title="Two panes: browse both folders side by side and copy or move files between them"
+        onClick=${() => leaveFile() && (actions.compareDirty(id, false), actions.updateCompare(id, { mode: 'panes' }))}><${Icon} name="panes" size=${16} /></button>
       <select class="fcmp-show" aria-label="Show" value=${show} onChange=${(e) => actions.updateCompare(id, { show: e.currentTarget.value })}>
         ${SHOW.map((s) => html`<option value=${s}>${SHOW_LABELS[s]}</option>`)}
       </select>
@@ -427,7 +434,8 @@ function FoldersTab({ id, record, settings, actions }) {
         : current.dir || current.state === 'kind'
           ? html`<p class="muted small fcmp-hint">${current.state === 'kind' ? STATE_LABELS.kind : `${current.name}: ${STATE_LABELS[current.state]}`}. Pick a file inside to compare it.</p>`
           : current.left && current.right
-            ? html`<${FileCompare} key=${current.rel} left=${fileSide('left')} right=${fileSide('right')} settings=${settings} actions=${actions} names=${lowerNames} onSaved=${() => setTick((t) => t + 1)} />`
+            ? html`<${FileCompare} key=${current.rel} left=${fileSide('left')} right=${fileSide('right')} settings=${settings} actions=${actions} names=${lowerNames} onSaved=${() => setTick((t) => t + 1)}
+                onDirty=${(d) => ((lowerDirty.current = d.left || d.right), actions.compareDirty(id, lowerDirty.current))} />`
             : html`<${OneSide} key=${current.rel} side=${current.left ? 'left' : 'right'} file=${fileSide(current.left ? 'left' : 'right')} name=${current.name} actions=${actions} settings=${settings}
                 onCopy=${() => (setSelected(new Set([current.rel])), copy(current.left ? 'left' : 'right'))} />`}
     </div>
@@ -474,6 +482,8 @@ function SyncDialog({ plan, record, entries, onRun, onClose }) {
 /** A comparison in its tab: two files or two folders. */
 export function CompareTab({ id, record, settings, actions }) {
   if (!record) return null;
+  if (record.mode === 'panes')
+    return html`<${PanesTab} key=${`${id}:panes`} id=${id} record=${record} settings=${settings} actions=${actions} star=${html`<${SaveStar} id=${id} record=${record} actions=${actions} />`} />`;
   return record.mode === 'folders'
     ? html`<${FoldersTab} key=${`${id}:${record.left.path}:${record.right.path}`} id=${id} record=${record} settings=${settings} actions=${actions} />`
     : html`<${FilesTab} id=${id} record=${record} settings=${settings} actions=${actions} />`;

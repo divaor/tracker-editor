@@ -58,7 +58,7 @@ const binName = () => (window.desktop?.platform === 'win32' ? 'the Recycle Bin' 
 let clip = null;
 
 /** Moving files to the Recycle Bin: asked first, since the editor cannot bring them back. */
-function DeleteDialog({ entries, onConfirm, onClose }) {
+export function DeleteDialog({ entries, onConfirm, onClose }) {
   const names = entries.slice(0, 6).map((e) => e.name);
   const what = entries.length === 1 ? html`<strong>${entries[0].name}</strong>` : count(entries.length, 'item');
   // Servers have no Recycle Bin, nor has a phone: deleting there is for good.
@@ -74,7 +74,7 @@ function DeleteDialog({ entries, onConfirm, onClose }) {
 }
 
 /** Names already where files are being copied or moved: Replace, Keep both or Skip, for all of them. */
-function ExistsDialog({ names, target, onChoose, onClose }) {
+export function ExistsDialog({ names, target, onChoose, onClose }) {
   const onServer = isRemotePath(target);
   const shown = names.slice(0, 8);
   return html`<${Modal} title="Already there" onClose=${onClose} className="exists-dialog"
@@ -89,7 +89,7 @@ function ExistsDialog({ names, target, onChoose, onClose }) {
 }
 
 /** The name field of a new or renamed entry, in its row: Enter or leaving it keeps the name, Escape cancels. */
-function NameField({ initial, dir = false, label, onDone, onCancel }) {
+export function NameField({ initial, dir = false, label, onDone, onCancel }) {
   const input = useRef(null);
   const settled = useRef(false);
   useLayoutEffect(() => {
@@ -1021,6 +1021,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     { label: 'Paste (Ctrl+V)', icon: 'clipboard', run: paste },
     { label: 'Find in this folder… (Ctrl+Shift+F)', icon: 'search', run: () => actions.findInFolder(dir) },
     window.desktop?.compare && { label: 'Compare with another folder…', icon: 'compare', run: () => actions.compareFolders(dir) },
+    window.desktop?.compare && { label: 'Open in two panes…', icon: 'panes', hint: 'This folder and another side by side in a tab, to copy and move files between them', run: () => actions.twoPanes(dir) },
     { separator: true },
     ...sortItems,
     { separator: true },
@@ -1050,6 +1051,8 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       files.length === 2 && items.length === 2 && files.every((e) => opensInEditor(e.name)) && { label: 'Compare the two', icon: 'compare', run: () => actions.compareDiskFiles(files[0].path, files[1].path) },
       window.desktop?.compare && items.length === 2 && items.every((e) => e.dir) && { label: 'Compare the two folders', icon: 'compare', run: () => actions.compareFolders(items[0].path, items[1].path) },
       window.desktop?.compare && one?.dir && { label: 'Compare with another folder…', icon: 'compare', run: () => actions.compareFolders(one.path) },
+      window.desktop?.compare && items.length === 2 && items.every((e) => e.dir) && { label: 'Open the two in two panes', icon: 'panes', run: () => actions.twoPanes(items[0].path, items[1].path) },
+      window.desktop?.compare && one?.dir && { label: 'Open in two panes…', icon: 'panes', hint: 'This folder and another side by side in a tab, to copy and move files between them', run: () => actions.twoPanes(one.path) },
       // A terminal in the folder (a file's: the folder it is in), in the editor or the system's app.
       one && terminalFor(one.path) && { label: one.dir ? 'Open a terminal here' : 'Open a terminal in its folder', icon: 'terminal', run: () => actions.terminalHere(one.dir ? one.path : dirOf(one.path)) },
       one && !remote && bridge.terminal && { label: 'Open in the system’s terminal', icon: 'external', run: () => actions.systemTerminalHere(one.dir ? one.path : dirOf(one.path)) },
@@ -1090,6 +1093,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     !isAndroidApp() && { label: 'Servers from your SSH config…', icon: 'server', run: () => actions.importSshConfig() },
     window.desktop?.mirrors && { label: 'Mirrors…', icon: 'sync', run: () => actions.showMirrors() },
     window.desktop?.compare && { label: 'Compare this folder with another…', icon: 'compare', run: () => actions.compareFolders(dir) },
+    window.desktop?.compare && { label: 'Two panes…', icon: 'panes', hint: 'This folder and another side by side in a tab, to copy and move files between them (like WinSCP)', run: () => actions.twoPanes(dir) },
     (settings.savedCompares ?? []).length > 0 && { label: 'Saved comparisons…', icon: 'star', run: () => actions.showSavedCompares() },
     ...(remote ? [] : PLACES.filter((p) => places[p.id] && !roots.includes(places[p.id])).map((p) => ({ label: `Pick in ${p.label}…`, run: () => pick(places[p.id]) }))),
     { separator: true },
@@ -1130,6 +1134,8 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       { label: 'Find in this folder…', icon: 'search', run: () => actions.findInFolder(s) },
       window.desktop?.compare && { label: 'Compare with another folder…', icon: 'compare', run: () => actions.compareFolders(s) },
       window.desktop?.compare && live.length === 2 && { label: `Compare with ${folderLabel(live.find((x) => x !== s))}`, icon: 'compare', run: () => actions.compareFolders(s, live.find((x) => x !== s)) },
+      window.desktop?.compare && { label: 'Open in two panes…', icon: 'panes', run: () => actions.twoPanes(s) },
+      window.desktop?.compare && live.length === 2 && { label: `Two panes with ${folderLabel(live.find((x) => x !== s))}`, icon: 'panes', run: () => actions.twoPanes(s, live.find((x) => x !== s)) },
       terminalFor(s) && { label: 'Open a terminal here', icon: 'terminal', run: () => actions.terminalHere(s) },
       { label: 'Properties', icon: 'info', run: () => actions.showProperties(s) },
       { label: 'Copy path', icon: 'copy', run: () => actions.copyPath(s) },

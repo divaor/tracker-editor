@@ -160,7 +160,8 @@ contextBridge.exposeInMainWorld('desktop', {
     peekBytes: (file) => ipcRenderer.invoke('folder:peek-bytes', file),
     peekText: (file) => ipcRenderer.invoke('folder:peek-text', file),
     // The folders shown (a path, or several side by side; null stops): 'folder:changed' tells.
-    watch: (dirs) => ipcRenderer.invoke('folder:watch', dirs),
+    // `group` 'panes': a two-pane tab's, watched apart from the sidebar's.
+    watch: (dirs, group) => ipcRenderer.invoke('folder:watch', dirs, group),
     onChanged(callback) {
       const listener = (_event, change) => callback(change);
       ipcRenderer.on('folder:changed', listener);

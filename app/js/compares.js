@@ -1,6 +1,7 @@
 // Comparisons in tabs of their own (store's c:<id> tabs): what each side is called and where
 // it is, for the tab, its bar and saved comparisons. A side of folders is { path } (here or
 // remote://); of files { key } (an open-able tab key: f:, r:, d:) or { text, label, detail }.
+// Mode 'panes' is two folders browsed side by side (ui/twoPanes.js), its sides where each is now.
 import { baseName, folderLabel, placeLabel } from './folders.js';
 import { server } from './servers.js';
 import { parseKey, store } from './store.js';
@@ -47,17 +48,20 @@ export function sideWhere(side) {
   return '';
 }
 
-/** A comparison's name for its tab: "site ↔ site". */
+/** A comparison's name for its tab: "site ↔ site" (two panes: "site | site"). */
 export function compareName(c) {
   if (!c) return 'Comparison';
   if (c.name) return c.name;
-  return `${sideName(c.left) || '?'} ↔ ${sideName(c.right) || '?'}`;
+  return `${sideName(c.left) || '?'} ${c.mode === 'panes' ? '|' : '↔'} ${sideName(c.right) || '?'}`;
 }
+
+/** What a comparison tab is: "Folders compared", "Two panes"… */
+export const compareKind = (c) => (c?.mode === 'panes' ? 'Two panes' : c?.mode === 'folders' ? 'Folders compared' : 'Files compared');
 
 /** Its tooltip: both sides in full. */
 export function compareTitle(c) {
   if (!c) return '';
-  const what = c.mode === 'folders' ? 'Folders compared' : 'Files compared';
+  const what = compareKind(c);
   return `${what}:\n← ${[sideName(c.left), sideWhere(c.left)].filter(Boolean).join(' · ')}\n→ ${[sideName(c.right), sideWhere(c.right)].filter(Boolean).join(' · ')}`;
 }
 

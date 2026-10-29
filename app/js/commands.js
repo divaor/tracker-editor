@@ -130,6 +130,8 @@ export const COMMAND_LIST = [
   { id: 'compare-with', group: 'Tools', label: 'Compare with another file…', hint: 'An open tab (the ones next to it first), a file in your folders, my files, or Browse…' },
   { id: 'compare-clipboard', group: 'Tools', label: 'Compare with the clipboard' },
   { id: 'compare-folders', group: 'Tools', label: 'Compare two folders…', only: 'desktop', hint: 'The folder open in Folders with another one (here or on a server); or a folder’s menu → Compare with another folder…' },
+  { id: 'two-panes', group: 'Tools', label: 'Two panes: two folders side by side…', only: 'desktop', hint: 'The folder open in Folders and another one (here or on a server), to copy and move files between them, like WinSCP' },
+  { id: 'two-panes-keys', group: 'Tools', label: 'In two panes: copy / move to the other side, new folder, delete, the other side', keys: 'F5 / F6 / F7 / F8 / Tab', run: false },
   { id: 'compare-saved', group: 'Tools', label: 'Open a saved comparison…', hint: 'The comparisons saved with their ☆' },
   { id: 'compare-keys', group: 'Tools', label: 'In a comparison: next / previous change, copy it to the right / left', keys: 'Alt+↓ / Alt+↑ / Alt+→ / Alt+←', run: false },
   { id: 'image-ocr', group: 'Tools', label: 'Text from an image' },

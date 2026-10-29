@@ -1270,12 +1270,19 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         store.openCompare({ mode: 'folders', left: { path: left }, right: { path: right }, show: 'diff' });
         setView('editor');
       },
-      /** Another folder on one side of a folder comparison. */
+      /** Two folders side by side in a tab (two panes, like WinSCP); without `right`, a dialog asks for it. */
+      twoPanes(left, right = null) {
+        if (!window.desktop?.compare) return toast('Two panes are in the desktop app.', { kind: 'error' });
+        if (!right) return setDialog({ type: 'compareFolder', other: left, side: 'right', panes: true, onPick: (p) => actions.twoPanes(left, p) });
+        store.openCompare({ mode: 'panes', left: { path: left }, right: { path: right } });
+        setView('editor');
+      },
+      /** Another folder on one side of a folder comparison or of two panes. */
       pickCompareFolder({ id, side }) {
         const c = store.compare(id);
         if (!c) return;
         const other = c[side === 'left' ? 'right' : 'left'].path;
-        setDialog({ type: 'compareFolder', other, side, onPick: (p) => store.updateCompare(id, { [side]: { path: p }, expanded: [] }) });
+        setDialog({ type: 'compareFolder', other, side, panes: c.mode === 'panes', onPick: (p) => store.updateCompare(id, { [side]: { path: p }, expanded: [] }) });
       },
       updateCompare: (id, patch, opts) => store.updateCompare(id, patch, opts),
       /** Unsaved edits in a files comparison: the tab's dot. */
@@ -3274,6 +3281,7 @@ export function App() {
       'compare-with': () => actions.compareWith(),
       'compare-clipboard': () => actions.compareWithClipboard(),
       'compare-folders': () => (getSettings().folder ? actions.compareFolders(getSettings().folder) : toast('Open a folder in Folders first (Ctrl+Shift+E), then compare it with another one.')),
+      'two-panes': () => (getSettings().folder ? actions.twoPanes(getSettings().folder) : toast('Open a folder in Folders first (Ctrl+Shift+E), then open it in two panes with another one.')),
       'compare-saved': () => actions.showSavedCompares(),
     };
     if (run[command]) return run[command]();
@@ -3466,7 +3474,7 @@ export function App() {
     ${dialog?.type === 'quickOpen' &&
     html`<${QuickOpen} files=${store.live()} docs=${docs} openTabs=${openDiskTabs()} actions=${actions} initial=${dialog.query ?? ''} symbols=${() => (activeKey ? (hostRef.current?.codeContext()?.symbols ?? []) : [])}
       roots=${folderRoots(settings)} hidden=${Boolean(settings.showHidden)} onSymbol=${(entry) => actions.revealSymbol(entry)} onClose=${() => setDialog(null)} />`}
-    ${dialog?.type === 'compareFolder' && html`<${CompareFolderDialog} other=${dialog.other} side=${dialog.side} onPick=${dialog.onPick} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'compareFolder' && html`<${CompareFolderDialog} other=${dialog.other} side=${dialog.side} panes=${dialog.panes} onPick=${dialog.onPick} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'saveCompare' && html`<${SaveCompareDialog} id=${dialog.id} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'savedCompares' && html`<${SavedComparesDialog} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'compare' && activeKey &&

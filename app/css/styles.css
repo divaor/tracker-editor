@@ -5802,7 +5802,8 @@ mark {
 /* ---- Comparisons in tabs of their own (ui/compareTab.js) ------------------------------
    Over the editor's place, as documents are (no z-index: their menus rise over the frame). */
 .editor-area > .ccmp,
-.editor-area > .fcmp {
+.editor-area > .fcmp,
+.editor-area > .panes-tab {
   position: absolute;
   inset: 0;
   background: var(--surface);
@@ -6304,6 +6305,253 @@ mark {
 
 .saved-compare-sides {
   white-space: pre-line;
+}
+
+/* ---- Two panes: two folders side by side in a tab (ui/twoPanes.js) ---- */
+.panes-tab {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  container-type: inline-size;
+}
+
+.panes-keys {
+  margin-right: 6px;
+  white-space: nowrap;
+}
+
+@container (max-width: 760px) {
+  .panes-keys {
+    display: none;
+  }
+}
+
+.panes {
+  display: grid;
+  flex: 1 1 0;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  min-height: 0;
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.pane + .pane {
+  border-left: 1px solid var(--border);
+}
+
+.pane-head {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 2px 6px 2px 10px;
+  border-top: 2px solid var(--kc, var(--border));
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 12px;
+  white-space: nowrap;
+  opacity: 0.75;
+}
+
+.pane.active .pane-head {
+  background: color-mix(in srgb, var(--kc) 9%, var(--surface));
+  opacity: 1;
+}
+
+.pane-head > svg {
+  flex-shrink: 0;
+  color: var(--kc);
+}
+
+.pane-head-name {
+  flex-shrink: 0;
+  max-width: 45%;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+
+.pane-head-where {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  direction: rtl;
+  text-align: left;
+  text-overflow: ellipsis;
+}
+
+.pane-head .spacer {
+  flex: 1;
+}
+
+.pane-crumbs {
+  flex-shrink: 0;
+  min-height: 26px;
+  padding: 2px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.pane-columns,
+.pane-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 76px 128px;
+  align-items: center;
+}
+
+.pane-columns {
+  flex-shrink: 0;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.pane-col {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 24px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pane-col:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.pane-col.on {
+  color: var(--text);
+}
+
+.pane-col .icon.down {
+  transform: rotate(180deg);
+}
+
+.pane-col.size {
+  justify-content: flex-end;
+}
+
+.pane-list {
+  flex: 1 1 0;
+  min-height: 0;
+  padding: 2px 0;
+  overflow: auto;
+  outline: none;
+  font-size: 13px;
+}
+
+.pane.active .pane-list:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.pane-list.drop-target {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.pane-row {
+  min-height: 25px;
+  padding: 0 8px;
+  cursor: default;
+  user-select: none;
+}
+
+.pane-row:hover {
+  background: var(--surface-2);
+}
+
+.pane-row.selected {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.pane.active .pane-row.selected {
+  background: var(--accent-soft);
+}
+
+.pane.active .pane-row.cursor {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.pane-row.drop-target {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.pane-row.hidden-entry {
+  opacity: 0.6;
+}
+
+.pane-row.is-up {
+  color: var(--text-2);
+}
+
+.pane-cell-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.pane-cell-name > svg {
+  flex-shrink: 0;
+}
+
+.pane-row.is-dir .pane-cell-name > svg {
+  color: var(--kc);
+}
+
+.pane-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pane-cell-name .folder-name-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.pane-cell {
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.pane-cell.size {
+  text-align: right;
+}
+
+.pane-cell.date {
+  padding-left: 12px;
+}
+
+.pane-empty {
+  margin: 12px 14px;
+}
+
+.pane-foot {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  overflow: hidden;
+  border-top: 1px solid var(--border);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .icon-btn .up,

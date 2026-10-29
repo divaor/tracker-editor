@@ -1427,7 +1427,7 @@ ipcMain.handle('folder:read-image', guard((_e, file) => {
   return fs.readFileSync(file);
 }));
 // The folder shown is watched, so the list follows changes made elsewhere ('folder:changed').
-const folderWatches = new Map(); // webContents id → { close } of its watched folders
+const folderWatches = new Map(); // `${webContents id}:${group}` → { close } of its watched folders
 const watchedSenders = new Set();
 // The folders shown (one, or several side by side): each watched here, polled on a server.
 function watchFolder(sender, dir) {
@@ -1464,10 +1464,12 @@ function watchFolder(sender, dir) {
     return null; // some network folders cannot be watched; Refresh still works
   }
 }
-ipcMain.handle('folder:watch', guard((event, dirs) => {
+// `group` keeps the sidebar's folders ('folders') apart from a two-pane tab's ('panes').
+ipcMain.handle('folder:watch', guard((event, dirs, group = 'folders') => {
   const sender = event.sender;
-  folderWatches.get(sender.id)?.close();
-  folderWatches.delete(sender.id);
+  const key = `${sender.id}:${group === 'panes' ? 'panes' : 'folders'}`;
+  folderWatches.get(key)?.close();
+  folderWatches.delete(key);
   const list = (Array.isArray(dirs) ? dirs : [dirs]).filter((d) => typeof d === 'string' && d).slice(0, 20);
   if (!list.length) return false;
   const watches = [];
@@ -1479,14 +1481,17 @@ ipcMain.handle('folder:watch', guard((event, dirs) => {
       // not allowed or gone: the others are still watched
     }
   }
-  folderWatches.set(sender.id, { close: () => watches.forEach((w) => w.close()) });
+  folderWatches.set(key, { close: () => watches.forEach((w) => w.close()) });
   // Closed with the window (hooked once per window, not once per call).
   if (!watchedSenders.has(sender.id)) {
     watchedSenders.add(sender.id);
+    const id = sender.id;
     sender.once('destroyed', () => {
-      folderWatches.get(sender.id)?.close();
-      folderWatches.delete(sender.id);
-      watchedSenders.delete(sender.id);
+      for (const g of ['folders', 'panes']) {
+        folderWatches.get(`${id}:${g}`)?.close();
+        folderWatches.delete(`${id}:${g}`);
+      }
+      watchedSenders.delete(id);
     });
   }
   return watches.length > 0;

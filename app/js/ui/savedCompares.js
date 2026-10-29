@@ -53,7 +53,7 @@ export function SavedComparesDialog({ actions, onClose }) {
     <ul class="saved-compares">
       ${list.map(
         (c) => html`<li key=${c.id} class="saved-compare">
-          <${Icon} name=${c.mode === 'folders' ? 'folder' : 'file'} size=${15} />
+          <${Icon} name=${c.mode === 'panes' ? 'panes' : c.mode === 'folders' ? 'folder' : 'file'} size=${15} />
           ${editing?.id === c.id
             ? html`<form class="saved-compare-rename" onSubmit=${(e) => (e.preventDefault(), write(list.map((x) => (x.id === c.id ? { ...x, name: editing.name.trim() || x.name } : x))), setEditing(null))}>
                 <input value=${editing.name} autofocus aria-label="Name" onInput=${(e) => setEditing({ id: c.id, name: e.currentTarget.value })} />

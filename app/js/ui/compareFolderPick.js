@@ -23,9 +23,10 @@ const parentPath = (p) => {
 /**
  * The folder to compare with (desktop): the folders shown in Folders, the ones picked before,
  * favorites and recent folders (here and on servers), a server's start folder, a path on a
- * server, or one picked in the system dialog. `other` is the folder on the other side (left out).
+ * server, or one picked in the system dialog. `other` is the folder on the other side (left out;
+ * with `panes`, two panes may show the same folder on both sides).
  */
-export function CompareFolderDialog({ other, side = 'right', onPick, onClose, actions }) {
+export function CompareFolderDialog({ other, side = 'right', panes = false, onPick, onClose, actions }) {
   const settings = getSettings();
   const [roots, setRoots] = useState([]);
   const [, setTick] = useState(0);
@@ -63,7 +64,7 @@ export function CompareFolderDialog({ other, side = 'right', onPick, onClose, ac
     }
   };
   const choose = (p) => {
-    if (p === other) return setNote({ text: 'That is the folder on the other side: pick another one.', error: true });
+    if (p === other && !panes) return setNote({ text: 'That is the folder on the other side: pick another one.', error: true });
     onPick(p);
     onClose();
   };
@@ -144,7 +145,8 @@ export function CompareFolderDialog({ other, side = 'right', onPick, onClose, ac
     </button>
   </li>`;
 
-  return html`<${Modal} title=${`Compare ${other ? pathName(other) : 'a folder'} with…`} wide className="side-by-side-dialog compare-folder-dialog" onClose=${onClose}
+  const title = panes ? `The folder on the ${side}${other ? `, next to ${pathName(other)}` : ''}` : `Compare ${other ? pathName(other) : 'a folder'} with…`;
+  return html`<${Modal} title=${title} wide className="side-by-side-dialog compare-folder-dialog" onClose=${onClose}
     footer=${html`<span class="muted small">${other ? `It goes on the ${side}; ${pathName(other)} stays on the ${side === 'right' ? 'left' : 'right'}.` : ''}</span><span class="spacer" /><button type="button" class="btn" onClick=${onClose}>Cancel</button>`}>
     ${note && html`<p class="notice ${note.error ? 'error' : ''}" role="status"><${Icon} name=${note.error ? 'alert' : 'info'} size=${15} /><span>${note.text}</span></p>`}
     ${next.length > 0 &&
