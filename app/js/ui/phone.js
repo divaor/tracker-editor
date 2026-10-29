@@ -22,8 +22,9 @@ export function useMedia(query) {
   return matches;
 }
 
-// A phone (or a small tablet): touch, and a short side a phone's.
-const phoneScreen = () => matchMedia('(pointer: coarse)').matches && Math.min(screen.width, screen.height) <= 600;
+// A phone (or a small tablet): touch, and a short side a phone's. The window's size, in CSS
+// pixels everywhere: older Android WebViews give `screen.width` in the device's own pixels.
+const phoneScreen = () => matchMedia('(pointer: coarse)').matches && Math.min(innerWidth, innerHeight) <= 640;
 
 /**
  * Turns the app sideways (`on`) or lets it follow the phone again. The Android app asks Android

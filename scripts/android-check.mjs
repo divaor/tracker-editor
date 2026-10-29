@@ -298,12 +298,20 @@ try {
   // Turning sideways (a folder comparison or two panes on a phone held upright): the app asks
   // Android for landscape, and lets it turn back. Rotation by hand, upright, so back is portrait.
   await part('turning sideways', async () => {
+    // The terminal panel hidden and the keyboard down (the parts before leave them up).
+    await page.evaluate(() => {
+      document.querySelector('[aria-label="Hide the terminal"]')?.click();
+      document.activeElement?.blur?.();
+    });
+    await page.waitForTimeout(800);
     adb('shell', 'settings', 'put', 'system', 'accelerometer_rotation', '0');
     adb('shell', 'settings', 'put', 'system', 'user_rotation', '0');
     const look = () => page.evaluate(() => ({ type: screen.orientation?.type, w: innerWidth, h: innerHeight }));
+    // Turned: the orientation and the window's size both say so (the size follows a moment later).
+    const settled = (now, way) => now.type?.startsWith(way) && (way === 'landscape' ? now.w > now.h : now.h > now.w);
     const turned = async (way) => {
       let now;
-      for (let i = 0; i < 20 && !(now = await look()).type?.startsWith(way); i++) await page.waitForTimeout(500);
+      for (let i = 0; i < 20 && !settled((now = await look()), way); i++) await page.waitForTimeout(500);
       return now;
     };
     const before = await look();
@@ -329,8 +337,7 @@ try {
     const picked = await page.evaluate(() => window.__picked);
     check('the folder chooser picks Download', tapped && picked === base, { tapped, picked });
     const scan = await page.evaluate(([a, b]) => window.desktop.compare.scan(a, b).catch((err) => ({ error: err.message })), [A, B]);
-    const names = (side) => (scan?.[side]?.entries ?? scan?.[side] ?? []).map?.((e) => e.rel ?? e.name).sort?.() ?? [];
-    check('the comparison lists both folders', !scan?.error && JSON.stringify(scan).includes('only-left.md') && JSON.stringify(scan).includes('changed.txt'), scan?.error ?? { left: names('left'), right: names('right') });
+    check('the comparison lists both folders', !scan?.error && JSON.stringify(scan).includes('only-left.md') && JSON.stringify(scan).includes('changed.txt'), scan?.error ?? JSON.stringify(scan).slice(0, 300));
     const looks = () => page.evaluate(() => ({ one: document.querySelectorAll('.fcmp-row.one').length, two: document.querySelectorAll('.fcmp-cell.left').length, btn: document.querySelector('.sideways-btn')?.textContent?.trim() ?? null, type: screen.orientation?.type, w: innerWidth, h: innerHeight }));
     const until = async (test, ms = 15_000) => {
       let now;
