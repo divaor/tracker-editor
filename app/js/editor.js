@@ -174,9 +174,12 @@ function baseTheme(dark) {
       '.cm-selectionMatch': { backgroundColor: dark ? 'rgba(224,169,74,.22)' : 'rgba(183,121,31,.18)' },
       '.cm-searchMatch': { backgroundColor: dark ? 'rgba(224,169,74,.3)' : 'rgba(183,121,31,.25)', outline: '1px solid var(--warn)' },
       '.cm-searchMatch.cm-searchMatch-selected': { backgroundColor: dark ? 'rgba(139,133,245,.45)' : 'rgba(79,70,229,.3)' },
-      '.cm-panels': { backgroundColor: 'var(--surface-2)', color: 'var(--text)', borderColor: 'var(--border)' },
+      // CodeMirror's own layers (panels 300, tooltips 500) would be over the app's menus, dialogs
+      // and the phone's sidebar: panels just above the sticky scroll lines (the frame, after them,
+      // still shows), tooltips above the editor's area and under what opens over it.
+      '.cm-panels': { backgroundColor: 'var(--surface-2)', color: 'var(--text)', borderColor: 'var(--border)', zIndex: 4 },
       '.cm-panel input, .cm-panel button': { fontFamily: 'var(--font)', fontSize: '13px' },
-      '.cm-tooltip': { backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px' },
+      '.cm-tooltip': { backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px', zIndex: 30 },
       '.cm-foldPlaceholder': { backgroundColor: 'var(--surface-2)', border: '1px solid var(--border)', color: 'var(--text-2)' },
       '.cm-highlightSpace': { backgroundImage: `radial-gradient(circle at 50% 55%, ${dark ? '#6d6a63' : '#b8b4aa'} 11%, transparent 5%)` },
       '.cm-trailingSpace': { backgroundColor: dark ? 'rgba(239,107,107,.18)' : 'rgba(194,59,59,.12)' },

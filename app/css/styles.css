@@ -8881,11 +8881,11 @@ html[data-native='android'] body:has(.edit-bar) .toasts {
   background: var(--surface);
 }
 
-/* In a tab: over the editor's place (the editor is hidden meanwhile). */
+/* In a tab: over the editor's place (the editor is hidden meanwhile). No z-index: that would make
+   it a layer of its own, and its menus (Contents) could not rise over the frame or the terminal. */
 .editor-area > .doc-view {
   position: absolute;
   inset: 0;
-  z-index: 3;
 }
 
 /* Full screen (ui/fullScreen.js; a document or the preview): over the whole window (under
