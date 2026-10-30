@@ -10,8 +10,7 @@ export class GitHubError extends Error {
   }
 }
 
-export function encodeBase64(value) {
-  const bytes = new TextEncoder().encode(value);
+export function bytesToBase64(bytes) {
   let binary = '';
   for (let i = 0; i < bytes.length; i += 0x8000) {
     binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
@@ -19,12 +18,15 @@ export function encodeBase64(value) {
   return btoa(binary);
 }
 
-export function decodeBase64(value) {
+export function base64ToBytes(value) {
   const binary = atob(value.replace(/\s+/g, ''));
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return new TextDecoder().decode(bytes);
+  return bytes;
 }
+
+export const encodeBase64 = (value) => bytesToBase64(new TextEncoder().encode(value));
+export const decodeBase64 = (value) => new TextDecoder().decode(base64ToBytes(value));
 
 const encodePath = (p) => p.split('/').filter(Boolean).map(encodeURIComponent).join('/');
 
@@ -158,6 +160,32 @@ export function createGitHubClient({
       return blob.encoding === 'base64' ? decodeBase64(blob.content ?? '') : (blob.content ?? '');
     },
 
+    /** A file version's bytes (a tracker attachment's picture or PDF…). */
+    async getBlobBytes(sha) {
+      const blob = await request('GET', `${repoPath}/git/blobs/${sha}`);
+      return blob.encoding === 'base64' ? base64ToBytes(blob.content ?? '') : new TextEncoder().encode(blob.content ?? '');
+    },
+
+    /** { sha, bytes } of a file, or null when it does not exist. */
+    async getFileBytes(filePath, ref) {
+      let data;
+      try {
+        data = await request('GET', `${repoPath}/contents/${encodePath(filePath)}`, { query: { ref } });
+      } catch (err) {
+        if (err.status === 404) return null;
+        throw err;
+      }
+      if (Array.isArray(data) || data?.type !== 'file') throw new GitHubError(`“${filePath}” is a folder, not a file.`, 400);
+      if (data.content || !data.size) return { sha: data.sha, bytes: base64ToBytes(data.content ?? '') };
+      return { sha: data.sha, bytes: await client.getBlobBytes(data.sha) };
+    },
+
+    /** Stores bytes as a file version (for a tree to point at): its sha. */
+    async createBlobBytes(bytes) {
+      const data = await request('POST', `${repoPath}/git/blobs`, { body: { content: bytesToBase64(bytes), encoding: 'base64' } });
+      return data.sha;
+    },
+
     /**
      * Creates a tree from `baseTree` plus `changes`: { path, content } writes a
      * file, { path, sha } points a path at an existing blob, { path, sha: null } deletes it.
@@ -187,6 +215,15 @@ export function createGitHubClient({
     /** Creates or replaces one file through the Contents API (used to start an empty repo). */
     async putFile(filePath, { text, sha, branch, message }) {
       const body = { message, content: encodeBase64(text) };
+      if (sha) body.sha = sha;
+      if (branch) body.branch = branch;
+      const data = await request('PUT', `${repoPath}/contents/${encodePath(filePath)}`, { body });
+      return { sha: data?.content?.sha ?? null, commit: data?.commit?.sha ?? null };
+    },
+
+    /** putFile for bytes (a picture, a PDF…). */
+    async putFileBytes(filePath, { bytes, sha, branch, message }) {
+      const body = { message, content: bytesToBase64(bytes) };
       if (sha) body.sha = sha;
       if (branch) body.branch = branch;
       const data = await request('PUT', `${repoPath}/contents/${encodePath(filePath)}`, { body });

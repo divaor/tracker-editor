@@ -2,7 +2,7 @@
 
 Tracker Editor is a Notepad++-style editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs. Everything is saved the moment you paste or type, on this computer with the tracker, or, once you turn on sync, in the same private GitHub data repo as the tracker, so your files are on your computers and your phone.
 
-Version 0.33.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.33.0 · Web app: https://divaor.github.io/tracker-editor/
+Version 0.34.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.34.0 · Web app: https://divaor.github.io/tracker-editor/
 
 ---
 
@@ -14,9 +14,9 @@ Download from **https://github.com/divaor/tracker-editor/releases/latest**:
 
 | System | File |
 | --- | --- |
-| Windows | `Tracker Editor Setup 0.33.0.exe` (installer) or `Tracker Editor-0.33.0-portable.exe` (no install, no admin rights) |
-| macOS | `Tracker Editor-0.33.0-arm64.dmg` |
-| Linux | `Tracker Editor-0.33.0.AppImage` |
+| Windows | `Tracker Editor Setup 0.34.0.exe` (installer) or `Tracker Editor-0.34.0-portable.exe` (no install, no admin rights) |
+| macOS | `Tracker Editor-0.34.0-arm64.dmg` |
+| Linux | `Tracker Editor-0.34.0.AppImage` |
 
 The builds are not code-signed, so the first launch warns you. On Windows, choose *More info → Run anyway*. On macOS, right-click the app → *Open*. Installing the desktop app also registers `tracker-editor://` links, so the tracker's **Open in editor** opens files straight in it.
 
@@ -27,7 +27,7 @@ The builds are not code-signed, so the first launch warns you. On Windows, choos
 The editor as an Android app, with what a web page cannot do: **Open with** from other apps, **Folders** on the phone, **servers** and **terminals**. For Android 7 and later on 64-bit phones (nearly all from the last ten years).
 
 1. Install **Obtainium** (from https://github.com/ImranR98/Obtainium/releases or F-Droid). It installs apps from their GitHub releases and keeps them up to date.
-2. In Obtainium: **Add app**, paste `https://github.com/divaor/tracker-editor`, **Add**, then **Install** (`Tracker-Editor-0.33.0.apk`). The first time, Android asks to let Obtainium install apps: allow it.
+2. In Obtainium: **Add app**, paste `https://github.com/divaor/tracker-editor`, **Add**, then **Install** (`Tracker-Editor-0.34.0.apk`). The first time, Android asks to let Obtainium install apps: allow it.
 3. Obtainium tells you when there is a new version and installs it over the old one; your files and settings stay. (Or download the `.apk` from the releases page and open it; then updates are by hand.)
 
 What the app adds:
@@ -677,8 +677,9 @@ Turn them on in **Settings → Desktop**.
 
 ## 14. With the tracker and Claude
 
-- **The tracker's documents** (proposals, artifacts and other attachments) are listed with your files under their item's name, downloaded on each sync so you can read and search them offline. Edits you make are saved back to the tracker; if Claude sent a new version meanwhile, yours is kept as a copy.
-- In the tracker, items show **Open in editor** and attachments **Edit in editor**.
+- **The tracker's documents** (proposals, artifacts and other text attachments) are listed with your files under their item's name, downloaded on each sync so you can read and search them offline. Edits you make are saved back to the tracker; if Claude sent a new version meanwhile, yours is kept as a copy.
+- **Pictures, PDFs and other files attached in the tracker** are not downloaded here (they would be no use as text). In the tracker, a PDF, Word, Excel, PowerPoint or OpenDocument file's **Open in editor** shows it here as it looks, in a tab of its own (read-only, as documents are); pictures stay in the tracker.
+- In the tracker, items show **Open in editor** and text attachments **Edit in editor**.
 - **Send to tracker** turns a file into a task, idea or doc linked to it.
 - **Claude** (through the tracker's connector) can list, search, read and save your editor files: "save this as a note in my editor", "what's in my deploy notes?". It can't read or change encrypted files.
 - **Asking Claude with your subscription**: **Ask in the Claude app** in the ✦ panel opens Claude with the question ready; with the connector, Claude can save its fix back to the file. See [Your Claude subscription](#your-claude-subscription).
@@ -763,7 +764,7 @@ Turn them on in **Settings → Desktop**.
 - **Android app: "The app's file access did not start"**: Folders, servers and terminals need it; the rest of the editor works without it. **Send a log** (the message's reason is in it too).
 - **Android app: "The app's access to files and servers stopped"**: Android ended its file access while the app was in the background. Do it again: it starts again. Terminals on the phone and on servers end with it.
 - **Android app: the terminal opens blank, with only the cursor**: before 0.28.1 the shell's prompt could be lost on fast phones. Update the app; in an older one, press `Enter` and the prompt shows. "Starting the shell…" while it waits means the app's file access is starting (the first time after opening the app).
-- **Android app: no Compare with another folder… or Two panes in a folder's menu**: they came to the app in 0.33.0: update it.
+- **Android app: no Compare with another folder… or Two panes in a folder's menu**: they came to the app in 0.34.0: update it.
 - **Sideways does nothing, or says to turn the phone**: in a browser it needs full screen, which some (an iPhone's) do not give a page. Turn the phone yourself (unlock the screen's rotation in the quick settings); the layout follows. In the Android app, Sideways works even with rotation locked.
 - **Android app: a file opened with Tracker Editor is Read-only**: the app that gave it allows reading only (Gmail attachments, many file managers' "Open with"). Save a copy with ⋯ → **Download**, or open it from Folders instead.
 - **A document shows a message instead of its pages**: "protected (DRM)": only the app it was bought for opens it. "damaged or is not what its name says": the file is broken, or a different format with that name (an old `.doc` renamed `.docx`, say). Either way **Its program** tries the app made for it.

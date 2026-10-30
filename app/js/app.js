@@ -1,5 +1,6 @@
 import { html, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from '../vendor/preact-htm.js';
 import { createEditorHost, findLanguage, guessLanguage, PLAIN_TEXT } from './editor.js';
+import { documentKind } from './docTypes.js';
 import { onLaunchFiles, takeShared } from './inbox.js';
 import { cleanModelName, filingMessages, isUntitled, MIN_NAMING_TEXT, nameFromHeading, namingMessages, parseFiling, uniqueName } from './naming.js';
 import { llmClient } from './semantic.js';
@@ -37,7 +38,7 @@ import { clampFont, DEFAULT_FONT, pinchFont, stepFont, textSizeKey } from './tex
 import { keyboardState } from './editKeys.js';
 import { draggedPaths, draggedTab, dropped, isOwnDrop } from './dragOut.js';
 import { dataClient, getSyncState, movedTo, onSyncResult, onSyncState, syncNow } from './syncManager.js';
-import { matchesScope, projectKey, projectList } from './tracker-model.js';
+import { isTextAttachment, matchesScope, projectKey, projectList } from './tracker-model.js';
 import { AssistantPanel } from './ui/assistant.js';
 import { dismissToast, Toasts, toast } from './ui/components.js';
 import { ChecklistDialog, FileDialog, SendDialog } from './ui/dialogs.js';
@@ -117,6 +118,14 @@ const filedAs = ({ project, tags }) => [project, tags.map((t) => `#${t}`).join('
 const looksBinary = (text) => text.slice(0, 8000).includes('\u0000');
 // "Error invoking remote method 'disk:read': Error: This is not a text file." → "This is not a text file."
 const ipcMessage = (err) => String(err?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
+
+/** The bytes of a file in the data repo (a PDF or other document attached in the tracker). */
+async function repoBytes(path) {
+  const { client, branch, local } = await dataClient();
+  const got = await client.getFileBytes(path, branch || undefined);
+  if (!got) throw new Error(local ? `${path} is not in the data on this computer (yet).` : `${path} is not in ${getSettings().owner}/${getSettings().repo} (yet). Try syncing.`);
+  return got.bytes;
+}
 
 function download(name, text) {
   const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
@@ -245,6 +254,18 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         if (list.length > 1) toast(`Opened ${list.length} files`);
       },
       async openRepoFile(path, { line, column, length } = {}) {
+        // A PDF, Word or other document attached in the tracker: shown as it looks (its bytes read when shown).
+        const docKind = documentKind(path.split('/').pop());
+        if (!docKind && !isTextAttachment({ path })) {
+          toast(`${path.split('/').pop()} is not text: open it in the tracker.`, { kind: 'error' });
+          return;
+        }
+        if (docKind) {
+          store.openRepoFile({ path, text: '', sha: '', doc: docKind });
+          setView('editor');
+          if (isNarrow()) setSidebar(false);
+          return;
+        }
         const doc = store.doc(path);
         const tab = store.repoTab(path);
         if (tab && (tab.dirty || (doc && tab.baseSha === doc.sha))) store.open(repoKey(path));
@@ -1920,7 +1941,7 @@ export function App() {
   const activeSealed = Boolean(activeFile && store.isSealed(activeFile.id));
   const showPreview = Boolean(previewType) && preview.has(activeKey) && !compare && !activeSealed;
   // A document (PDF, e-book, Word…) shows as it looks, in the editor's place, unless "As text".
-  const docShown = Boolean(activeDisk?.doc && !activeDisk.asText && view === 'editor' && !compare);
+  const docShown = Boolean(((activeDisk?.doc && !activeDisk.asText) || activeRepo?.doc) && view === 'editor' && !compare);
   // A comparison belongs to its tab.
   useEffect(() => {
     if (compare && compare.key !== activeKey) setCompare(null);
@@ -3466,6 +3487,11 @@ export function App() {
           ${activeSealed && html`<${LockedFile} file=${activeFile} actions=${actions} />`}
           ${activeCompare && view === 'editor' && html`<${CompareTab} key=${activeKey} id=${active.id} record=${activeCompare} settings=${settings} actions=${actions} />`}
           ${docShown &&
+          activeRepo?.doc &&
+          html`<${DocumentView} key=${activeKey} name=${activeRepo.name} kind=${activeRepo.doc} load=${() => repoBytes(activeRepo.path)}
+            bookmarkKey=${activeKey} readKey=${activeKey} onReader=${(r) => (docReader = r)} />`}
+          ${docShown &&
+          activeDisk?.doc &&
           html`<${DocumentView} key=${`${activeKey}:${activeDisk.mtimeMs}:${activeDisk.reloads ?? 0}`} name=${activeDisk.name} kind=${activeDisk.doc} version=${activeDisk.mtimeMs}
             load=${() => window.desktop.disk.readBytes(activeDisk.path)} onText=${(text) => actions.documentText(activeDisk.path, text)}
             onOpenOutside=${() => actions.openOutside(activeDisk.path)} bookmarkKey=${activeDisk.path} readKey=${activeKey} onReader=${(r) => (docReader = r)} />`}

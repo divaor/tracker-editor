@@ -532,15 +532,17 @@ export const store = {
 
   // ---- Files elsewhere in the repo (tracker attachments) ----
 
-  openRepoFile({ path, text, sha }) {
+  /** A tracker attachment in a tab: text to edit, or `doc` (a document's kind: shown as it looks, never written). */
+  openRepoFile({ path, text, sha, doc = '' }) {
     const existing = repoTabs.get(path);
-    if (!existing || !existing.dirty) repoTabs.set(path, { path, name: path.split('/').pop(), text, baseSha: sha, dirty: false });
+    if (!existing || !existing.dirty) repoTabs.set(path, { path, name: path.split('/').pop(), text, baseSha: sha, dirty: false, ...(doc ? { doc } : {}) });
     persist.repo();
     store.open(repoKey(path));
   },
 
   setRepoText(path, text, { urgent = false } = {}) {
     const tab = repoTabs.get(path);
+    if (tab?.doc) return;
     if (!tab || tab.text === text) return;
     repoTabs.set(path, { ...tab, text, dirty: true });
     persist.repo(urgent ? 0 : undefined);

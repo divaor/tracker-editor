@@ -1,6 +1,6 @@
 // Editor data model: file records, the index document in the data repo,
 // names and paths. Pure and DOM-free so the Node tests can import it.
-import { bumpTime, cleanProjectName, cleanTags, newId, nowIso } from './tracker-model.js';
+import { bumpTime, cleanProjectName, cleanTags, isTextAttachment, newId, nowIso } from './tracker-model.js';
 
 export { bumpTime, cleanTags, newId, nowIso };
 
@@ -175,7 +175,8 @@ export function trackerDocs(items) {
   for (const item of items ?? []) {
     if (!item || item.deleted) continue;
     for (const f of item.files ?? []) {
-      if (!f?.path) continue;
+      // Text only: pictures, PDFs and other documents are opened from the tracker's links (#/repo/…), never read as text.
+      if (!f?.path || !isTextAttachment(f)) continue;
       const doc = {
         path: f.path,
         name: f.name || f.path.split('/').pop(),
