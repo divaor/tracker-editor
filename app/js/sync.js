@@ -4,6 +4,7 @@
 // — as one commit. If another device committed in between, the round starts
 // over from the new head. Text is never lost: when two devices edited the same
 // file, ours stays in the file and theirs is kept as a copy next to it.
+import { documentKind } from './docTypes.js';
 import {
   INDEX_PATH,
   byteLength,
@@ -19,7 +20,7 @@ import {
   serializeIndex,
   splitName,
 } from './model.js';
-import { applyPatch, parseData, serializeDocument } from './tracker-model.js';
+import { applyPatch, isTextAttachment, parseData, serializeDocument } from './tracker-model.js';
 
 const LOCAL_FIELDS = ['baseSha', 'dirty', 'pending'];
 const strip = (file) => normalizeFile(Object.fromEntries(Object.entries(file).filter(([k]) => !LOCAL_FIELDS.includes(k))));
@@ -179,6 +180,8 @@ export async function syncOnce({
     const repoResults = [];
     const trackerFiles = new Map(); // path → { sha, size } to record on tracker items
     for (const edit of repoEdits) {
+      // Text is never written over a picture, PDF or other file that is not text.
+      if (!isTextAttachment({ path: edit.path }) || documentKind(edit.path)) continue;
       const current = await client.getFile(edit.path, head.commit);
       const sha = await gitBlobSha(edit.text);
       if (current && current.sha !== edit.baseSha && current.sha !== sha) {

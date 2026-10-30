@@ -4,10 +4,24 @@
 import { isSealed } from './crypto.js';
 import { kvDelete, kvGet, kvSet } from './kv.js';
 import { getSettings } from './settings.js';
+import { documentKind } from './docTypes.js';
 import { applyFilePatch, createFile, nowIso, tombstone, trackerDocs, untitledName } from './model.js';
-import { newId } from './tracker-model.js';
+import { isTextAttachment, newId } from './tracker-model.js';
 
 const META_FIELDS = ['name', 'project', 'tags', 'language', 'deleted', 'encrypted', 'snippet', 'updatedAt', 'updatedBy'];
+
+/**
+ * A saved tab of a tracker attachment as this version shows it. Versions before 0.34 opened
+ * any attachment as text: a PDF or other document becomes a document tab again (its text,
+ * edits too, let go: it is never written back), and a picture or other file that is not text
+ * is no tab at all.
+ */
+function settleRepoTab(tab) {
+  const name = tab.name || tab.path.split('/').pop();
+  const doc = documentKind(name);
+  if (doc) return tab.doc === doc && !tab.text && !tab.dirty ? tab : { path: tab.path, name, text: '', baseSha: '', dirty: false, doc };
+  return isTextAttachment({ path: tab.path }) ? tab : null;
+}
 
 let files = new Map(); // id → record (+ baseSha, dirty)
 let texts = new Map(); // id → text
@@ -181,7 +195,9 @@ export const store = {
     texts = new Map(loaded.filter(([id, t]) => !(files.get(id).encrypted && isSealed(t))));
     sealed = new Map(loaded.filter(([id, t]) => files.get(id).encrypted && isSealed(t)));
     session = { ...EMPTY_SESSION(), ...((await kvGet('session')) ?? {}) };
-    repoTabs = new Map(((await kvGet('repoTabs')) ?? []).map((t) => [t.path, t]));
+    const savedRepo = (await kvGet('repoTabs')) ?? [];
+    repoTabs = new Map(savedRepo.map(settleRepoTab).filter(Boolean).map((t) => [t.path, t]));
+    if (savedRepo.some((t) => repoTabs.get(t.path) !== t)) persist.repo(0);
     diskTabs = new Map(((await kvGet('diskTabs')) ?? []).map((t) => [t.path, t]));
     // Edits in a comparison are not kept across a restart: nothing is unsaved there now.
     compares = new Map(((await kvGet('compares')) ?? []).map((c) => [c.id, { ...c, dirty: false }]));
@@ -535,7 +551,8 @@ export const store = {
   /** A tracker attachment in a tab: text to edit, or `doc` (a document's kind: shown as it looks, never written). */
   openRepoFile({ path, text, sha, doc = '' }) {
     const existing = repoTabs.get(path);
-    if (!existing || !existing.dirty) repoTabs.set(path, { path, name: path.split('/').pop(), text, baseSha: sha, dirty: false, ...(doc ? { doc } : {}) });
+    // A document always replaces what is there (a text tab of it from an older version is not its text).
+    if (doc || !existing || !existing.dirty) repoTabs.set(path, { path, name: path.split('/').pop(), text, baseSha: sha, dirty: false, ...(doc ? { doc } : {}) });
     persist.repo();
     store.open(repoKey(path));
   },

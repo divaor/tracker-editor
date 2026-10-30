@@ -237,6 +237,23 @@ test('editing a tracker attachment updates the file and the tracker item in one 
   assert.equal(pc.text(copy.id), 'stale edit');
 });
 
+test('text is never written over a PDF, a picture or another file that is not text', async () => {
+  const { github, client } = setup();
+  const files = ['poster.pdf', 'photo.png', 'report.docx'].map((name) => ({ path: `files/p/${name}`, name, sha: '', size: 3 }));
+  const item = createItem({ title: 'Poster', files });
+  github.commit({ 'files/p/poster.pdf': '%PDF', 'files/p/photo.png': 'PNG', 'files/p/report.docx': 'PK', 'tracker.json': serializeDocument([item]) });
+  const tracker = github.read('tracker.json');
+  const pc = device('Phone', client);
+  // What a version before 0.34 kept: the files opened as text (at their current version), then "edited".
+  const bases = { 'files/p/poster.pdf': '%PDF', 'files/p/photo.png': 'PNG', 'files/p/report.docx': 'PK' };
+  const result = await pc.sync({ repoEdits: files.map((f) => ({ path: f.path, text: 'garbled text', baseSha: github.gitSha(bases[f.path]) })) });
+  assert.equal(github.read('files/p/poster.pdf'), '%PDF');
+  assert.equal(github.read('files/p/photo.png'), 'PNG');
+  assert.equal(github.read('files/p/report.docx'), 'PK');
+  assert.equal(github.read('tracker.json'), tracker);
+  assert.deepEqual(result.repoResults, []);
+});
+
 test('tracker changes go into the same commit and keep the rest of tracker.json', async () => {
   const { github, client } = setup();
   github.commit({ 'tracker.json': serializeDocument([createItem({ title: 'Keep me' })], [], { future: 1 }) });
