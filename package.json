@@ -1,7 +1,7 @@
 {
   "name": "tracker-editor",
   "productName": "Tracker Editor",
-  "version": "0.34.1",
+  "version": "0.34.2",
   "description": "A Notepad++-style editor for many open files, synced through GitHub, with projects, tags, search across files and a local model.",
   "author": "divaor",
   "license": "UNLICENSED",
@@ -16,6 +16,7 @@
     "start": "electron .",
     "web": "node scripts/serve.js",
     "test": "node --test",
+    "test:phone-node": "node --test test/android-node.test.js test/capture.test.js test/code-index.test.js test/disk-files.test.js test/find-folder.test.js test/folder-compare-main.test.js test/folders.test.js test/git.test.js test/lsp-remote.test.js test/lsp.test.js test/mirror.test.js test/properties.test.js test/servers.test.js test/shell-integration.test.js test/zip.test.js",
     "vendor": "node scripts/vendor.js",
     "android:node": "node scripts/android-node.js",
     "dist": "electron-builder --publish never",

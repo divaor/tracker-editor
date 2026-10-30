@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 const require = createRequire(import.meta.url);
-const { safeEntry, unzipFile, zipPaths } = require('../electron/zip.cjs');
+const { safeEntry, tableCrc32, unzipFile, zipPaths } = require('../electron/zip.cjs');
 const { zipSync, strToU8 } = require('fflate');
 const tmp = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'editor-zip-')));
 
@@ -120,4 +120,41 @@ test('a damaged entry is found by its checksum', async () => {
   fs.writeFileSync(path.join(dir, 'bad.zip'), zip);
   await assert.rejects(unzipFile(path.join(dir, 'bad.zip'), path.join(dir, 'bad')), /damaged/);
   assert.ok(!fs.existsSync(path.join(dir, 'bad')));
+});
+
+test('the checksum works without zlib.crc32 (Node 18, the Android app\'s)', async () => {
+  const zlib = require('node:zlib');
+  assert.equal(tableCrc32(Buffer.from('123456789')), 0xcbf43926, 'the standard check value');
+  assert.equal(tableCrc32(new Uint8Array(0)), 0);
+  const bytes = Buffer.from(Array.from({ length: 70000 }, (_, i) => (i * 7919) % 256));
+  const whole = tableCrc32(bytes);
+  assert.equal(tableCrc32(bytes.subarray(30000), tableCrc32(bytes.subarray(0, 30000))), whole, 'carried on across chunks');
+  if (zlib.crc32) assert.equal(whole, zlib.crc32(bytes));
+
+  // Extracting as on the phone: compressed and stored files, an empty one, a folder.
+  const dir = tmp();
+  const zip = path.join(dir, 'site.zip');
+  fs.writeFileSync(zip, zipSync({ 'site/index.html': [strToU8('<h1>Hi</h1>'.repeat(500)), { level: 6 }], 'site/.nojekyll': [new Uint8Array(0), { level: 0 }], 'site/data/': {}, 'site/data/a.json': strToU8('{"a":1}') }));
+  const saved = Object.getOwnPropertyDescriptor(zlib, 'crc32');
+  if (saved) delete zlib.crc32;
+  try {
+    assert.equal(zlib.crc32, undefined);
+    const result = await unzipFile(zip, path.join(dir, 'site-out'));
+    assert.deepEqual([result.files, result.skipped], [3, []]);
+    assert.equal(fs.readFileSync(path.join(dir, 'site-out', 'site', 'index.html'), 'utf8'), '<h1>Hi</h1>'.repeat(500));
+    assert.equal(fs.statSync(path.join(dir, 'site-out', 'site', '.nojekyll')).size, 0);
+  } finally {
+    if (saved) Object.defineProperty(zlib, 'crc32', saved);
+  }
+});
+
+test('an error while a file comes out is the one reported (the archive is closed after it)', async () => {
+  // Its directory says a.bin is 10 bytes, but it inflates to a megabyte: stopped mid-file.
+  const dir = tmp();
+  const zip = Buffer.from(zipSync({ 'a.bin': new Uint8Array(1024 * 1024) }, { level: 9 }));
+  const central = zip.lastIndexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+  zip.writeUInt32LE(10, central + 24);
+  fs.writeFileSync(path.join(dir, 'liar.zip'), zip);
+  await assert.rejects(unzipFile(path.join(dir, 'liar.zip'), path.join(dir, 'liar'), { maxBytes: 64 * 1024 }), /far more than its size/);
+  assert.ok(!fs.existsSync(path.join(dir, 'liar')));
 });

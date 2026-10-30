@@ -33,6 +33,24 @@ function safeEntry(name) {
   return parts;
 }
 
+// CRC-32 (the zip checksum) of extracted bytes, carried on from `crc`. Node 18 (the Android
+// app's Node.js) has no zlib.crc32: a table does it there.
+let crcTable = null;
+function tableCrc32(chunk, crc = 0) {
+  if (!crcTable) {
+    crcTable = new Int32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      crcTable[n] = c;
+    }
+  }
+  let c = ~crc;
+  for (let i = 0; i < chunk.length; i++) c = crcTable[(c ^ chunk[i]) & 0xff] ^ (c >>> 8);
+  return ~c >>> 0;
+}
+const crc32 = (chunk, crc) => (zlib.crc32 ? zlib.crc32(chunk, crc) : tableCrc32(chunk, crc));
+
 // Resolves when a stream can take more (or has failed: the error is checked by the caller).
 const drained = (stream) =>
   new Promise((resolve) => {
@@ -253,7 +271,7 @@ async function unzipFile(zipFile, destDir, { maxEntries = MAX_ENTRIES, maxBytes,
       let length = 0;
       const out = (chunk) => {
         if (!chunk?.length) return;
-        crc = zlib.crc32(chunk, crc);
+        crc = crc32(chunk, crc);
         length += chunk.length;
         written += chunk.length;
         if (written > cap) error ??= tooBig();
@@ -262,7 +280,9 @@ async function unzipFile(zipFile, destDir, { maxEntries = MAX_ENTRIES, maxBytes,
       const inflate = entry.method === 8 ? new Inflate((chunk) => out(chunk)) : null;
       try {
         if (entry.csize) {
-          for await (const chunk of fs.createReadStream(null, { fd, autoClose: false, start, end: start + entry.csize - 1, highWaterMark: 256 * 1024 })) {
+          // A stream of its own (not on `fd`): a stream stopped early closes its file, which on
+          // Node 18 it does even with autoClose off, and `fd` is still needed for the next entry.
+          for await (const chunk of fs.createReadStream(zipFile, { start, end: start + entry.csize - 1, highWaterMark: 256 * 1024 })) {
             if (inflate) inflate.push(chunk);
             else out(chunk);
             if (error) break;
@@ -285,8 +305,13 @@ async function unzipFile(zipFile, destDir, { maxEntries = MAX_ENTRIES, maxBytes,
     if (made) fs.rmSync(destDir, { recursive: true, force: true });
     throw err;
   } finally {
-    fs.closeSync(fd);
+    // Never in the way of the error that ended the extraction.
+    try {
+      fs.closeSync(fd);
+    } catch {
+      // already closed
+    }
   }
 }
 
-module.exports = { safeEntry, unzipFile, zipPaths, MAX_ZIP_BYTES };
+module.exports = { safeEntry, unzipFile, zipPaths, tableCrc32, MAX_ZIP_BYTES };

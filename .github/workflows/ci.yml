@@ -17,3 +17,22 @@ jobs:
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
       - run: npm test
+
+  # The Android app runs the main process on its own Node.js 18 (nodejs-mobile), and the tests
+  # above run on 22: the main process's tests run on 18 too, so an API 18 lacks (zlib.crc32 was
+  # one) fails here, not on a phone.
+  phone-node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 18
+      - run: node --version && npm run test:phone-node
