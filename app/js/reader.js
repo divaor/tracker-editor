@@ -223,6 +223,9 @@ async function playAudio(passage, myRun, next, fail) {
   }
 }
 
+// The app's name (index.html's application-name), for the lock screen's player.
+const appName = () => (typeof document !== 'undefined' && document.querySelector('meta[name="application-name"]')?.content) || '';
+
 function updateMediaSession() {
   if (typeof navigator === 'undefined' || !('mediaSession' in navigator) || state.engine !== 'server') return;
   const session = navigator.mediaSession;
@@ -231,7 +234,7 @@ function updateMediaSession() {
     session.playbackState = 'none';
     return;
   }
-  if (typeof MediaMetadata === 'function') session.metadata = new MediaMetadata({ title: state.name, artist: 'Tracker Editor', album: `Passage ${state.index + 1} of ${state.total}` });
+  if (typeof MediaMetadata === 'function') session.metadata = new MediaMetadata({ title: state.name, artist: appName(), album: `Passage ${state.index + 1} of ${state.total}` });
   session.playbackState = state.status === 'playing' ? 'playing' : 'paused';
 }
 
