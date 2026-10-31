@@ -188,7 +188,7 @@ The status bar names it (**TypeScript 7.0.2 · ready**, **gopls · ready**, **Py
 For folders on this computer in a Git repository, with the `git` program installed. **`Ctrl+Shift+G`** opens the **Git panel** for the repository of the open file (or of the folder in Folders):
 
 - **The branch** and what is to push and pull (**↑1 ↓2**). Click it to **switch branches**: your branches (what each has to push and pull, and those whose remote branch is gone), the ones **on the remote only** (switching to one makes a branch here that follows it), and **New branch from main…**, which makes one from where you are and switches to it (your changes come along). The branch in the status bar opens the same list.
-- **Fetch** (see what is new on the remote, changing nothing here), **Pull** and **Push**, with Git's progress as it goes. Pull only moves forward: when your branch and the remote both have new commits, it says so and offers **Pull, merging** or **Pull, rebasing mine on top**. A push the remote refuses (it has commits you lack) offers **Pull first**. The first push of a new branch sends it to the remote and follows it from then on.
+- **Fetch** (see what is new on the remote, changing nothing here), **Pull** and **Push**, with Git's progress as it goes. Pull only moves forward: when your branch and the remote both have new commits, it says so and offers **Pull, merging** or **Pull, rebasing mine on top**. A push the remote refuses (it has commits you lack) offers **Pull first**. The first push of a new branch sends it to the remote and follows it from then on; when the site (GitHub, GitLab, Bitbucket, Azure DevOps) says where to open a merge request (pull request) for it, a toast offers **Open the merge request page**.
 - **Commit**: write the message and press **Commit** (or `Ctrl+Enter`). **Amend the last commit** puts the staged changes into the last commit instead, with its message to change (empty keeps it).
 - **Staged** and **Changes**: the files the next commit takes, and those changed since. **+** stages a file, **↶** unstages it; **Stage all** and **Unstage all** take them all. Click a file to open it; ⇄ compares it with the last commit.
 - **One change at a time**: click a change's mark in the bar next to the line numbers → **Stage this change**: only that block goes into the next commit, as it is in the editor (the rest of the file stays as a change). **Edit → Code → Stage the Change at the Cursor** does it from the keyboard.
@@ -207,8 +207,31 @@ Git can be confusing, and a wrong command can seem to lose work. With a model co
 - **Ask anything**: "what state is my repository in?", "why can't I push?", "undo my last commit", "move my last two commits to a new branch", "bring my branch up to date with main", "squash my last three commits", "which files should not be in Git?", "I lost my changes after a reset: get them back". It sees the repository: the branch, what changed and what is staged, the branches and recent commits on all of them, the stash, the remotes (their addresses without passwords), the reflog, and when needed it reads commits, diffs and files.
 - **Steps**: what it proposes shows as cards with the exact git command. Steps that are easy to undo **run by themselves**: staging, stashing, fetching, switching or making a branch, adding lines to `.gitignore`. Steps that change history or your files **wait for Run**: commit, pull, push, merge, revert, cherry-pick, bringing back a stash. Those that rewrite history or throw work away are **red** and say what will be lost: rebase, reset, amending, deleting a branch, throwing changes away, force pushing (only ever with `--force-with-lease`, so it never overwrites commits you have not seen). **Skip** leaves a step out and **Stop** runs none of the rest; steps stop at the first that fails, and the model sees what happened and explains or fixes it.
 - **Undo**: before every step that waits for Run, the editor takes a **backup**: the commit you are on, your changes not committed, and where every branch was. **Undo** on the step brings all of it back (a deleted branch too); the undo is itself backed up. The model can use the backups too ("go back to before the rebase"). A push cannot be undone from here.
+- **Help me do it** or **Only explain, I'll do it** (above the question box): with **Only explain**, nothing runs: the model says what to click in the Git panel, step by step, and gives the same as git commands for a terminal; its steps show as a list for you. Saying "just tell me how" in the question does the same.
+- **Merge requests**: the model can open the site's page for a merge request (pull request) of your branch into another (GitHub, GitLab, Bitbucket, Azure DevOps), after pushing it. A new branch made from a remote one (from `origin/dev`) does not follow it, so its first push makes a branch of its own name, never a push to dev.
 - **Commit messages**: ✦ next to **Commit** writes the message from what is staged, in the style of the repository's recent commits; edit it, then commit.
 - It cannot run an interactive rebase, change Git's settings, sign in for you or delete files Git does not track; for those it gives the commands to type in a terminal and says what they do.
+
+Common things to ask:
+
+| You want | Ask, for example | What it does |
+| --- | --- | --- |
+| Work started on main (or master) moved to a new branch, main left as it was | "I made changes on main by mistake: move them to a new branch feature/login and leave main as it was" | Not committed yet: makes the branch (your changes come along). Already committed: makes the branch where you are, then moves main back to the remote's main (**Run**); nothing is lost, and Undo puts main back |
+| The same, onto an existing branch (dev) | "Move my commits from main to dev" | Copies the commits onto dev (cherry-pick), then moves main back |
+| Your work pushed for review | "Push my work to a new feature branch and open a merge request into dev" | Makes the branch, commits, pushes it, opens the site's merge request page |
+| Instructions only | "How do I open a merge request into dev? Just tell me the steps, I'll do them myself" | Numbered steps in the Git panel, and the same as commands |
+| A new feature from the latest dev | "Start a branch feature/x from the latest dev" | Fetches, makes the branch from the remote's dev |
+| Your branch up to date | "Bring my branch up to date with dev" | Fetches, then merges dev in (or rebases, on a branch only you use) |
+| The last commit undone | "Undo my last commit but keep the changes" | Not pushed: takes it back, changes staged. Pushed: a new commit that reverses it |
+| A better last commit | "Fix my last commit's message" / "I forgot a file in the last commit" | Amends it (not pushed), or says why a new commit is better |
+| Fewer commits | "Squash my last 3 commits into one" | Takes them back and makes one commit |
+| Pull or push refused | "Pull says my local changes would be overwritten" / "Push was rejected" | Stash, pull, bring the changes back; or pull first, then push |
+| Conflicts | "Help me with these conflicts" | Says which files and what the markers mean; after you fix them, stages and continues |
+| Lost work | "I did a reset and lost my commits" / "I deleted a branch" | Finds them in the reflog or the backups and brings them back |
+| Files that should not be in Git | "Stop tracking node_modules and .env" | Adds them to .gitignore and takes them out of Git, keeping them on disk |
+| A password committed | "I committed my API key" | Takes the commit back if not pushed; if pushed, says to change the key first and how history can be cleaned |
+| On no branch | "It says detached HEAD" | Explains, and keeps your commits on a new branch |
+| A merge undone | "Undo the merge I just did" | Not pushed: back to before it. Pushed: a commit that reverses it |
 
 ## 3. Tabs, pinning, groups and the split view
 

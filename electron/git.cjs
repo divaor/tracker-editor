@@ -127,7 +127,7 @@ function createGit({ parseStatus, parse = {}, runGit = run, runGitWrite = runWri
   async function snapshot(root, parse) {
     const [statusOut, graph, branchesOut, stashOut, remotes, reflog, tags, name, email, ignore] = await Promise.all([
       tryGit(['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all'], root),
-      tryGit(['log', '--graph', '--all', '--date-order', '--decorate=short', '--format=%h%d %s · %an, %cr', '-n', '60'], root),
+      tryGit(['log', '--graph', `--exclude=${BACKUP_REFS}/*`, '--all', '--date-order', '--decorate=short', '--format=%h%d %s · %an, %cr', '-n', '60'], root),
       tryGit(['for-each-ref', '--format=%(refname)%00%(upstream:short)%00%(upstream:track)%00%(committerdate:relative)%00%(HEAD)', 'refs/heads', 'refs/remotes'], root),
       tryGit(['stash', 'list', '--format=%gd%x00%s%x00%cr'], root),
       tryGit(['remote', '-v'], root),
@@ -194,7 +194,7 @@ function createGit({ parseStatus, parse = {}, runGit = run, runGitWrite = runWri
     if (head) await runGitWrite(['update-ref', '-m', `Tracker Editor backup: ${label}`, `${BACKUP_REFS}/${id}`, head], root);
     if (changes) await runGitWrite(['update-ref', '-m', 'Tracker Editor backup (changes)', `${BACKUP_REFS}/${id}-changes`, changes], root);
     for (const [i, b] of kept.entries()) await runGitWrite(['update-ref', '-m', `Tracker Editor backup: ${b}`, `${BACKUP_REFS}/${id}-kept-${i}`, tips[b]], root);
-    const entry = { id, at: new Date().toISOString(), label, head, branch, changes, tips, kept: kept.length };
+    const entry = { id, at: new Date().toISOString(), label, head, branch, changes, tips, kept: kept.length, keptNames: kept };
     const list = [entry, ...(await readBackups(root))];
     for (const old of list.slice(MAX_BACKUPS)) {
       await tryGit(['update-ref', '-d', `${BACKUP_REFS}/${old.id}`], root);
@@ -234,6 +234,11 @@ function createGit({ parseStatus, parse = {}, runGit = run, runGitWrite = runWri
         await w(['switch', '-f', '--detach', entry.head]);
       }
       await w(['reset', '-q', '--hard', entry.head]);
+    }
+    // The branches the step moved (move-branch, delete-branch, rename-branch) go back where they were.
+    for (const b of entry.keptNames ?? []) {
+      if (b === entry.branch || !safeBranch(b) || !entry.tips?.[b]) continue;
+      await w(['branch', '-f', b, entry.tips[b]]).catch(() => {});
     }
     if (entry.changes) await w(['stash', 'apply', '--index', entry.changes]).catch(() => w(['stash', 'apply', entry.changes]));
     return { restored: entry, backup: before };
@@ -323,7 +328,8 @@ function createGit({ parseStatus, parse = {}, runGit = run, runGitWrite = runWri
             if (action.from && !safeBranch(action.from)) throw new Error('Not a branch name');
             // Git's own check of the name, before anything changes.
             await runGit(['check-ref-format', '--branch', action.name], root, { timeout: 5000 });
-            return w(['switch', '-c', action.name, ...(action.from ? [action.from] : [])]);
+            // From another branch ("origin/dev"): not following it, so its first push makes a branch of its own name.
+            return w(['switch', '-c', action.name, ...(action.from ? ['--no-track', action.from] : [])]);
           }
           // A remote branch ("origin/x") gets a local one that follows it.
           if (action.track) return w(['switch', '--track', action.name]);
@@ -385,7 +391,7 @@ function createGit({ parseStatus, parse = {}, runGit = run, runGitWrite = runWri
           if (range != null && !safeRange(range)) throw new Error('Not a commit or range');
           const paths = action.paths ? rels(action.paths) : [];
           if (!(await hasHead())) return '(no commits yet)';
-          const out = await runGit(['log', '--graph', '--date-order', '--decorate=short', '--format=%h%d %s · %an, %cr', '-n', String(count), ...(action.all ? ['--all'] : range ? [range] : []), '--', ...paths], root);
+          const out = await runGit(['log', '--graph', '--date-order', '--decorate=short', '--format=%h%d %s · %an, %cr', '-n', String(count), ...(action.all ? [`--exclude=${BACKUP_REFS}/*`, '--all'] : range ? [range] : []), '--', ...paths], root);
           return cap(out);
         }
         case 'show': {
@@ -455,12 +461,20 @@ function createGit({ parseStatus, parse = {}, runGit = run, runGitWrite = runWri
           if (!mode || !safeRev(action.rev)) throw new Error('Not a reset');
           return w(['reset', '-q', mode, action.rev]);
         }
-        case 'revert':
+        case 'revert': {
           if (!safeRev(action.rev)) throw new Error('Not a commit');
-          return w(['revert', '--no-edit', action.rev]);
+          // A merge commit: which parent's side to keep (1: the branch it was merged into).
+          const mainline = [1, 2].includes(action.mainline) ? ['-m', String(action.mainline)] : [];
+          return w(['revert', '--no-edit', ...mainline, action.rev]);
+        }
         case 'cherry-pick':
-          if (!safeRev(action.rev)) throw new Error('Not a commit');
+          // One commit, or a range ("origin/main..main": the commits main has that origin/main lacks).
+          if (!safeRange(action.rev)) throw new Error('Not a commit');
           return w(['cherry-pick', action.rev]);
+        case 'move-branch':
+          // Another branch (not the one checked out) moved to a commit: "put main back where origin/main is".
+          if (!safeBranch(action.name) || !safeRev(action.to)) throw new Error('Not a branch or commit');
+          return w(['branch', '-f', action.name, action.to]);
         case 'delete-branch':
           if (!safeBranch(action.name)) throw new Error('Not a branch name');
           return w(['branch', action.force ? '-D' : '-d', action.name]);

@@ -32,7 +32,7 @@ import { LanguageServersPanel, ReferencesPanel, RenameSymbolDialog, SetupServerD
 import { BranchDialog, GitPanel } from './ui/gitPanel.js';
 import { GitAssist } from './ui/gitAssist.js';
 import { CHANGES_FILES, cleanCommitMessage, commitMessageMessages } from './gitAssist.js';
-import { gitError, stageBlock } from './gitStatus.js';
+import { gitError, mergeRequestLink, stageBlock } from './gitStatus.js';
 import { refreshAllGit } from './gitState.js';
 import { FolderSearchPanel } from './ui/folderSearch.js';
 import { PropertiesDialog } from './ui/properties.js';
@@ -2618,6 +2618,8 @@ export function App() {
     const doing = { fetch: 'Fetching', pull: 'Pulling', push: 'Pushing' }[op];
     toast(`${doing}…`, { key: 'git-quick', timeout: 60000 });
     const r = await actions.gitRun(dir, { op });
+    const link = r.ok && op === 'push' ? mergeRequestLink(`${r.result?.stdout ?? ''}\n${r.result?.stderr ?? ''}`) : null;
+    if (link) return toast(`Pushed. Open a ${link.label} for it?`, { key: 'git-quick', timeout: 20000, action: { label: `Open the ${link.label} page`, run: () => window.open(link.url, '_blank', 'noopener') } });
     if (r.ok) return toast({ fetch: 'Fetched', pull: 'Pulled', push: 'Pushed' }[op], { key: 'git-quick' });
     toast(r.error.message, { key: 'git-quick', kind: 'error', timeout: 12000, action: { label: 'Git panel', run: () => actions.toggleGit(dir) } });
   };

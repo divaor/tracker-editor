@@ -6,6 +6,7 @@
 // those that rewrite history or throw work away), and backs up before each of them (undo).
 // Steps never become a command line: each is an action of git.cjs's `act`, which checks its
 // fields again.
+import { mergeRequestUrl } from './gitStatus.js';
 
 // What the model may name (the main process checks the same).
 const safeRel = (rel) => typeof rel === 'string' && rel.length > 0 && rel.length < 4096 && !rel.startsWith('/') && !/^[A-Za-z]:/.test(rel) && !rel.split('/').includes('..') && !/[\0\r\n]/.test(rel);
@@ -46,14 +47,16 @@ export const STEPS = {
   fetch: { fields: '{}', risk: () => 'auto', check: () => '', cmd: () => 'git fetch --all --prune', text: () => 'Fetch what is new on the remote (your files do not change)' },
   'create-branch': { fields: '{ "name": "fix/login", "from"?: "main" }', risk: () => 'auto', check: (s) => (!safeBranch(s.name) ? 'name' : s.from != null && !safeBranch(s.from) ? 'from' : ''), cmd: (s) => `git switch -c ${s.name}${s.from ? ` ${s.from}` : ''}`, text: (s) => `Make the branch ${s.name}${s.from ? ` from ${s.from}` : ''} and switch to it` },
   switch: { fields: '{ "name": "main", "track"?: true  (track: a remote branch like "origin/x") }', risk: () => 'auto', check: (s) => (safeBranch(s.name) ? '' : 'name'), cmd: (s) => `git switch ${s.track ? '--track ' : ''}${s.name}`, text: (s) => `Switch to ${s.name}` },
+  'open-merge-request': { page: true, fields: '{ "source": "feature/x", "target"?: "dev", "remote"?: "origin" }  (opens the site’s page in the browser; push the branch first)', risk: () => 'auto', check: (s) => (!safeBranch(s.source) ? 'source' : s.target != null && !safeBranch(s.target) ? 'target' : s.remote != null && !/^[A-Za-z0-9._-]{1,100}$/.test(s.remote) ? 'remote' : ''), cmd: (s) => `(open the ${s.target ? `${s.source} → ${s.target}` : s.source} merge request page)`, text: (s) => `Open the page to ask for ${s.source} to be merged${s.target ? ` into ${s.target}` : ''}` },
   ignore: { fields: '{ "patterns": ["*.log", "node_modules/"] }', risk: () => 'auto', check: (s) => (Array.isArray(s.patterns) && s.patterns.length > 0 && s.patterns.length <= 50 && s.patterns.every((p) => typeof p === 'string' && p.trim() && p.length <= 200 && !/[\r\n\0]/.test(p)) ? '' : 'patterns'), cmd: (s) => `echo ${s.patterns.map(q).join(' ')} >> .gitignore`, text: (s) => `Add ${s.patterns.join(', ')} to .gitignore` },
   // ---- Asked first ----
   commit: { fields: '{ "message": "Subject\\n\\nBody", "amend"?: true }', riskText: 'ask (amend: danger)', risk: (s) => (s.amend ? 'danger' : 'ask'), backup: (s) => Boolean(s.amend), check: (s) => (typeof s.message === 'string' && (s.message.trim() || s.amend) ? '' : 'message'), cmd: (s) => `git commit${s.amend ? ' --amend' : ''}${s.message?.trim() ? ` -m ${q(firstLine(s.message))}${s.message.trim().includes('\n') ? ' …' : ''}` : ' --no-edit'}`, text: (s) => (s.amend ? `Rewrite the last commit${s.message?.trim() ? `: “${firstLine(s.message)}”` : ''}` : `Commit: “${firstLine(s.message)}”`) },
   pull: { fields: '{ "how"?: "merge" | "rebase"  (none: only when it can just move forward) }', risk: () => 'ask', backup: () => true, check: (s) => (s.how == null || ['merge', 'rebase'].includes(s.how) ? '' : 'how'), cmd: (s) => `git pull ${{ merge: '--no-rebase', rebase: '--rebase' }[s.how] ?? '--ff-only'}`, text: (s) => `Pull the remote’s commits${s.how === 'rebase' ? ', putting yours on top' : s.how === 'merge' ? ', merging them' : ''}` },
   push: { fields: '{ "force"?: true  (only --force-with-lease), "remote"?: "origin" }', riskText: 'ask (force: danger)', risk: (s) => (s.force ? 'danger' : 'ask'), check: (s) => (s.remote != null && !/^[A-Za-z0-9._-]{1,100}$/.test(s.remote) ? 'remote' : ''), cmd: (s) => `git push${s.force ? ' --force-with-lease' : ''}`, text: (s) => (s.force ? 'Push over the remote branch (replacing its commits)' : 'Push to the remote'), final: true },
   merge: { fields: '{ "rev": "feature", "how"?: "ff-only" | "no-ff" | "squash" }', risk: () => 'ask', backup: () => true, check: (s) => (!safeRev(s.rev) ? 'rev' : s.how != null && !['ff-only', 'no-ff', 'squash'].includes(s.how) ? 'how' : ''), cmd: (s) => `git merge${s.how ? ` --${s.how}` : ''} ${s.rev}`, text: (s) => `Merge ${s.rev} into the current branch` },
-  revert: { fields: '{ "rev": "abc1234" }', risk: () => 'ask', backup: () => true, check: (s) => (safeRev(s.rev) ? '' : 'rev'), cmd: (s) => `git revert --no-edit ${s.rev}`, text: (s) => `Undo commit ${s.rev} with a new commit (history stays)` },
-  'cherry-pick': { fields: '{ "rev": "abc1234" }', risk: () => 'ask', backup: () => true, check: (s) => (safeRev(s.rev) ? '' : 'rev'), cmd: (s) => `git cherry-pick ${s.rev}`, text: (s) => `Copy commit ${s.rev} onto this branch` },
+  revert: { fields: '{ "rev": "abc1234", "mainline"?: 1  (a merge commit: 1 keeps the branch it was merged into) }', risk: () => 'ask', backup: () => true, check: (s) => (!safeRev(s.rev) ? 'rev' : s.mainline != null && ![1, 2].includes(s.mainline) ? 'mainline' : ''), cmd: (s) => `git revert --no-edit${s.mainline ? ` -m ${s.mainline}` : ''} ${s.rev}`, text: (s) => `Undo ${s.mainline ? 'the merge' : 'commit'} ${s.rev} with a new commit (history stays)` },
+  'cherry-pick': { fields: '{ "rev": "abc1234" | "origin/main..main"  (a range: those commits, oldest first) }', risk: () => 'ask', backup: () => true, check: (s) => (safeRange(s.rev) ? '' : 'rev'), cmd: (s) => `git cherry-pick ${s.rev}`, text: (s) => (s.rev.includes('..') ? `Copy the commits ${s.rev} onto this branch` : `Copy commit ${s.rev} onto this branch`) },
+  'move-branch': { fields: '{ "name": "main", "to": "origin/main"  (a branch you are NOT on) }', risk: () => 'ask', backup: () => true, keep: (s) => [s.name], check: (s) => (!safeBranch(s.name) ? 'name' : !safeRev(s.to) ? 'to' : ''), cmd: (s) => `git branch -f ${s.name} ${s.to}`, text: (s) => `Move the branch ${s.name} to ${s.to} (without switching to it)` },
   'stash-apply': { fields: '{ "ref": "stash@{0}" }', risk: () => 'ask', backup: () => true, check: (s) => (safeStash(s.ref) ? '' : 'ref'), cmd: (s) => `git stash apply ${s.ref}`, text: (s) => `Bring back the changes of ${s.ref} (kept in the stash)` },
   'stash-pop': { fields: '{ "ref": "stash@{0}" }', risk: () => 'ask', backup: () => true, check: (s) => (safeStash(s.ref) ? '' : 'ref'), cmd: (s) => `git stash pop ${s.ref}`, text: (s) => `Bring back the changes of ${s.ref} and drop it from the stash` },
   tag: { fields: '{ "name": "v1.2.0", "rev"?: "HEAD", "message"?: "..." }', risk: () => 'ask', check: (s) => (!safeBranch(s.name) ? 'name' : s.rev != null && !safeRev(s.rev) ? 'rev' : ''), cmd: (s) => `git tag${s.message ? ' -a' : ''} ${s.name}${s.rev ? ` ${s.rev}` : ''}`, text: (s) => `Tag ${s.rev ?? 'this commit'} as ${s.name}` },
@@ -72,7 +75,7 @@ export const STEPS = {
 };
 
 /** Ops whose step needs the working tree saved first (they change files on disk). */
-export const CHANGES_FILES = new Set(['switch', 'create-branch', 'stash', 'stash-apply', 'stash-pop', 'pull', 'merge', 'rebase', 'rebase-skip', 'reset', 'revert', 'cherry-pick', 'restore', 'abort', 'continue', 'undo']);
+export const CHANGES_FILES = new Set(['move-branch', 'switch', 'create-branch', 'stash', 'stash-apply', 'stash-pop', 'pull', 'merge', 'rebase', 'rebase-skip', 'reset', 'revert', 'cherry-pick', 'restore', 'abort', 'continue', 'undo']);
 
 /**
  * One step from the model → { step, look, risk, cmd, text, backup, keep, problem }: its op
@@ -94,6 +97,7 @@ export function describeStep(raw) {
     backup: Boolean(def.backup?.(step)),
     keep: def.keep?.(step) ?? [],
     final: Boolean(def.final),
+    page: Boolean(def.page),
   };
 }
 
@@ -185,8 +189,55 @@ const stepList = () =>
     .map(([op, d]) => `- ${op} ${d.fields}${d.look ? ' — looks' : ` — ${d.riskText ?? d.risk({})}`}`)
     .join('\n');
 
-/** The system message: what the model is for, how to look and act, what it cannot do. */
-export function gitSystem() {
+/**
+ * Common situations and the steps that solve them: the model's worked examples (people ask
+ * these most, and get them wrong most).
+ */
+export const RECIPES = `- Changes NOT committed, made on the wrong branch (main), wanted on a new branch with main left as it was: create-branch (the changes come along; main is untouched). To an existing branch: switch (Git refuses if a file would be overwritten: then stash, switch, stash-pop).
+- Commits made on main by mistake (not pushed), wanted on a new branch with main back as it was: create-branch at HEAD (it takes the commits and the changes not committed), then move-branch main to its upstream (origin/main), or to HEAD~N when it has none. Nothing is lost: the commits are on the new branch.
+- Commits made on main by mistake, wanted on an EXISTING branch (dev): commit or stash what is not committed, switch dev, cherry-pick origin/main..main (the range), then move-branch main to origin/main, and stash-pop if stashed.
+- Start a feature from the latest dev: fetch, then create-branch "feature/x" from "origin/dev" (it does not follow dev, so its first push makes feature/x on the remote).
+- Push work and open a merge request (pull request) into dev: on main/dev with changes, first create-branch feature/…; stage, commit, push (the first push sets the upstream), then open-merge-request with source the branch and target dev. Never push straight to dev when a merge request is asked for.
+- Bring a feature branch up to date with dev: fetch, then merge origin/dev (keeps history, safe on shared branches) or rebase onto origin/dev (cleaner; only if the branch is yours alone; a push after it needs force).
+- Undo the last commit, keeping the work: not pushed → reset soft HEAD~1; pushed → revert it (a new commit). Throw the commit away entirely (not pushed): reset hard HEAD~1, say what is lost.
+- Change the last commit's message or add a forgotten file: not pushed → stage it, commit with amend; pushed → a new commit is safer (amend then needs a force push).
+- Squash the last N commits before a merge request: reset soft HEAD~N, then one commit (force push if they were pushed).
+- Pull refused, "local changes would be overwritten": stash, pull, stash-pop (conflicts then are fixed in the files).
+- Pull refused, the branches diverged: on your own branch pull with "rebase"; on a shared one pull with "merge". Push refused (the remote has new commits): pull first, then push.
+- Merge conflict: name the files (C in the status), explain <<<<<<< (yours) ======= >>>>>>> (theirs); the person keeps what they want in the editor and removes the markers, then stage the files and continue; or abort to go back.
+- Detached HEAD (on no branch) with commits made there: create-branch at HEAD to keep them; otherwise switch back to a branch.
+- Lost commits after a reset, rebase or deleted branch: look at the reflog (and the backups); create-branch at the commit from the reflog, or undo with the backup's id.
+- A file already in Git that .gitignore should skip (node_modules, .env, build output): ignore the pattern, untrack the files, commit.
+- A password or key committed: not pushed → reset soft HEAD~1 (or amend after untracking), ignore the file; pushed → the secret must be changed at its source now (it is public to anyone with the repository); removing it from history needs git filter-repo in a terminal and a force push: give the commands, warn that everyone must clone again.
+- Throw away all changes not committed: offer stash first (it can come back); restore only when sure, saying what is lost. Untracked files are not deleted by the editor: give git clean -n then -f for a terminal.
+- Undo a merge: not pushed → reset hard to the commit before it (or undo its backup); pushed → revert the merge commit with mainline 1.
+- Recover a deleted file: restore it from HEAD (or from the last commit that had it: log with its path).
+- Delete branches already merged or gone on the remote: delete-branch each (without force: Git refuses unmerged ones).
+- Rename a branch: rename-branch; on the remote the old one stays: push the new one, and give git push origin --delete old for a terminal.
+- "Please tell me who you are" (identity not set): give git config --global user.name "…" and user.email "…" for a terminal, then commit again.
+- Signing in fails (authentication): explain the credential helper (Git Credential Manager on Windows, the keychain on macOS) or an SSH key with its agent; the editor never asks for passwords.
+- Every line shows as changed (line endings, CRLF/LF): explain core.autocrlf and a .gitattributes with "* text=auto"; give the commands.
+- Which commits are on one branch and not the other: log with a range (dev..feature); what changed: diff from/to.
+- Who changed a line: give git blame -L 10,20 file for a terminal (the editor has no blame yet).`;
+
+/** The guide's Git sections (### Git…), which the model follows when it tells the person what to click. */
+export function gitGuide(guide) {
+  const lines = String(guide ?? '').split('\n');
+  const out = [];
+  let on = false;
+  for (const line of lines) {
+    if (/^#{1,3} /.test(line)) on = /^### Git/.test(line);
+    if (on) out.push(line);
+  }
+  return out.join('\n').trim();
+}
+
+/**
+ * The system message: what the model is for, how to look and act, what it cannot do, the
+ * worked examples, and (`guide`: gitGuide's text) how the editor's Git panel works. The same
+ * each time for one guide, so Claude caches it.
+ */
+export function gitSystem({ guide = '' } = {}) {
   return `You help someone with Git in Tracker Editor, a text editor. Many people find Git confusing and some have damaged their repositories: explain plainly and briefly (Markdown), say what each step does and why, prefer the safe way, and never guess about the repository: look first.
 
 Every question comes with a snapshot of the repository (status, branches, recent commits on all branches, stash, reflog, backups).
@@ -204,23 +255,44 @@ How steps run:
 - Steps run in order and stop at the first that fails or is skipped; then the results come back to you so you can explain or fix.
 - Several steps in one block are fine when they belong together (stash, switch, pull, stash-pop).
 
+When the person wants to do it themselves ("just tell me how", "give me the steps", "I'll do it myself", or a message marked Explain only): write NO git-steps block with actions (looking steps are still fine, to answer right). Give numbered instructions in the editor: the exact panel, button and menu names from the guide below (the Git panel, Ctrl+Shift+G; the branch button; Stage, Commit, Push…), then the same as git commands for a terminal, in one \`\`\`sh block. Say where the result shows and how to check it. For a merge request, say that the site's page opens from the link Git prints after the first push of the branch (or from the site: New merge request / pull request, source → target).
+
 Be careful:
 - Do not rewrite commits that are already pushed to a shared branch (rebase, amend, reset) unless the person asks; then say why it needs a force push, and only push with "force": true (it is --force-with-lease).
 - Before reset --hard, restore, rebase-skip or stash-drop, say exactly what will be lost.
 - To recover lost work, look at the reflog and the backups; "undo" with a backup's id goes back to it; "create-branch" from a commit in the reflog saves a lost commit.
 - Conflicts: say which files, what the markers <<<<<<< ======= >>>>>>> mean; the person fixes them in the editor; then stage them and "continue" (or "abort").
 - Write commit messages in the commit step: a short subject (under 72 characters, in the imperative), a blank line, then the why if useful.
-- You cannot run an interactive rebase, edit Git's settings, sign in, or delete untracked files: give the commands for a terminal instead (a \`\`\`sh block), and say what they do. To squash commits, use reset with "mode": "soft" and a new commit.
-- Answer questions that need no step without a block.`;
+- You cannot run an interactive rebase, edit Git's settings, sign in, delete untracked files or delete a branch on the remote: give the commands for a terminal instead (a \`\`\`sh block), and say what they do. To squash commits, use reset with "mode": "soft" and a new commit.
+- Answer questions that need no step without a block.
+
+Common situations and how to solve them (adapt to the snapshot: the real branch names, whether commits are pushed, what is not committed):
+${RECIPES}${guide ? `\n\nThe editor's Git panel, as its guide describes it (for instructions the person follows themselves):\n${guide}` : ''}`;
 }
 
-/** The messages for one turn: the system, the turns so far, the question with a fresh snapshot. */
-export function gitMessages(question, snap, history = []) {
+/** Marked on a question when the person turned on Explain only. */
+export const EXPLAIN_ONLY = '(Explain only: tell me how to do it myself in the editor, step by step; do not run any action.)';
+
+/**
+ * The messages for one turn: the system, the turns so far, the question with a fresh snapshot.
+ * `explainOnly`: the person does the steps themselves. `guide`: gitGuide's text.
+ */
+export function gitMessages(question, snap, history = [], { explainOnly = false, guide = '' } = {}) {
   return [
-    { role: 'system', content: gitSystem() },
+    { role: 'system', content: gitSystem({ guide }) },
     ...history,
-    { role: 'user', content: `${question}\n\n<repository>\n${snapshotText(snap)}\n</repository>` },
+    { role: 'user', content: `${question}${explainOnly ? `\n\n${EXPLAIN_ONLY}` : ''}\n\n<repository>\n${snapshotText(snap)}\n</repository>` },
   ];
+}
+
+/**
+ * The merge request page for the open-merge-request step, from the snapshot's remotes ("origin
+ * <address>"): { url, label } or null (no such remote, or a site the editor does not know).
+ */
+export function mergeRequestFor(snap, { source, target = '', remote = 'origin' }) {
+  const lines = snap?.remotes ?? [];
+  const line = lines.find((l) => l.split(' ')[0] === remote) ?? (lines.length === 1 ? lines[0] : null);
+  return line ? mergeRequestUrl(line.slice(line.indexOf(' ') + 1), source, target) : null;
 }
 
 /** What came of the steps, for the model's next turn. */

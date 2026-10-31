@@ -5,7 +5,7 @@
 // the middle of a merge or rebase, and the stash. Every command goes through
 // actions.gitRun (the main process's git:act), which also says when unsaved tabs are in the way.
 import { html, useEffect, useRef, useState } from '../../vendor/preact-htm.js';
-import { GIT_LABELS, branchNameProblem, canCommit } from '../gitStatus.js';
+import { GIT_LABELS, branchNameProblem, canCommit, mergeRequestLink } from '../gitStatus.js';
 import { Modal } from './components.js';
 import { FileIcon } from './fileIcon.js';
 import { Icon } from './icons.js';
@@ -74,6 +74,9 @@ export function GitPanel({ dir, tick, actions, onClose }) {
     setDoing(null);
     setProgress('');
     if (!r.ok) setProblem({ ...r.error, action });
+    // The first push of a branch: the site says where to open a merge request.
+    const link = r.ok && action.op === 'push' ? mergeRequestLink(`${r.result?.stdout ?? ''}\n${r.result?.stderr ?? ''}`) : null;
+    if (link) actions.toast(`Pushed. Open a ${link.label} for it?`, { timeout: 20000, action: { label: `Open the ${link.label} page`, run: () => window.open(link.url, '_blank', 'noopener') } });
     await load();
     return r;
   };

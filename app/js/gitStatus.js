@@ -314,3 +314,44 @@ export function gitError(stderr = '', stdout = '') {
     return { kind: 'noremote', message: 'This repository has no remote to push to or pull from.', detail };
   return { kind: 'other', message: lines.at(-1) ?? 'Git failed.', detail };
 }
+
+// ---- Merge requests (pull requests): the page the remote's site opens one on ----
+
+// After a push, GitHub, GitLab, Bitbucket and Azure DevOps print where to open one:
+// "remote: Create a pull request for 'x' on GitHub by visiting:\nremote:   https://…/pull/new/x".
+const MR_LINK = /https:\/\/[^\s'"<>]+(?:\/pull\/new\/|\/-\/merge_requests\/new|\/merge_requests\/new|\/pull-requests\/new|\/pullrequestcreate|\/compare\/)[^\s'"<>]*/;
+
+/** The merge request link in what a push said ({ url, label }), or null. */
+export function mergeRequestLink(text) {
+  const url = MR_LINK.exec(String(text ?? ''))?.[0];
+  if (!url) return null;
+  return { url, label: /merge_requests/.test(url) ? 'merge request' : 'pull request' };
+}
+
+/**
+ * The page that opens a merge request of `source` into `target` (optional: the site's default
+ * branch), from a remote's address (https or SSH, without a password): GitHub, GitLab (also
+ * self-hosted ones with "gitlab" in the name), Bitbucket, Azure DevOps. { url, label } or null.
+ */
+export function mergeRequestUrl(remote, source, target = '') {
+  let host = '';
+  let repoPath = '';
+  const text = String(remote ?? '').trim();
+  let m;
+  if ((m = /^[\w.-]+@([^:/\s]+):(?!\/)(.+)$/.exec(text))) [host, repoPath] = [m[1], m[2]];
+  else if ((m = /^(?:ssh|git|https?):\/\/(?:[^@/\s]*@)?([^/:\s]+)(?::\d+)?\/(.+)$/.exec(text))) [host, repoPath] = [m[1], m[2]];
+  else return null;
+  repoPath = repoPath.replace(/\.git$/, '').replace(/\/+$/, '');
+  const enc = (b) => encodeURIComponent(b).replace(/%2F/gi, '/');
+  if (/(^|\.)dev\.azure\.com$|visualstudio\.com$/.test(host)) {
+    // ssh.dev.azure.com:v3/org/project/repo, or dev.azure.com/org/project/_git/repo.
+    const parts = repoPath.replace(/^v3\//, '').split('/');
+    const [org, project, repo] = parts.includes('_git') ? [parts[0], parts[1], parts[parts.indexOf('_git') + 1]] : parts;
+    if (!org || !project || !repo) return null;
+    return { url: `https://dev.azure.com/${org}/${project}/_git/${repo}/pullrequestcreate?sourceRef=${enc(source)}${target ? `&targetRef=${enc(target)}` : ''}`, label: 'pull request' };
+  }
+  if (/github/i.test(host)) return { url: `https://${host}/${repoPath}/compare/${target ? `${enc(target)}...` : ''}${enc(source)}?expand=1`, label: 'pull request' };
+  if (/gitlab/i.test(host)) return { url: `https://${host}/${repoPath}/-/merge_requests/new?merge_request%5Bsource_branch%5D=${encodeURIComponent(source)}${target ? `&merge_request%5Btarget_branch%5D=${encodeURIComponent(target)}` : ''}`, label: 'merge request' };
+  if (/bitbucket/i.test(host)) return { url: `https://${host}/${repoPath}/pull-requests/new?source=${encodeURIComponent(source)}${target ? `&dest=${encodeURIComponent(target)}` : ''}`, label: 'pull request' };
+  return null;
+}

@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import * as gitStatus from '../app/js/gitStatus.js';
@@ -24,6 +24,8 @@ function repo() {
   const git = (...args) => execFileSync('git', args, { cwd: dir, env, encoding: 'utf8', stdio: 'pipe' });
   git('config', 'user.name', 't');
   git('config', 'user.email', 't@example.org');
+  // Windows' Git turns line endings into CRLF on checkout: the files stay as written here.
+  git('config', 'core.autocrlf', 'false');
   git('remote', 'set-url', 'origin', remote);
   writeFileSync(path.join(dir, 'a.txt'), 'one\ntwo\nthree\n');
   git('add', '.');
@@ -102,6 +104,8 @@ test('a reset, backed up first, then undone: the commit and the changes not comm
   git('reflog', 'expire', '--expire=now', '--all');
   git('gc', '-q', '--prune=now');
   const undone = await g.act(dir, { op: 'undo', id: backup.id });
+  assert.doesNotMatch((await g.act(dir, { op: 'snapshot' })).graph, /Tracker Editor backup/, 'the backups stay out of the graph');
+  assert.doesNotMatch(await g.act(dir, { op: 'log', all: true }), /Tracker Editor backup/);
   assert.equal(git('rev-parse', 'HEAD').trim(), head);
   assert.equal(readFileSync(path.join(dir, 'a.txt'), 'utf8'), 'work in progress\n');
   assert.equal(readFileSync(path.join(dir, 'b.txt'), 'utf8'), 'b\n');
@@ -202,4 +206,55 @@ test('force push only with a lease: refused when the remote moved on unseen', as
   at('push', '-q');
   await g.act(dir, { op: 'commit', message: 'empty?', amend: true });
   await assert.rejects(g.act(dir, { op: 'push', force: true }));
+});
+
+test('work moved off main: a new branch takes the commits, main goes back, a range is copied, nothing tracks dev by mistake', async () => {
+  const { dir, git, g } = repo();
+  // Two commits on main by mistake, and an edit not committed.
+  await commit(g, dir, 'a.txt', 'one\ntwo\nthree\nfour\n', 'four');
+  await commit(g, dir, 'b.txt', 'b\n', 'add b');
+  writeFileSync(path.join(dir, 'c.txt'), 'not committed\n');
+  const tip = git('rev-parse', 'HEAD').trim();
+  await g.act(dir, { op: 'switch', name: 'feature/work', create: true });
+  const b = await g.act(dir, { op: 'backup', label: 'git branch -f main origin/main', keep: ['main'] });
+  await g.act(dir, { op: 'move-branch', name: 'main', to: 'origin/main' });
+  assert.equal(git('rev-parse', 'main').trim(), git('rev-parse', 'origin/main').trim(), 'main is as it was');
+  assert.equal(git('rev-parse', 'HEAD').trim(), tip, 'the branch has the commits');
+  assert.equal(readFileSync(path.join(dir, 'c.txt'), 'utf8'), 'not committed\n', 'and the change not committed');
+  // The branch checked out cannot be moved this way (Git refuses).
+  await assert.rejects(g.act(dir, { op: 'move-branch', name: 'feature/work', to: 'main' }));
+  // Undo puts main back on the commits.
+  await g.act(dir, { op: 'undo', id: b.id });
+  assert.equal(git('rev-parse', 'main').trim(), git('rev-parse', 'feature/work').trim());
+  await g.act(dir, { op: 'move-branch', name: 'main', to: 'origin/main' });
+  // The same commits onto an existing branch: a range.
+  await g.act(dir, { op: 'stash', untracked: true });
+  git('branch', 'dev', 'origin/main');
+  await g.act(dir, { op: 'switch', name: 'dev' });
+  await g.act(dir, { op: 'cherry-pick', rev: 'main..feature/work' });
+  assert.deepEqual(git('log', '--format=%s', '-2').trim().split('\n'), ['add b', 'four']);
+  // A branch from a remote one does not follow it: its first push makes its own.
+  await g.act(dir, { op: 'push' }).catch(() => {});
+  await g.act(dir, { op: 'fetch' });
+  await g.act(dir, { op: 'switch', name: 'feature/next', create: true, from: 'origin/main' });
+  assert.throws(() => git('rev-parse', '--abbrev-ref', '@{u}'), 'no upstream yet');
+  await commit(g, dir, 'n.txt', 'n\n', 'next');
+  await g.act(dir, { op: 'push' });
+  assert.equal(git('rev-parse', '--abbrev-ref', '@{u}').trim(), 'origin/feature/next');
+  assert.notEqual(git('rev-parse', 'origin/main').trim(), git('rev-parse', 'HEAD').trim(), 'main on the remote untouched');
+});
+
+test('a merge reverted (pushed): the side merged in is undone with a new commit', async () => {
+  const { dir, git, g } = repo();
+  await g.act(dir, { op: 'switch', name: 'feature', create: true });
+  await commit(g, dir, 'f.txt', 'f\n', 'feature');
+  await g.act(dir, { op: 'switch', name: 'main' });
+  await commit(g, dir, 'm.txt', 'm\n', 'main moves on');
+  await g.act(dir, { op: 'merge', rev: 'feature', how: 'no-ff' });
+  await assert.rejects(g.act(dir, { op: 'revert', rev: 'HEAD' }), 'a merge needs its side');
+  await g.act(dir, { op: 'abort', what: 'revert' }).catch(() => {});
+  await g.act(dir, { op: 'revert', rev: 'HEAD', mainline: 1 });
+  assert.equal(existsSync(path.join(dir, 'f.txt')), false);
+  assert.equal(existsSync(path.join(dir, 'm.txt')), true);
+  assert.match(git('log', '-1', '--format=%s'), /^Revert "Merge branch 'feature'"/);
 });

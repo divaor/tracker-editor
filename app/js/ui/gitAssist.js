@@ -5,7 +5,8 @@
 // red), each backed up first so Undo can bring things back. Steps run in order and stop at the
 // first that fails or is skipped; the results go back to the model, which explains or fixes.
 import { html, useEffect, useLayoutEffect, useRef, useState } from '../../vendor/preact-htm.js';
-import { gitMessages, outputOf, parsePlan, resultsMessage, toAction } from '../gitAssist.js';
+import { gitGuide, gitMessages, mergeRequestFor, outputOf, parsePlan, resultsMessage, toAction } from '../gitAssist.js';
+import { mergeRequestLink } from '../gitStatus.js';
 import { renderMarkdown } from '../markdown.js';
 import { connectionOf } from '../providers.js';
 import { llmClient } from '../semantic.js';
@@ -17,8 +18,18 @@ const baseName = (p) => String(p).replace(/[\\/]+$/, '').split(/[\\/]/).pop() ||
 // The model answers, looks and answers again: at most this many times for one question.
 const MAX_ROUNDS = 8;
 
+// The guide's Git sections, loaded once: the model follows them when it says what to click.
+let guideText = null;
+const loadGitGuide = () =>
+  (guideText ??= fetch('help/guide.md')
+    .then((r) => (r.ok ? r.text() : ''))
+    .then(gitGuide)
+    .catch(() => ''));
+
 const SUGGESTIONS = [
   'What state is my repository in? Anything I should do?',
+  'I made changes on main by mistake: move them to a new branch and leave main as it was',
+  'Push my work to a new feature branch and open a merge request into dev',
   'Write a commit message for what I changed, and commit it',
   'Undo my last commit, keeping the changes',
   'Bring my branch up to date with main',
@@ -38,6 +49,8 @@ const wordsSoFar = (text) => text.replace(/```[ \t]*(git-steps|json)[\s\S]*$/, '
 
 function StepCard({ s, onDecide, onUndo, waiting }) {
   const r = RISK[s.risk] ?? RISK.ask;
+  // A push's answer may say where to open a merge request (GitHub, GitLab, Bitbucket, Azure).
+  const link = s.status === 'ok' && s.step.op === 'push' ? mergeRequestLink(s.output) : null;
   return html`<div class=${`gai-step risk-${s.risk} st-${s.status}`}>
     <div class="gai-step-head">
       <span class="gai-step-icon" title=${r.label}><${Icon} name=${s.status === 'ok' ? 'check' : s.status === 'failed' ? 'xCircle' : s.status === 'running' ? 'sync' : r.icon} size=${14} /></span>
@@ -53,6 +66,8 @@ function StepCard({ s, onDecide, onUndo, waiting }) {
     </div>`}
     ${s.output && html`<details class="gai-out" open=${s.status === 'failed'}><summary class="small muted">${s.status === 'failed' ? 'What Git said' : s.look ? 'What it saw' : 'Output'}</summary><pre>${s.output}</pre></details>`}
     ${s.status === 'ok' && s.backupId && html`<div class="gai-step-actions"><button type="button" class="btn ghost xs" title="Back to how things were before this step (branch, commit, changes not committed)" onClick=${() => onUndo(s)}><${Icon} name="undo" size=${12} />Undo</button></div>`}
+    ${link && html`<div class="gai-step-actions"><button type="button" class="btn sm" title=${link.url} onClick=${() => window.open(link.url, '_blank', 'noopener')}><${Icon} name="external" size=${13} />Open the ${link.label} page</button></div>`}
+    ${s.status === 'shown' && html`<p class="muted small">For you to do (Only explain is on)</p>`}
     ${s.status === 'skipped' && html`<p class="muted small">Skipped</p>`}
     ${s.status === 'stopped' && html`<p class="muted small">Not run</p>`}
   </div>`;
@@ -73,6 +88,9 @@ export function GitAssist({ dir, start = null, actions, onClose }) {
   const [error, setError] = useState('');
   const [question, setQuestion] = useState('');
   const [repo, setRepo] = useState(null);
+  // The person does the steps themselves: the model explains, nothing runs.
+  const [explainOnly, setExplainOnly] = useState(Boolean(start?.explainOnly));
+  const lastSnap = useRef(null); // the latest snapshot (the merge request step reads its remotes)
   const history = useRef([]); // the conversation for the model (without the snapshots)
   const controller = useRef(null);
   const decide = useRef(null); // resolves the step waiting for Run / Skip / Stop
@@ -104,8 +122,9 @@ export function GitAssist({ dir, start = null, actions, onClose }) {
   const setPart = (index, part) => updateLast((t) => ({ ...t, parts: t.parts.map((p, i) => (i === index ? part : p)) }));
 
   /** One answer from the model: streamed into a new part; resolves to the plan. */
-  const modelTurn = async (userContent, snap, signal) => {
-    const messages = snap ? gitMessages(userContent, snap, history.current) : [...gitMessages('', null, history.current).slice(0, -1), { role: 'user', content: userContent }];
+  const modelTurn = async (userContent, snap, signal, opts) => {
+    if (snap) lastSnap.current = snap;
+    const messages = snap ? gitMessages(userContent, snap, history.current, opts) : [...gitMessages('', null, history.current, opts).slice(0, -1), { role: 'user', content: userContent }];
     let partIndex = -1;
     updateLast((t) => {
       partIndex = t.parts.length;
@@ -132,7 +151,7 @@ export function GitAssist({ dir, start = null, actions, onClose }) {
   };
 
   /** Runs the steps in order: looking and auto ones at once, the others after Run. */
-  const runSteps = async (steps) => {
+  const runSteps = async (steps, { explainOnly: onlyShown = false } = {}) => {
     let partIndex = -1;
     const cards = steps.map((d) => ({ ...d, status: 'pending', output: '' }));
     updateLast((t) => {
@@ -148,6 +167,10 @@ export function GitAssist({ dir, start = null, actions, onClose }) {
       const s = cards[i];
       if (stopped) {
         set(i, { status: 'stopped' });
+        continue;
+      }
+      if (onlyShown && !s.look) {
+        set(i, { status: 'shown' });
         continue;
       }
       if (s.risk === 'ask' || s.risk === 'danger') {
@@ -174,6 +197,18 @@ export function GitAssist({ dir, start = null, actions, onClose }) {
         }
         backupId = b.result.id;
       }
+      if (s.page) {
+        // Opening the merge request page: built from the remote's address, in the browser.
+        const mr = mergeRequestFor(lastSnap.current, s.step);
+        if (mr) {
+          window.open(mr.url, '_blank', 'noopener');
+          set(i, { status: 'ok', output: `Opened the ${mr.label} page: ${mr.url}` });
+        } else {
+          set(i, { status: 'failed', output: 'The remote’s site is not one the editor knows how to open a merge request on (GitHub, GitLab, Bitbucket, Azure DevOps): open it on the site.' });
+          stopped = true;
+        }
+        continue;
+      }
       const r = s.look ? await bridge.act(dir, toAction(s.step)).then((x) => (x.ok ? { ok: true, result: x.result } : { ok: false, error: { message: x.message, detail: x.stderr } })) : await actions.gitRun(dir, toAction(s.step));
       if (r.ok) set(i, { status: 'ok', output: outputOf(r.result), backupId });
       else {
@@ -195,9 +230,16 @@ export function GitAssist({ dir, start = null, actions, onClose }) {
     try {
       const first = await bridge.act(dir, { op: 'snapshot' });
       if (!first?.ok) throw new Error(first?.message ?? 'Git did not answer');
-      let plan = await modelTurn(q, first.result, signal);
+      // The guide's Git part for instructions: always for an AI provider (cached); for a model on
+      // this computer (small contexts) only when the person wants to do it themselves.
+      const opts = { explainOnly, guide: explainOnly || connectionOf(llm) !== 'local' ? await loadGitGuide() : '' };
+      let plan = await modelTurn(q, first.result, signal, opts);
       for (let round = 1; round < MAX_ROUNDS && plan.steps.length; round++) {
         const looks = plan.steps.filter((s) => s.look);
+        if (!looks.length && explainOnly) {
+          await runSteps(plan.steps, { explainOnly: true });
+          break;
+        }
         const { results, userStopped } = await runSteps(looks.length ? looks : plan.steps);
         if (userStopped || signal.aborted) break;
         setBusy('asking');
@@ -205,7 +247,7 @@ export function GitAssist({ dir, start = null, actions, onClose }) {
         const changed = !looks.length && results.some((r) => r.status === 'ok');
         const again = changed ? await bridge.act(dir, { op: 'snapshot' }) : null;
         const note = looks.length && looks.length < plan.steps.length ? '\n\n(The other steps in that block were not run: looking steps go in a block of their own. Propose them again if they are still right.)' : '';
-        plan = await modelTurn(`${resultsMessage(results.map((r) => ({ cmd: r.cmd, outcome: r.status === 'ok' ? 'ok' : r.status === 'failed' ? 'failed' : r.status === 'skipped' ? 'skipped' : 'stopped', output: r.output })))}${note}`, again?.ok ? again.result : null, signal);
+        plan = await modelTurn(`${resultsMessage(results.map((r) => ({ cmd: r.cmd, outcome: r.status === 'ok' ? 'ok' : r.status === 'failed' ? 'failed' : r.status === 'skipped' ? 'skipped' : 'stopped', output: r.output })))}${note}`, again?.ok ? again.result : null, signal, opts);
       }
     } catch (err) {
       if (err?.name !== 'AbortError') setError(err.message);
@@ -213,6 +255,7 @@ export function GitAssist({ dir, start = null, actions, onClose }) {
       setBusy(null);
       setPhase('');
       actions.gitChanged();
+      bridge.status(dir).then(setRepo, () => {});
       setTimeout(() => input.current?.focus(), 0);
     }
   };
@@ -221,6 +264,7 @@ export function GitAssist({ dir, start = null, actions, onClose }) {
     if (!confirm(`Go back to how things were before “${s.cmd}”? The branch, its commit and your changes not committed come back (what changed since is backed up too).`)) return;
     const r = await actions.gitRun(dir, { op: 'undo', id: s.backupId });
     toast(r.ok ? `Back to before ${s.cmd}` : r.error.message, { kind: r.ok ? 'info' : 'error' });
+    bridge.status(dir).then(setRepo, () => {});
     if (r.ok) history.current.push({ role: 'user', content: `(I clicked Undo on “${s.cmd}”: the repository is back to how it was before it.)` }, { role: 'assistant', content: 'Understood.' });
   };
 
@@ -275,6 +319,10 @@ export function GitAssist({ dir, start = null, actions, onClose }) {
       </div>
     </div>
     <form class="ask-custom assist-ask" onSubmit=${(e) => (e.preventDefault(), ask(question))}>
+      <div class="assist-mode" role="group" aria-label="What the model does">
+        <button type="button" class=${`chip ${explainOnly ? '' : 'on'}`} aria-pressed=${!explainOnly} disabled=${Boolean(busy)} title="The model runs the steps: easy-to-undo ones by themselves, the rest after you click Run" onClick=${() => setExplainOnly(false)}>Help me do it</button>
+        <button type="button" class=${`chip ${explainOnly ? 'on' : ''}`} aria-pressed=${explainOnly} disabled=${Boolean(busy)} title="The model tells you what to click and type; nothing runs" onClick=${() => setExplainOnly(true)}>Only explain, I’ll do it</button>
+      </div>
       <div class="assist-input">
         <textarea ref=${input} rows="2" value=${question} aria-label="Your question about Git" disabled=${Boolean(busy)}
           placeholder=${turns.length ? 'Ask a follow-up…' : 'Ask about Git, or say what to do: “move my last commit to a new branch”'}

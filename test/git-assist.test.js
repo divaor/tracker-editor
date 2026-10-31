@@ -3,11 +3,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { CHANGES_FILES, STEPS, cleanCommitMessage, commitMessageMessages, describeStep, gitMessages, gitSystem, outputOf, parsePlan, resultsMessage, snapshotText, toAction } from '../app/js/gitAssist.js';
+import { mergeRequestLink, mergeRequestUrl } from '../app/js/gitStatus.js';
+import { CHANGES_FILES, EXPLAIN_ONLY, RECIPES, STEPS, cleanCommitMessage, gitGuide, mergeRequestFor, commitMessageMessages, describeStep, gitMessages, gitSystem, outputOf, parsePlan, resultsMessage, snapshotText, toAction } from '../app/js/gitAssist.js';
 
 test('each step the model is offered is one git.cjs knows', () => {
   const source = readFileSync(new URL('../electron/git.cjs', import.meta.url), 'utf8');
   for (const op of Object.keys(STEPS)) {
+    if (STEPS[op].page) continue; // done by the page (opening the merge request page)
     const action = toAction({ op, name: 'x' });
     assert.match(source, new RegExp(`case '${action.op}':`), `${op} → ${action.op}`);
   }
@@ -137,4 +139,55 @@ test('commit messages: from the staged diff in the repository’s style, cleaned
   assert.equal(cleanCommitMessage('Here’s a commit message:\n\nFix the build'), 'Fix the build');
   assert.equal(cleanCommitMessage('Commit message: Fix the build'), 'Fix the build');
   assert.equal(cleanCommitMessage('"Fix the build"'), 'Fix the build');
+});
+
+test('moving work off main: a branch moved without switching, a range of commits copied, a merge reverted', () => {
+  const move = describeStep({ op: 'move-branch', name: 'main', to: 'origin/main' });
+  assert.equal(move.risk, 'ask');
+  assert.equal(move.backup, true);
+  assert.deepEqual(move.keep, ['main'], 'its old commit is pinned by the backup');
+  assert.equal(move.cmd, 'git branch -f main origin/main');
+  assert.equal(describeStep({ op: 'cherry-pick', rev: 'origin/main..main' }).cmd, 'git cherry-pick origin/main..main');
+  assert.match(describeStep({ op: 'cherry-pick', rev: 'a....b' }).problem, /rev/);
+  assert.equal(describeStep({ op: 'revert', rev: 'abc1234', mainline: 1 }).cmd, 'git revert --no-edit -m 1 abc1234');
+  assert.match(describeStep({ op: 'revert', rev: 'abc1234', mainline: 3 }).problem, /mainline/);
+  const mr = describeStep({ op: 'open-merge-request', source: 'feature/login', target: 'dev' });
+  assert.equal(mr.risk, 'auto');
+  assert.equal(mr.page, true);
+  assert.match(describeStep({ op: 'open-merge-request', source: '--evil' }).problem, /source/);
+});
+
+test('the merge request page: from the push’s answer, or built from the remote’s address', () => {
+  assert.deepEqual(mergeRequestLink("remote:\nremote: Create a pull request for 'topic' on GitHub by visiting:\nremote:      https://github.com/a/b/pull/new/topic\nremote:\nTo github.com:a/b.git"), { url: 'https://github.com/a/b/pull/new/topic', label: 'pull request' });
+  assert.deepEqual(mergeRequestLink('remote: To create a merge request for feat, visit:\nremote:   https://gitlab.com/t/app/-/merge_requests/new?merge_request%5Bsource_branch%5D=feat\n'), { url: 'https://gitlab.com/t/app/-/merge_requests/new?merge_request%5Bsource_branch%5D=feat', label: 'merge request' });
+  assert.equal(mergeRequestLink('Everything up-to-date'), null);
+  assert.equal(mergeRequestUrl('git@github.com:divaor/tracker-editor.git', 'feature/x', 'dev').url, 'https://github.com/divaor/tracker-editor/compare/dev...feature/x?expand=1');
+  assert.equal(mergeRequestUrl('https://github.com/a/b', 'f').url, 'https://github.com/a/b/compare/f?expand=1');
+  assert.equal(mergeRequestUrl('https://gitlab.example.com/team/app.git', 'feat', 'dev').url, 'https://gitlab.example.com/team/app/-/merge_requests/new?merge_request%5Bsource_branch%5D=feat&merge_request%5Btarget_branch%5D=dev');
+  assert.equal(mergeRequestUrl('ssh://git@bitbucket.org/team/app.git', 'f', 'dev').url, 'https://bitbucket.org/team/app/pull-requests/new?source=f&dest=dev');
+  assert.equal(mergeRequestUrl('git@ssh.dev.azure.com:v3/org/proj/repo', 'f', 'main').url, 'https://dev.azure.com/org/proj/_git/repo/pullrequestcreate?sourceRef=f&targetRef=main');
+  assert.equal(mergeRequestUrl('https://dev.azure.com/org/proj/_git/repo', 'f').url, 'https://dev.azure.com/org/proj/_git/repo/pullrequestcreate?sourceRef=f');
+  assert.equal(mergeRequestUrl('/srv/git/app.git', 'f'), null, 'a folder: no site');
+  assert.equal(mergeRequestUrl('https://git.example.org/app.git', 'f'), null, 'a site the editor does not know');
+  const snap = { remotes: ['origin git@github.com:a/b.git', 'upstream git@github.com:up/b.git'] };
+  assert.equal(mergeRequestFor(snap, { source: 'f', target: 'dev' }).url, 'https://github.com/a/b/compare/dev...f?expand=1');
+  assert.equal(mergeRequestFor(snap, { source: 'f', remote: 'upstream' }).url, 'https://github.com/up/b/compare/f?expand=1');
+  assert.equal(mergeRequestFor({ remotes: [] }, { source: 'f' }), null);
+});
+
+test('worked examples and “only explain”: the model knows the common cases and the editor’s buttons', () => {
+  // The two cases people ask most: work moved off main, and a merge request into dev.
+  assert.match(RECIPES, /create-branch at HEAD .* then move-branch main to its upstream/);
+  assert.match(RECIPES, /open-merge-request with source the branch and target dev/);
+  assert.match(RECIPES, /Never push straight to dev when a merge request is asked for/);
+  const guide = readFileSync(new URL('../app/help/guide.md', import.meta.url), 'utf8');
+  const part = gitGuide(guide);
+  assert.match(part, /^### Git: stage, commit/);
+  assert.match(part, /### Git with the model/);
+  assert.doesNotMatch(part, /^## 3\. Tabs/m, 'stops at the next section');
+  const system = gitMessages('How do I open a merge request?', null, [], { explainOnly: true, guide: part });
+  assert.match(system[0].content, /The editor's Git panel, as its guide describes it/);
+  assert.match(system[0].content, /New branch from main…/);
+  assert.ok(system.at(-1).content.includes(EXPLAIN_ONLY));
+  assert.doesNotMatch(gitMessages('q', null)[0].content, /as its guide describes it/);
 });
