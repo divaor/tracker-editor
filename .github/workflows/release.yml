@@ -40,7 +40,18 @@ jobs:
           version="v$(node -p "require('./package.json').version")"
           if [ "$version" != "$TAG" ]; then echo "::error::Tag $TAG does not match package.json ($version)"; exit 1; fi
       - run: npm ci
-      - run: npm test
+      # The failing tests become annotations (the run's logs are not always at hand).
+      - name: npm test
+        shell: bash
+        run: |
+          set +e
+          node --test --test-reporter=tap > test-output.txt 2>&1
+          code=$?
+          if [ $code -ne 0 ]; then
+            awk '/^ *not ok /{n=14} n>0 {printf "%s%%0A", $0; n--; if (n==0) print ""}' test-output.txt | grep -v '^$' | head -20 | sed 's/^/::error title=Test failed on ${{ matrix.os }}::/'
+            tail -n 30 test-output.txt
+          fi
+          exit $code
       - run: npx electron-builder --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
