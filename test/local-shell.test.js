@@ -74,7 +74,9 @@ test('each shell is started so it says its folder, its own startup files still r
   const dir = mkdtempSync(path.join(os.tmpdir(), 'hooks-'));
   const env = { PATH: '/bin' };
   const bash = integrate({ id: 'bash', args: [], integration: 'bash' }, env, dir);
-  assert.deepEqual(bash.args, ['--init-file', path.join(dir, 'bash', 'init.bash'), '-i']);
+  // Git Bash takes C:/… better than C:\… (Windows).
+  const initFile = path.join(dir, 'bash', 'init.bash');
+  assert.deepEqual(bash.args, ['--init-file', process.platform === 'win32' ? initFile.replace(/\\/g, '/') : initFile, '-i']);
   assert.ok(existsSync(path.join(dir, 'bash', 'init.bash')));
   // A login shell (macOS, Git Bash) runs the login files from the init file instead.
   assert.equal(integrate({ id: 'bash', args: ['-l'], integration: 'bash' }, env, dir).env.TRACKER_LOGIN, '1');
@@ -114,20 +116,20 @@ async function saysFolder(shell, home, extraEnv = {}) {
   return { said, own, out };
 }
 
-test('bash says its folder after a cd, and runs ~/.bashrc', { skip: !existsSync('/usr/bin/bash') && !existsSync('/bin/bash') }, async () => {
+test('bash says its folder after a cd, and runs ~/.bashrc (macOS: a login shell, ~/.bash_profile)', { skip: !existsSync('/usr/bin/bash') && !existsSync('/bin/bash') }, async () => {
   const home = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'home-')));
-  writeFileSync(path.join(home, '.bashrc'), 'export OWN_RC=yes\nPS1="$ "\n');
+  writeFileSync(path.join(home, process.platform === 'darwin' ? '.bash_profile' : '.bashrc'), 'export OWN_RC=yes\nPS1="$ "\n');
   const r = await saysFolder('bash', home);
-  assert.ok(r.said, r.out);
-  assert.ok(r.own, r.out);
+  assert.ok(r.said, `no OSC 7 after the cd:\n${r.out}`);
+  assert.ok(r.own, `own startup file not run:\n${r.out}`);
 });
 
 test('zsh says its folder after a cd, and runs ~/.zshrc', { skip: !existsSync('/usr/bin/zsh') && !existsSync('/bin/zsh') }, async () => {
   const home = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'home-')));
   writeFileSync(path.join(home, '.zshrc'), 'export OWN_RC=yes\nPROMPT="$ "\n');
   const r = await saysFolder('zsh', home);
-  assert.ok(r.said, r.out);
-  assert.ok(r.own, r.out);
+  assert.ok(r.said, `no OSC 7 after the cd:\n${r.out}`);
+  assert.ok(r.own, `own startup file not run:\n${r.out}`);
 });
 
 test('fish says its folder after a cd', { skip: !existsSync('/usr/bin/fish') }, async () => {
@@ -135,6 +137,6 @@ test('fish says its folder after a cd', { skip: !existsSync('/usr/bin/fish') }, 
   mkdirSync(path.join(home, '.config', 'fish'), { recursive: true });
   writeFileSync(path.join(home, '.config', 'fish', 'config.fish'), 'set -gx OWN_RC yes\n');
   const r = await saysFolder('fish', home, { XDG_CONFIG_HOME: path.join(home, '.config') });
-  assert.ok(r.said, r.out);
-  assert.ok(r.own, r.out);
+  assert.ok(r.said, `no OSC 7 after the cd:\n${r.out}`);
+  assert.ok(r.own, `own startup file not run:\n${r.out}`);
 });
