@@ -48,6 +48,7 @@ export function GitPanel({ dir, tick, actions, onClose }) {
   const [stashes, setStashes] = useState([]);
   const [inProgress, setInProgress] = useState(null);
   const [stashing, setStashing] = useState(null); // { message, untracked } while asking
+  const [writing, setWriting] = useState(null); // an AbortController while the model writes the message
   const box = useRef(null);
 
   const load = async () => {
@@ -85,6 +86,19 @@ export function GitPanel({ dir, tick, actions, onClose }) {
       setAmend(false);
     }
   };
+  // The model writes the message from the staged diff (in the box as it comes; Esc or the button again stops it).
+  const writeMessage = async () => {
+    if (writing) return writing.abort();
+    const controller = new AbortController();
+    setWriting(controller);
+    const before = message;
+    const text = await actions.writeCommitMessage(dir, { signal: controller.signal, onToken: (t) => setMessage(t) });
+    setWriting(null);
+    setMessage(text ?? before);
+    box.current?.focus();
+  };
+  /** Git with the model, about this repository (asking `question` at once). */
+  const askModel = (question = null) => actions.gitAssist(dir, question ? { question } : null);
   const toggleAmend = async (on) => {
     setAmend(on);
     if (on && !message.trim()) {
@@ -104,6 +118,7 @@ export function GitPanel({ dir, tick, actions, onClose }) {
     <div class="panel-head">
       <h2><${Icon} name="branch" size=${16} />Git<span class="muted small git-repo" title=${root ?? dir}>${name}</span></h2>
       <span class="spacer" />
+      ${status && html`<button type="button" class="icon-btn sm" aria-label="Ask the model about this repository" title="Ask the model: about this repository, or to do something in it" onClick=${() => askModel()}><${Icon} name="sparkle" size=${15} /></button>`}
       <button type="button" class="icon-btn sm" aria-label="Read again" title="Read again" disabled=${busy} onClick=${load}><${Icon} name="rotate" size=${15} /></button>
       <button type="button" class="icon-btn sm" aria-label="Close" onClick=${onClose}><${Icon} name="x" size=${16} /></button>
     </div>
@@ -133,6 +148,7 @@ export function GitPanel({ dir, tick, actions, onClose }) {
               <button type="button" class="btn sm" onClick=${() => run({ op: 'pull', how: 'rebase' }, 'pull')}>Pull, rebasing mine on top</button>
             </span>`}
             ${problem.kind === 'rejected' && html`<span class="git-problem-actions"><button type="button" class="btn sm" onClick=${() => run({ op: 'pull' }, 'pull')}>Pull first</button></span>`}
+            ${problem.kind !== 'unsaved' && html`<span class="git-problem-actions"><button type="button" class="btn ghost sm" title="The model looks at the repository and Git’s message, explains, and offers the steps to fix it" onClick=${() => askModel(`This failed in the Git panel: ${problem.action?.op ?? 'a Git command'}. Git said:\n${problem.message}${problem.detail ? `\n${problem.detail}` : ''}\nWhat happened, and how do I fix it?`)}><${Icon} name="sparkle" size=${13} />Ask the model</button></span>`}
           </span>
           <button type="button" class="icon-btn xs" aria-label="Dismiss" onClick=${() => setProblem(null)}><${Icon} name="x" size=${13} /></button>
         </div>`}
@@ -140,7 +156,10 @@ export function GitPanel({ dir, tick, actions, onClose }) {
         html`<div class="notice git-in-progress">
           <${Icon} name="alert" size=${16} />
           <span>A ${inProgress} is halfway${conflicts.length ? `: ${conflicts.length} file${conflicts.length === 1 ? '' : 's'} in conflict. Fix each (look for <<<<<<<), stage it, then commit` : ': commit to finish it'}, or abort it.</span>
-          <button type="button" class="btn sm" disabled=${busy} onClick=${() => run({ op: 'abort', what: inProgress }, 'abort')}>Abort the ${inProgress}</button>
+          <span class="git-problem-actions">
+            <button type="button" class="btn sm" disabled=${busy} onClick=${() => run({ op: 'abort', what: inProgress }, 'abort')}>Abort the ${inProgress}</button>
+            <button type="button" class="btn ghost sm" title="The model explains where things stand and walks you through finishing (or undoing) it" onClick=${() => askModel(`A ${inProgress} stopped halfway${conflicts.length ? ` with conflicts in ${conflicts.map(([r]) => r).join(', ')}` : ''}. Explain where things stand and help me finish it, or go back safely.`)}><${Icon} name="sparkle" size=${13} />Help me finish</button>
+          </span>
         </div>`}
         <div class="git-commit">
           <textarea ref=${box} rows="3" placeholder=${amend ? 'The last commit’s message (Ctrl+Enter amends)' : 'Message (Ctrl+Enter commits)'} value=${message} aria-label="Commit message"
@@ -154,6 +173,10 @@ export function GitPanel({ dir, tick, actions, onClose }) {
           <div class="git-commit-row">
             <label class="small git-amend"><input type="checkbox" checked=${amend} onChange=${(e) => toggleAmend(e.currentTarget.checked)} />Amend the last commit</label>
             <span class="spacer" />
+            <button type="button" class=${`icon-btn sm ${writing ? 'on' : ''}`} disabled=${busy || (!staged.length && !writing)} aria-label=${writing ? 'Stop writing the message' : 'Write the message with the model'}
+              title=${writing ? 'Stop' : staged.length ? 'The model writes the message from what is staged' : 'Stage some changes first: the model writes the message from them'} onClick=${writeMessage}>
+              <${Icon} name=${writing ? 'stop' : 'sparkle'} size=${15} />
+            </button>
             <button type="button" class="btn primary sm" disabled=${busy || !ready || (!amend && !message.trim())}
               title=${conflicts.length ? 'Fix and stage the files in conflict first' : !staged.length && !amend ? 'Stage some changes first' : ''} onClick=${commit}>
               <${Icon} name="check" size=${14} />${amend ? 'Amend' : `Commit${staged.length ? ` ${staged.length}` : ''}`}

@@ -2,7 +2,7 @@
 
 Tracker Editor is a Notepad++-style editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs. Everything is saved the moment you paste or type, on this computer with the tracker, or, once you turn on sync, in the same private GitHub data repo as the tracker, so your files are on your computers and your phone.
 
-Version 0.37.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.37.0 · Web app: https://divaor.github.io/tracker-editor/
+Version 0.38.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.38.0 · Web app: https://divaor.github.io/tracker-editor/
 
 ---
 
@@ -14,9 +14,9 @@ Download from **https://github.com/divaor/tracker-editor/releases/latest**:
 
 | System | File |
 | --- | --- |
-| Windows | `Tracker Editor Setup 0.37.0.exe` (installer) or `Tracker Editor-0.37.0-portable.exe` (no install, no admin rights) |
-| macOS | `Tracker Editor-0.37.0-arm64.dmg` |
-| Linux | `Tracker Editor-0.37.0.AppImage` |
+| Windows | `Tracker Editor Setup 0.38.0.exe` (installer) or `Tracker Editor-0.38.0-portable.exe` (no install, no admin rights) |
+| macOS | `Tracker Editor-0.38.0-arm64.dmg` |
+| Linux | `Tracker Editor-0.38.0.AppImage` |
 
 The builds are not code-signed, so the first launch warns you. On Windows, choose *More info → Run anyway*. On macOS, right-click the app → *Open*. Installing the desktop app also registers `tracker-editor://` links, so the tracker's **Open in editor** opens files straight in it.
 
@@ -27,7 +27,7 @@ The builds are not code-signed, so the first launch warns you. On Windows, choos
 The editor as an Android app, with what a web page cannot do: **Open with** from other apps, **Folders** on the phone, **servers** and **terminals**. For Android 7 and later on 64-bit phones (nearly all from the last ten years).
 
 1. Install **Obtainium** (from https://github.com/ImranR98/Obtainium/releases or F-Droid). It installs apps from their GitHub releases and keeps them up to date.
-2. In Obtainium: **Add app**, paste `https://github.com/divaor/tracker-editor`, **Add**, then **Install** (`Tracker-Editor-0.37.0.apk`). The first time, Android asks to let Obtainium install apps: allow it.
+2. In Obtainium: **Add app**, paste `https://github.com/divaor/tracker-editor`, **Add**, then **Install** (`Tracker-Editor-0.38.0.apk`). The first time, Android asks to let Obtainium install apps: allow it.
 3. Obtainium tells you when there is a new version and installs it over the old one; your files and settings stay. (Or download the `.apk` from the releases page and open it; then updates are by hand.)
 
 What the app adds:
@@ -198,6 +198,17 @@ For folders on this computer in a Git repository, with the `git` program install
 - Commands that change your files (pull, switching branches, the stash) wait while a file of the repository has edits not saved: save it first.
 - Signing in to the remote is Git's own: a credential helper (Git Credential Manager on Windows, the keychain on macOS) or an SSH key with its agent. The editor never asks for a password in a terminal; when Git cannot sign in, it says so. Git that writes is for folders on this computer; files on SSH servers and the Android app show none of it.
 - Blame, reverting a change from the bar, and Git for folders on SSH servers come in a later version.
+
+### Git with the model: ask, and have it done (desktop)
+
+Git can be confusing, and a wrong command can seem to lose work. With a model connected (Settings → Model: one on this computer or an AI provider with your API key), the model helps with the repository and can do the steps for you:
+
+- **Open it**: ✦ at the top of the Git panel, **Ask the model about Git** in the command palette (`Ctrl+Shift+P`) or **Edit → Code**. A failed Git command in the panel offers **Ask the model**, and a merge or rebase stopped halfway offers **Help me finish**.
+- **Ask anything**: "what state is my repository in?", "why can't I push?", "undo my last commit", "move my last two commits to a new branch", "bring my branch up to date with main", "squash my last three commits", "which files should not be in Git?", "I lost my changes after a reset: get them back". It sees the repository: the branch, what changed and what is staged, the branches and recent commits on all of them, the stash, the remotes (their addresses without passwords), the reflog, and when needed it reads commits, diffs and files.
+- **Steps**: what it proposes shows as cards with the exact git command. Steps that are easy to undo **run by themselves**: staging, stashing, fetching, switching or making a branch, adding lines to `.gitignore`. Steps that change history or your files **wait for Run**: commit, pull, push, merge, revert, cherry-pick, bringing back a stash. Those that rewrite history or throw work away are **red** and say what will be lost: rebase, reset, amending, deleting a branch, throwing changes away, force pushing (only ever with `--force-with-lease`, so it never overwrites commits you have not seen). **Skip** leaves a step out and **Stop** runs none of the rest; steps stop at the first that fails, and the model sees what happened and explains or fixes it.
+- **Undo**: before every step that waits for Run, the editor takes a **backup**: the commit you are on, your changes not committed, and where every branch was. **Undo** on the step brings all of it back (a deleted branch too); the undo is itself backed up. The model can use the backups too ("go back to before the rebase"). A push cannot be undone from here.
+- **Commit messages**: ✦ next to **Commit** writes the message from what is staged, in the style of the repository's recent commits; edit it, then commit.
+- It cannot run an interactive rebase, change Git's settings, sign in for you or delete files Git does not track; for those it gives the commands to type in a terminal and says what they do.
 
 ## 3. Tabs, pinning, groups and the split view
 

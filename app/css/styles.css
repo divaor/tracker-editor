@@ -10946,3 +10946,150 @@ html[data-native='android'] body:has(.edit-bar) .toasts {
 .terminal-tasks {
   margin-right: 2px;
 }
+
+/* Git with the model (ui/gitAssist.js) */
+.git-assist {
+  width: min(520px, calc(100% - 28px));
+}
+
+.gai-intro {
+  display: grid;
+  gap: 8px;
+}
+
+.gai-suggest {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.gai-suggest .chip {
+  text-align: left;
+}
+
+.gai-steps {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.gai-step {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 13px;
+}
+
+.gai-step.risk-look {
+  border-left-color: var(--text-3);
+}
+
+.gai-step.risk-auto {
+  border-left-color: var(--accent);
+}
+
+.gai-step.risk-ask {
+  border-left-color: var(--warn);
+}
+
+.gai-step.risk-danger {
+  border-left-color: var(--danger);
+}
+
+.gai-step.st-waiting {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.gai-step.risk-danger.st-waiting {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 1px var(--danger);
+}
+
+.gai-step.st-skipped,
+.gai-step.st-stopped {
+  opacity: 0.65;
+}
+
+.gai-step-head {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.gai-step-icon {
+  display: inline-flex;
+  flex: none;
+  margin-top: 2px;
+  color: var(--text-2);
+}
+
+.gai-step.st-ok .gai-step-icon {
+  color: var(--done);
+}
+
+.gai-step.st-failed .gai-step-icon,
+.gai-step.risk-danger .gai-step-icon {
+  color: var(--danger);
+}
+
+.gai-step.st-running .gai-step-icon {
+  animation: spin 1s linear infinite;
+}
+
+.gai-step-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.gai-cmd {
+  display: block;
+  overflow-x: auto;
+  padding: 3px 6px;
+  border-radius: 5px;
+  background: var(--surface);
+  font-size: 12px;
+  white-space: pre;
+}
+
+.gai-warn {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  margin: 0;
+  color: var(--danger);
+}
+
+.gai-step-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.btn.danger-solid {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+.gai-out summary {
+  cursor: pointer;
+}
+
+.gai-out pre {
+  max-height: 220px;
+  margin: 4px 0 0;
+  overflow: auto;
+  padding: 6px;
+  border-radius: 5px;
+  background: var(--surface);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

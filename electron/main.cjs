@@ -2817,6 +2817,7 @@ function buildMenu() {
             shown('Previous Problem', 'Shift+F8', 'previousProblem'),
             { type: 'separator' },
             shown('Git Panel', 'CmdOrCtrl+Shift+G', 'git-panel'),
+            item('Ask the Model about Git…', undefined, 'git-ask'),
             item('Switch Branch (Git)…', undefined, 'git-branch'),
             item('Stage the Change at the Cursor (Git)', undefined, 'git-stage-change'),
             item('Compare with the Last Commit (Git)', undefined, 'git-compare'),

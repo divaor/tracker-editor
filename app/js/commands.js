@@ -94,6 +94,7 @@ export const COMMAND_LIST = [
   { id: 'foldLevel3', group: 'Code', label: 'Fold two levels in', keys: 'Alt+3' },
   { id: 'problems', group: 'Code', label: 'Problems in this file (errors as you type)', keys: 'Mod+Shift+M', hint: 'JSON, YAML, XML, HTML, CSS and code' },
   { id: 'git-compare', group: 'Git', label: 'Compare with the last commit (Git)', only: 'desktop', hint: 'A file on this computer in a Git repository; or click ±N in the status bar' },
+  { id: 'git-ask', group: 'Git', label: 'Ask the model about Git: explain, fix, or do it for you', only: 'desktop', hint: 'It sees the repository; steps that are hard to undo wait for your Run and are backed up first. Or ✦ in the Git panel' },
   { id: 'git-panel', group: 'Git', label: 'Git panel: stage, commit, pull, push, stash', keys: 'Mod+Shift+G', only: 'desktop', hint: 'For the repository of the open file, or of the folder in Folders' },
   { id: 'git-branch', group: 'Git', label: 'Switch branch, or make a new one (Git)', only: 'desktop', hint: 'Or click the branch in the status bar' },
   { id: 'git-stage-change', group: 'Git', label: 'Stage the change at the cursor (Git)', only: 'desktop', hint: 'That block alone; or click its mark next to the line numbers' },

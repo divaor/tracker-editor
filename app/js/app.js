@@ -4,6 +4,7 @@ import { documentKind } from './docTypes.js';
 import { onLaunchFiles, takeShared } from './inbox.js';
 import { cleanModelName, filingMessages, isUntitled, MIN_NAMING_TEXT, nameFromHeading, namingMessages, parseFiling, uniqueName } from './naming.js';
 import { llmClient } from './semantic.js';
+import { connectionOf } from './providers.js';
 import { completionMessages } from './completion.js';
 import { fileLink, parseRoute, safeName } from './model.js';
 import { fileVersions, versionName } from './versions.js';
@@ -29,6 +30,8 @@ import { applyTextEdits, changedLanguages, changedLines, codeActionRows, editPla
 import { Menu } from './ui/menu.js';
 import { LanguageServersPanel, ReferencesPanel, RenameSymbolDialog, SetupServerDialog, WorkspaceEditDialog } from './ui/languageServers.js';
 import { BranchDialog, GitPanel } from './ui/gitPanel.js';
+import { GitAssist } from './ui/gitAssist.js';
+import { CHANGES_FILES, cleanCommitMessage, commitMessageMessages } from './gitAssist.js';
 import { gitError, stageBlock } from './gitStatus.js';
 import { refreshAllGit } from './gitState.js';
 import { FolderSearchPanel } from './ui/folderSearch.js';
@@ -1595,6 +1598,7 @@ export function App() {
   const [gitMenu, setGitMenu] = useState(null); // { key, line, x, y }: a changed line's mark clicked
   const [gitDir, setGitDir] = useState(null); // the folder whose repository the Git panel shows
   const [gitTick, setGitTick] = useState(0); // Git's state may have changed: the panel reads it again
+  const [gitAssist, setGitAssist] = useState(null); // Git with the model: { dir, start, id }
   const actions = useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setCompare, setUsagesOf, setSearchSeed });
   const editorOptions = (s) => ({ ...s, dark: resolvedTheme(s.theme) === 'dark', inlineSuggest: Boolean(s.inlineSuggest && s.llm.enabled && s.llm.provider !== 'async') });
 
@@ -2514,7 +2518,7 @@ export function App() {
   };
   // ---- Git that writes: the Git panel, the branch picker, a change staged from the gutter ----
   // Commands that change files on disk wait while a tab in the repository has unsaved edits.
-  const WORKING_TREE_OPS = new Set(['pull', 'switch', 'stash', 'stash-apply', 'stash-pop', 'abort']);
+  const WORKING_TREE_OPS = new Set(['pull', 'switch', 'stash', 'stash-apply', 'stash-pop', 'abort', ...CHANGES_FILES]);
   const gitBridge = () => window.desktop?.git ?? null;
   const parentDir = (p) => p.replace(/[\\/][^\\/]*$/, '') || p;
   const insideRoot = (root, p) => {
@@ -2549,7 +2553,7 @@ export function App() {
       const status = await bridge.status(dir).catch(() => null);
       const unsaved = status ? store.session.open.filter((k) => k.startsWith('d:') && !isRemotePath(k.slice(2)) && store.diskTab(k.slice(2))?.dirty && insideRoot(status.root, k.slice(2))).map((k) => store.diskTab(k.slice(2)).name) : [];
       if (unsaved.length) {
-        const what = action.op === 'switch' ? 'Switching branches' : action.op.startsWith('stash') ? 'The stash' : action.op === 'pull' ? 'Pulling' : 'This';
+        const what = action.op === 'switch' ? 'Switching branches' : action.op.startsWith('stash') ? 'The stash' : action.op === 'pull' ? 'Pulling' : `git ${action.op}`;
         return { ok: false, error: { kind: 'unsaved', message: `Save ${unsaved.slice(0, 3).join(', ')}${unsaved.length > 3 ? ` and ${unsaved.length - 3} more` : ''} first: ${what} changes files on disk.`, detail: '' } };
       }
     }
@@ -2567,6 +2571,45 @@ export function App() {
   actions.chooseBranch = (dir = null) => {
     const at = dir ?? gitFolderNow();
     if (at && gitBridge()) setDialog({ type: 'branches', dir: at });
+  };
+  /**
+   * Git with the model (Ctrl+K in the Git panel, command git-ask): about the repository `dir` is
+   * in (else the open file's or the folder's); `start.question` is asked at once.
+   */
+  actions.gitAssist = (dir = null, start = null) => {
+    if (!gitBridge()) return toast('Git with the model works in the desktop app, for folders on this computer.');
+    const at = dir ?? gitDir ?? gitFolderNow();
+    if (!at) return toast('Open a file or a folder from this computer in a Git repository first.');
+    setAssist(false);
+    setGitAssist({ dir: at, start, id: Date.now() });
+  };
+  /**
+   * A commit message for what is staged in `dir`'s repository, written by the model from the
+   * staged diff and the last subjects (their style); `onToken` gets it as it comes. Resolves to
+   * the message, or null (nothing staged, no model: a toast says so).
+   */
+  actions.writeCommitMessage = async (dir, { onToken = () => {}, signal } = {}) => {
+    const bridge = gitBridge();
+    const { llm } = getSettings();
+    if (!bridge) return null;
+    if (!llm.enabled || !llm.chatModel || connectionOf(llm) === 'async') {
+      toast('Connect a model that answers at once in Settings → Model to have it write commit messages.', { action: { label: 'Settings', run: () => actions.showSettings() } });
+      return null;
+    }
+    const [diff, stat, log] = await Promise.all([bridge.act(dir, { op: 'diff', staged: true }), bridge.act(dir, { op: 'diff', staged: true, stat: true }), bridge.act(dir, { op: 'log', count: 15 })]);
+    if (!diff?.ok || diff.result === '(no differences)') {
+      toast('Stage some changes first: the message is written from what is staged.');
+      return null;
+    }
+    const subjects = log?.ok ? String(log.result).split('\n').map((l) => l.replace(/^[*|\\/ ]*[0-9a-f]{4,40}\s+(\([^)]*\)\s+)?/, '').replace(/ · [^·]*$/, '').trim()).filter(Boolean) : [];
+    let out = '';
+    try {
+      const reply = await llmClient().chat({ model: llm.chatModel, purpose: 'commit', messages: commitMessageMessages({ diff: diff.result, stat: stat?.ok ? stat.result : '', subjects }), signal, onToken: (t) => onToken(cleanCommitMessage((out += t))) });
+      return cleanCommitMessage(reply || out);
+    } catch (err) {
+      if (err?.name !== 'AbortError') toast(`No message: ${err.message}`, { kind: 'error' });
+      return null;
+    }
   };
   /** Fetch, pull or push from a command, without the panel: a toast says how it went. */
   actions.gitQuick = async (op) => {
@@ -3453,6 +3496,7 @@ export function App() {
       'git-fetch': () => actions.gitQuick('fetch'),
       'git-pull': () => actions.gitQuick('pull'),
       'git-push': () => actions.gitQuick('push'),
+      'git-ask': () => actions.gitAssist(),
       'git-stage-change': () => actions.stageChangeAt(store.session.active, cursor?.line ?? 1),
       problems: () => actions.toggleProblems(),
       'indent-spaces': () => actions.setIndent({ tabs: false }),
@@ -3615,8 +3659,9 @@ export function App() {
         <div class="editor-area ${showPreview ? 'split' : ''} ${showPreview && previewFull ? 'preview-full' : ''} ${showSide ? 'side-split' : ''} ${compare ? 'comparing' : ''} ${settings.whereFrame && activeKey ? 'framed' : ''}"
           data-kind=${kindOfKey(activeKey) ?? undefined} ref=${areaEl} style=${{ '--split': `${((settings.splitRatio || 0.5) * 100).toFixed(2)}%` }}>
           <div class="editor-host" ref=${editorEl} />
-          ${assist && ((activeKey && !activeCompare) || assistStart) && view === 'editor' && !compare && !activeSealed && html`<${AssistPanel} key=${`${activeKey}:${assistStart?.id ?? 0}`} scope=${assistScope} start=${assistStart} hasFile=${Boolean(activeKey)} actions=${actions} onClose=${() => (setAssist(false), setAssistStart(null), hostRef.current?.focus())} />`}
-          ${!assist && modelReady && settings.assistBubble && activeKey && !activeCompare && !compare && !activeSealed && !docShown && !typingJob && html`<${AssistBubble} onOpen=${() => setAssist(true)} />`}
+          ${assist && !gitAssist && ((activeKey && !activeCompare) || assistStart) && view === 'editor' && !compare && !activeSealed && html`<${AssistPanel} key=${`${activeKey}:${assistStart?.id ?? 0}`} scope=${assistScope} start=${assistStart} hasFile=${Boolean(activeKey)} actions=${actions} onClose=${() => (setAssist(false), setAssistStart(null), hostRef.current?.focus())} />`}
+          ${gitAssist && view === 'editor' && html`<${GitAssist} key=${gitAssist.id} dir=${gitAssist.dir} start=${gitAssist.start} actions=${actions} onClose=${() => (setGitAssist(null), hostRef.current?.focus())} />`}
+          ${!assist && !gitAssist && modelReady && settings.assistBubble && activeKey && !activeCompare && !compare && !activeSealed && !docShown && !typingJob && html`<${AssistBubble} onOpen=${() => setAssist(true)} />`}
           ${showSide && splitHandle('Resize the side view')}
           ${showSide &&
           html`<div class="side-pane" aria-label=${`Side view: ${sideFile?.name ?? sideRepo.name}`}>
