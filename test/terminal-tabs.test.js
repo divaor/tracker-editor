@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { addTab, closeTab, dropIndex, EMPTY_TABS, moveTab, shown, sideOf, splitTab, tabName, unsplit, useTab } from '../app/js/terminalTabs.js';
+import { addTab, closeTab, dropIndex, EMPTY_TABS, fromWsl, moveTab, oscCwd, shown, sideOf, splitTab, tabName, unsplit, useTab } from '../app/js/terminalTabs.js';
 
 const three = () => ['a', 'b', 'c'].reduce((s, k) => addTab(s, k), EMPTY_TABS);
 
@@ -81,4 +81,26 @@ test('a tab’s name: the one given, else what it is and where', () => {
   assert.equal(tabName({ place: 'Box', runner: true }), 'Run · Box');
   assert.equal(tabName({ name: '  build  ', place: 'Box' }), 'build');
   assert.equal(tabName({ name: '   ', place: 'Box' }), 'Box');
+});
+
+test('the folder a shell says it is in', () => {
+  assert.equal(oscCwd(7, 'file://box/home/me/my%20app'), '/home/me/my app');
+  assert.equal(oscCwd(7, 'file:///srv/www/'), '/srv/www');
+  assert.equal(oscCwd(7, 'file://box/'), '/');
+  assert.equal(oscCwd(7, 'file://box/100%'), '/100%', 'not percent-encoded after all: as it came');
+  // Git Bash: file://PC/C:/Users/Me; PowerShell and cmd: 9;9 with or without quotes.
+  assert.equal(oscCwd(7, 'file://PC/C:/Users/Me', { windows: true }), 'C:\\Users\\Me');
+  assert.equal(oscCwd(9, '9;"C:\\Users\\Me\\a b"', { windows: true }), 'C:\\Users\\Me\\a b');
+  assert.equal(oscCwd(9, '9;D:\\', { windows: true }), 'D:\\');
+  assert.equal(oscCwd(633, 'P;Cwd=/home/me/x\\x3by'), '/home/me/x;y');
+  // Other OSC 9 (progress), relative paths, control characters: nothing.
+  assert.equal(oscCwd(9, '4;1;50'), null);
+  assert.equal(oscCwd(7, 'file://box'), null);
+  assert.equal(oscCwd(9, '9;relative/dir'), null);
+  assert.equal(oscCwd(7, 'file://box/a\u0007b'), null);
+  assert.equal(oscCwd(2, 'title'), null);
+  // WSL's folders as Windows reaches them.
+  assert.equal(fromWsl('/mnt/c/Users/Me'), 'C:\\Users\\Me');
+  assert.equal(fromWsl('/home/me/app', 'Ubuntu'), '\\\\wsl.localhost\\Ubuntu\\home\\me\\app');
+  assert.equal(fromWsl('/home/me'), null);
 });

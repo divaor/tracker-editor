@@ -519,11 +519,75 @@ const { StringDecoder } = require('node:string_decoder');
 const localShell = require('./localShell.cjs');
 const terminals = new Map(); // id → { stream }
 const clampInt = (n, min, max, fallback) => (Number.isFinite(Number(n)) ? Math.min(max, Math.max(min, Math.round(Number(n)))) : fallback);
+// The shells on this computer (Settings and the panel's New terminal): ids and names only; the
+// page opens one by its id. WSL's distributions are asked once (they take a moment).
+let wslDistros = null;
+const shellsHere = async () => {
+  if (process.platform === 'win32') wslDistros ??= localShell.listWslDistros();
+  return localShell.listShells({ distros: process.platform === 'win32' ? await wslDistros : [] });
+};
+ipcMain.handle('term:shells', guard(async () => (await shellsHere()).map(({ id, label, kind }) => ({ id, label, kind }))));
+// The tasks list: the project files (package.json, Makefile, pyproject.toml, composer.json) in
+// each folder given and the folders above it, up to the folder picked (here) or a Git
+// repository's top (both), at most 6 up; with the lock files next to each (which tool runs
+// them). Here only inside folders picked; on servers through their connection. The page reads
+// the tasks out of them (tasks.js).
+const TASK_FILES = ['package.json', 'Makefile', 'makefile', 'GNUmakefile', 'pyproject.toml', 'composer.json'];
+const LOCK_FILES = ['pnpm-lock.yaml', 'yarn.lock', 'bun.lockb', 'bun.lock', 'uv.lock', 'poetry.lock', 'pdm.lock'];
+ipcMain.handle('tasks:files', guard(async (_e, dirs) => {
+  const out = [];
+  const seen = new Set();
+  for (const start of (Array.isArray(dirs) ? dirs : []).filter((d) => typeof d === 'string').slice(0, 12)) {
+    const remoteDir = isRemote(start) ? remoteFiles.parseUri(start) : null;
+    const p = remoteDir ? path.posix : path;
+    let dir = remoteDir ? remoteDir.path : start;
+    let stop = '';
+    if (!remoteDir) {
+      try {
+        checkDir(dir);
+      } catch {
+        continue;
+      }
+      stop = allowedFolders.find((f) => folders.allowedBy([f], dir)) ?? '';
+    }
+    for (let up = 0; up < 6; up++) {
+      const where = remoteDir ? remoteFiles.toUri(remoteDir.id, dir) : dir;
+      if (seen.has(where)) break;
+      seen.add(where);
+      let names = [];
+      try {
+        names = remoteDir ? (await remote.list(where)).map((e) => e.name) : fs.readdirSync(dir);
+      } catch {
+        break;
+      }
+      const siblings = names.filter((n) => LOCK_FILES.includes(n));
+      for (const name of TASK_FILES.filter((n) => names.includes(n))) {
+        try {
+          const file = remoteDir ? remoteFiles.toUri(remoteDir.id, p.join(dir, name)) : path.join(dir, name);
+          const bytes = remoteDir ? await remote.readBytes(file, 1024 * 1024) : fs.statSync(file).size <= 1024 * 1024 ? fs.readFileSync(file) : null;
+          if (bytes) out.push({ dir: where, name, text: bytes.toString('utf8'), siblings });
+        } catch {
+          // unreadable: left out
+        }
+      }
+      const parent = p.dirname(dir);
+      // The top of a repository, the folder picked, or the root: no further.
+      if (names.includes('.git') || parent === dir || (!remoteDir && (!stop || path.resolve(dir) === path.resolve(stop)))) break;
+      dir = parent;
+    }
+  }
+  return out;
+}));
 ipcMain.handle('term:open', guard(async (event, connId, opts = {}) => {
   const cols = clampInt(opts.cols, 20, 500, 100);
   const rows = clampInt(opts.rows, 5, 200, 24);
   const cwd = typeof opts.cwd === 'string' ? opts.cwd : '';
-  const stream = connId === 'local' ? localShell.openLocalShell({ cols, rows, cwd }) : await remote.openShell(String(connId), { cols, rows, cwd });
+  // This computer's: the shell named (an id from term:shells), started so it says its folder.
+  const shell = typeof opts.shell === 'string' ? opts.shell.slice(0, 80) : '';
+  const stream =
+    connId === 'local'
+      ? localShell.openLocalShell({ cols, rows, cwd, shell, hooksDir: path.join(app.getPath('userData'), 'shell-integration'), distros: process.platform === 'win32' && wslDistros ? await wslDistros : [] })
+      : await remote.openShell(String(connId), { cols, rows, cwd });
   const id = crypto.randomBytes(6).toString('hex');
   const sender = event.sender;
   const decoder = new StringDecoder('utf8');
@@ -552,7 +616,7 @@ ipcMain.handle('term:open', guard(async (event, connId, opts = {}) => {
   });
   terminals.set(id, { stream, sender });
   watchTerminalPage(sender);
-  return { id, shell: stream.shell ?? 'posix' };
+  return { id, shell: stream.shell ?? 'posix', profile: stream.profile ?? '', label: stream.label ?? '', distro: stream.distro ?? '' };
 }));
 // A page reloaded or closed: its shells end (once per page, not once per shell).
 const terminalPages = new WeakSet();

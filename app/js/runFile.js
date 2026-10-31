@@ -38,8 +38,20 @@ export function shellKind(shell = '', platform = 'linux') {
   return 'posix';
 }
 
-/** A path quoted for a shell. */
+/**
+ * A Windows path as WSL sees it: C:\\x\\y → /mnt/c/x/y; \\\\wsl.localhost\\Ubuntu\\home → /home.
+ */
+export function wslPath(p) {
+  const s = String(p);
+  if (/^[A-Za-z]:[\\/]/.test(s)) return `/mnt/${s[0].toLowerCase()}${s.slice(2).replace(/\\/g, '/')}`;
+  const unc = /^\\\\(?:wsl\.localhost|wsl\$)\\[^\\]+(\\.*)?$/i.exec(s);
+  if (unc) return (unc[1] ?? '/').replace(/\\/g, '/');
+  return s.replace(/\\/g, '/');
+}
+
+/** A path quoted for a shell ('wsl': a posix shell inside WSL, the path as it sees it). */
 export function quoteFor(kind, p) {
+  if (kind === 'wsl') return quoteFor('posix', wslPath(p));
   if (kind === 'powershell') return `'${p.replace(/'/g, "''")}'`;
   if (kind === 'cmd') return `"${p.replace(/"/g, '')}"`;
   return /^[\w./@:+-]+$/.test(p) ? p : `'${p.replace(/'/g, "'\\''")}'`;
@@ -52,13 +64,14 @@ const extOf = (name) => (/\.([^.\\/]+)$/.exec(name)?.[1] ?? '').toLowerCase();
  * none here. `custom` (Settings: extension → command) wins over the defaults; `platform`
  * picks Windows or the others' default; `shell` is the terminal's (for quoting).
  */
-export function runCommandFor(file, { platform = 'linux', shell = '', custom = {} } = {}) {
+export function runCommandFor(file, { platform = 'linux', shell = '', kind: given = '', custom = {} } = {}) {
   const ext = extOf(file.name);
-  const win = platform === 'win32';
+  // WSL runs Linux's commands, wherever its terminal is opened from.
+  const win = platform === 'win32' && given !== 'wsl';
   const entry = ext in custom ? custom[ext] : RUN_COMMANDS[ext];
   const template = typeof entry === 'string' ? entry : entry ? (win ? entry.win : entry.posix) : null;
   if (!template) return null;
-  const kind = shellKind(shell, platform);
+  const kind = given || shellKind(shell, platform);
   // PowerShell runs a quoted program only after "&"; the programs here are plain names.
   return template.replace(/\{file\}/g, quoteFor(kind, file.path)).replace(/\{name\}/g, quoteFor(kind, file.name)).replace(/\{dir\}/g, quoteFor(kind, file.dir));
 }
@@ -68,6 +81,7 @@ export function runLine({ command, dir, kind = 'posix' }) {
   if (!dir) return command;
   if (kind === 'powershell') return `Set-Location -LiteralPath ${quoteFor(kind, dir)}; ${command}`;
   if (kind === 'cmd') return `cd /d ${quoteFor(kind, dir)} && ${command}`;
+  if (kind === 'wsl') return `cd -- ${quoteFor(kind, dir)} && ${command}`;
   return `cd -- ${quoteFor(kind, dir)} && ${command}`;
 }
 

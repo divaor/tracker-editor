@@ -14,11 +14,13 @@ import { getReaderState, onReaderState, setReaderHighlighter, startReading, stop
 import { getSettings, isLocal, isSyncConfigured, onSettings, resolvedTheme, saveSettings } from './settings.js';
 import { diskKey, fileKey, flush, parseKey, repoKey, store } from './store.js';
 import { diskAvailable, diskReadOnly, openDiskFiles, recheckServerTabs, reloadDiskTab, saveDiskTab, unwatchDisk, watchDiskTabs } from './diskTabs.js';
-import { isContentPath, isRemotePath, kindOfKey, remoteAddress, remoteParts, remoteRoot, toRemoteUri } from './where.js';
+import { isContentPath, isRemotePath, KINDS, kindOfKey, remoteAddress, remoteParts, remoteRoot, toRemoteUri } from './where.js';
 import { onServers, server, watchServers } from './servers.js';
 import { HostKeyDialog, PromptDialog, ServerDialog, SshImportDialog } from './ui/servers.js';
-import { activeTerminal, focusTerminal, openTerminal, retheme, runInTerminal, setActiveTerminal, setRefHandler, setToggleHandler, showTerminalOn, splitTerminals, terminals, terminalsAvailable, terminalText, unsplitTerminals } from './terminals.js';
-import { parseRunCommands, runCommandFor, runLine } from './runFile.js';
+import { activeTerminal, focusTerminal, openTerminal, retheme, runInTerminal, setActiveTerminal, setRefHandler, setToggleHandler, showTerminalOn, splitTerminals, terminalFolder, terminals, terminalsAvailable, terminalText, unsplitTerminals } from './terminals.js';
+import { parseRunCommands, quoteFor, runCommandFor, runLine } from './runFile.js';
+import { taskLine } from './tasks.js';
+import { TasksDialog } from './ui/tasks.js';
 import { findFileRefs, pastedPath, resolveRef } from './fileRefs.js';
 import { claudeAppPrompt, claudeAppUrl, codeAround, errorContextText, EXPLAIN_ERROR, explainProblemAction, fixForErrorAction, fixProblemsAction } from './errorHelp.js';
 import { TerminalPanel } from './ui/terminal.js';
@@ -2775,13 +2777,13 @@ export function App() {
   // Terminals (desktop): on this computer ('local') and on servers, in the panel under the
   // editor. Hiding it keeps the shells running.
   const [terminalShown, setTerminalShown] = useState(false);
-  actions.openTerminal = async (connId, cwd = '') => {
+  actions.openTerminal = async (connId, cwd = '', opts = {}) => {
     if (!terminalsAvailable()) return toast('Terminals work in the desktop app.', { kind: 'error' });
     const conn = server(connId);
     if (conn && conn.protocol !== 'sftp') return toast(`${conn.name} is an FTP server; terminals need SSH (SFTP).`, { kind: 'error' });
     setTerminalShown(true);
     try {
-      return await openTerminal(connId, { cwd });
+      return await openTerminal(connId, { cwd, ...opts });
     } catch (err) {
       toast(ipcMessage(err), { kind: 'error', timeout: 8000 });
       return null;
@@ -2822,7 +2824,7 @@ export function App() {
     const dir = k?.kind === 'disk' && !isContentPath(k.path) ? parentDir(k.path) : actions.localTerminalDir();
     const connId = isRemotePath(dir) ? remoteParts(dir).id : 'local';
     const cwd = isRemotePath(dir) ? remoteParts(dir).path : dir;
-    const there = terminals().find((s) => !s.exited && !s.runner && s.connId === connId && s.cwd === cwd);
+    const there = terminals().find((s) => !s.exited && !s.runner && s.connId === connId && terminalFolder(s) === cwd);
     if (!there) return actions.openTerminal(connId, cwd);
     setActiveTerminal(there);
     setTerminalShown(true);
@@ -2871,7 +2873,8 @@ export function App() {
   };
   useEffect(() => {
     setToggleHandler(() => actions.toggleTerminal());
-    setRefHandler((ref, s) => actions.openRef(ref, s.connId === 'local' ? s.cwd : toRemoteUri(s.connId, s.cwd || '/')));
+    // From the folder the shell says it is in now (after a cd), else the one it opened in.
+    setRefHandler((ref, s) => actions.openRef(ref, s.connId === 'local' ? terminalFolder(s) : toRemoteUri(s.connId, terminalFolder(s) || '/')));
   }, []);
 
   /**
@@ -2889,19 +2892,47 @@ export function App() {
     const file = { path, dir: parentDir(path), name: path.split(/[\\/]/).pop() };
     if (!remote && /\.html?$/i.test(file.name)) return window.desktop.folders.openExternal(k.path).catch((err) => toast(ipcMessage(err), { kind: 'error' }));
     const platform = remote ? 'linux' : (window.desktop.platform ?? 'linux');
-    const kind = platform === 'win32' ? 'powershell' : 'posix';
-    const command = runCommandFor(file, { platform, shell: kind === 'powershell' ? 'pwsh' : '', custom: parseRunCommands(getSettings().runCommands) });
-    if (!command) return toast(`No run command for ${file.name}. Add one for its type in Settings → Editor → Run commands.`);
+    const custom = parseRunCommands(getSettings().runCommands);
+    // Quoted for the shell the terminal runs (PowerShell, cmd, Git Bash, WSL…), known once it does.
+    const commandFor = (kind) => runCommandFor(file, { platform, kind, custom });
+    if (!commandFor(platform === 'win32' ? 'powershell' : 'posix')) return toast(`No run command for ${file.name}. Add one for its type in Settings → Editor → Run commands.`);
     hostRef.current?.flushAll(); // what was typed a moment ago counts
     if (store.diskTab(k.path)?.dirty && (await actions.saveDisk(k.path)) !== 'saved') return;
     setTerminalShown(true);
     try {
-      await runInTerminal(remote ? conn.id : 'local', { cwd: file.dir, line: runLine({ command, dir: file.dir, kind }) });
+      await runInTerminal(remote ? conn.id : 'local', { cwd: file.dir, line: (kind) => runLine({ command: commandFor(kind) ?? commandFor(platform === 'win32' ? 'powershell' : 'posix'), dir: file.dir, kind }) });
     } catch (err) {
       toast(ipcMessage(err), { kind: 'error', timeout: 8000 });
     }
   };
   useEffect(() => retheme(), [settings.theme]);
+
+  // ---- Tasks (Ctrl+Shift+B): what the projects around name for themselves, run in terminals ----
+  /** Where to look: the open file's folder, then the folders shown in Folders (on servers only SSH ones). */
+  const taskDirs = () => {
+    const k = parseKey(store.session.active);
+    const s = getSettings();
+    const dirs = [k?.kind === 'disk' && !isContentPath(k.path) ? parentDir(k.path) : '', ...(s.folderSections?.length ? s.folderSections : [s.folder])].filter(Boolean);
+    return [...new Set(dirs)].filter((d) => !isRemotePath(d) || server(remoteParts(d).id)?.protocol === 'sftp');
+  };
+  actions.showTasks = () => {
+    if (!terminalsAvailable()) return toast('Tasks run in terminals, in the desktop app.');
+    const dirs = taskDirs();
+    if (!dirs.length) return toast('Open a file or a folder of a project first: its tasks come from its package.json, Makefile, pyproject.toml or composer.json.');
+    setDialog({ type: 'tasks', dirs });
+  };
+  /** Runs a task in a terminal of its own (reused when it is run again), in its project's folder. */
+  actions.runTask = async (group, task) => {
+    const remote = isRemotePath(group.dir);
+    const connId = remote ? remoteParts(group.dir).id : 'local';
+    const dir = remote ? remoteParts(group.dir).path : group.dir;
+    setTerminalShown(true);
+    try {
+      await runInTerminal(connId, { cwd: dir, label: task.name, task: `${group.dir}/${group.file}:${task.name}`, line: (kind) => taskLine(task, dir, { kind, quote: quoteFor, line: runLine }) });
+    } catch (err) {
+      toast(ipcMessage(err), { kind: 'error', timeout: 8000 });
+    }
+  };
 
   // Filtering lines (Alt+L): the tabs whose filter bar is open.
   const [filterKeys, setFilterKeys] = useState(() => new Set());
@@ -3304,6 +3335,9 @@ export function App() {
       } else if (mod && e.shiftKey && k === 'm') {
         e.preventDefault();
         actions.toggleProblems();
+      } else if (mod && e.shiftKey && !e.altKey && k === 'b') {
+        e.preventDefault();
+        actions.showTasks();
       } else if (mod && e.shiftKey && !e.altKey && k === 'g') {
         e.preventDefault();
         actions.toggleGit();
@@ -3414,6 +3448,7 @@ export function App() {
       'command-palette': () => actions.commandPalette(),
       'git-compare': () => actions.compareWithHead(),
       'git-panel': () => actions.toggleGit(),
+      tasks: () => actions.showTasks(),
       'git-branch': () => actions.chooseBranch(),
       'git-fetch': () => actions.gitQuick('fetch'),
       'git-pull': () => actions.gitQuick('pull'),
@@ -3661,6 +3696,8 @@ export function App() {
     ${dialog?.type === 'palette' && html`<${CommandPalette} initial=${dialog.query ?? ''} onRun=${(c) => setTimeout(() => actions.command(c.id), 0)} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'symbols' && html`<${SymbolSearch} files=${store.live()} roots=${folderRoots(settings)} servers=${settings.languageServers !== false ? lspRef.current : null} initial=${dialog.query ?? ''} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'workspaceEdit' && html`<${WorkspaceEditDialog} title=${dialog.title} entries=${dialog.entries} rel=${(p) => relInFolders(p, settings)} onDone=${dialog.onDone} />`}
+    ${dialog?.type === 'tasks' &&
+    html`<${TasksDialog} dirs=${dialog.dirs} place=${(d) => (isRemotePath(d) ? (server(remoteParts(d).id)?.name ?? 'Server') : KINDS.disk.label)} onRun=${(g, t) => actions.runTask(g, t)} onClose=${() => setDialog(null)} />`}
     ${panel === 'git' && gitDir && html`<${GitPanel} key=${gitDir} dir=${gitDir} tick=${gitTick} actions=${actions} onClose=${() => setPanel(null)} />`}
     ${dialog?.type === 'branches' && html`<${BranchDialog} dir=${dialog.dir} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${gitMenu &&

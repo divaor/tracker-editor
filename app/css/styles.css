@@ -10872,3 +10872,77 @@ html[data-native='android'] body:has(.edit-bar) .toasts {
 .fcmp.phone .fcmp-head + .fcmp-head {
   border-top-width: 1px;
 }
+
+/* ---- Tasks (ui/tasks.js) ---- */
+.tasks-filter {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.tasks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 56vh;
+  overflow: auto;
+  margin-bottom: 8px;
+}
+
+.tasks-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 2px;
+  font-size: 13px;
+  font-weight: 600;
+  min-width: 0;
+}
+
+.tasks-group-head span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tasks-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tasks-row:hover,
+.tasks-row:focus-visible {
+  background: var(--hover);
+}
+
+.tasks-name {
+  flex-shrink: 0;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.tasks-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+}
+
+.terminal-tasks {
+  margin-right: 2px;
+}

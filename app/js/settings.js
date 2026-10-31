@@ -66,6 +66,9 @@ export const DEFAULT_SETTINGS = {
   lspLanguages: {},
   // Run this file (F5): "extension: command" lines that replace or add to runFile.js's.
   runCommands: '',
+  // The shell new terminals on this computer start (an id from term:shells: 'pwsh', 'gitbash',
+  // 'wsl:Ubuntu', 'zsh'…); '' = the first one found. F5 and the tasks run in it too.
+  terminalShell: '',
   indentGuides: true,
   bracketColors: true,
   stickyScroll: true,

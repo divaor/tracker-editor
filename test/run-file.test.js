@@ -1,7 +1,7 @@
 // Run this file: the command for its type, quoted for the terminal's shell.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseRunCommands, quoteFor, runCommandFor, runLine, shellKind } from '../app/js/runFile.js';
+import { parseRunCommands, quoteFor, runCommandFor, runLine, shellKind, wslPath } from '../app/js/runFile.js';
 
 const file = (p) => ({ path: p, name: p.split(/[\\/]/).pop(), dir: p.replace(/[\\/][^\\/]+$/, '') });
 
@@ -42,4 +42,14 @@ test('run commands from the settings', () => {
   assert.equal(runCommandFor(file('/w/a.ts'), { custom }), 'bun /w/a.ts');
   assert.equal(runCommandFor(file('/w/a.js'), { custom }), null, 'an empty command turns a type off');
   assert.equal(runCommandFor(file('/w/a.rb'), { custom }), 'ruby /w/a.rb', 'the others keep their defaults');
+});
+
+test('WSL: Linux commands, and the paths as WSL sees them', () => {
+  assert.equal(wslPath('C:\\Users\\Me\\my app'), '/mnt/c/Users/Me/my app');
+  assert.equal(wslPath('\\\\wsl.localhost\\Ubuntu\\home\\me'), '/home/me');
+  assert.equal(quoteFor('wsl', 'C:\\a b\\x.py'), "'/mnt/c/a b/x.py'");
+  const f = { path: 'C:\\p\\a.py', dir: 'C:\\p', name: 'a.py' };
+  assert.equal(runCommandFor(f, { platform: 'win32', kind: 'wsl' }), 'python3 /mnt/c/p/a.py');
+  assert.equal(runCommandFor(f, { platform: 'win32', kind: 'cmd' }), 'python "C:\\p\\a.py"');
+  assert.equal(runLine({ command: 'make', dir: 'C:\\p', kind: 'wsl' }), 'cd -- /mnt/c/p && make');
 });

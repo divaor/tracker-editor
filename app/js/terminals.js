@@ -2,15 +2,18 @@
 // person's own shell on this computer (main.cjs term:*), shown with xterm.js, which is
 // loaded the first time one opens. The sessions live here, outside the panel, so hiding
 // the panel keeps them; the panel attaches their screens (attach) and fits them to its size.
-// "file:line" in the output is a link (fileRefs.js) that the app opens (setRefHandler).
+// "file:line" in the output is a link (fileRefs.js) that the app opens (setRefHandler), from
+// the folder the shell says it is in (OSC 7 / 9;9 / 633, oscCwd: shells on this computer are
+// started so they say it), else the one it was opened in.
 // The tabs' order, the one in use and the panel split in two follow terminalTabs.js.
 import { outputTail } from './errorHelp.js';
 import { findFileRefs } from './fileRefs.js';
 import { getSettings, resolvedTheme } from './settings.js';
-import { addTab, closeTab, EMPTY_TABS, moveTab, shown, splitTab, unsplit, useTab } from './terminalTabs.js';
+import { addTab, closeTab, EMPTY_TABS, fromWsl, moveTab, oscCwd, shown, splitTab, unsplit, useTab } from './terminalTabs.js';
 
 let lib = null; // { Terminal, FitAddon }
-const sessions = []; // { key, id, connId, cwd, label, name, title, term, fit, el, exited, code, starting, shell, runner }, in the tabs' order
+// { key, id, connId, cwd, cwdNow, label, name, title, term, fit, el, exited, code, starting, shell (its kind), shellId, profile, profileLabel, distro, runner, task }, in the tabs' order
+const sessions = [];
 const listeners = new Set();
 let active = null;
 let tabs = EMPTY_TABS;
@@ -59,6 +62,10 @@ export const activeTerminal = () => active;
 export const splitTerminals = () => (tabs.split ? { left: byKey(tabs.split.left), right: byKey(tabs.split.right) } : null);
 /** Whether a terminal's screen shows (the one in use, or one of the two side by side). */
 export const terminalShown = (s) => Boolean(s) && shown(tabs, s.key);
+/** The folder a terminal is in now: the one its shell last said, else the one it was opened in. */
+export const terminalFolder = (s) => s?.cwdNow || s?.cwd || '';
+/** The shells on this computer ({ id, label, kind }), the default first; [] when they cannot be listed. */
+export const localShells = () => bridge()?.shells?.().catch(() => []) ?? Promise.resolve([]);
 export function onTerminals(callback) {
   listeners.add(callback);
   return () => listeners.delete(callback);
@@ -139,7 +146,7 @@ async function start(s) {
   try {
     const cols = s.term.cols || lastSize.cols;
     const rows = s.term.rows || lastSize.rows;
-    const { id, shell } = await bridge().open(s.connId, { cols, rows, cwd: s.cwd });
+    const { id, shell, profile, label, distro } = await bridge().open(s.connId, { cols, rows, cwd: s.cwd, ...(s.shellId ? { shell: s.shellId } : {}) });
     clearTimeout(slow);
     const before = takeEarly(id);
     // Closed while it was starting: the shell ends right away.
@@ -150,6 +157,9 @@ async function start(s) {
     if (waiting) s.term.write('\r\x1b[2K');
     s.id = id;
     s.shell = shell ?? 'posix';
+    s.profile = profile ?? '';
+    s.profileLabel = label ?? '';
+    s.distro = distro ?? '';
     s.exited = false;
     s.code = null;
     if (before?.data) s.term.write(before.data);
@@ -184,7 +194,7 @@ const pasteInto = (term) => navigator.clipboard.readText().then((text) => text &
  * Opens a terminal on a server (an SFTP connection's id) or on this computer ('local'),
  * in `cwd` when given. Resolves with the session once its shell runs (or shows why it did not).
  */
-export async function openTerminal(connId, { cwd = '', label = 'Terminal', runner = false } = {}) {
+export async function openTerminal(connId, { cwd = '', label = 'Terminal', runner = false, shell = null, task = '' } = {}) {
   if (!bridge()) throw new Error('Terminals work in the desktop app.');
   const { Terminal, FitAddon } = await load();
   wire();
@@ -202,7 +212,21 @@ export async function openTerminal(connId, { cwd = '', label = 'Terminal', runne
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
-  const s = { key: `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, id: null, connId, cwd, label, title: '', term, fit, el: null, exited: false, code: null, starting: false, typed: '', runner };
+  // This computer's: the shell asked for, else the one chosen in Settings (else the default).
+  const shellId = connId === 'local' ? (shell ?? getSettings().terminalShell ?? '') : '';
+  const s = { key: `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, id: null, connId, cwd, cwdNow: '', label, title: '', term, fit, el: null, exited: false, code: null, starting: false, typed: '', runner, task, shellId };
+  // The folder the shell says it is in after each command (OSC 7, 9;9, 633): links start there.
+  const windows = connId === 'local' && window.desktop?.platform === 'win32';
+  const onCwd = (ident) => (data) => {
+    let p = oscCwd(ident, data, { windows: windows && s.shell !== 'wsl' });
+    if (p && s.shell === 'wsl' && p.startsWith('/')) p = fromWsl(p, s.distro);
+    if (p && p !== s.cwdNow) {
+      s.cwdNow = p;
+      changed();
+    }
+    return Boolean(p);
+  };
+  for (const ident of [7, 9, 633]) term.parser.registerOscHandler(ident, onCwd(ident));
   term.onData((data) => {
     if (s.exited) {
       if (data === '\r' && !s.starting) {
@@ -345,17 +369,20 @@ export function closeTerminal(s) {
 
 /**
  * Types `line` and Enter into the terminal kept for running files on `connId` (one per
- * place), opened in `cwd` the first time. Resolves with the session.
+ * place; `task`: one per task), opened in `cwd` the first time. `line` may be a function of
+ * the shell's kind ('powershell', 'cmd', 'posix', 'wsl'), known once the shell runs, for the
+ * quoting. Resolves with the session.
  */
-export async function runInTerminal(connId, { cwd = '', line, label = 'Run', enter = true }) {
-  let s = sessions.find((x) => x.runner && x.connId === connId && !x.exited && !x.closed);
+export async function runInTerminal(connId, { cwd = '', line, label = 'Run', enter = true, task = '' }) {
+  let s = sessions.find((x) => x.runner && x.connId === connId && (x.task ?? '') === task && !x.exited && !x.closed);
   if (!s) {
-    s = await openTerminal(connId, { cwd, label, runner: true });
+    s = await openTerminal(connId, { cwd, label, runner: true, task });
     if (s.exited) return s; // it said why in its screen
   }
   setActiveTerminal(s);
+  const text = typeof line === 'function' ? line(s.shell ?? 'posix') : line;
   // Without `enter`, the line is typed for the person to run (Set up… for a language server).
-  const typed = enter ? `${line}\r` : line;
+  const typed = enter ? `${text}\r` : text;
   if (s.id && !s.starting) bridge().input(s.id, typed);
   else s.typed += typed;
   return s;

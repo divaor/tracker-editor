@@ -1,4 +1,5 @@
 import { html, useEffect, useState } from '../../vendor/preact-htm.js';
+import { localShells } from '../terminals.js';
 import { clampFont, DEFAULT_FONT } from '../textSize.js';
 import { DEFAULT_LLM_URL } from '../llm.js';
 import { API_PROVIDERS, connectionOf, createModelClient, keySecret, providerOf } from '../providers.js';
@@ -231,12 +232,29 @@ function EditorCard({ settings }) {
         onChange=${(v) => saveSettings({ autoName: v })} />
       <${Check} checked=${settings.autoFile} label="File new notes under a project, with tags" hint="By the model, from your projects and the tags you use. Undo is in the message."
         onChange=${(v) => saveSettings({ autoFile: v })} />
+      ${isDesktopApp() && html`<${TerminalShellField} settings=${settings} />`}
       ${isDesktopApp() &&
       html`<${Field} label="Run commands (F5)" wide hint=${`One "type: command" per line, to change or add to the built-in ones (${Object.keys(RUN_COMMANDS).filter((e) => RUN_COMMANDS[e]).slice(0, 8).join(', ')}…). {file} is the file, {dir} its folder, {name} its name; an empty command turns a type off.`}>
         <textarea class="run-commands" rows="3" spellcheck=${false} value=${settings.runCommands ?? ''} placeholder=${'py: uv run {file}\nts: bun {file}'} onInput=${(e) => saveSettings({ runCommands: e.currentTarget.value })} />
       </${Field}>`}
     </div>
   </${Card}>`;
+}
+
+/** The shell new terminals on this computer start (Run this file and the tasks too). */
+function TerminalShellField({ settings }) {
+  const [shells, setShells] = useState(null);
+  useEffect(() => {
+    localShells().then(setShells);
+  }, []);
+  if (!shells?.length) return null;
+  const known = shells.some((sh) => sh.id === settings.terminalShell);
+  return html`<${Field} label="Shell for new terminals" hint="On this computer; F5 and the tasks run in it too. The panel's + opens any of them.">
+    <select value=${known ? settings.terminalShell : ''} onChange=${(e) => saveSettings({ terminalShell: e.currentTarget.value })}>
+      <option value="">${shells[0].label} (the usual one)</option>
+      ${shells.slice(1).map((sh) => html`<option key=${sh.id} value=${sh.id}>${sh.label}</option>`)}
+    </select>
+  </${Field}>`;
 }
 
 // Desktop only: typing a selection or file into another window (Alt+T).

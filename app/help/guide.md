@@ -2,7 +2,7 @@
 
 Tracker Editor is a Notepad++-style editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs. Everything is saved the moment you paste or type, on this computer with the tracker, or, once you turn on sync, in the same private GitHub data repo as the tracker, so your files are on your computers and your phone.
 
-Version 0.36.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.36.0 · Web app: https://divaor.github.io/tracker-editor/
+Version 0.37.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.37.0 · Web app: https://divaor.github.io/tracker-editor/
 
 ---
 
@@ -14,9 +14,9 @@ Download from **https://github.com/divaor/tracker-editor/releases/latest**:
 
 | System | File |
 | --- | --- |
-| Windows | `Tracker Editor Setup 0.36.0.exe` (installer) or `Tracker Editor-0.36.0-portable.exe` (no install, no admin rights) |
-| macOS | `Tracker Editor-0.36.0-arm64.dmg` |
-| Linux | `Tracker Editor-0.36.0.AppImage` |
+| Windows | `Tracker Editor Setup 0.37.0.exe` (installer) or `Tracker Editor-0.37.0-portable.exe` (no install, no admin rights) |
+| macOS | `Tracker Editor-0.37.0-arm64.dmg` |
+| Linux | `Tracker Editor-0.37.0.AppImage` |
 
 The builds are not code-signed, so the first launch warns you. On Windows, choose *More info → Run anyway*. On macOS, right-click the app → *Open*. Installing the desktop app also registers `tracker-editor://` links, so the tracker's **Open in editor** opens files straight in it.
 
@@ -27,7 +27,7 @@ The builds are not code-signed, so the first launch warns you. On Windows, choos
 The editor as an Android app, with what a web page cannot do: **Open with** from other apps, **Folders** on the phone, **servers** and **terminals**. For Android 7 and later on 64-bit phones (nearly all from the last ten years).
 
 1. Install **Obtainium** (from https://github.com/ImranR98/Obtainium/releases or F-Droid). It installs apps from their GitHub releases and keeps them up to date.
-2. In Obtainium: **Add app**, paste `https://github.com/divaor/tracker-editor`, **Add**, then **Install** (`Tracker-Editor-0.36.0.apk`). The first time, Android asks to let Obtainium install apps: allow it.
+2. In Obtainium: **Add app**, paste `https://github.com/divaor/tracker-editor`, **Add**, then **Install** (`Tracker-Editor-0.37.0.apk`). The first time, Android asks to let Obtainium install apps: allow it.
 3. Obtainium tells you when there is a new version and installs it over the old one; your files and settings stay. (Or download the `.apk` from the releases page and open it; then updates are by hand.)
 
 What the app adds:
@@ -546,8 +546,11 @@ It types real key presses into whichever window has the focus when the countdown
 ### A terminal, and running a file
 
 - `` Ctrl+` `` (or **View → Terminal**) opens a terminal in a panel under the editor: on this computer (your usual shell: PowerShell on Windows, zsh or bash on Mac and Linux) in the folder of the open file or the one shown in Folders, or on the server when the open file is on one. **Terminal** at the right of the status bar opens one in the open file's folder (or brings back the one already there). Right-click a folder → **Open a terminal here**, or a file → **Open a terminal in its folder** (in Folders, or on a tab); **+** in the panel opens more (this computer or a server). See [Terminal on a server](#terminal-on-a-server) for the keys.
+- **Which shell**: **+** lists the shells on this computer: **PowerShell 7**, **Windows PowerShell**, **Command Prompt**, **Git Bash** and each **WSL** distribution on Windows; your own shell, **zsh**, **Bash** and **fish** on Mac and Linux. **Settings → Editor → Shell for new terminals** picks the one new terminals start with (`F5` and the tasks run in it too). When several are listed, a terminal's tab is named by its shell (**zsh · src**).
+- **The terminal follows your `cd`**: after each command the shell tells the editor which folder it is in, so its tab shows that folder and `file:line` links start from there. Bash, zsh, fish, PowerShell and the Command Prompt do this by themselves here (your own `.bashrc`, `.zshrc`, `config.fish` or PowerShell profile still run first); a shell inside WSL, or on a server, does it only when its own setup says the folder (some Linux setups do).
+- **Tasks** (`Ctrl+Shift+B`, or **Tasks** in the terminal's bar): what the project names for itself, from the open file's folder up to the folder you opened (and the folders in Folders): **npm scripts** in `package.json` (run with pnpm, yarn or bun when their lock file is there), **Makefile** targets (with their `##` comments), **pyproject.toml** scripts (taskipy's and PDM's, Poetry's, and `[project.scripts]` through uv, Poetry or PDM when their lock file is there) and **Composer** scripts. Click one (or type to find it and press `Enter`): it runs in a terminal of its own, named after it, in its project's folder; running it again types it there again. On an SSH server, its projects' tasks run there.
 - **Run this file** (`F5`, or **View → Run This File**): saves it, then runs it in a terminal of its own (**Run · …**), in the file's folder: `python3` for `.py` (`python` on Windows), `node` for `.js`, `bash` for `.sh`, PowerShell for `.ps1`, `go run`, `ruby`, `php`, `npx tsx` for `.ts` and more; `.html` opens in the browser. On a server it runs there, over SSH. Change or add commands in **Settings → Editor → Run commands**, one per line: `py: uv run {file}` (`{file}` the file, `{dir}` its folder, `{name}` its name; `js:` with nothing after turns a type off).
-- **`file:line` opens the file there**: in a terminal, the places programs print (`src/app.js:12:5`, `File "main.py", line 7`, `Foo.cs:line 42`, `a.ts(12,5)`) are links; click one. In the text (a log, a pasted stack trace), `Ctrl+click` one. Relative paths start from the terminal's folder, or the file's. Files outside the folders you opened in Folders do not open (open their folder first).
+- **`file:line` opens the file there**: in a terminal, the places programs print (`src/app.js:12:5`, `File "main.py", line 7`, `Foo.cs:line 42`, `a.ts(12,5)`) are links; click one. In the text (a log, a pasted stack trace), `Ctrl+click` one. Relative paths start from the folder the terminal is in now (after a `cd`), or the file's. Files outside the folders you opened in Folders do not open (open their folder first).
 - **When it fails**, ✦ in the terminal's bar asks the model about the error, and offers to fix the file it points to: see [Help with errors](#help-with-errors).
 
 ### Terminal tabs: names, order, two side by side (desktop)

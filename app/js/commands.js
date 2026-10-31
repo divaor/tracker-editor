@@ -114,6 +114,7 @@ export const COMMAND_LIST = [
   { id: 'outline', group: 'View', label: 'Outline and links', keys: 'Mod+Shift+O' },
   { id: 'terminal', group: 'View', label: 'Terminal (this computer or a server)', keys: 'Ctrl+`', only: 'desktop' },
   { id: 'terminal-split', group: 'View', label: 'Two terminals side by side (or one again)', only: 'desktop', hint: 'Or drag a terminal tab onto the left or right half of the panel' },
+  { id: 'tasks', group: 'Terminal', label: 'Tasks: run a project’s npm scripts, Makefile targets, pyproject or Composer scripts', keys: 'Mod+Shift+B', only: 'desktop', hint: 'From the open file’s project and the folders in Folders; each in a terminal of its own' },
   { id: 'terminal-rename', group: 'View', label: 'Rename the terminal', only: 'desktop', hint: 'Or double-click its tab' },
   { id: 'terminal-tabs-keys', group: 'View', label: 'Terminal tabs: reorder, or show one on a side of the panel', keys: 'Drag the tab', only: 'desktop', run: false, hint: 'Along the tabs to reorder; onto the left or right half to show two; a side’s name back onto the tabs shows one again' },
   { id: 'explain-error', group: 'Tools', label: 'Ask the model about the error in the terminal', only: 'desktop', hint: 'The selection, or the last output, with the code it points to' },

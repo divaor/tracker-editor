@@ -96,3 +96,50 @@ export function dropIndex(middles, x, draggedAt = -1) {
   if (draggedAt !== -1 && draggedAt < index) index -= 1;
   return index;
 }
+
+/**
+ * The folder a shell says it is in, from an escape sequence it printed: OSC 7
+ * ("file://host/path", percent-encoded), OSC 9;9 ("9;"C:\path"", PowerShell and cmd, as in
+ * ConEmu and Windows Terminal) or OSC 633 ("P;Cwd=path", VS Code's). `ident` is the OSC number,
+ * `data` what follows it. `windows`: paths on this computer are Windows paths (C:/x → C:\x).
+ * null when it says nothing usable (a relative path, nonsense, something too long).
+ */
+export function oscCwd(ident, data, { windows = false } = {}) {
+  let p = null;
+  const text = String(data ?? '');
+  if (text.length > 4096) return null;
+  if (ident === 7) {
+    const m = /^file:\/\/[^/]*(\/.*)$/i.exec(text);
+    if (!m) return null;
+    try {
+      p = decodeURIComponent(m[1]);
+    } catch {
+      p = m[1];
+    }
+    // file:///C:/x on Windows.
+    if (/^\/[A-Za-z]:([/\\]|$)/.test(p)) p = p.slice(1);
+  } else if (ident === 9) {
+    const m = /^9;(?:"([^"]*)"|(.*))$/.exec(text);
+    if (!m) return null;
+    p = m[1] ?? m[2];
+  } else if (ident === 633) {
+    const m = /^P;Cwd=(.*)$/.exec(text);
+    if (!m) return null;
+    p = m[1].replace(/\\x([0-9a-fA-F]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16))).replace(/\\\\/g, '\\');
+  } else return null;
+  if (!p || /[\u0000-\u001f]/.test(p)) return null;
+  const isWin = /^[A-Za-z]:([/\\]|$)/.test(p) || /^\\\\/.test(p);
+  if (!isWin && !p.startsWith('/')) return null;
+  if (isWin && windows) p = p.replace(/\//g, '\\').replace(/^([A-Za-z]:)$/, '$1\\');
+  return p.length > 1 && !/^[A-Za-z]:\\$/.test(p) ? p.replace(/[\\/]+$/, '') : p;
+}
+
+/**
+ * A folder inside WSL as Windows reaches it: /mnt/c/x → C:\x, others under
+ * \\wsl.localhost\<distro> (null without a distribution's name).
+ */
+export function fromWsl(p, distro = '') {
+  const m = /^\/mnt\/([a-z])(\/.*)?$/i.exec(p);
+  if (m) return `${m[1].toUpperCase()}:${(m[2] ?? '\\').replace(/\//g, '\\')}`;
+  return distro ? `\\\\wsl.localhost\\${distro}${p.replace(/\//g, '\\')}` : null;
+}

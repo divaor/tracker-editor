@@ -261,6 +261,10 @@ contextBridge.exposeInMainWorld('desktop', {
   // Terminals on servers (SSH): a shell over the server's connection.
   terminal: {
     open: (connId, opts) => ipcRenderer.invoke('term:open', connId, opts),
+    // The shells on this computer ({ id, label, kind }), to open one by its id.
+    shells: () => ipcRenderer.invoke('term:shells'),
+    // Tasks in the projects around these folders (package.json, Makefile, pyproject.toml, composer.json).
+    tasks: (dirs) => ipcRenderer.invoke('tasks:files', dirs),
     input: (id, data) => ipcRenderer.send('term:input', id, data),
     resize: (id, cols, rows) => ipcRenderer.invoke('term:resize', id, cols, rows),
     close: (id) => ipcRenderer.invoke('term:close', id),

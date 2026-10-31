@@ -10,6 +10,7 @@ import {
   copyFromTerminal,
   fitSoon,
   focusTerminal,
+  localShells,
   moveTerminal,
   onTerminals,
   pasteIntoTerminal,
@@ -17,6 +18,7 @@ import {
   setActiveTerminal,
   showTerminalOn,
   splitTerminals,
+  terminalFolder,
   terminalHasSelection,
   terminals,
   terminalShown,
@@ -77,6 +79,10 @@ export function TerminalPanel({ settings, actions, onHide }) {
   const [dropAt, setDropAt] = useState(null); // index in the strip
   const [zone, setZone] = useState(null); // 'left' | 'right' while a tab is held over the screens
   const [ratio, setRatio] = useState(() => getSettings().terminalSplit || 0.5);
+  const [shells, setShells] = useState([]); // this computer's ({ id, label, kind }), for New terminal
+  useEffect(() => {
+    localShells().then(setShells);
+  }, []);
   const list = terminals();
   const current = activeTerminal();
   const split = splitTerminals();
@@ -138,16 +144,26 @@ export function TerminalPanel({ settings, actions, onHide }) {
 
   const sftp = servers().filter((c) => c.protocol === 'sftp');
   const here = () => actions.openTerminal('local', actions.localTerminalDir());
+  // This computer's shells (the one chosen in Settings first), then the servers'.
+  const chosen = shells.find((sh) => sh.id === settings.terminalShell) ?? shells[0];
   const newItems = () => [
-    { label: KINDS.disk.label, icon: 'disk', hint: actions.localTerminalDir() || 'Your home folder', run: here },
+    ...(shells.length > 1
+      ? [
+          { heading: true, label: `${KINDS.disk.label} · ${actions.localTerminalDir() || 'your home folder'}`, key: 'h-here' },
+          ...[chosen, ...shells.filter((sh) => sh !== chosen)].map((sh) => ({ key: `sh-${sh.id}`, label: sh.label, icon: 'disk', hint: sh === chosen ? 'The usual one (Settings)' : undefined, run: () => actions.openTerminal('local', actions.localTerminalDir(), { shell: sh.id }) })),
+        ]
+      : [{ label: KINDS.disk.label, icon: 'disk', hint: actions.localTerminalDir() || 'Your home folder', run: here }]),
     { separator: true },
     ...(sftp.length
       ? sftp.map((c) => ({ label: `${c.name} (${c.user ? `${c.user}@` : ''}${c.host})`, icon: 'server', run: () => actions.openTerminal(c.id) }))
       : [{ label: 'Connect to a server…', icon: 'server', run: () => actions.editServer() }]),
   ];
-  const place = (s) => (s.connId === 'local' ? KINDS.disk.label : (server(s.connId)?.name ?? 'Server'));
-  const nameOf = (s) => tabName({ name: s.name, runner: s.runner, place: place(s), folder: s.cwd ? baseName(s.cwd) : '' });
-  const titleOf = (s) => [s.name ? `${nameOf(s)}: ${tabName({ runner: s.runner, place: place(s), folder: s.cwd ? baseName(s.cwd) : '' })}` : nameOf(s), s.cwd, s.title].filter(Boolean).join('\n');
+  // This computer's terminals by their shell when there is a choice of them; servers' by name.
+  const place = (s) => (s.connId === 'local' ? (shells.length > 1 && s.profileLabel ? s.profileLabel : KINDS.disk.label) : (server(s.connId)?.name ?? 'Server'));
+  // The folder it is in now (what the shell said after its last command).
+  const folderOf = (s) => (terminalFolder(s) ? baseName(terminalFolder(s)) : '');
+  const nameOf = (s) => (s.task && !s.name ? `${s.label} · ${folderOf(s)}` : tabName({ name: s.name, runner: s.runner, place: place(s), folder: folderOf(s) }));
+  const titleOf = (s) => [s.name ? `${nameOf(s)}: ${tabName({ runner: s.runner, place: place(s), folder: folderOf(s) })}` : nameOf(s), terminalFolder(s), s.profileLabel && s.connId === 'local' ? s.profileLabel : '', s.title].filter(Boolean).join('\n');
   const rename = (s) => setRenaming(s.key);
 
   // ---- Dragging tabs: along the strip (their order), onto a half of the screens (split) ----
@@ -269,6 +285,7 @@ export function TerminalPanel({ settings, actions, onHide }) {
       </div>
       <${MenuButton} label="New terminal" icon="plus" items=${newItems} />
       <span class="spacer" />
+      <button type="button" class="btn ghost sm terminal-tasks" title="Tasks (Ctrl+Shift+B): the project's npm scripts, Makefile targets, pyproject and Composer scripts" onClick=${() => actions.showTasks()}><${Icon} name="play" size=${14} /><span class="hide-narrow">Tasks</span></button>
       ${split
         ? html`<button type="button" class="icon-btn sm" aria-label="One terminal again" title="One terminal again (the one in use)" onClick=${() => unsplitTerminals()}><${Icon} name="terminal" size=${15} /></button>`
         : two && html`<button type="button" class="icon-btn sm" aria-label="Two side by side" title="Two side by side: this one and the next (or drag a tab onto a side)" onClick=${() => showTerminalOn(current, 'left')}><${Icon} name="panes" size=${15} /></button>`}
