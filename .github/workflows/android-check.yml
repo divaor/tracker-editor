@@ -64,6 +64,12 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: KOKORO=http://10.0.2.2:8880/v1 node scripts/android-check.mjs $(ls android/app/build/outputs/apk/debug/*.apk)
+      # Each failed check as an annotation, so the run's page (and the API) says which one.
+      - name: Failed checks
+        if: failure()
+        run: |
+          [ -f android-check/report.json ] || exit 0
+          node -e "for (const r of require('./android-check/report.json')) if (!r.ok) console.log('::error title=' + r.name.replace(/[,:\n]/g, ' ') + '::' + String(typeof r.detail === 'string' ? r.detail : JSON.stringify(r.detail)).replace(/%/g, '%25').replace(/\r/g, '').replace(/\n/g, '%0A').slice(0, 3000))"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
