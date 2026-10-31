@@ -146,19 +146,31 @@ export function changedLines(text, edits, { max = 200 } = {}) {
   });
 }
 
-/** The initialize message with the project folder as the workspace folder (some servers want one). */
-export function withWorkspaceFolder(message, name = '') {
+/**
+ * The initialize message with the workspace folders (some servers want one): `folders` as
+ * [{ uri, name }] (several projects sharing a server), or the project folder's name alone.
+ */
+export function withWorkspaceFolder(message, folders = '') {
   // (Text in a file sent along has its quotes escaped, so it never matches.)
   if (!message.includes('"method":"initialize"')) return message;
   try {
     const msg = JSON.parse(message);
     if (msg.method !== 'initialize' || !msg.params?.rootUri || msg.params.workspaceFolders) return message;
-    msg.params.workspaceFolders = [{ uri: msg.params.rootUri, name: name || decodeURIComponent(msg.params.rootUri.split('/').filter(Boolean).pop() ?? '') }];
+    msg.params.workspaceFolders = Array.isArray(folders) && folders.length ? folders : [{ uri: msg.params.rootUri, name: (typeof folders === 'string' && folders) || folderName(msg.params.rootUri) }];
     return JSON.stringify(msg);
   } catch {
     return message;
   }
 }
+
+/** A workspace folder's name: its last part ("my app" for file:///home/me/my%20app). */
+export const folderName = (uri) => decodeURIComponent(String(uri).split('/').filter(Boolean).pop() ?? '');
+
+/**
+ * How long after typing stops a file's text goes to its server: a moment for most files, longer
+ * for large ones (each change costs a large project's server more), never more than 1.5 s.
+ */
+export const syncWait = (length, base = 400) => Math.min(1500, base + Math.max(0, Math.round((length - 200_000) / 1000)));
 
 /** Two LSP ranges overlap (an empty one touching the other counts). */
 const isBefore = (a, b) => a.line < b.line || (a.line === b.line && a.character < b.character);
@@ -245,3 +257,29 @@ export function whereLabel(where) {
   if (where?.kind === 'notes') return 'on this computer, for single files';
   return 'on this computer';
 }
+
+/**
+ * Settings → Language servers, per language (setting `lspLanguages`: entry id → { off, server,
+ * formatter }): what the main process is told when a server starts, { off: [ids], prefer: { id: choice } }.
+ */
+export function languageOptions(perLanguage = {}) {
+  const off = [];
+  const prefer = {};
+  for (const [id, v] of Object.entries(perLanguage ?? {})) {
+    if (v?.off) off.push(id);
+    if (v?.server) prefer[id] = v.server;
+  }
+  return { off, prefer };
+}
+
+/** The languages whose servers must start again: turned on or off, or another server chosen. */
+export function changedLanguages(before = {}, after = {}) {
+  const ids = new Set([...Object.keys(before ?? {}), ...Object.keys(after ?? {})]);
+  return [...ids].filter((id) => Boolean(before?.[id]?.off) !== Boolean(after?.[id]?.off) || (before?.[id]?.server ?? '') !== (after?.[id]?.server ?? ''));
+}
+
+/** Which formatter goes first for a file whose server is `entry`: its language's choice, else the general one. */
+export const formatFirst = (settings, entry) => {
+  const own = entry ? settings.lspLanguages?.[entry]?.formatter : '';
+  return own === 'server' || own === 'builtin' ? own : settings.formatter === 'builtin' ? 'builtin' : 'server';
+};

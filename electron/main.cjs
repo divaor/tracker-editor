@@ -654,19 +654,20 @@ ipcMain.handle('lsp:start', guard(async (event, file, opts = {}) => {
     // On a server: the project search stops at the folder the page shows there, else at home.
     const { id, path: where } = remoteFiles.parseUri(file);
     const shown = typeof opts?.stop === 'string' && isRemote(opts.stop) ? remoteFiles.parseUri(opts.stop) : null;
-    return lspHost.start(lspSender(event.sender), where, { remote: id, stop: shown?.id === id ? shown.path : '' });
+    return lspHost.start(lspSender(event.sender), where, { remote: id, stop: shown?.id === id ? shown.path : '', languages: opts?.languages });
   }
   checkFile(file);
   // The project folder is looked for up to the folder the person picked, not above it.
   const stop = allowedFolders.find((f) => folders.allowedBy([f], file)) ?? '';
-  return lspHost.start(lspSender(event.sender), file, { stop });
+  // `languages`: Settings' languages turned off and servers chosen (entry ids; lsp.cjs checks them).
+  return lspHost.start(lspSender(event.sender), file, { stop, languages: opts?.languages });
 }));
 // A synced file or tracker document (`key`, the tab's): a file that exists only in the editor,
 // named `name`, in a folder of its own under the notes folder (empty folders: the servers look
 // around a file). The page gets the path the server knows it by.
 const lspNotesDir = () => path.join(app.getPath('userData'), 'lsp-notes');
 let lspNotesTidied = false;
-ipcMain.handle('lsp:start-note', guard(async (event, key, name) => {
+ipcMain.handle('lsp:start-note', guard(async (event, key, name, opts = {}) => {
   if (typeof key !== 'string' || typeof name !== 'string' || !key || key.length > 1000) return { none: true };
   const root = lspNotesDir();
   // What earlier runs left (empty folders only) goes first.
@@ -677,9 +678,10 @@ ipcMain.handle('lsp:start-note', guard(async (event, key, name) => {
   const safe = name.replace(/[<>:"|?*\\/\u0000-\u001f]/g, '_').replace(/^\.+$/, '_').slice(-120) || 'note';
   const dir = path.join(root, crypto.createHash('sha1').update(key).digest('hex').slice(0, 12));
   const file = path.join(dir, safe);
-  if (!lsp.catalogFor(file, [...(prefs?.lspCustom ?? []).map(lsp.customEntry), ...lsp.CATALOG])) return { none: true };
+  const { off } = lsp.cleanLanguages(opts?.languages);
+  if (!lsp.catalogFor(file, [...(prefs?.lspCustom ?? []).map(lsp.customEntry), ...lsp.CATALOG].filter((e) => !off.includes(e.id)))) return { none: true };
   fs.mkdirSync(dir, { recursive: true });
-  const info = await lspHost.start(lspSender(event.sender), file, { note: true, root });
+  const info = await lspHost.start(lspSender(event.sender), file, { note: true, root, languages: opts?.languages });
   return info.id ? { ...info, path: file } : info;
 }));
 ipcMain.on('lsp:send', (event, id, message) => {
@@ -688,6 +690,15 @@ ipcMain.on('lsp:send', (event, id, message) => {
 ipcMain.handle('lsp:stop', guard((event, id) => lspHost.stop(id, '', event.sender)));
 ipcMain.handle('lsp:restart', guard((event, id) => lspHost.restart(id, event.sender)));
 ipcMain.handle('lsp:list', guard((event) => lspHost.list(event.sender)));
+// The server said it takes workspace folders as they change: other projects may share it.
+ipcMain.handle('lsp:multi-root', guard((event, id, can) => lspHost.multiRoot(id, event.sender, can !== false)));
+// Settings → Language servers: one row per language (the person's own servers first).
+ipcMain.handle('lsp:catalog', guard(() => lsp.catalogRows([...(prefs?.lspCustom ?? []).map(lsp.customEntry), ...lsp.CATALOG])));
+// A language's settings changed: its servers stop (they start again, as now set, with the next file).
+ipcMain.handle('lsp:stop-entry', guard((event, entryId) => {
+  if (typeof entryId === 'string') lspHost.stopEntry(entryId, '', event.sender);
+  return true;
+}));
 // Servers the person adds (Settings → Language servers). The page describes one; this process
 // finds the program, asks in a native dialog naming exactly what will run, and only then keeps
 // it (prefs.json, with the program's full path, so a different one found later never runs).
@@ -2807,7 +2818,9 @@ app.whenReady().then(() => {
   const link = process.argv.find((a) => a.startsWith(`${LINK_SCHEME}://`));
   if (link) pendingRoute = routeFromLink(link);
   takeLaunch(shellIntegration.launchedPaths(process.argv, launchOptions(process.cwd())));
-  createWindow();
+  // Files given at launch opened the window already (takeLaunch): a second one would be hidden
+  // behind it with the files, the shown one empty.
+  if (!mainWindow) createWindow();
   applyShellIntegration();
   app.on('activate', showWindow);
 });

@@ -245,18 +245,67 @@ const quoteArg = (a) => (/[\s"']/.test(a) || !a ? `"${a.replace(/"/g, '\\"')}"` 
 const ipcMessage = (err) => String(err?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
 
 /**
- * Language servers (desktop): on or off, which formatter goes first, and servers of your own for
- * other languages (the main process asks you to confirm the exact program before keeping one).
+ * Each language (setting `lspLanguages`): on or off, which server when there are two, and which
+ * formatter goes first. Rows come from the main process's catalog (your own servers first).
+ */
+function LanguageRows({ settings, rows }) {
+  const per = settings.lspLanguages ?? {};
+  const set = (id, patch) => {
+    const next = { ...per[id], ...patch };
+    for (const k of Object.keys(next)) if (!next[k]) delete next[k];
+    const all = { ...getSettings().lspLanguages };
+    if (Object.keys(next).length) all[id] = next;
+    else delete all[id];
+    saveSettings({ lspLanguages: all });
+  };
+  const general = settings.formatter === 'builtin' ? 'Prettier and the editor’s own' : 'the language server';
+  return html`<details class="lang-settings">
+    <summary>Each language: on or off, its server, its formatter</summary>
+    <div class="lang-rows" role="table" aria-label="Language servers by language">
+      ${rows.map((r) => {
+        const v = per[r.id] ?? {};
+        return html`<div class=${`lang-row${v.off ? ' off' : ''}`} role="row" key=${r.id}>
+          <label class="lang-name" role="cell" title=${r.exts.join(' ')}>
+            <input type="checkbox" checked=${!v.off} onChange=${(e) => set(r.id, { off: !e.currentTarget.checked })} />
+            <span><strong>${r.label}</strong> <span class="muted small">${r.exts.slice(0, 4).join(' ')}${r.exts.length > 4 ? ' …' : ''}</span></span>
+          </label>
+          <span class="lang-pick" role="cell">
+            ${r.choices.length > 1 &&
+            html`<select value=${v.server ?? ''} disabled=${v.off} aria-label=${`${r.label}: server`} onChange=${(e) => set(r.id, { server: e.currentTarget.value })}>
+              <option value="">Usual server</option>
+              ${r.choices.map((c) => html`<option key=${c.id} value=${c.id}>${c.label}</option>`)}
+            </select>`}
+            <select value=${v.formatter ?? ''} disabled=${v.off} aria-label=${`${r.label}: formatter`} title=${`Format document: as above is ${general}; Prettier first means Prettier and the editor’s own formatters, then the server`} onChange=${(e) => set(r.id, { formatter: e.currentTarget.value })}>
+              <option value="">Format: as above</option>
+              <option value="server">Format: server first</option>
+              <option value="builtin">Format: Prettier first</option>
+            </select>
+          </span>
+        </div>`;
+      })}
+    </div>
+    <small class="muted">A language turned off gets no server (its files keep the editor’s own problems and F12). A server chosen is used when it is installed, else the other one. Changes apply to the open files at once.</small>
+  </details>`;
+}
+
+/**
+ * Language servers (desktop): on or off, which formatter goes first (also per language), and
+ * servers of your own for other languages (the main process asks you to confirm the exact
+ * program before keeping one).
  */
 function LanguageServersCard({ settings, actions }) {
   const bridge = window.desktop.lsp;
   const [list, setList] = useState(null);
+  const [rows, setRows] = useState([]); // one per language, for LanguageRows
   const [draft, setDraft] = useState(null); // the server being added or changed
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     bridge.customList().then(setList, () => setList([]));
   }, []);
+  useEffect(() => {
+    bridge.catalog?.().then(setRows, () => setRows([]));
+  }, [list]);
   // The open tabs look for their server again.
   const changed = (next) => {
     setList(next);
@@ -298,6 +347,7 @@ function LanguageServersCard({ settings, actions }) {
         <small>When that one cannot format a file, the other does.</small>
       </div>
     </div>
+    ${settings.languageServers !== false && rows.length > 0 && html`<${LanguageRows} settings=${settings} rows=${rows} />`}
     <h3 class="settings-sub">Servers of your own</h3>
     <p class="muted small">For another language (Lua, Ruby, PHP, Kotlin…): the program and the files it is for. Before it is kept, the app shows you the exact program it found and asks.</p>
     ${list?.map(

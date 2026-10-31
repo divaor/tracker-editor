@@ -271,11 +271,14 @@ contextBridge.exposeInMainWorld('desktop', {
   // Language servers (lsp.cjs) for files here, on SSH servers and synced: the page names a file, never a program.
   lsp: {
     start: (path, opts) => ipcRenderer.invoke('lsp:start', path, opts),
-    startNote: (key, name) => ipcRenderer.invoke('lsp:start-note', key, name),
+    startNote: (key, name, opts) => ipcRenderer.invoke('lsp:start-note', key, name, opts),
     send: (id, message) => ipcRenderer.send('lsp:send', id, message),
     stop: (id) => ipcRenderer.invoke('lsp:stop', id),
     restart: (id) => ipcRenderer.invoke('lsp:restart', id),
     list: () => ipcRenderer.invoke('lsp:list'),
+    multiRoot: (id, can) => ipcRenderer.invoke('lsp:multi-root', id, can),
+    catalog: () => ipcRenderer.invoke('lsp:catalog'),
+    stopEntry: (entryId) => ipcRenderer.invoke('lsp:stop-entry', entryId),
     // Servers the person adds: saving one asks in a native dialog (the page cannot add one alone).
     customList: () => ipcRenderer.invoke('lsp:custom-list'),
     customSave: (def) => ipcRenderer.invoke('lsp:custom-save', def),

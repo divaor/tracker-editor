@@ -2,7 +2,7 @@
 
 Tracker Editor is a Notepad++-style editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs. Everything is saved the moment you paste or type, on this computer with the tracker, or, once you turn on sync, in the same private GitHub data repo as the tracker, so your files are on your computers and your phone.
 
-Version 0.34.2 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.34.2 · Web app: https://divaor.github.io/tracker-editor/
+Version 0.35.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.35.0 · Web app: https://divaor.github.io/tracker-editor/
 
 ---
 
@@ -14,9 +14,9 @@ Download from **https://github.com/divaor/tracker-editor/releases/latest**:
 
 | System | File |
 | --- | --- |
-| Windows | `Tracker Editor Setup 0.34.2.exe` (installer) or `Tracker Editor-0.34.2-portable.exe` (no install, no admin rights) |
-| macOS | `Tracker Editor-0.34.2-arm64.dmg` |
-| Linux | `Tracker Editor-0.34.2.AppImage` |
+| Windows | `Tracker Editor Setup 0.35.0.exe` (installer) or `Tracker Editor-0.35.0-portable.exe` (no install, no admin rights) |
+| macOS | `Tracker Editor-0.35.0-arm64.dmg` |
+| Linux | `Tracker Editor-0.35.0.AppImage` |
 
 The builds are not code-signed, so the first launch warns you. On Windows, choose *More info → Run anyway*. On macOS, right-click the app → *Open*. Installing the desktop app also registers `tracker-editor://` links, so the tracker's **Open in editor** opens files straight in it.
 
@@ -27,7 +27,7 @@ The builds are not code-signed, so the first launch warns you. On Windows, choos
 The editor as an Android app, with what a web page cannot do: **Open with** from other apps, **Folders** on the phone, **servers** and **terminals**. For Android 7 and later on 64-bit phones (nearly all from the last ten years).
 
 1. Install **Obtainium** (from https://github.com/ImranR98/Obtainium/releases or F-Droid). It installs apps from their GitHub releases and keeps them up to date.
-2. In Obtainium: **Add app**, paste `https://github.com/divaor/tracker-editor`, **Add**, then **Install** (`Tracker-Editor-0.34.2.apk`). The first time, Android asks to let Obtainium install apps: allow it.
+2. In Obtainium: **Add app**, paste `https://github.com/divaor/tracker-editor`, **Add**, then **Install** (`Tracker-Editor-0.35.0.apk`). The first time, Android asks to let Obtainium install apps: allow it.
 3. Obtainium tells you when there is a new version and installs it over the old one; your files and settings stay. (Or download the `.apk` from the releases page and open it; then updates are by hand.)
 
 What the app adds:
@@ -160,7 +160,7 @@ The status bar names it (**TypeScript 7.0.2 · ready**, **gopls · ready**, **Py
 - **Quick fixes** (`Ctrl+.`): on a line with a problem, a 💡 shows at its end; click it, or press `Ctrl+.` anywhere, for what the server offers: add a missing import, fix a problem, extract a function… A problem's tooltip has **Quick fix…** too. **Organize imports** (`Shift+Alt+O`) sorts them and drops the unused ones.
 - **`F12`** goes to the declaration in any file of the project, **`Shift+F12`** lists the uses across files (click one to go there), and **`F2`** renames the name everywhere it is used: a dialog asks for the new name.
 - **Changes to other files** (a rename, a quick fix that moves code to a new file) are **shown first**: each file with its changed lines, ticked to take part. **Apply** changes the open files as an edit `Ctrl+Z` takes back (not saved yet), and **saves** the files that are not open, each only if it did not change since it was read; new files are made inside the folder you opened. **Undo**, in the message afterwards, takes it all back.
-- **Format document** (`Shift+Alt+F`) uses the server's formatter (gofmt for Go, clangd's for C…) when it has one; **Settings → Language servers** can put Prettier and the editor's own first. When the one chosen cannot format a file, the other does.
+- **Format document** (`Shift+Alt+F`) uses the server's formatter (gofmt for Go, clangd's for C…) when it has one; **Settings → Language servers** can put Prettier and the editor's own first, for every language or for one (below). When the one chosen cannot format a file, the other does.
 - **`Ctrl+T`** also lists the servers' symbols for the projects they run for (classes, functions…, with their kind).
 - **JSON** files are checked against their schema: `package.json`, `tsconfig.json`, `.eslintrc`, `appsettings.json` and other well-known files, or any file with a `"$schema"`. **YAML**: GitHub Actions workflows, Compose files and many others by their schema; Kubernetes files in `k8s/`, `kubernetes/` or `manifests/` folders, or named `*.k8s.yaml`; a first line `# yaml-language-server: $schema=<url>` picks one for any file.
 - A file with no server, or a name the server does not know, works as before.
@@ -169,9 +169,11 @@ The status bar names it (**TypeScript 7.0.2 · ready**, **gopls · ready**, **Py
 
 **Servers of your own** (Settings → **Language servers** → **Add a server…**): for another language (Lua, Ruby, PHP, Kotlin…), give a name, the file extensions, the program (its name, found on PATH, or its full path) and its arguments (most want `--stdio`). Before it is kept, the app shows the exact program it found and asks you to allow it; it runs only that one. **Change** and **Remove** are next to it.
 
-- Each server runs for one **project folder** (the nearest folder with a `package.json`, `go.mod`, `Cargo.toml`, `pyproject.toml`…, never above the folder you opened in Folders); JSON, CSS, HTML, YAML and Bash run once for the whole folder you opened. At most six run at once, and one stops 10 minutes after its last file is closed.
-- Click the server in the status bar for the **Language servers** panel: what runs for which folder, **Restart**, **Stop**, and **Show its messages** for when something goes wrong. A server that keeps crashing stops after three times; the status bar then offers **Start**.
-- Turn them off in **Settings → Language servers**.
+- Each server runs for a **project folder** (the nearest folder with a `package.json`, `go.mod`, `Cargo.toml`, `pyproject.toml`…, never above the folder you opened in Folders); JSON, CSS, HTML, YAML and Bash run for the whole folder you opened. At most six run at once, and one stops 10 minutes after its last file is closed.
+- **Several projects at once**: when files of two projects are open (two folders side by side in Folders, or two projects in one folder), servers that can take several folders (Pyright, gopls, rust-analyzer, jdtls, and JSON, CSS, HTML, YAML and Bash) run once for all of them, so `Ctrl+T` and renames reach across them; each project is added as you open one of its files and let go when its last one closes. Servers that cannot (TypeScript 7, clangd, csharp-ls), or projects that need a different copy (a project's own TypeScript in `node_modules`), get one each.
+- **Large projects**: the text goes to the server a little later for large files (up to 1.5 seconds after you stop typing), problems are asked for a couple of files at a time (the one in front first), and a question the editor no longer needs (problems for an older text, a `Ctrl+T` search you typed past, an answer that took too long) is cancelled on the server, so it does not keep working on it.
+- Click the server in the status bar for the **Language servers** panel: what runs for which folders, **Restart**, **Stop**, and **Show its messages** for when something goes wrong. A server that keeps crashing stops after three times; the status bar then offers **Start**.
+- Turn them off in **Settings → Language servers**, all at once or **each language** (open **Each language: on or off, its server, its formatter**): untick a language and its files get no server (they keep the editor's own problems and `F12`); a server of your own for the same files, turned off, lets the built-in one take them again. For TypeScript, pick **TypeScript 7 (tsc --lsp)** or **typescript-language-server**, and for Python **Pyright** or **basedpyright** (the other is used when the one picked is not installed). **Format** says which formatter goes first for that language. Changes apply to the open files at once.
 
 **Files on an SSH server.** A code file opened from a server (SFTP) gets the server's own language server, running **there**: it sees the project as it is on the server, with its packages, so problems, completion, `F12` and renames are the real ones. The editor looks for it in the server's login PATH, the usual install folders (`~/.local/bin`, `~/.npm-global/bin`, `~/go/bin`, `~/.cargo/bin`, `~/.dotnet/tools`…) and the project's `node_modules`. The project folder is the nearest one with its markers, up to your home folder there. When none is installed, **Set up…** types the install command into a terminal **on that server**. Only the servers in the table run there (never one of your own), nothing is installed by itself, and the status bar says where: **Pyright on Box · ready**. If the connection drops, the server stops; it starts again when the connection is back. FTP and Windows servers have none. Turn it off with **Also for files on SSH servers** in Settings.
 

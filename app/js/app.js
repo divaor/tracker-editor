@@ -23,7 +23,7 @@ import { findFileRefs, pastedPath, resolveRef } from './fileRefs.js';
 import { claudeAppPrompt, claudeAppUrl, codeAround, errorContextText, EXPLAIN_ERROR, explainProblemAction, fixForErrorAction, fixProblemsAction } from './errorHelp.js';
 import { TerminalPanel } from './ui/terminal.js';
 import { createLanguageServers } from './lsp.js';
-import { applyTextEdits, changedLines, codeActionRows, editPlan, lineOf, textChanges, uriPath } from './lspTools.js';
+import { applyTextEdits, changedLanguages, changedLines, codeActionRows, editPlan, formatFirst, languageOptions, lineOf, textChanges, uriPath } from './lspTools.js';
 import { Menu } from './ui/menu.js';
 import { LanguageServersPanel, ReferencesPanel, RenameSymbolDialog, SetupServerDialog, WorkspaceEditDialog } from './ui/languageServers.js';
 import { FolderSearchPanel } from './ui/folderSearch.js';
@@ -498,7 +498,8 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         if (!source.trim()) return;
         const formatter = formatterFor(now.name, findLanguage(now.name, now.language)?.name ?? '') ?? guessFormatter(source);
         // A language server that formats: first, unless the editor's own are chosen (Settings), or alone.
-        if ((getSettings().formatter !== 'builtin' || !formatter) && (await actions.formatWithServer?.(now.key, part))) return;
+        // Per language when Settings says so (the tab's server's language).
+        if ((formatFirst(getSettings(), lspRef.current?.entryOf(now.key)) !== 'builtin' || !formatter) && (await actions.formatWithServer?.(now.key, part))) return;
         if (!formatter) return toast(`No formatter for this kind of file. Pick its language in the status bar; these can be formatted: ${FORMATTABLE}.`, { timeout: 8000 });
         if (source.length > 5 * 1024 * 1024 && !['json', 'xml'].includes(formatter.kind)) return toast('This is too large to format here.');
         const { tabSize = 4 } = getSettings();
@@ -1838,12 +1839,23 @@ export function App() {
       // Edits a server asks for (after a command): shown first when they reach files not open.
       applyEdit: (edit, { label, server, placeOf }) => actions.applyWorkspaceEdit(edit, { title: label || `Changes from ${server}`, userEvent: 'input.codeaction', placeOf }),
       onQuickFix: () => actions.quickFix(),
+      // Settings → Language servers, per language: off, and which server.
+      languages: () => languageOptions(getSettings().lspLanguages),
     });
   }, []);
   // Turned off in Settings: the tabs lose their servers (turned on again: when shown next).
   useEffect(() => {
     if (settings.languageServers === false) lspRef.current?.detachAll();
   }, [settings.languageServers]);
+  // A language turned on or off, or another server chosen for it (Settings): its servers stop and
+  // the tabs look again (the open one at once).
+  const lspLanguagesWere = useRef(settings.lspLanguages);
+  useEffect(() => {
+    const changed = changedLanguages(lspLanguagesWere.current, settings.lspLanguages);
+    lspLanguagesWere.current = settings.lspLanguages;
+    if (!changed.length || !lspRef.current) return;
+    lspRef.current.languagesChanged(changed).then(() => attachLanguageServer(store.session.active));
+  }, [settings.lspLanguages]);
   // A server of your own added or removed (Settings): the tabs without one look again.
   useEffect(() => {
     const onChanged = () => lspRef.current?.refresh(getSettings().languageServers !== false ? store.session.active : null);

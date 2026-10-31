@@ -61,6 +61,9 @@ export const DEFAULT_SETTINGS = {
   // Files on SSH servers get theirs there; synced files and tracker documents one of their own.
   languageServersRemote: true,
   languageServersNotes: true,
+  // Per language (a catalog entry id → { off, server, formatter }): turned off, which server when
+  // there is a choice ('' = the usual one), and which formatter goes first ('' = as `formatter`).
+  lspLanguages: {},
   // Run this file (F5): "extension: command" lines that replace or add to runFile.js's.
   runCommands: '',
   indentGuides: true,

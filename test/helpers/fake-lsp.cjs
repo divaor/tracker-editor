@@ -13,7 +13,9 @@
 // - formatting: trailing spaces go, " = " around assignments (the selection only, for a range);
 // - workspace symbols: the declarations whose name contains the query;
 // - files changed on disk (didChangeWatchedFiles) and settings received are written to stderr;
-// - "Indexing" progress after start; CRASH_NOW in a file ends the process (code 3).
+// - "Indexing" progress after start; CRASH_NOW in a file ends the process (code 3);
+// - workspace folders: those given to initialize and each change are written to stderr, as are
+//   cancelled requests ($/cancelRequest); a workspace/symbol query "SLOW" is never answered.
 const fs = require('node:fs');
 const path = require('node:path');
 const { fileURLToPath, pathToFileURL } = require('node:url');
@@ -115,6 +117,7 @@ function handle(msg) {
     case 'initialize':
       root = params.rootUri ? fileURLToPath(params.rootUri) : null;
       progress = Boolean(params.capabilities?.window?.workDoneProgress);
+      process.stderr.write(`fake-lsp: folders ${(params.workspaceFolders ?? []).map((f) => f.name).join(',')}\n`);
       return reply({
         capabilities: {
           textDocumentSync: { openClose: true, change: 2 },
@@ -129,6 +132,7 @@ function handle(msg) {
           documentFormattingProvider: true,
           documentRangeFormattingProvider: true,
           workspaceSymbolProvider: true,
+          workspace: { workspaceFolders: { supported: true, changeNotifications: true } },
           ...(pull ? { diagnosticProvider: { interFileDependencies: false, workspaceDiagnostics: false } } : {}),
         },
         serverInfo: { name: 'fake-lsp', version: '1.0' },
@@ -274,7 +278,16 @@ function handle(msg) {
       }
       return reply(edits);
     }
+    case 'workspace/didChangeWorkspaceFolders': {
+      const { added = [], removed = [] } = params.event ?? {};
+      process.stderr.write(`fake-lsp: folders ${[...added.map((f) => `+${f.name}`), ...removed.map((f) => `-${f.name}`)].join(',')}\n`);
+      return;
+    }
+    case '$/cancelRequest':
+      process.stderr.write(`fake-lsp: cancelled ${params.id}\n`);
+      return;
     case 'workspace/symbol': {
+      if (params.query === 'SLOW') return;
       const found = [];
       const decl = /\b(function|def|const|let|class)\s+(\w+)/g;
       for (const [uri, text] of allFiles()) {

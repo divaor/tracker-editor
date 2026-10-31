@@ -1,7 +1,7 @@
 // Language servers, the page's pure part (lspTools.js): file URIs, problems, places, edits.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyTextEdits, changedLines, codeActionRows, editPlan, editsByFile, fileUri, locations, offsetOf, pathKey, progressText, rangesTouch, serverLabel, symbolRows, textChanges, toProblems, uriPath, withWorkspaceFolder } from '../app/js/lspTools.js';
+import { applyTextEdits, changedLines, codeActionRows, editPlan, editsByFile, fileUri, locations, offsetOf, pathKey, progressText, rangesTouch, serverLabel, symbolRows, syncWait, textChanges, toProblems, uriPath, withWorkspaceFolder, languageOptions, changedLanguages, formatFirst } from '../app/js/lspTools.js';
 
 test('paths as file URIs, the way servers write them, and back', () => {
   assert.equal(fileUri('/home/me/my app/x.ts'), 'file:///home/me/my%20app/x.ts');
@@ -118,6 +118,16 @@ test('the workspace folder goes with initialize', () => {
   assert.deepEqual(JSON.parse(withWorkspaceFolder(init)).params.workspaceFolders, [{ uri: 'file:///home/me/my%20app', name: 'my app' }]);
   const other = JSON.stringify({ jsonrpc: '2.0', method: 'initialized', params: {} });
   assert.equal(withWorkspaceFolder(other), other);
+  // Several projects sharing a server: all of them.
+  const two = [{ uri: 'file:///w/a', name: 'a' }, { uri: 'file:///w/b', name: 'b' }];
+  assert.deepEqual(JSON.parse(withWorkspaceFolder(init, two)).params.workspaceFolders, two);
+});
+
+test('large files go to their server less often', () => {
+  assert.equal(syncWait(10_000), 400);
+  assert.equal(syncWait(200_000), 400);
+  assert.equal(syncWait(700_000), 900);
+  assert.equal(syncWait(50_000_000), 1500);
 });
 
 test('code actions: quick fixes first, the preferred on top, disabled ones last', () => {
@@ -149,4 +159,17 @@ test('workspace symbols as rows', () => {
     { title: 'helper', kind: 'function', container: 'util', uri: 'file:///w/util.ts', line: 5, column: 17 },
     { title: 'Store', kind: 'class', container: '', uri: 'file:///w/store.ts', line: 1, column: 1 },
   ]);
+});
+
+test('each language in Settings: what the main process is told, what restarts, which formatter first', () => {
+  const per = { python: { off: true }, typescript: { server: 'tls', formatter: 'builtin' }, go: { formatter: 'server' } };
+  assert.deepEqual(languageOptions(per), { off: ['python'], prefer: { typescript: 'tls' } });
+  assert.deepEqual(languageOptions(undefined), { off: [], prefer: {} });
+  // Only turning on or off, or another server, starts servers again (not the formatter).
+  assert.deepEqual(changedLanguages(per, { ...per, go: {} }), []);
+  assert.deepEqual(changedLanguages(per, { typescript: { formatter: 'builtin' }, go: { formatter: 'server' } }).sort(), ['python', 'typescript']);
+  assert.equal(formatFirst({ formatter: 'server', lspLanguages: per }, 'typescript'), 'builtin');
+  assert.equal(formatFirst({ formatter: 'builtin', lspLanguages: per }, 'go'), 'server');
+  assert.equal(formatFirst({ formatter: 'builtin', lspLanguages: per }, 'rust'), 'builtin');
+  assert.equal(formatFirst({ lspLanguages: per }, ''), 'server');
 });

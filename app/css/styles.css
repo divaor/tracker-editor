@@ -9578,6 +9578,65 @@ button.help-command:focus-visible {
   margin-top: 8px;
 }
 
+/* Settings → Language servers, each language: name and switch, then its server and formatter. */
+.lang-settings {
+  margin: 8px 0 4px;
+}
+
+.lang-settings > summary {
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.lang-rows {
+  display: flex;
+  flex-direction: column;
+  margin: 4px 0 6px;
+}
+
+.lang-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+  min-width: 0;
+}
+
+.lang-row.off .lang-name strong {
+  color: var(--text-3);
+}
+
+.lang-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.lang-name > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lang-pick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.lang-pick select {
+  width: auto;
+  max-width: 100%;
+  min-height: 32px;
+  padding: 4px 30px 4px 9px;
+  font-size: 13px;
+}
+
 /* Touch screens: the edit bar in the status bar's place while you type (ui/editBar.js). Its
    buttons never take the focus; a row that does not fit scrolls sideways. On iOS the keyboard
    covers the page's bottom, so `--edit-lift` lifts the bar above it. */

@@ -25,7 +25,7 @@ export function LanguageServersPanel({ lsp, tick, actions, onClose }) {
       <button type="button" class="icon-btn sm" aria-label="Close" onClick=${onClose}><${Icon} name="x" size=${16} /></button>
     </div>
     <div class="panel-body">
-      <p class="muted small">They check code as you type and know its types: TypeScript and JavaScript, Python, Go, Rust, C and C++, Java, C#, JSON, CSS, HTML, YAML, Bash, and servers of your own (Settings → Language servers). Each runs for one project folder: on this computer for files opened from Folders, on the server for files on an SSH server, and here for your synced files, each on its own.</p>
+      <p class="muted small">They check code as you type and know its types: TypeScript and JavaScript, Python, Go, Rust, C and C++, Java, C#, JSON, CSS, HTML, YAML, Bash, and servers of your own (Settings → Language servers). Each runs for a project folder (several projects share one when the server can take them all, as Pyright, gopls and rust-analyzer can): on this computer for files opened from Folders, on the server for files on an SSH server, and here for your synced files, each on its own.</p>
       ${rows === null && html`<p class="muted small">Loading…</p>`}
       ${rows?.length === 0 && html`<p class="muted small">None running. Open a code file (.ts, .py, .go, .json…) from Folders to start one.</p>`}
       ${rows?.map((r) => {
@@ -36,7 +36,7 @@ export function LanguageServersPanel({ lsp, tick, actions, onClose }) {
             <strong>${r.server}</strong>
             <span class="muted small">${serverLabel({ server: '', state, progress: r.progress }).slice(3)}</span>
           </div>
-          <p class="muted small server-root" title=${r.root}>${r.where?.kind === 'notes' ? 'Your synced files' : baseName(r.root)} · ${whereLabel(r.where)} · ${r.files === 1 ? '1 open file' : `${r.files} open files`}</p>
+          <p class="muted small server-root" title=${(r.folders ?? [r.root]).join('\n')}>${r.where?.kind === 'notes' ? 'Your synced files' : (r.folders ?? [r.root]).map(baseName).join(', ')} · ${whereLabel(r.where)} · ${r.files === 1 ? '1 open file' : `${r.files} open files`}</p>
           ${(r.failed || r.message) && html`<p class="small server-message">${r.failed || r.message}</p>`}
           <div class="server-actions">
             <button type="button" class="btn sm" onClick=${() => actions.restartLanguageServer(r.id)}><${Icon} name="rotate" size=${14} />Restart</button>

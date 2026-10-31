@@ -9,18 +9,24 @@
 //   as TypeScript 7 does) and reach the editor's own linter (serverProblems), so the
 //   Problems list, F8 and the model's Explain / Fix work the same;
 // - completion, hover and signature help are the client's; F12, Shift+F12 and F2 ask here
-//   (definition, references, rename) and app.js shows the answers.
+//   (definition, references, rename) and app.js shows the answers;
+// - several projects share one server when it takes workspace folders and the same program
+//   serves them (lsp.cjs decides; this side adds and removes the folders as tabs come and go);
+// - large projects: the text goes over later for large files, problems are asked for a few
+//   files at a time (the shown one first), and answers no longer wanted are cancelled.
 import DOMPurify from '../vendor/purify.js';
 import { Decoration, EditorView, keymap, languages, LanguageDescription, StateEffect, StateField, ViewPlugin, WidgetType } from '../vendor/cm/codemirror.js';
 import { serverProblems } from './editor.js';
-import { fileUri, locations, pathKey, progressText, rangesTouch, symbolRows, toProblems, uriPath, withWorkspaceFolder } from './lspTools.js';
+import { fileUri, folderName, locations, pathKey, progressText, rangesTouch, symbolRows, syncWait, toProblems, uriPath, withWorkspaceFolder } from './lspTools.js';
 import { isRemotePath, remoteParts, toRemoteUri } from './where.js';
 
 let lib = null; // the client's module, once loaded
 const loadLib = async () => (lib ??= await import('../vendor/cm/lsp.js'));
 
 const IDLE_STOP = 10 * 60 * 1000; // a server with no open file stops after this
-const SYNC_WAIT = 400; // ms after typing before the server gets the text
+const SYNC_WAIT = 400; // ms after typing before the server gets the text (more for large files: syncWait)
+const PULLS_AT_ONCE = 2; // problems asked for this many files at a time per server
+const SYMBOLS_WAIT = 4000; // Ctrl+T does not wait longer for a server
 
 // Code blocks in hovers and docs: highlighted with the language when it is loaded.
 const highlightFor = (name) => LanguageDescription.matchLanguageName(languages, name, true)?.support?.language ?? null;
@@ -140,12 +146,13 @@ function serverPath(where, uri, root = '') {
  * The language servers of the open tabs. `host`: the editor host; `onChange()`: their
  * state changed (the status bar, the panel); `onMessage(text, kind)`: a server's message
  * worth a toast; `openPath(path)`: shows a file (a definition in another file); `openKey(key)`:
- * shows a tab (a synced file).
+ * shows a tab (a synced file); `languages()`: Settings' choices per language, { off: [entry
+ * ids], prefer: { entry id: choice } }, sent with each start (the main process checks them).
  */
-export function createLanguageServers({ host, bridge = window.desktop?.lsp, onChange = () => {}, onMessage = () => {}, openPath, openKey, applyEdit, onQuickFix }) {
+export function createLanguageServers({ host, bridge = window.desktop?.lsp, onChange = () => {}, onMessage = () => {}, openPath, openKey, applyEdit, onQuickFix, languages = () => ({}) }) {
   const servers = new Map(); // id → server
   const connecting = new Map(); // id → Promise<server>
-  // key → { how, id, uri, languageId } | { how, pending } | { how, none } | { how, missing } | { how, stopped }
+  // key → { how, id, uri, languageId, root } | { how, pending } | { how, none } | { how, missing } | { how, stopped }
   // `how`: { path, stop } (a disk tab, here or on a server) or { note } (a synced file's name).
   const tabs = new Map();
   if (!bridge) return null;
@@ -161,7 +168,11 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
     if (status.generation > s.generation) {
       s.generation = status.generation;
       s.ready = false;
+      s.multi = false;
       s.tasks.clear();
+      // Questions to the old process end with their timeout; the new one starts afresh.
+      s.pulls = { queue: [], running: 0, asking: new Map() };
+      s.symbols = null;
       s.client.disconnect();
       s.client.connect(s.transport);
       watchInit(s);
@@ -189,6 +200,13 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
         if (s.generation !== generation) return;
         s.ready = true;
         s.failed = '';
+        // Whether it takes workspace folders as they change: then other projects may share it
+        // (lsp.cjs waits to hear this before starting another server for them).
+        const folders = s.client.serverCapabilities?.workspace?.workspaceFolders;
+        if (s.info.multiRoot && !s.multi) {
+          s.multi = Boolean(folders?.supported && folders.changeNotifications);
+          bridge.multiRoot?.(s.id, s.multi);
+        }
         // Settings for servers that read them when told (the JSON server); the others ask again.
         if (s.info.settings) s.client.notification('workspace/didChangeConfiguration', { settings: s.info.settings });
         // Problems for the files open now, when the server is asked for them.
@@ -199,6 +217,7 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
         if (s.generation !== generation) return;
         s.failed = err?.message ?? String(err);
         s.log.push(`[initialize] ${s.failed}`);
+        if (s.info.multiRoot) bridge.multiRoot?.(s.id, false);
         onChange();
       },
     );
@@ -208,11 +227,15 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
 
   async function connect(info) {
     const { LSPClient, Workspace, ChangeSet } = await loadLib();
-    const s = { id: info.id, info, state: info.state, message: info.message, generation: info.generation, ready: false, failed: '', tasks: new Map(), diags: new Map(), log: [], idle: null };
+    const s = { id: info.id, info, state: info.state, message: info.message, generation: info.generation, ready: false, failed: '', tasks: new Map(), diags: new Map(), log: [], idle: null, multi: false };
+    // Its workspace folders: the project it was started for, then others that share it.
+    s.folders = [workspaceFolder(info.root)];
+    // Problems asked for: files waiting, how many are being asked, the request of each (to cancel it).
+    s.pulls = { queue: [], running: 0, asking: new Map() };
     const handlers = new Set();
-    const folderName = String(info.root).split(/[\\/]/).filter(Boolean).pop() ?? '';
     s.transport = {
-      send: (message) => bridge.send(s.id, withWorkspaceFolder(message, folderName)),
+      // After a restart, initialize names every folder it had.
+      send: (message) => bridge.send(s.id, withWorkspaceFolder(message, s.folders)),
       subscribe: (h) => handlers.add(h),
       unsubscribe: (h) => handlers.delete(h),
     };
@@ -228,7 +251,7 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
         // Settings the server asks for: the catalog's for its sections (lsp.cjs), else none.
         const answer = (result) => bridge.send(s.id, JSON.stringify({ jsonrpc: '2.0', id: msg.id, result }));
         if (msg.id != null && msg.method === 'workspace/configuration') return answer((msg.params?.items ?? []).map((item) => info.settings?.[item.section] ?? null));
-        if (msg.id != null && msg.method === 'workspace/workspaceFolders') return answer([{ uri: fileUri(info.root), name: folderName }]);
+        if (msg.id != null && msg.method === 'workspace/workspaceFolders') return answer(s.folders.map(({ uri, name }) => ({ uri, name })));
         // Its knowledge changed (another file did): the files' problems are asked for again.
         if (msg.id != null && msg.method === 'workspace/diagnostic/refresh') {
           for (const file of s.client.workspace.files) pull(s, file);
@@ -293,6 +316,7 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
         if (!file) return;
         this.files = this.files.filter((f) => f !== file);
         s.diags.delete(uri);
+        unpull(s, file);
         if (this.client.connected) this.client.didClose(uri);
         if (!this.files.length) {
           clearTimeout(s.idle);
@@ -333,8 +357,16 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
       }
     }
 
-    s.client = new LSPClient({
-      rootUri: fileUri(info.root),
+    // A request the server did not answer in time is cancelled there too (the library only
+    // gives up on it here), so a large project's server stops working on it.
+    class Client extends LSPClient {
+      timeoutRequest(req) {
+        if (this.requests.includes(req)) this.notification('$/cancelRequest', { id: req.id });
+        super.timeoutRequest(req);
+      }
+    }
+    s.client = new Client({
+      rootUri: s.folders[0].uri,
       initializationOptions: info.init ?? undefined,
       workspace: (client) => new TabWorkspace(client),
       timeout: 15000,
@@ -383,16 +415,74 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
     if (key) host.refreshProblems(key);
   }
 
-  // Servers that answer only when asked (textDocument/diagnostic): asked after each change.
-  async function pull(s, file) {
+  // Servers that answer only when asked (textDocument/diagnostic): asked after each change, a
+  // few files at a time (the shown ones first), and a question about an older text is cancelled.
+  function pull(s, file) {
     if (!s.ready || !s.client.serverCapabilities?.diagnosticProvider) return;
-    const ask = (file.asked = (file.asked ?? 0) + 1);
-    try {
-      const result = await s.client.request('textDocument/diagnostic', { textDocument: { uri: file.uri } });
-      if (ask === file.asked && result?.kind === 'full') setProblems(s, file.uri, result.items);
-    } catch {
-      // cancelled or not supported after all: the push ones (if any) stay
+    const { queue, asking } = s.pulls;
+    const before = asking.get(file.uri);
+    if (before) {
+      asking.delete(file.uri);
+      s.client.cancelRequest(before);
     }
+    if (!queue.includes(file)) {
+      if (file.view) queue.unshift(file);
+      else queue.push(file);
+    }
+    nextPull(s);
+  }
+  function nextPull(s) {
+    const pulls = s.pulls;
+    while (pulls.running < PULLS_AT_ONCE && pulls.queue.length) {
+      const file = pulls.queue.shift();
+      if (!s.client.workspace.getFile(file.uri)) continue;
+      const params = { textDocument: { uri: file.uri } };
+      const ask = (file.asked = (file.asked ?? 0) + 1);
+      pulls.asking.set(file.uri, params);
+      pulls.running++;
+      s.client
+        .request('textDocument/diagnostic', params)
+        .then(
+          (result) => {
+            if (ask === file.asked && result?.kind === 'full') setProblems(s, file.uri, result.items);
+          },
+          () => {
+            // cancelled or not supported after all: the push ones (if any) stay
+          },
+        )
+        .finally(() => {
+          if (pulls.asking.get(file.uri) === params) pulls.asking.delete(file.uri);
+          pulls.running--;
+          nextPull(s);
+        });
+    }
+  }
+  // A file the server forgets: nothing more is asked about it.
+  function unpull(s, file) {
+    s.pulls.queue = s.pulls.queue.filter((f) => f !== file);
+    const asking = s.pulls.asking.get(file.uri);
+    if (asking) {
+      s.pulls.asking.delete(file.uri);
+      if (s.client.connected) s.client.cancelRequest(asking);
+    }
+  }
+
+  // Workspace folders: a project's folder as the server knows it, and the ones a server has.
+  const workspaceFolder = (root) => ({ root, uri: fileUri(root), name: folderName(fileUri(root)) });
+  function addFolder(s, root) {
+    if (!root || s.folders.some((f) => f.root === root)) return;
+    const folder = workspaceFolder(root);
+    s.folders.push(folder);
+    if (s.ready && s.client.connected) s.client.notification('workspace/didChangeWorkspaceFolders', { event: { added: [{ uri: folder.uri, name: folder.name }], removed: [] } });
+    onChange();
+  }
+  // The last tab of a project that shared the server closed: the server lets the folder go.
+  function dropFolder(s, root) {
+    if (!root || root === s.folders[0].root || [...tabs.values()].some((t) => t.id === s.id && t.root === root)) return;
+    const folder = s.folders.find((f) => f.root === root);
+    if (!folder) return;
+    s.folders = s.folders.filter((f) => f !== folder);
+    if (s.ready && s.client.connected) s.client.notification('workspace/didChangeWorkspaceFolders', { event: { added: [], removed: [{ uri: folder.uri, name: folder.name }] } });
   }
 
   // In each tab with a server: its text goes to the server a moment after typing stops.
@@ -405,12 +495,13 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
         update(u) {
           if (!u.docChanged) return;
           clearTimeout(this.timer);
+          // Large files wait longer: each change costs the server more.
           this.timer = setTimeout(() => {
             if (!s.client.connected) return;
             s.client.sync();
             const file = s.client.workspace.getFile(uri);
             if (file) pull(s, file);
-          }, SYNC_WAIT);
+          }, syncWait(u.state.doc.length, SYNC_WAIT));
         }
         destroy() {
           clearTimeout(this.timer);
@@ -471,7 +562,8 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
     onChange();
     let info;
     try {
-      info = how.note ? await bridge.startNote(key, how.note) : await bridge.start(how.path, how.stop ? { stop: how.stop } : undefined);
+      const opts = { languages: languages() };
+      info = how.note ? await bridge.startNote(key, how.note, opts) : await bridge.start(how.path, how.stop ? { ...opts, stop: how.stop } : opts);
     } catch (err) {
       if (tabs.get(key)?.how === how) tabs.set(key, { how, stopped: String(err?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '') });
       return onChange();
@@ -486,7 +578,9 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
     }
     if (tabs.get(key)?.how !== how) return;
     const uri = how.note ? fileUri(info.path) : serverUri(info.where, how.path);
-    tabs.set(key, { how, id: s.id, uri, languageId: info.languageId });
+    // Another project sharing the server: it becomes one of its workspace folders.
+    if (!how.note) addFolder(s, info.root);
+    tabs.set(key, { how, id: s.id, uri, languageId: info.languageId, root: info.root, entry: info.entry });
     clearTimeout(s.idle);
     host.setLanguageServer(key, extensionFor(s, uri, info.languageId));
     onChange();
@@ -516,7 +610,11 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
     forget(key) {
       const t = tabs.get(key);
       tabs.delete(key);
-      if (t?.id) servers.get(t.id)?.client.workspace.forget(t.uri);
+      const s = t?.id ? servers.get(t.id) : null;
+      if (s) {
+        s.client.workspace.forget(t.uri);
+        dropFolder(s, t.root);
+      }
       if (t) onChange();
     },
     /** The tab goes on without a server (a synced file encrypted): it forgets the file, and the editor its help. */
@@ -576,7 +674,7 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
       const rows = await bridge.list();
       return rows.map((r) => {
         const s = servers.get(r.id);
-        return { ...r, files: s?.client.workspace.files.length ?? 0, ready: Boolean(s?.ready), progress: s ? progressText(s.tasks) : '', log: s?.log.slice(-40) ?? [], failed: s?.failed ?? '' };
+        return { ...r, folders: s ? s.folders.map((f) => f.root) : [r.root], files: s?.client.workspace.files.length ?? 0, ready: Boolean(s?.ready), progress: s ? progressText(s.tasks) : '', log: s?.log.slice(-40) ?? [], failed: s?.failed ?? '' };
       });
     },
     /** Language servers turned off: every tab without one, every server stopped. */
@@ -586,6 +684,20 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
       for (const s of [...servers.values()]) bridge.stop(s.id);
       onChange();
     },
+    /**
+     * A language's settings changed (on or off, its server): the tabs it served let it go, its
+     * servers stop, and every tab without a server looks again (the shown one, `key`, at once).
+     */
+    async languagesChanged(entryIds, key) {
+      for (const [k, t] of [...tabs]) {
+        const s = t.id ? servers.get(t.id) : null;
+        if (s && entryIds.includes(s.info.entry)) this.detach(k);
+      }
+      await Promise.all(entryIds.map((id) => bridge.stopEntry?.(id)));
+      return this.refresh(key);
+    },
+    /** The catalog entry of a tab's server ('typescript', 'custom:lua'…), or ''. */
+    entryOf: (key) => serverOf(key)?.s?.info.entry ?? '',
     restart: (id) => bridge.restart(id),
     stop: (id) => bridge.stop(id),
 
@@ -648,9 +760,16 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
     async workspaceSymbols(query) {
       const ready = [...servers.values()].filter((s) => s.ready && s.client.serverCapabilities?.workspaceSymbolProvider);
       const asked = ready.map(async (s) => {
-        // A slow server is not waited for (its late answer, or its timeout, goes nowhere).
-        const asking = s.client.request('workspace/symbol', { query }).catch(() => null);
-        const result = await Promise.race([asking, new Promise((resolve) => setTimeout(() => resolve(null), 4000))]);
+        // The question before (Ctrl+T typed on) is cancelled; so is one a slow server has not
+        // answered in time (it is not waited for).
+        if (s.symbols) s.client.cancelRequest(s.symbols);
+        const params = (s.symbols = { query });
+        let timer;
+        const asking = s.client.request('workspace/symbol', params).catch(() => null);
+        const result = await Promise.race([asking, new Promise((resolve) => (timer = setTimeout(() => resolve(undefined), SYMBOLS_WAIT)))]);
+        clearTimeout(timer);
+        if (s.symbols === params) s.symbols = null;
+        if (result === undefined) s.client.cancelRequest(params);
         return symbolRows(result)
           .slice(0, 300)
           .map((r) => ({ ...r, path: s.info.where?.kind === 'notes' ? null : serverPath(s.info.where, r.uri, s.info.root), server: s.info.server }))
@@ -669,7 +788,8 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
         const where = s.info.where ?? { kind: 'local' };
         if (!s.ready || where.kind === 'notes') continue;
         // A server sees its own place's files, under the paths it knows them by.
-        const own = (p) => (where.kind === 'remote' ? isRemotePath(p) && remoteParts(p).id === where.id && inside(s.info.root, remoteParts(p).path) : !isRemotePath(p) && inside(s.info.root, p));
+        const inFolders = (p) => s.folders.some((f) => inside(f.root, p));
+        const own = (p) => (where.kind === 'remote' ? isRemotePath(p) && remoteParts(p).id === where.id && inFolders(remoteParts(p).path) : !isRemotePath(p) && inFolders(p));
         const changes = [...created.map((p) => ({ p, type: 1 })), ...paths.map((p) => ({ p, type: 2 }))].filter(({ p }) => own(p)).map(({ p, type }) => ({ uri: serverUri(where, p), type }));
         if (changes.length) s.client.notification('workspace/didChangeWatchedFiles', { changes });
       }

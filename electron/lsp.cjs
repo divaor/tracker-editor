@@ -113,6 +113,9 @@ const npmServer = (name, args, label = name) =>
  * or patterns (*.csproj), or groups of them tried in order (the first group anywhere up the
  * folders wins). `programs`: the names find() looks for, which a probe on an SSH server asks
  * about (npmServer's carry theirs); `verify`: those run with --version there first.
+ * `choices`: the ways find() can go, which Settings lets the person pick (`ctx.prefer`).
+ * `multiRoot`: one server can take several project folders (workspace folders), so the projects
+ * open at once share it when the same program serves them.
  */
 const CATALOG = [
   {
@@ -122,6 +125,12 @@ const CATALOG = [
     languageIds: { '.ts': 'typescript', '.mts': 'typescript', '.cts': 'typescript', '.tsx': 'typescriptreact', '.js': 'javascript', '.mjs': 'javascript', '.cjs': 'javascript', '.jsx': 'javascriptreact' },
     markers: ['tsconfig.json', 'jsconfig.json', 'package.json'],
     programs: ['typescript-language-server', 'tsc'],
+    multiRoot: true,
+    // Settings → Language servers can pick one (ctx.prefer); the other is used when it is missing.
+    choices: [
+      { id: 'tsc', label: 'TypeScript 7 (tsc --lsp)' },
+      { id: 'tls', label: 'typescript-language-server' },
+    ],
     // TypeScript 7 has its language server built in (tsc --lsp).
     install: ['npm install -g typescript'],
     // Answers to workspace/configuration, by section: F2 renames the symbol everywhere rather
@@ -130,19 +139,25 @@ const CATALOG = [
     async find(ctx) {
       // The project's own TypeScript first: 7 and later speak LSP themselves; older ones
       // through typescript-language-server (the project's, or one installed for everyone).
+      // `ctx.prefer` ('tsc' or 'tls') puts that way first.
       const own = ctx.typescriptIn(ctx.root);
-      if (own && own.major >= 7) return { name: `TypeScript ${own.version}`, ...own.server, args: ['--lsp', '--stdio'] };
       const tls = ctx.projectBin('typescript-language-server') ?? (await ctx.onPath('typescript-language-server'));
-      const preferences = { useAliasesForRenames: false };
-      if (own && tls) return { name: `TypeScript ${own.version}`, ...ctx.runnable(tls), args: ['--stdio'], init: { preferences } };
       const tsc = await ctx.onPath('tsc');
       const global = tsc && ctx.typescriptOf(tsc);
-      if (global && global.major >= 7) return { name: `TypeScript ${global.version}`, ...global.server, args: ['--lsp', '--stdio'] };
-      if (tls) {
-        // An older TypeScript next to it (installed together for everyone).
-        const fallback = global?.tsserver ?? ctx.siblingTsserver(tls);
-        return { name: global ? `TypeScript ${global.version}` : 'typescript-language-server', ...ctx.runnable(tls), args: ['--stdio'], init: { preferences, ...(fallback ? { tsserver: { fallbackPath: fallback } } : {}) } };
-      }
+      const native = (ts) => ({ name: `TypeScript ${ts.version}`, ...ts.server, args: ['--lsp', '--stdio'] });
+      const preferences = { useAliasesForRenames: false };
+      const viaTls = () => {
+        // The project's TypeScript before 7 (7 has no tsserver for it), else the one next to it.
+        if (own && own.major < 7) return { name: `TypeScript ${own.version}`, ...ctx.runnable(tls), args: ['--stdio'], init: { preferences } };
+        const older = global && global.major < 7 ? global : null;
+        const fallback = older?.tsserver ?? ctx.siblingTsserver(tls);
+        return { name: older ? `TypeScript ${older.version}` : 'typescript-language-server', ...ctx.runnable(tls), args: ['--stdio'], init: { preferences, ...(fallback ? { tsserver: { fallbackPath: fallback } } : {}) } };
+      };
+      if (ctx.prefer === 'tls' && tls) return viaTls();
+      if (own && own.major >= 7) return native(own);
+      if (ctx.prefer !== 'tsc' && own && tls) return viaTls();
+      if (global && global.major >= 7) return native(global);
+      if (tls) return viaTls();
       return null;
     },
   },
@@ -154,8 +169,14 @@ const CATALOG = [
     markers: ['pyproject.toml', 'pyrightconfig.json', 'setup.py', 'setup.cfg', 'requirements.txt'],
     install: ['npm install -g pyright', 'pip install pyright'],
     programs: ['pyright-langserver', 'basedpyright-langserver'],
+    multiRoot: true,
+    choices: [
+      { id: 'pyright', label: 'Pyright' },
+      { id: 'basedpyright', label: 'basedpyright' },
+    ],
     async find(ctx) {
-      for (const name of ['pyright-langserver', 'basedpyright-langserver']) {
+      const names = ['pyright-langserver', 'basedpyright-langserver'];
+      for (const name of ctx.prefer === 'basedpyright' ? names.reverse() : names) {
         const found = ctx.projectBin(name) ?? (await ctx.onPath(name));
         if (found) return { name: name.startsWith('based') ? 'basedpyright' : 'Pyright', ...ctx.runnable(found), args: ['--stdio'] };
       }
@@ -171,6 +192,7 @@ const CATALOG = [
     install: ['go install golang.org/x/tools/gopls@latest'],
     note: 'It needs Go (go.dev/dl).',
     programs: ['gopls'],
+    multiRoot: true,
     async find(ctx) {
       const found = await ctx.onPath('gopls');
       return found ? { name: 'gopls', ...ctx.runnable(found), args: [] } : null;
@@ -185,6 +207,7 @@ const CATALOG = [
     install: ['rustup component add rust-analyzer'],
     note: 'It needs Rust (rustup.rs).',
     programs: ['rust-analyzer'],
+    multiRoot: true,
     verify: ['rust-analyzer'],
     async find(ctx) {
       const found = await ctx.onPath('rust-analyzer');
@@ -217,6 +240,7 @@ const CATALOG = [
     install: { darwin: ['brew install jdtls'], win32: ['scoop install jdtls'], default: ['brew install jdtls'] },
     note: 'It needs a recent Java (25 for current versions: the one JAVA_HOME names, else java on PATH) and Python 3, which starts it. Or download it from download.eclipse.org/jdtls/milestones, unpack it and put its bin folder on PATH. It keeps what it learns about each project in its own cache folder, not in the project. The first time it reads a project can take a minute.',
     programs: ['jdtls'],
+    multiRoot: true,
     async find(ctx) {
       const found = await ctx.onPath('jdtls');
       return found ? { name: 'jdtls', ...ctx.runnable(found), args: [] } : null;
@@ -244,6 +268,7 @@ const CATALOG = [
     languageIds: { '.json': 'json', '.jsonc': 'jsonc', '.code-workspace': 'jsonc' },
     markers: [],
     scope: 'folder',
+    multiRoot: true,
     install: ['npm install -g vscode-langservers-extracted'],
     note: 'The same package gives CSS and HTML their servers. Schemas for package.json, tsconfig.json and other well-known files come from schemastore.org.',
     init: { provideFormatter: true },
@@ -257,6 +282,7 @@ const CATALOG = [
     languageIds: { '.css': 'css', '.scss': 'scss', '.less': 'less' },
     markers: [],
     scope: 'folder',
+    multiRoot: true,
     install: ['npm install -g vscode-langservers-extracted'],
     note: 'The same package gives JSON and HTML their servers.',
     init: { provideFormatter: true },
@@ -270,6 +296,7 @@ const CATALOG = [
     languageIds: { '.html': 'html', '.htm': 'html', '.xhtml': 'html' },
     markers: [],
     scope: 'folder',
+    multiRoot: true,
     install: ['npm install -g vscode-langservers-extracted'],
     note: 'The same package gives JSON and CSS their servers.',
     init: { provideFormatter: true, embeddedLanguages: { css: true, javascript: true }, configurationSection: ['html', 'css', 'javascript'] },
@@ -283,6 +310,7 @@ const CATALOG = [
     languageIds: { '.yaml': 'yaml', '.yml': 'yaml' },
     markers: [],
     scope: 'folder',
+    multiRoot: true,
     install: ['npm install -g yaml-language-server'],
     note: 'GitHub Actions workflows, Compose files and many others are checked against their schemas (schemastore.org); Kubernetes files in k8s/, kubernetes/ or manifests/ folders, or named *.k8s.yaml. A first line "# yaml-language-server: $schema=<url>" picks one for any file.',
     settings: { yaml: { validate: true, hover: true, completion: true, format: { enable: true }, schemaStore: { enable: true }, schemas: { kubernetes: KUBERNETES_GLOBS } } },
@@ -295,11 +323,28 @@ const CATALOG = [
     languageIds: { '.sh': 'shellscript', '.bash': 'shellscript' },
     markers: [],
     scope: 'folder',
+    multiRoot: true,
     install: ['npm install -g bash-language-server'],
     note: 'Its problems come from ShellCheck: install it too (winget install koalaman.shellcheck, brew install shellcheck, or sudo apt install shellcheck).',
     find: npmServer('bash-language-server', ['start'], 'Bash'),
   },
 ];
+
+/** The catalog as Settings shows it, one row per language: { id, label, exts, choices, custom }. */
+const catalogRows = (entries = CATALOG) => entries.map((e) => ({ id: e.id, label: e.label, exts: e.exts, choices: e.choices ?? [], custom: Boolean(e.custom) }));
+
+/**
+ * What the page says about each language (Settings): `off` (entry ids) and `prefer`
+ * (entry id → one of its choices), checked: anything else is dropped.
+ */
+function cleanLanguages(opts) {
+  const off = Array.isArray(opts?.off) ? opts.off.filter((id) => typeof id === 'string' && id.length <= 60).slice(0, 100) : [];
+  const prefer = {};
+  for (const [id, choice] of Object.entries(opts?.prefer && typeof opts.prefer === 'object' ? opts.prefer : {})) {
+    if (typeof choice === 'string' && /^[a-z0-9-]{1,30}$/.test(choice) && id.length <= 60) prefer[id] = choice;
+  }
+  return { off, prefer };
+}
 
 /** The commands Set up… offers for an entry on this platform. */
 const installFor = (entry, platform = process.platform) => (Array.isArray(entry.install) ? entry.install : (entry.install?.[platform] ?? entry.install?.default ?? []));
@@ -541,9 +586,10 @@ function serverEnv(env) {
 
 /**
  * Looks for the server for a file's project: { entry, root, found, env } (found null when
- * missing). `login: false` looks only on `env`'s PATH (the tests); `root` sets the folder.
+ * missing). `login: false` looks only on `env`'s PATH (the tests); `root` sets the folder;
+ * `prefer`: the way chosen in Settings for this language (one of the entry's `choices`).
  */
-async function locate(file, { stop = '', root: rootGiven = '', env = process.env, platform = process.platform, login = true, entries = CATALOG, nodePath = process.execPath, run = execFile } = {}) {
+async function locate(file, { stop = '', root: rootGiven = '', prefer = '', env = process.env, platform = process.platform, login = true, entries = CATALOG, nodePath = process.execPath, run = execFile } = {}) {
   const entry = catalogFor(file, entries);
   if (!entry) return null;
   const root = rootGiven || rootFor(entry, file, { stop });
@@ -555,6 +601,7 @@ async function locate(file, { stop = '', root: rootGiven = '', env = process.env
   };
   const ctx = {
     root,
+    prefer,
     projectBin: (name) => binIn(root, name),
     onPath: async (name) => searchPath(name, { env: searchIn, platform }),
     runnable: (found) => runnable(found, { platform }),
@@ -589,6 +636,7 @@ const MAX_SERVERS = 6;
 const STDERR_LINES = 200;
 const CRASH_WINDOW = 5 * 60 * 1000;
 const MAX_QUEUED = 200; // messages kept for a server still starting on an SSH server
+const ROOTS_WAIT = 15000; // how long another project waits to hear whether a starting server can take it
 
 /**
  * The running servers. `send(sender, channel, payload)` reaches the page; `spawn` and
@@ -596,7 +644,7 @@ const MAX_QUEUED = 200; // messages kept for a server still starting on an SSH s
  * for the real ones in the tests. `remote` (main.cjs, over remote.cjs): `run(id, script)` →
  * its output, `exec(id, command)` → an exec channel, `label(id)`, `connected(id)`.
  */
-function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath, env = process.env, platform = process.platform, now = Date.now, locateServer = locate, catalog = () => CATALOG, remote = null } = {}) {
+function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath, env = process.env, platform = process.platform, now = Date.now, locateServer = locate, catalog = () => CATALOG, remote = null, rootsWait = ROOTS_WAIT } = {}) {
   const servers = new Map(); // id → server
   let nextId = 1;
 
@@ -732,14 +780,32 @@ function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath
   }
 
   const sameWhere = (a, b) => a.kind === b.kind && (a.kind !== 'remote' || a.id === b.id);
-  function running(sender, entry, root, where) {
+  const sameKind = (s, sender, entry, where, prefer) => s.entry.id === entry.id && s.sender === sender && sameWhere(s.where, where) && s.prefer === prefer && !s.removed;
+  // The server for a project: its own, or one that took it as another workspace folder.
+  function running(sender, entry, root, where, prefer = '') {
     for (const s of servers.values()) {
-      if (s.entry.id === entry.id && s.root === root && s.sender === sender && sameWhere(s.where, where) && !s.removed) {
+      if (sameKind(s, sender, entry, where, prefer) && (s.root === root || s.roots?.has(root))) {
         s.used = now();
         return s;
       }
     }
     return null;
+  }
+  // Several roots at once: a server that takes workspace folders (the page saw it say so) and
+  // runs the same program takes another project rather than a second process.
+  const sameProgram = (a, b) => a.command === b.command && a.script === b.script && JSON.stringify(a.args) === JSON.stringify(b.args) && JSON.stringify(a.init ?? null) === JSON.stringify(b.init ?? null);
+  // A server that may take it but has not said yet (still starting: files opened together) is
+  // waited for, so they do not each start their own.
+  async function sharing(sender, entry, root, where, prefer, found) {
+    if (!entry.multiRoot) return null;
+    const candidates = () => [...servers.values()].filter((s) => sameKind(s, sender, entry, where, prefer) && sameProgram(s.found, found));
+    const undecided = candidates().filter((s) => s.canShare === undefined);
+    if (undecided.length) await Promise.race([Promise.all(undecided.map((s) => s.sharingKnown)), new Promise((resolve) => setTimeout(resolve, rootsWait).unref?.())]);
+    const s = candidates().find((c) => c.canShare);
+    if (!s) return null;
+    s.roots.add(root);
+    s.used = now();
+    return s;
   }
 
   /**
@@ -749,24 +815,32 @@ function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath
    * the SSH connection the file is on (`file` its path there); `note`: `file` exists only in the
    * editor, and `root` is the notes folder.
    */
-  async function start(sender, file, { stop: stopDir = '', remote: connId = '', note = false, root: noteRoot = '' } = {}) {
-    // Servers of your own were confirmed to run on this computer: not on SSH servers.
-    const entries = connId ? catalog().filter((e) => !e.custom) : catalog();
+  async function start(sender, file, { stop: stopDir = '', remote: connId = '', note = false, root: noteRoot = '', languages } = {}) {
+    const { off, prefer: chosen } = cleanLanguages(languages);
+    // Servers of your own were confirmed to run on this computer: not on SSH servers. Languages
+    // turned off in Settings have none (another entry for the same files may take them).
+    const entries = catalog().filter((e) => !(connId && e.custom) && !off.includes(e.id));
     const entry = catalogFor(file, entries);
     if (!entry) return { none: true };
     const languageId = entry.languageIds[path.extname(file).toLowerCase()];
-    if (connId) return startRemote(sender, file, entry, languageId, connId, stopDir);
+    const prefer = (entry.choices ?? []).some((c) => c.id === chosen[entry.id]) ? chosen[entry.id] : '';
+    if (connId) return startRemote(sender, file, entry, languageId, connId, stopDir, prefer);
     const where = note ? { kind: 'notes' } : { kind: 'local' };
     const root = note ? noteRoot : rootFor(entry, file, { stop: stopDir });
     // Stopped after crashes: Restart in the panel brings it back, not every file opened.
-    const known = running(sender, entry, root, where);
-    if (known) return info(known, languageId);
-    const located = await locateServer(file, { stop: stopDir, root: note ? noteRoot : '', env, platform, entries, nodePath });
+    const known = running(sender, entry, root, where, prefer);
+    if (known) return info(known, languageId, root);
+    const located = await locateServer(file, { stop: stopDir, root: note ? noteRoot : '', prefer, env, platform, entries, nodePath });
     if (!located?.found) return { missing: { id: entry.id, language: entry.label, install: installFor(entry, platform), note: entry.note ?? '', custom: Boolean(entry.custom), command: entry.command ?? '', root, where } };
-    return add({ entry, root, found: located.found, env: located.env ?? env, sender, where }, languageId);
+    const shared = await sharing(sender, entry, root, where, prefer, located.found);
+    if (shared) return info(shared, languageId, root);
+    // Another file of this project, started while this one waited.
+    const meanwhile = running(sender, entry, root, where, prefer);
+    if (meanwhile) return info(meanwhile, languageId, root);
+    return add({ entry, root, found: located.found, env: located.env ?? env, sender, where, prefer }, languageId);
   }
 
-  async function startRemote(sender, file, entry, languageId, connId, stopDir) {
+  async function startRemote(sender, file, entry, languageId, connId, stopDir, prefer) {
     if (!remote) return { none: true };
     const where = { kind: 'remote', id: connId, name: remote.label(connId) };
     const script = probeScript({ file, markers: entry.markers, stop: stopDir, scope: entry.scope, programs: entry.programs ?? entry.find.programs ?? [], verify: entry.verify ?? [], typescript: entry.id === 'typescript' });
@@ -777,26 +851,39 @@ function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath
       throw new Error(`Could not look for ${entry.label} on ${where.name}: ${err.message}`);
     }
     if (!probe.complete || !probe.root) throw new Error(`Could not look for ${entry.label} on ${where.name}: its shell did not answer as expected.`);
-    const known = running(sender, entry, probe.root, where);
-    if (known) return info(known, languageId);
-    const found = await entry.find(remoteContext(probe));
+    const known = running(sender, entry, probe.root, where, prefer);
+    if (known) return info(known, languageId, probe.root);
+    const found = await entry.find({ ...remoteContext(probe), prefer });
     if (!found) return { missing: { id: entry.id, language: entry.label, install: installFor(entry, 'linux'), note: entry.note ?? '', custom: false, command: '', root: probe.root, where } };
-    return add({ entry, root: probe.root, found, path: probe.path, sender, where }, languageId);
+    const shared = await sharing(sender, entry, probe.root, where, prefer, found);
+    if (shared) return info(shared, languageId, probe.root);
+    const meanwhile = running(sender, entry, probe.root, where, prefer);
+    if (meanwhile) return info(meanwhile, languageId, probe.root);
+    return add({ entry, root: probe.root, found, path: probe.path, sender, where, prefer }, languageId);
   }
 
   function add(fields, languageId) {
     makeRoom();
-    const s = { id: `lsp${nextId++}`, name: fields.found.name, stderr: [], crashes: [], used: now(), state: 'starting', message: '', generation: 0, queue: [], ...fields };
+    const s = { id: `lsp${nextId++}`, name: fields.found.name, stderr: [], crashes: [], used: now(), state: 'starting', message: '', generation: 0, queue: [], prefer: '', roots: null, ...fields };
+    // Whether other projects can share it: the page says once the server answered initialize
+    // (multiRoot); servers that cannot never wait anyone.
+    if (s.entry.multiRoot) s.sharingKnown = new Promise((resolve) => (s.sharingSaid = resolve));
+    else s.canShare = false;
     servers.set(s.id, s);
     launch(s);
     return info(s, languageId);
   }
 
-  const info = (s, languageId) => ({
+  // `root`: the project of the file asked about (another workspace folder of a shared server);
+  // `home`: the folder the server was started for.
+  const info = (s, languageId, root = s.root) => ({
     id: s.id,
     server: s.name,
     language: s.entry.label,
-    root: s.root,
+    entry: s.entry.id,
+    multiRoot: Boolean(s.entry.multiRoot),
+    root,
+    home: s.root,
     languageId,
     where: s.where,
     init: s.entry.init || s.found.init ? { ...s.entry.init, ...s.found.init } : null,
@@ -834,6 +921,7 @@ function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath
     const s = own(id, sender);
     if (!s) return false;
     s.removed = true;
+    s.sharingSaid?.();
     stopProcess(s);
     servers.delete(id);
     send(s.sender, 'lsp:status', { id, state: 'removed', message, server: s.name });
@@ -855,6 +943,19 @@ function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath
     return true;
   }
 
+  /**
+   * The page saw whether the server takes workspace folders as they change (`can`): if so, other
+   * projects can share it.
+   */
+  function multiRoot(id, sender, can = true) {
+    const s = own(id, sender);
+    if (!s || !s.entry.multiRoot) return false;
+    s.canShare = Boolean(can);
+    if (s.canShare) s.roots ??= new Set([s.root]);
+    s.sharingSaid?.();
+    return s.canShare;
+  }
+
   const list = (sender) =>
     [...servers.values()]
       .filter((s) => !sender || s.sender === sender)
@@ -863,16 +964,16 @@ function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath
   const stopAll = (sender) => {
     for (const s of [...servers.values()]) if (!sender || s.sender === sender) stop(s.id);
   };
-  /** Stops the servers of a catalog entry (a custom server changed or was removed). */
-  const stopEntry = (entryId, message = '') => {
-    for (const s of [...servers.values()]) if (s.entry.id === entryId) stop(s.id, message);
+  /** Stops the servers of a catalog entry (a custom server changed or was removed, or its settings changed). */
+  const stopEntry = (entryId, message = '', sender) => {
+    for (const s of [...servers.values()]) if (s.entry.id === entryId && (!sender || s.sender === sender)) stop(s.id, message);
   };
   /** Stops the servers on an SSH server (it was disconnected or removed). */
   const stopRemote = (connId, message = '') => {
     for (const s of [...servers.values()]) if (s.where.kind === 'remote' && s.where.id === connId) stop(s.id, message);
   };
 
-  return { start, write, stop, restart, list, stopAll, stopEntry, stopRemote };
+  return { start, write, stop, restart, list, stopAll, stopEntry, stopRemote, multiRoot };
 }
 
-module.exports = { frame, createReader, CATALOG, JSON_SCHEMAS, catalogFor, installFor, findRoot, rootFor, searchPath, runnable, typescriptIn, searchEnv, serverEnv, shellPath, locate, createLspHost, parseArgs, cleanCustom, customEntry, MAX_SERVERS };
+module.exports = { frame, createReader, CATALOG, JSON_SCHEMAS, catalogFor, catalogRows, cleanLanguages, installFor, findRoot, rootFor, searchPath, runnable, typescriptIn, searchEnv, serverEnv, shellPath, locate, createLspHost, parseArgs, cleanCustom, customEntry, MAX_SERVERS };

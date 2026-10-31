@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { mkdtempSync, mkdirSync, realpathSync, writeFileSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -211,6 +211,8 @@ function fakeHost(opts = {}) {
     send,
     nodePath: process.execPath,
     locateServer: async (file) => ({ entry: lsp.catalogFor(file), root: path.dirname(file), found: { name: 'Fake', script: FAKE, args: ['--stdio'] }, env: process.env }),
+    // No page here to say whether a server takes workspace folders: little waiting for it.
+    rootsWait: 50,
     ...opts,
   });
   return { host, events, next };
@@ -293,4 +295,97 @@ test('a server of your own starts through the catalog the host is given', async 
   const missing = await host2.start(sender, path.join(dir, 'a.zz'), { stop: dir });
   assert.equal(missing.missing.custom, true);
   assert.equal(missing.missing.command, '/nowhere/zz-server');
+});
+
+test('each language in Settings: rows, and what the page may say about them', () => {
+  const rows = lsp.catalogRows();
+  const ts = rows.find((r) => r.id === 'typescript');
+  assert.deepEqual(ts.choices.map((c) => c.id), ['tsc', 'tls']);
+  assert.ok(rows.find((r) => r.id === 'go').choices.length === 0);
+  assert.equal(rows.length, lsp.CATALOG.length);
+  // Only ids and short choice names get through.
+  assert.deepEqual(lsp.cleanLanguages({ off: ['python', 7, 'x'.repeat(100)], prefer: { python: 'basedpyright', typescript: '../../bin/sh', go: 3 } }), { off: ['python'], prefer: { python: 'basedpyright' } });
+  assert.deepEqual(lsp.cleanLanguages(null), { off: [], prefer: {} });
+});
+
+test('a language turned off has no server; another entry for its files may take them', async () => {
+  const { host } = fakeHost();
+  const sender = {};
+  const dir = mkdtempSync(path.join(tmpdir(), 'lsp-off-'));
+  assert.deepEqual(await host.start(sender, path.join(dir, 'a.py'), { languages: { off: ['python'] } }), { none: true });
+  const own = lsp.customEntry(lsp.cleanCustom({ label: 'My Python', exts: '.py', command: FAKE, args: '--stdio' }));
+  const { host: withOwn } = fakeHost({ catalog: () => [own, ...lsp.CATALOG] });
+  // Your own server for .py turned off: the catalog's Pyright serves them again.
+  const started = await withOwn.start(sender, path.join(dir, 'a.py'), { languages: { off: [own.id] } });
+  assert.equal(started.entry, 'python');
+  withOwn.stopAll();
+});
+
+test('the server chosen for a language comes first, the other when it is missing', async (t) => {
+  if (process.platform === 'win32') return t.skip('npm links are .cmd shims there');
+  const dir = realpathSync(mkdtempSync(path.join(tmpdir(), 'lsp-pick-')));
+  const bin = path.join(dir, 'bin');
+  mkdirSync(bin);
+  for (const name of ['pyright-langserver', 'basedpyright-langserver']) writeFileSync(path.join(bin, name), '#!/bin/sh\n');
+  const py = path.join(dir, 'a.py');
+  const env = { PATH: bin };
+  assert.equal((await lsp.locate(py, { env, login: false })).found.name, 'Pyright');
+  assert.equal((await lsp.locate(py, { env, login: false, prefer: 'basedpyright' })).found.name, 'basedpyright');
+  // TypeScript 7 in the project and typescript-language-server: TypeScript 7 unless the other is chosen.
+  const ts = path.join(dir, 'node_modules', 'typescript');
+  mkdirSync(path.join(ts, 'lib'), { recursive: true });
+  writeFileSync(path.join(ts, 'package.json'), JSON.stringify({ name: 'typescript', version: '7.1.0' }));
+  writeFileSync(path.join(ts, 'lib', 'tsc.js'), '');
+  writeFileSync(path.join(dir, 'package.json'), '{}');
+  writeFileSync(path.join(bin, 'typescript-language-server'), '#!/usr/bin/env node\n');
+  const a = path.join(dir, 'a.ts');
+  assert.deepEqual((await lsp.locate(a, { stop: dir, env, login: false })).found.args, ['--lsp', '--stdio']);
+  const tls = (await lsp.locate(a, { stop: dir, env, login: false, prefer: 'tls' })).found;
+  assert.equal(tls.script, path.join(bin, 'typescript-language-server'));
+  assert.deepEqual(tls.args, ['--stdio']);
+  // Chosen but not installed: the usual one.
+  rmSync(path.join(bin, 'basedpyright-langserver'));
+  assert.equal((await lsp.locate(py, { env, login: false, prefer: 'basedpyright' })).found.name, 'Pyright');
+});
+
+test('several projects share a server that takes workspace folders and runs the same program', async () => {
+  const program = (file) => ({ name: 'Fake', script: FAKE, args: file.includes('other') ? ['--stdio', '--other'] : ['--stdio'] });
+  const { host } = fakeHost({ locateServer: async (file) => ({ entry: lsp.catalogFor(file), root: path.dirname(file), found: program(file), env: process.env }) });
+  const sender = {};
+  const one = mkdtempSync(path.join(tmpdir(), 'lsp-one-'));
+  const two = mkdtempSync(path.join(tmpdir(), 'lsp-two-'));
+  const first = await host.start(sender, path.join(one, 'a.ts'));
+  assert.equal(first.multiRoot, true);
+  // The page says it cannot take folders as they change: one per project.
+  assert.equal(host.multiRoot(first.id, sender, false), false);
+  const apart = await host.start(sender, path.join(two, 'b.ts'));
+  assert.notEqual(apart.id, first.id);
+  host.stop(apart.id, '', sender);
+  assert.equal(host.multiRoot(first.id, sender), true);
+  const shared = await host.start(sender, path.join(two, 'b.ts'));
+  assert.equal(shared.id, first.id);
+  assert.equal(shared.root, two);
+  assert.equal(shared.home, one);
+  // Its next file there is found at once; a project needing another program gets its own.
+  assert.equal((await host.start(sender, path.join(two, 'c.ts'))).id, first.id);
+  const other = await host.start(sender, path.join(mkdtempSync(path.join(tmpdir(), 'lsp-other-')), 'd.ts'));
+  assert.notEqual(other.id, first.id);
+  // Servers that cannot (clangd) are never shared.
+  const c = await host.start(sender, path.join(one, 'a.c'));
+  assert.equal(host.multiRoot(c.id, sender), false);
+  host.stopAll();
+});
+
+test('files of two projects opened together: the second waits to hear whether the first server takes it', async () => {
+  const { host } = fakeHost({ rootsWait: 5000 });
+  const sender = {};
+  const one = mkdtempSync(path.join(tmpdir(), 'lsp-together-'));
+  const two = mkdtempSync(path.join(tmpdir(), 'lsp-together-'));
+  const first = await host.start(sender, path.join(one, 'a.py'));
+  const second = host.start(sender, path.join(two, 'b.py'));
+  setTimeout(() => host.multiRoot(first.id, sender, true), 100);
+  const started = Date.now();
+  assert.equal((await second).id, first.id);
+  assert.ok(Date.now() - started < 3000);
+  host.stopAll();
 });
