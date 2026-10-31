@@ -1798,9 +1798,55 @@ ipcMain.handle('folder:replace-undo', guard(async (_e, id) => {
   return { restored, skipped };
 }));
 
-// ---- Git for folders on this computer (read-only) ----
+// ---- Git for folders on this computer ----
+// Reading (status, a file at HEAD) and, asked by the person in the page, the commands that
+// change the repository a folder they opened is in (git.cjs `act`: stage, commit, branches,
+// stash, fetch, pull, push). The page names a folder (checked) and paths inside the
+// repository, never a command; git.cjs checks every name it passes on.
 let gitTool = null;
-const git = async () => (gitTool ??= createGit({ parseStatus: (await loadAppModules()).gitStatus.parseStatus }));
+const git = async () => {
+  if (gitTool) return gitTool;
+  const { gitStatus } = await loadAppModules();
+  return (gitTool ??= createGit({ parseStatus: gitStatus.parseStatus, parse: { parseBranches: gitStatus.parseBranches, parseStashes: gitStatus.parseStashes } }));
+};
+ipcMain.handle('git:act', guard(async (event, dir, action) => {
+  if (typeof dir !== 'string' || isRemote(dir)) throw new Error('Git works on folders on this computer');
+  checkDir(dir);
+  const tool = await git();
+  const root = await tool.repoOf(dir);
+  if (!root) throw new Error('This folder is not in a Git repository');
+  const sender = event.sender;
+  try {
+    const result = await tool.act(root, action, { onProgress: (line) => !sender.isDestroyed() && sender.send('git:progress', { root, line }) });
+    return { ok: true, result: typeof result === 'object' && result && 'stdout' in result ? { stdout: result.stdout, stderr: result.stderr } : result };
+  } catch (err) {
+    // Git's own words go back, for the page to say in its own (gitError).
+    return { ok: false, message: err.message, stdout: String(err.stdout ?? ''), stderr: String(err.stderr ?? '') };
+  }
+}));
+// One change of a file staged: the page gives the file's whole text as it should be staged
+// (stageBlock); it is written with the file's own line endings and encoding.
+ipcMain.handle('git:index', guard(async (_e, file) => {
+  if (typeof file !== 'string' || isRemote(file)) return null;
+  const found = await (await git()).indexBytes(checkFile(file));
+  if (!found) return null;
+  try {
+    return { text: disk.decode(found.bytes).text, rel: found.rel, root: found.root };
+  } catch {
+    return null;
+  }
+}));
+ipcMain.handle('git:stage-text', guard(async (_e, file, text) => {
+  if (typeof file !== 'string' || isRemote(file) || typeof text !== 'string') throw new Error('Not a file on this computer');
+  checkFile(file);
+  let format = {};
+  try {
+    format = disk.decode(fs.readFileSync(file));
+  } catch {
+    // gone or not text: as plain UTF-8 with LF
+  }
+  return (await git()).setIndexBytes(file, disk.encode(text, format));
+}));
 ipcMain.handle('git:status', guard(async (_e, dir) => {
   if (typeof dir !== 'string' || isRemote(dir)) return null;
   checkDir(dir);
@@ -2705,7 +2751,13 @@ function buildMenu() {
             shown('Problems', 'CmdOrCtrl+Shift+M', 'problems'),
             shown('Next Problem', 'F8', 'nextProblem'),
             shown('Previous Problem', 'Shift+F8', 'previousProblem'),
+            { type: 'separator' },
+            shown('Git Panel', 'CmdOrCtrl+Shift+G', 'git-panel'),
+            item('Switch Branch (Git)…', undefined, 'git-branch'),
+            item('Stage the Change at the Cursor (Git)', undefined, 'git-stage-change'),
             item('Compare with the Last Commit (Git)', undefined, 'git-compare'),
+            item('Pull (Git)', undefined, 'git-pull'),
+            item('Push (Git)', undefined, 'git-push'),
             { type: 'separator' },
             item('Indent This File with Spaces', undefined, 'indent-spaces'),
             item('Indent This File with Tabs', undefined, 'indent-tabs'),

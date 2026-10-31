@@ -196,6 +196,15 @@ contextBridge.exposeInMainWorld('desktop', {
   git: {
     status: (dir) => ipcRenderer.invoke('git:status', dir),
     head: (file) => ipcRenderer.invoke('git:head', file),
+    // The commands that change a repository (stage, commit, branches, stash, fetch, pull, push).
+    act: (dir, action) => ipcRenderer.invoke('git:act', dir, action),
+    index: (file) => ipcRenderer.invoke('git:index', file),
+    stageText: (file, text) => ipcRenderer.invoke('git:stage-text', file, text),
+    onProgress(callback) {
+      const listener = (_event, progress) => callback(progress);
+      ipcRenderer.on('git:progress', listener);
+      return () => ipcRenderer.removeListener('git:progress', listener);
+    },
   },
   remote: {
     connections: () => ipcRenderer.invoke('remote:connections'),

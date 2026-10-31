@@ -38,7 +38,10 @@ export function refreshGit(dirs, { force = false } = {}) {
   }
 }
 
-/** The repository state a folder is in ({ root, branch, ahead, behind, files }), or null. */
+/** After a Git command (commit, switch, pull…): every folder known is read again. */
+export const refreshAllGit = () => refreshGit([...known.keys()], { force: true });
+
+/** The repository state a folder is in ({ root, branch, ahead, behind, files, staged, unstaged }), or null. */
 export const gitOf = (dir) => known.get(dir)?.status ?? null;
 
 const norm = (p) => p.replace(/\\/g, '/').replace(/\/+$/, '');
@@ -55,4 +58,19 @@ export function gitCodeOf(dir, path, isDir = false) {
   const lower = (s) => (/^[a-z]:/i.test(s) ? s.toLowerCase() : s);
   if (lower(p) !== lower(root) && !lower(p).startsWith(`${lower(root)}/`)) return null;
   return statusOf(status.files, p.slice(root.length + 1), isDir);
+}
+
+/**
+ * Whether `path` (a file in the folder `dir` shown) has changes staged and not staged:
+ * { root, rel, staged, unstaged } (codes or null), or null outside a repository.
+ */
+export function stageStateOf(dir, path) {
+  const status = gitOf(dir);
+  if (!status) return null;
+  const root = norm(status.root);
+  const p = norm(path);
+  const lower = (s) => (/^[a-z]:/i.test(s) ? s.toLowerCase() : s);
+  if (!lower(p).startsWith(`${lower(root)}/`)) return null;
+  const rel = p.slice(root.length + 1);
+  return { root: status.root, rel, staged: status.staged?.[rel] ?? null, unstaged: status.unstaged?.[rel] ?? null };
 }

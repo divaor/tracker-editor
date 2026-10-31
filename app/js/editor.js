@@ -102,7 +102,7 @@ import { isOwnDrop } from './dragOut.js';
 import { createSearchPanel, openReplacePanel } from './searchPanel.js';
 import { SYNTAX_LANGUAGES, problemsFor, treeErrors } from './problems.js';
 import { convertIndent, detectIndent } from './indent.js';
-import { gitGutter, gitInfo, setGitBase } from './gitGutter.js';
+import { gitGutter, gitInfo, gitMarkClick, setGitBase } from './gitGutter.js';
 import { emmetOnTab, linkedTags } from './htmlTools.js';
 import { inlineSuggestions } from './inlineSuggest.js';
 import { findFileRefs, pastedPath } from './fileRefs.js';
@@ -998,7 +998,7 @@ function fileRefAt(state, pos) {
  * `openSide(key, el, …)` shows a second tab next to it (the split view); a tab's
  * state, with its undo history, moves between the panes.
  */
-export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpenLink, onOpenRef, onSuggest, onImage, onPasteFiles, onPastePath, onProblems, onProblemAction, onDrop, onLineMenu, linkTargets, settings }) {
+export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpenLink, onOpenRef, onSuggest, onImage, onPasteFiles, onPastePath, onProblems, onProblemAction, onDrop, onLineMenu, onGitMark, linkTargets, settings }) {
   const states = new Map(); // key → EditorState
   const scroll = new Map(); // key → scroll position
   const pending = new Map(); // key → timer for onChange
@@ -1246,6 +1246,8 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       checks.of(config.checks),
       aids.of(config.aids),
       gitBar.of([]),
+      // A click on a changed line's mark: the app offers to stage that change.
+      gitMarkClick.of((v, line, at) => onGitMark?.({ key: keyOfView(v), line, ...at })),
       server.of([]),
       EditorView.updateListener.of((update) => {
         if (update.docChanged && !update.transactions.some((tr) => tr.annotation(remote))) {

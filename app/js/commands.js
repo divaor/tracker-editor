@@ -3,7 +3,7 @@
 // Alt (Option); `desktop` keys apply in the desktop app instead; `only` marks commands
 // that exist only there ('desktop'). Pure, so the Node tests can check it.
 
-export const COMMAND_GROUPS = ['Files and tabs', 'Find', 'Edit and text', 'Code', 'View', 'Tools', 'Folders view', 'Terminal'];
+export const COMMAND_GROUPS = ['Files and tabs', 'Find', 'Edit and text', 'Code', 'Git', 'View', 'Tools', 'Folders view', 'Terminal'];
 
 /**
  * [{ id, group, label, keys?, desktop?, only?, hint?, run?, local? }]; `run: false` for keys that only work in place;
@@ -93,7 +93,13 @@ export const COMMAND_LIST = [
   { id: 'foldLevel2', group: 'Code', label: 'Fold one level in (methods in classes)', keys: 'Alt+2' },
   { id: 'foldLevel3', group: 'Code', label: 'Fold two levels in', keys: 'Alt+3' },
   { id: 'problems', group: 'Code', label: 'Problems in this file (errors as you type)', keys: 'Mod+Shift+M', hint: 'JSON, YAML, XML, HTML, CSS and code' },
-  { id: 'git-compare', group: 'Code', label: 'Compare with the last commit (Git)', only: 'desktop', hint: 'A file on this computer in a Git repository; or click the branch in the status bar' },
+  { id: 'git-compare', group: 'Git', label: 'Compare with the last commit (Git)', only: 'desktop', hint: 'A file on this computer in a Git repository; or click ±N in the status bar' },
+  { id: 'git-panel', group: 'Git', label: 'Git panel: stage, commit, pull, push, stash', keys: 'Mod+Shift+G', only: 'desktop', hint: 'For the repository of the open file, or of the folder in Folders' },
+  { id: 'git-branch', group: 'Git', label: 'Switch branch, or make a new one (Git)', only: 'desktop', hint: 'Or click the branch in the status bar' },
+  { id: 'git-stage-change', group: 'Git', label: 'Stage the change at the cursor (Git)', only: 'desktop', hint: 'That block alone; or click its mark next to the line numbers' },
+  { id: 'git-fetch', group: 'Git', label: 'Fetch (Git): see what is new on the remote', only: 'desktop' },
+  { id: 'git-pull', group: 'Git', label: 'Pull (Git): bring the remote’s commits in', only: 'desktop' },
+  { id: 'git-push', group: 'Git', label: 'Push (Git): send your commits', only: 'desktop' },
   { id: 'nextProblem', group: 'Code', label: 'Next problem', keys: 'F8' },
   { id: 'previousProblem', group: 'Code', label: 'Previous problem', keys: 'Shift+F8' },
 

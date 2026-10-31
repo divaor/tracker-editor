@@ -16,7 +16,7 @@ import { Menu, MenuButton } from './menu.js';
 import { FileViewer, PeekPane } from './folderPreview.js';
 import { Splitter } from './splitter.js';
 import { onTransfers, running } from '../transfers.js';
-import { gitCodeOf, gitOf, onGitState, refreshGit } from '../gitState.js';
+import { gitCodeOf, gitOf, onGitState, refreshGit, stageStateOf } from '../gitState.js';
 import { GIT_LABELS } from '../gitStatus.js';
 import { folderGroupOf } from '../tabViews.js';
 
@@ -1041,12 +1041,22 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     const remote = items.some((e) => isRemotePath(e.path));
     const files = items.filter((e) => !e.dir);
     const images = files.filter((e) => isImageName(e.name));
+    // Git: files with changes to stage, or staged ones to leave out of the next commit.
+    const states = remote ? [] : files.map((e) => stageStateOf(rootOf(e.path, live) ?? dir, e.path)).filter(Boolean);
+    const toStage = states.filter((st) => st.unstaged);
+    const toUnstage = states.filter((st) => st.staged);
+    const stageFiles = async (list, op) => {
+      const r = await actions.gitRun(folderOf(files), { op, paths: list.map((st) => st.rel) });
+      if (!r.ok) toast(r.error.message, { kind: 'error', timeout: 9000 });
+    };
     return [
       touchScreen() && !picking && { label: 'Select', icon: 'check', hint: 'Then tap others to pick them too', run: () => setPicking(true) },
       { label: one?.dir ? 'Open' : 'Open (Enter)', icon: one?.dir ? 'folderOpen' : 'file', run: openSelected },
       one && !one.dir && { label: 'View it large (Space)', icon: 'fullscreen', run: () => setViewing(one.path) },
       one && !one.dir && { label: 'Open with its program', icon: 'external', run: () => openOutside(one) },
       one && !one.dir && ['M', 'R'].includes(gitOn(one.path)) && opensInEditor(one.name) && { label: 'Compare with the last commit (Git)', icon: 'branch', run: () => actions.compareWithHead(one.path) },
+      toStage.length > 0 && { label: toStage.length === 1 ? 'Stage (Git)' : `Stage ${toStage.length} files (Git)`, icon: 'plus', hint: 'Take into the next commit', run: () => stageFiles(toStage, 'stage') },
+      toUnstage.length > 0 && { label: toUnstage.length === 1 ? 'Unstage (Git)' : `Unstage ${toUnstage.length} files (Git)`, icon: 'undo', hint: 'Leave out of the next commit', run: () => stageFiles(toUnstage, 'unstage') },
       images.length && images.length === items.length && { label: `Text from ${images.length === 1 ? 'the image' : `${images.length} images`}…`, icon: 'scan', run: () => actions.readImageFiles(images.map((e) => e.path), folderOf(images)) },
       files.length === 2 && items.length === 2 && files.every((e) => opensInEditor(e.name)) && { label: 'Compare the two', icon: 'compare', run: () => actions.compareDiskFiles(files[0].path, files[1].path) },
       window.desktop?.compare && items.length === 2 && items.every((e) => e.dir) && { label: 'Compare the two folders', icon: 'compare', run: () => actions.compareFolders(items[0].path, items[1].path) },

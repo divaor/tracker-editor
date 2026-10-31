@@ -26,6 +26,9 @@ import { createLanguageServers } from './lsp.js';
 import { applyTextEdits, changedLanguages, changedLines, codeActionRows, editPlan, formatFirst, languageOptions, lineOf, textChanges, uriPath } from './lspTools.js';
 import { Menu } from './ui/menu.js';
 import { LanguageServersPanel, ReferencesPanel, RenameSymbolDialog, SetupServerDialog, WorkspaceEditDialog } from './ui/languageServers.js';
+import { BranchDialog, GitPanel } from './ui/gitPanel.js';
+import { gitError, stageBlock } from './gitStatus.js';
+import { refreshAllGit } from './gitState.js';
 import { FolderSearchPanel } from './ui/folderSearch.js';
 import { PropertiesDialog } from './ui/properties.js';
 import { lastSyncText, mirror as mirrorById, onMirrors, watchMirrors as watchMirrorStatus } from './mirrors.js';
@@ -1587,6 +1590,9 @@ export function App() {
   const [lspTick, setLspTick] = useState(0);
   const [refs, setRefs] = useState(null); // { word, list, server }: the References panel
   const [codeMenu, setCodeMenu] = useState(null); // { key, rows, at }: a language server's quick fixes
+  const [gitMenu, setGitMenu] = useState(null); // { key, line, x, y }: a changed line's mark clicked
+  const [gitDir, setGitDir] = useState(null); // the folder whose repository the Git panel shows
+  const [gitTick, setGitTick] = useState(0); // Git's state may have changed: the panel reads it again
   const actions = useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setCompare, setUsagesOf, setSearchSeed });
   const editorOptions = (s) => ({ ...s, dark: resolvedTheme(s.theme) === 'dark', inlineSuggest: Boolean(s.inlineSuggest && s.llm.enabled && s.llm.provider !== 'async') });
 
@@ -1790,6 +1796,7 @@ export function App() {
       onPasteFiles: (files) => actions.openPastedFiles(files),
       onPastePath: (path) => actions.offerPastedPath(path),
       onLineMenu: (at) => setLineMenu(at),
+      onGitMark: (at) => setGitMenu(at),
       linkTargets: () => store.live().map((f) => linkName(f.name)),
       // A tab's editor state is gone (closed, or made again under a new path): its server forgets it.
       onDrop: (key) => lspRef.current?.forget(key),
@@ -2483,7 +2490,10 @@ export function App() {
   };
   useEffect(() => lookUpGit(activeKey), [activeKey]);
   useEffect(() => {
-    const onFocus = () => lookUpGit(store.session.active);
+    const onFocus = () => {
+      lookUpGit(store.session.active);
+      setGitTick((n) => n + 1);
+    };
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, []);
@@ -2499,6 +2509,101 @@ export function App() {
     const tab = store.diskTab(key.slice(2));
     if (!tab) return;
     setCompare({ key, name: tab.name, language: '', left: { label: `Last commit (${head.branch || 'Git'})`, text: head.text }, right: { label: `${tab.name} now`, text: tab.text }, actions: [] });
+  };
+  // ---- Git that writes: the Git panel, the branch picker, a change staged from the gutter ----
+  // Commands that change files on disk wait while a tab in the repository has unsaved edits.
+  const WORKING_TREE_OPS = new Set(['pull', 'switch', 'stash', 'stash-apply', 'stash-pop', 'abort']);
+  const gitBridge = () => window.desktop?.git ?? null;
+  const parentDir = (p) => p.replace(/[\\/][^\\/]*$/, '') || p;
+  const insideRoot = (root, p) => {
+    const n = (x) => x.replace(/\\/g, '/').replace(/\/+$/, '');
+    const low = /^[a-z]:/i.test(root) ? (x) => x.toLowerCase() : (x) => x;
+    return low(n(p)).startsWith(`${low(n(root))}/`);
+  };
+  /** The folder whose repository Git shows: the open file's (on this computer), else the one in Folders. */
+  const gitFolderNow = () => {
+    const key = store.session.active;
+    if (key?.startsWith('d:') && !isRemotePath(key.slice(2))) return parentDir(key.slice(2));
+    const f = getSettings().folder;
+    return f && !isRemotePath(f) ? f : null;
+  };
+  /** The Git panel (Ctrl+Shift+G): for `dir`'s repository, or the open file's / the folder's. */
+  actions.toggleGit = (dir = null) => {
+    if (!gitBridge()) return toast('Git works in the desktop app, for folders on this computer.');
+    const at = dir ?? gitFolderNow();
+    if (!at) return toast('Open a file or a folder from this computer first: the Git panel shows its repository.');
+    setGitDir(at);
+    setPanel((p) => (p === 'git' && !dir ? null : 'git'));
+  };
+  /**
+   * Runs a Git command (git.cjs `act`) for the repository `dir` is in: { ok, result } or
+   * { ok: false, error } (gitError: Git's message in words, and its own last lines).
+   */
+  actions.gitRun = async (dir, action) => {
+    const bridge = gitBridge();
+    if (!bridge) return { ok: false, error: { kind: 'other', message: 'Git works in the desktop app.', detail: '' } };
+    hostRef.current?.flushAll();
+    if (WORKING_TREE_OPS.has(action.op)) {
+      const status = await bridge.status(dir).catch(() => null);
+      const unsaved = status ? store.session.open.filter((k) => k.startsWith('d:') && !isRemotePath(k.slice(2)) && store.diskTab(k.slice(2))?.dirty && insideRoot(status.root, k.slice(2))).map((k) => store.diskTab(k.slice(2)).name) : [];
+      if (unsaved.length) {
+        const what = action.op === 'switch' ? 'Switching branches' : action.op.startsWith('stash') ? 'The stash' : action.op === 'pull' ? 'Pulling' : 'This';
+        return { ok: false, error: { kind: 'unsaved', message: `Save ${unsaved.slice(0, 3).join(', ')}${unsaved.length > 3 ? ` and ${unsaved.length - 3} more` : ''} first: ${what} changes files on disk.`, detail: '' } };
+      }
+    }
+    const r = await bridge.act(dir, action).catch((err) => ({ ok: false, message: ipcMessage(err), stdout: '', stderr: '' }));
+    actions.gitChanged();
+    return r.ok ? { ok: true, result: r.result } : { ok: false, error: gitError(r.stderr, r.stdout || r.message) };
+  };
+  /** Git's state may have changed (a command here, a commit elsewhere): Folders, the status bar, the bar of changed lines and the panel read it again. */
+  actions.gitChanged = () => {
+    refreshAllGit();
+    lookUpGit(store.session.active);
+    setGitTick((n) => n + 1);
+  };
+  /** The branch picker (the status bar's branch). */
+  actions.chooseBranch = (dir = null) => {
+    const at = dir ?? gitFolderNow();
+    if (at && gitBridge()) setDialog({ type: 'branches', dir: at });
+  };
+  /** Fetch, pull or push from a command, without the panel: a toast says how it went. */
+  actions.gitQuick = async (op) => {
+    const dir = gitFolderNow();
+    if (!dir || !gitBridge()) return toast('Open a file or a folder from this computer in a Git repository first.');
+    const doing = { fetch: 'Fetching', pull: 'Pulling', push: 'Pushing' }[op];
+    toast(`${doing}…`, { key: 'git-quick', timeout: 60000 });
+    const r = await actions.gitRun(dir, { op });
+    if (r.ok) return toast({ fetch: 'Fetched', pull: 'Pulled', push: 'Pushed' }[op], { key: 'git-quick' });
+    toast(r.error.message, { key: 'git-quick', kind: 'error', timeout: 12000, action: { label: 'Git panel', run: () => actions.toggleGit(dir) } });
+  };
+  /**
+   * Stages the change of tab `key` at `line` (its mark in the bar of changed lines): that block
+   * alone, as it is in the editor, goes into what the next commit takes.
+   */
+  actions.stageChangeAt = async (key, line) => {
+    const bridge = gitBridge();
+    if (!bridge || !key?.startsWith('d:') || isRemotePath(key.slice(2))) return;
+    const path = key.slice(2);
+    const text = hostRef.current?.stateOf(key)?.doc.toString();
+    if (text == null) return;
+    const index = await bridge.index(path).catch(() => null);
+    if (!index) {
+      // Not in Git yet: the whole file.
+      const status = await bridge.status(parentDir(path)).catch(() => null);
+      if (!status || !insideRoot(status.root, path)) return toast('This file is not in a Git repository.');
+      const rel = path.slice(status.root.replace(/[\\/]+$/, '').length + 1).replace(/\\/g, '/');
+      const r = await actions.gitRun(parentDir(path), { op: 'stage', paths: [rel] });
+      return toast(r.ok ? `Staged ${store.diskTab(path)?.name ?? rel}, a new file` : r.error.message, { kind: r.ok ? 'info' : 'error' });
+    }
+    const next = stageBlock(index.text, text, line);
+    if (next === null) return toast('That change is staged already.');
+    try {
+      await bridge.stageText(path, next);
+    } catch (err) {
+      return toast(`Not staged: ${ipcMessage(err)}`, { kind: 'error' });
+    }
+    actions.gitChanged();
+    toast(`Staged the change at line ${line}${store.diskTab(path)?.dirty ? ', as it is here (the file is not saved yet)' : ''}`, { action: { label: 'Git panel', run: () => actions.toggleGit(parentDir(path)) } });
   };
   actions.togglePreview = () => {
     hostRef.current?.flushAll();
@@ -3199,6 +3304,9 @@ export function App() {
       } else if (mod && e.shiftKey && k === 'm') {
         e.preventDefault();
         actions.toggleProblems();
+      } else if (mod && e.shiftKey && !e.altKey && k === 'g') {
+        e.preventDefault();
+        actions.toggleGit();
       } else if (mod && !e.shiftKey && !e.altKey && k === 'k') {
         e.preventDefault();
         actions.askSelection();
@@ -3305,6 +3413,12 @@ export function App() {
       'goto-symbol-all': () => actions.gotoSymbolAll(),
       'command-palette': () => actions.commandPalette(),
       'git-compare': () => actions.compareWithHead(),
+      'git-panel': () => actions.toggleGit(),
+      'git-branch': () => actions.chooseBranch(),
+      'git-fetch': () => actions.gitQuick('fetch'),
+      'git-pull': () => actions.gitQuick('pull'),
+      'git-push': () => actions.gitQuick('push'),
+      'git-stage-change': () => actions.stageChangeAt(store.session.active, cursor?.line ?? 1),
       problems: () => actions.toggleProblems(),
       'indent-spaces': () => actions.setIndent({ tabs: false }),
       'indent-tabs': () => actions.setIndent({ tabs: true }),
@@ -3547,6 +3661,15 @@ export function App() {
     ${dialog?.type === 'palette' && html`<${CommandPalette} initial=${dialog.query ?? ''} onRun=${(c) => setTimeout(() => actions.command(c.id), 0)} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'symbols' && html`<${SymbolSearch} files=${store.live()} roots=${folderRoots(settings)} servers=${settings.languageServers !== false ? lspRef.current : null} initial=${dialog.query ?? ''} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'workspaceEdit' && html`<${WorkspaceEditDialog} title=${dialog.title} entries=${dialog.entries} rel=${(p) => relInFolders(p, settings)} onDone=${dialog.onDone} />`}
+    ${panel === 'git' && gitDir && html`<${GitPanel} key=${gitDir} dir=${gitDir} tick=${gitTick} actions=${actions} onClose=${() => setPanel(null)} />`}
+    ${dialog?.type === 'branches' && html`<${BranchDialog} dir=${dialog.dir} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${gitMenu &&
+    html`<${Menu} label="This change" at=${{ x: gitMenu.x, y: gitMenu.y }} onClose=${() => setGitMenu(null)}
+      items=${[
+        { key: 'stage', label: 'Stage this change', icon: 'plus', hint: 'Only this block goes into the next commit', run: () => actions.stageChangeAt(gitMenu.key, gitMenu.line) },
+        { key: 'compare', label: 'Compare with the last commit', icon: 'compare', run: () => actions.compareWithHead() },
+        { key: 'panel', label: 'The Git panel', icon: 'branch', hint: 'Ctrl+Shift+G', run: () => actions.toggleGit(parentDir(gitMenu.key.slice(2))) },
+      ]} />`}
     ${codeMenu &&
     html`<${Menu} className="code-actions" label="Quick fixes and refactorings" at=${codeMenu.at} onClose=${() => (setCodeMenu(null), hostRef.current?.focus())}
       items=${codeMenu.rows.flatMap((r, i) => [

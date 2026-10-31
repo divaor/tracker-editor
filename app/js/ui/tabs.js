@@ -777,11 +777,16 @@ export function StatusBar({ recording, big, cursor, language, file, repo, disk, 
     </button>`}
     ${lsp && html`<${ServerStatus} lsp=${lsp} open=${lspOpen} actions=${actions} />`}
     ${git &&
-    html`<button type="button" class="status-item status-btn-text status-git hide-narrow" disabled=${!git.tracked}
-      title=${git.tracked ? `Git: branch ${git.branch}${git.changes ? ` · ${changedLines(git.changes) ? `${changedLines(git.changes)} line${changedLines(git.changes) === 1 ? '' : 's'} changed` : 'no changes'} since the last commit` : ''}. Click to compare.` : `Git: branch ${git.branch} · a new file, not committed yet`}
-      onClick=${() => actions.compareWithHead()}>
-      <${Icon} name="branch" size=${13} /><span>${git.branch}</span>${git.tracked && git.changes && changedLines(git.changes) > 0 ? html`<span class="git-count">±${changedLines(git.changes)}</span>` : ''}
-    </button>`}
+    html`<button type="button" class="status-item status-btn-text status-git hide-narrow"
+      title=${`Git: branch ${git.branch}${git.tracked ? '' : ' · this file is new, not committed yet'}. Click to switch branches or make one; Ctrl+Shift+G for the Git panel.`}
+      onClick=${() => actions.chooseBranch()}>
+      <${Icon} name="branch" size=${13} /><span>${git.branch}</span>
+    </button>
+    ${git.tracked && git.changes && changedLines(git.changes) > 0 &&
+    html`<button type="button" class="status-item status-btn-text status-git-changes hide-narrow"
+      title=${`${changedLines(git.changes)} line${changedLines(git.changes) === 1 ? '' : 's'} changed since the last commit. Click to compare.`} onClick=${() => actions.compareWithHead()}>
+      <span class="git-count">±${changedLines(git.changes)}</span>
+    </button>`}`}
     <span class="spacer" />
     ${cursor?.scope && html`<button type="button" class="status-item status-btn-text status-scope hide-narrow" title=${`In ${cursor.scope} · Ctrl+P then @ goes to another`} onClick=${() => actions.gotoSymbol()}>
       <${Icon} name="code" size=${13} /><span>${cursor.scope}</span>

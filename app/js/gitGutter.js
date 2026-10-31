@@ -1,13 +1,17 @@
 // Lines changed since the last commit, for files on disk in a Git repository: a bar next
 // to the line numbers (green added, blue changed) and a red mark where lines were removed.
 // The text at the last commit comes from the main process (git:head); setGitBase gives it.
-import { GutterMarker, RangeSetBuilder, StateEffect, StateField, gutter } from '../vendor/cm/codemirror.js';
+// A click on a mark calls the editor's `gitMarkClick` (stage that change, compare…).
+import { Facet, GutterMarker, RangeSetBuilder, StateEffect, StateField, gutter } from '../vendor/cm/codemirror.js';
 import { lineChanges } from './gitStatus.js';
 
 /** The file's text at the last commit (null: not in a repository, or new). */
 export const setGitBase = StateEffect.define();
 
-const TITLES = { added: 'Added since the last commit', modified: 'Changed since the last commit', deleted: 'Lines removed here since the last commit', 'deleted-top': 'Lines removed here since the last commit' };
+const TITLES = { added: 'Added since the last commit (click to stage it)', modified: 'Changed since the last commit (click to stage it)', deleted: 'Lines removed here since the last commit (click to stage it)', 'deleted-top': 'Lines removed here since the last commit (click to stage it)' };
+
+/** (view, line (1-based), { x, y }) for a click on a mark; the editor host provides it. */
+export const gitMarkClick = Facet.define({ combine: (values) => values[0] ?? null });
 class Mark extends GutterMarker {
   constructor(kind) {
     super();
@@ -61,6 +65,20 @@ export const gitGutter = [
   gutter({
     class: 'cm-git-gutter',
     markers: (view) => view.state.field(gitField).marks,
+    domEventHandlers: {
+      mousedown(view, line, event) {
+        const onClick = view.state.facet(gitMarkClick);
+        if (!onClick || event.button !== 0) return false;
+        let marked = false;
+        view.state.field(gitField).marks.between(line.from, line.from, () => {
+          marked = true;
+        });
+        if (!marked) return false;
+        event.preventDefault();
+        onClick(view, view.state.doc.lineAt(line.from).number, { x: event.clientX, y: event.clientY });
+        return true;
+      },
+    },
   }),
 ];
 

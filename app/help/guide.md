@@ -2,7 +2,7 @@
 
 Tracker Editor is a Notepad++-style editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs. Everything is saved the moment you paste or type, on this computer with the tracker, or, once you turn on sync, in the same private GitHub data repo as the tracker, so your files are on your computers and your phone.
 
-Version 0.35.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.35.0 · Web app: https://divaor.github.io/tracker-editor/
+Version 0.36.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.36.0 · Web app: https://divaor.github.io/tracker-editor/
 
 ---
 
@@ -14,9 +14,9 @@ Download from **https://github.com/divaor/tracker-editor/releases/latest**:
 
 | System | File |
 | --- | --- |
-| Windows | `Tracker Editor Setup 0.35.0.exe` (installer) or `Tracker Editor-0.35.0-portable.exe` (no install, no admin rights) |
-| macOS | `Tracker Editor-0.35.0-arm64.dmg` |
-| Linux | `Tracker Editor-0.35.0.AppImage` |
+| Windows | `Tracker Editor Setup 0.36.0.exe` (installer) or `Tracker Editor-0.36.0-portable.exe` (no install, no admin rights) |
+| macOS | `Tracker Editor-0.36.0-arm64.dmg` |
+| Linux | `Tracker Editor-0.36.0.AppImage` |
 
 The builds are not code-signed, so the first launch warns you. On Windows, choose *More info → Run anyway*. On macOS, right-click the app → *Open*. Installing the desktop app also registers `tracker-editor://` links, so the tracker's **Open in editor** opens files straight in it.
 
@@ -27,7 +27,7 @@ The builds are not code-signed, so the first launch warns you. On Windows, choos
 The editor as an Android app, with what a web page cannot do: **Open with** from other apps, **Folders** on the phone, **servers** and **terminals**. For Android 7 and later on 64-bit phones (nearly all from the last ten years).
 
 1. Install **Obtainium** (from https://github.com/ImranR98/Obtainium/releases or F-Droid). It installs apps from their GitHub releases and keeps them up to date.
-2. In Obtainium: **Add app**, paste `https://github.com/divaor/tracker-editor`, **Add**, then **Install** (`Tracker-Editor-0.35.0.apk`). The first time, Android asks to let Obtainium install apps: allow it.
+2. In Obtainium: **Add app**, paste `https://github.com/divaor/tracker-editor`, **Add**, then **Install** (`Tracker-Editor-0.36.0.apk`). The first time, Android asks to let Obtainium install apps: allow it.
 3. Obtainium tells you when there is a new version and installs it over the old one; your files and settings stay. (Or download the `.apk` from the releases page and open it; then updates are by hand.)
 
 What the app adds:
@@ -182,6 +182,22 @@ The status bar names it (**TypeScript 7.0.2 · ready**, **gopls · ready**, **Py
 **Java and C#** take a while the first time: they read the whole project (Maven or Gradle for Java, the `.sln` or `.csproj` for C#) before problems show. jdtls keeps what it learns in a cache folder of its own, not in your project.
 
 ---
+
+### Git: stage, commit, branches, stash, pull and push (desktop)
+
+For folders on this computer in a Git repository, with the `git` program installed. **`Ctrl+Shift+G`** opens the **Git panel** for the repository of the open file (or of the folder in Folders):
+
+- **The branch** and what is to push and pull (**↑1 ↓2**). Click it to **switch branches**: your branches (what each has to push and pull, and those whose remote branch is gone), the ones **on the remote only** (switching to one makes a branch here that follows it), and **New branch from main…**, which makes one from where you are and switches to it (your changes come along). The branch in the status bar opens the same list.
+- **Fetch** (see what is new on the remote, changing nothing here), **Pull** and **Push**, with Git's progress as it goes. Pull only moves forward: when your branch and the remote both have new commits, it says so and offers **Pull, merging** or **Pull, rebasing mine on top**. A push the remote refuses (it has commits you lack) offers **Pull first**. The first push of a new branch sends it to the remote and follows it from then on.
+- **Commit**: write the message and press **Commit** (or `Ctrl+Enter`). **Amend the last commit** puts the staged changes into the last commit instead, with its message to change (empty keeps it).
+- **Staged** and **Changes**: the files the next commit takes, and those changed since. **+** stages a file, **↶** unstages it; **Stage all** and **Unstage all** take them all. Click a file to open it; ⇄ compares it with the last commit.
+- **One change at a time**: click a change's mark in the bar next to the line numbers → **Stage this change**: only that block goes into the next commit, as it is in the editor (the rest of the file stays as a change). **Edit → Code → Stage the Change at the Cursor** does it from the keyboard.
+- **Stash**: **Stash changes…** puts your changes aside (new files too, unless unticked) and brings the files back to the last commit; each stash shows with its note: **Pop** brings it back and drops it, **Apply** brings it back and keeps it, **Drop** throws it away.
+- **A merge or rebase halfway** (files in conflict): the panel says so; fix each file (look for `<<<<<<<`), stage it, then commit, or **Abort the merge**.
+- In **Folders**, right-click changed files → **Stage (Git)** or **Unstage (Git)**.
+- Commands that change your files (pull, switching branches, the stash) wait while a file of the repository has edits not saved: save it first.
+- Signing in to the remote is Git's own: a credential helper (Git Credential Manager on Windows, the keychain on macOS) or an SSH key with its agent. The editor never asks for a password in a terminal; when Git cannot sign in, it says so. Git that writes is for folders on this computer; files on SSH servers and the Android app show none of it.
+- Blame, reverting a change from the bar, and Git for folders on SSH servers come in a later version.
 
 ## 3. Tabs, pinning, groups and the split view
 
@@ -577,11 +593,11 @@ The sidebar has two views on the desktop: **My files** (synced) and **Folders** 
 | Pictures | Right-click → **Text from the image…** reads the text on this computer; **Save as photo.txt here** keeps it next to the picture (or insert it, copy it, or make a synced file). |
 | Find text | `Ctrl+Shift+F` in the list (or 🔍, or right-click a folder → **Find in this folder…**): type, `Enter`. It looks in the folder and the folders inside it; **Files** narrows it (`*.log, !debug*`), **Hidden** includes dot files. Click a line to open the file there. **Stop** stops a long one. `.git`, `node_modules`, non-text and very large files are skipped. |
 | Replace in files | In Find in this folder, the arrow at the left of the field shows **Replace with**: each line found shows what it becomes (old struck out, new in green). Untick the files to leave alone, then **Replace in N files** (or `Enter`). With `.*` (a regular expression), `$1` puts back a group and `\n` a new line. The message has **Undo** (it puts back only files nobody changed since). Files open with unsaved edits are left out; open tabs show the new text. On servers too. |
-| Git | In a folder that is a Git repository (on this computer), the branch shows next to the folder's name, and files show what changed since the last commit: **M** changed, **U** new, **A** added, **R** renamed, **C** in conflict; folders with changes inside have a dot. Hover the branch for how many files changed and what is to push or pull. Right-click a changed file → **Compare with the last commit**. It uses the `git` program installed on the computer and only reads. |
+| Git | In a folder that is a Git repository (on this computer), the branch shows next to the folder's name, and files show what changed since the last commit: **M** changed, **U** new, **A** added, **R** renamed, **C** in conflict; folders with changes inside have a dot. Hover the branch for how many files changed and what is to push or pull. Right-click a changed file → **Compare with the last commit**, **Stage (Git)** or **Unstage (Git)**. It uses the `git` program installed on the computer; the Git panel (`Ctrl+Shift+G`) commits, pulls, pushes, switches branches and stashes (see *Git* under Code tools). |
 | Properties | `Alt+Enter` or right-click → **Properties**: where it is, size (**Count what is inside** for a folder), dates, owner, permissions. On Mac/Linux tick Read/Write/Run for Owner/Group/Others or type `644`, **Save permissions**; for a folder, **Also for everything inside**. On Windows: **Read-only**. |
 | Terminal | Right-click a folder → **Open a terminal here** (a file: **Open a terminal in its folder**), near the top of the menu: a terminal in the panel under the editor, in that folder. **Open in the system’s terminal** opens your system's own (Windows Terminal or PowerShell, Terminal, …) there instead. |
 
-- **Files in a Git repository**: lines changed since the last commit have a bar next to their number (green added, blue changed, a red mark where lines were removed), and the status bar shows the branch with how many lines changed (**main ±3**); click it to compare with the last commit (also **Edit → Code → Compare with the Last Commit**).
+- **Files in a Git repository**: lines changed since the last commit have a bar next to their number (green added, blue changed, a red mark where lines were removed), and the status bar shows the branch and how many lines changed (**main** **±3**): click the branch to switch branches or make one, and **±3** to compare with the last commit (also **Edit → Code → Compare with the Last Commit**). Click a line's mark to stage that change alone.
 - **Open tabs follow**: rename or move a file (or its folder) and its tab follows, unsaved edits included. Deleting a file closes its tab, unless it has unsaved edits.
 - **Programs are never started**: `.exe`, `.bat`, `.ps1`, `.lnk` and other programs, scripts and shortcuts don't open with a double-click (scripts open as text). Use **Show in the file explorer** for those.
 - **Right-click** a file for **Open with its program**, **Copy path**, **Copy for Claude** (the paths, quoted as a terminal takes them), **Copy into my files** (a synced copy; the file on disk stays as it is) and **Show in the file explorer**. Right-click empty space for New, Paste, the order and hidden files.
