@@ -21,6 +21,8 @@ export function folderColor(path, taken = new Set()) {
 export const NOTES = 'notes';
 export const OTHER = 'other';
 export const PINNED = 'pinned';
+// The tabs found by asking (Find by asking, 0.40): a view of its own, `session.found.keys`.
+export const FOUND = 'found';
 
 const projectId = (name) => `p:${projectKey(name)}`;
 export const folderId = (path) => `f:${path}`;
@@ -93,9 +95,9 @@ export const viewKey = (view) => (view?.length ? [...view].sort().join('|') : ''
  * ones (with `pinnedEverywhere`, or when the view has Pinned), and the open tab
  * (and the side view's) when it is from elsewhere: `guests`.
  */
-export function viewTabs(open, view, groupOfKey, { pinned = [], pinnedEverywhere = true, active = null, side = null } = {}) {
+export function viewTabs(open, view, groupOfKey, { pinned = [], pinnedEverywhere = true, active = null, side = null, found = [] } = {}) {
   if (!view?.length) return { keys: open, guests: [] };
-  const shows = (key) => view.includes(groupOfKey(key)) || (pinned.includes(key) && (pinnedEverywhere || view.includes(PINNED)));
+  const shows = (key) => view.includes(groupOfKey(key)) || (view.includes(FOUND) && found.includes(key)) || (pinned.includes(key) && (pinnedEverywhere || view.includes(PINNED)));
   const keys = open.filter(shows);
   const guests = [active, side].filter((k, i, all) => k && open.includes(k) && !shows(k) && all.indexOf(k) === i);
   return { keys, guests };
@@ -114,6 +116,7 @@ export function groupName(id, { projects = [], folderName = baseName } = {}) {
   if (id === NOTES) return 'Notes';
   if (id === OTHER) return 'Other files';
   if (id === PINNED) return 'Pinned';
+  if (id === FOUND) return 'Found';
   if (id.startsWith('p:')) return projects.find((p) => p.key === id.slice(2))?.name ?? id.slice(2);
   if (id.startsWith('f:')) return folderName(id.slice(2)) || folderLabel(id.slice(2));
   return '';

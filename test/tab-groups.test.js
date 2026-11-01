@@ -1,7 +1,7 @@
 // Tab views (tabGroups.js): which group a tab belongs to, the groups, what a view shows.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FOLDER_COLORS, folderColor, groupName, groupOf, NOTES, OTHER, PINNED, stepView, suggestedProject, tabGroups, toggleInView, viewKey, viewLabel, viewTabs } from '../app/js/tabGroups.js';
+import { FOLDER_COLORS, folderColor, FOUND, groupName, groupOf, NOTES, OTHER, PINNED, stepView, suggestedProject, tabGroups, toggleInView, viewKey, viewLabel, viewTabs } from '../app/js/tabGroups.js';
 
 const ctx = {
   folders: ['/code/tracker-editor', '/code/tracking_app', '/code/tracker-editor/vendor', 'C:\\Work\\Scripts', 'remote://db1/'],
@@ -70,6 +70,12 @@ test('what a view shows: its groups, the pinned tabs, and the open tab from else
   assert.deepEqual(viewTabs(open, [PINNED, 'p:a'], of, { pinned: ['f:pin'], pinnedEverywhere: false }).keys, ['f:pin', 'f:1']);
   assert.deepEqual(viewTabs(open, ['f:/x'], of, { active: 'f:2', side: 'f:1' }).guests, ['f:2', 'f:1']);
   assert.deepEqual(viewTabs(open, ['f:/x'], of, { active: 'd:/x/a' }).guests, []);
+  // The tabs found by asking (0.40): a view of their own, whatever their groups.
+  assert.deepEqual(viewTabs(open, [FOUND], of, { found: ['f:2', 'd:/x/b', 'f:gone'] }).keys, ['f:2', 'd:/x/b']);
+  assert.deepEqual(viewTabs(open, [FOUND, 'p:a'], of, { found: ['f:2'] }).keys, ['f:1', 'f:2']);
+  assert.deepEqual(viewTabs(open, [FOUND], of).keys, []);
+  assert.equal(groupName(FOUND), 'Found');
+  assert.equal(viewLabel([FOUND], [], (id) => (id === FOUND ? 'Found: docker' : '')), 'Found: docker');
 });
 
 test('switching views: labels, combinations, stepping through the groups, remembering', () => {

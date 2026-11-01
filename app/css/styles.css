@@ -11255,3 +11255,140 @@ html[data-native='android'] body:has(.edit-bar) .toasts {
   padding: 4px 0;
   cursor: pointer;
 }
+
+/* ---- Find by asking (0.40): Ctrl+P's Ask row and the results panel ---- */
+.quick-row.quick-ask .icon,
+.quick-row.quick-ask .quick-name {
+  color: var(--accent);
+}
+
+.ask-body {
+  gap: 8px;
+}
+
+.ask-question {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.ask-plan {
+  margin: -4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.ask-results {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ask-row {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--kc, var(--border-strong));
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.ask-row.kind-item {
+  --kc: var(--accent);
+}
+
+.ask-open {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ask-open .icon {
+  flex: none;
+  color: var(--kc, var(--text-3));
+}
+
+.ask-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.ask-open:hover .ask-name {
+  text-decoration: underline;
+}
+
+.ask-place {
+  color: var(--text-3);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.ask-badge {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.ask-why {
+  margin: 4px 0 0;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.ask-line {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  margin-top: 4px;
+  padding: 3px 6px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ask-line-no {
+  flex: none;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.ask-line code {
+  overflow: hidden;
+  font-family: var(--mono);
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+
+.ask-encrypted h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 2px;
+}
+
+.ask-encrypted p {
+  margin: 0 0 6px;
+}
+
+.ask-searched {
+  margin: 0;
+}

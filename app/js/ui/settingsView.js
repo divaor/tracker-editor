@@ -202,6 +202,9 @@ function EditorCard({ settings }) {
       <${Check} checked=${Boolean(settings.inlineSuggest)} label="Suggest the rest as you type (the model)"
         hint=${settings.llm.enabled && settings.llm.provider !== 'async' ? 'Grey text after the cursor: Tab takes it, Ctrl+→ one word, Esc drops it. A code model (Settings → Model → Model for suggestions) works best.' : 'Needs a model on this computer or a server that answers at once: set it up under Model.'}
         onChange=${(v) => saveSettings({ inlineSuggest: v })} />
+      <${Check} checked=${Boolean(settings.askNamesOnly)} label="Find by asking: send the model only names, not the lines that matched"
+        hint="A question in Ctrl+P: the model then picks from the names and places of what was found (encrypted files never go, not even their names)"
+        onChange=${(v) => saveSettings({ askNamesOnly: v })} />
       <${Check} checked=${settings.indentGuides !== false} label="Indentation guides" onChange=${(v) => saveSettings({ indentGuides: v })} />
       <${Check} checked=${settings.bracketColors !== false} label="Color bracket pairs by depth" onChange=${(v) => saveSettings({ bracketColors: v })} />
       <${Check} checked=${settings.stickyScroll !== false} label="Sticky scroll" hint="The lines that start the function or section you are in stay at the top"

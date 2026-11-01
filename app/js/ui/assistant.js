@@ -16,17 +16,22 @@ const SCOPES = [
   { id: 'filtered', label: 'Filtered' },
   { id: 'all', label: 'All files' },
 ];
+// Find by asking's Ask about these: just the files and items it found.
+const FOUND_SCOPE = { id: 'found', label: 'Found' };
 
 function Answer({ text, busy }) {
   return html`<div class="answer markdown">${text ? html`<div dangerouslySetInnerHTML=${{ __html: renderMarkdown(text) }} />` : busy ? html`<p class="muted">Thinking…</p>` : null}</div>`;
 }
+
+// A passage's file: the editor's files and tracker documents, or (found by asking) a file on disk or a tracker item.
+const openPassage = (p, actions) => (/^[fdi]:/.test(p.id) ? actions.openFound({ id: p.id, kind: p.id.startsWith('i:') ? 'item' : '', itemId: p.id.slice(2) }, p.from) : actions.openFile(p.id, { line: p.from }));
 
 function Sources({ passages, actions }) {
   if (!passages?.length) return null;
   return html`<div class="sources">
     <div class="muted small">Sources</div>
     ${passages.map(
-      (p, i) => html`<button type="button" key=${i} class="source" onClick=${() => actions.openFile(p.id, { line: p.from })}>
+      (p, i) => html`<button type="button" key=${i} class="source" onClick=${() => openPassage(p, actions)}>
         <${Icon} name="file" size=${13} /><span>${p.name}</span><span class="muted">:${p.from}${p.to > p.from ? `–${p.to}` : ''}</span>
       </button>`,
     )}
@@ -34,14 +39,14 @@ function Sources({ passages, actions }) {
 }
 
 /** The model (on this computer, an AI provider, or a service): ask about your files, find by meaning, summarize. */
-export function AssistantPanel({ files, docs, activeFile, activeRepo, settings, actions, onClose }) {
+export function AssistantPanel({ files, docs, activeFile, activeRepo, asked = null, settings, actions, onClose }) {
   const { llm } = settings;
   // The open tab: one of the editor's files or a tracker document.
   const current = activeFile
     ? { id: activeFile.id, name: activeFile.name, project: activeFile.project, text: store.text(activeFile.id) }
     : activeRepo ? { id: `r:${activeRepo.path}`, name: activeRepo.name, project: '', text: activeRepo.text } : null;
   const [mode, setMode] = useState('ask');
-  const [scope, setScope] = useState(current ? 'file' : 'all');
+  const [scope, setScope] = useState(asked ? 'found' : current ? 'file' : 'all');
   const [question, setQuestion] = useState('');
   const [chat, setChat] = useState([]); // [{ q, a, passages }]
   const [busy, setBusy] = useState(false);
@@ -107,7 +112,7 @@ export function AssistantPanel({ files, docs, activeFile, activeRepo, settings, 
     return () => window.removeEventListener('assistant', on);
   }, [activeFile?.id, activeRepo?.path]);
 
-  const pool = () => (scope === 'file' && current ? [current] : scope === 'filtered' ? [...fileSources(files), ...docSources(docs)] : allSources());
+  const pool = () => (scope === 'found' && asked ? asked.sources : scope === 'file' && current ? [current] : scope === 'filtered' ? [...fileSources(files), ...docSources(docs)] : allSources());
 
   const ask = (e) => {
     e?.preventDefault();
@@ -118,7 +123,11 @@ export function AssistantPanel({ files, docs, activeFile, activeRepo, settings, 
       const candidates = pool();
       const ids = new Set(candidates.map((f) => f.id));
       let passages;
-      if (scope === 'file' && current && current.text.length < 20000) {
+      if (scope === 'found' && asked) {
+        // What Find by asking found: whole when it is short, else the passages about the question.
+        const total = asked.sources.reduce((n, f) => n + f.text.length, 0);
+        passages = total < 24000 ? asked.sources.map((f) => ({ id: f.id, name: f.name, from: 1, to: f.text.split('\n').length, text: f.text })) : keywordPassages(q, asked.sources);
+      } else if (scope === 'file' && current && current.text.length < 20000) {
         const { text } = current;
         passages = [{ id: current.id, name: current.name, from: 1, to: text.split('\n').length, text }];
       } else if (llm.embedModel) {
@@ -177,7 +186,8 @@ export function AssistantPanel({ files, docs, activeFile, activeRepo, settings, 
     </div>
     <div class="panel-body">
       <${Segmented} small options=${MODES} value=${mode} onChange=${setMode} label="Mode" />
-      ${mode !== 'summary' && html`<${Segmented} small options=${current ? SCOPES : SCOPES.slice(1)} value=${scope} onChange=${setScope} label="Look in" />`}
+      ${mode !== 'summary' && html`<${Segmented} small options=${[...(asked ? [FOUND_SCOPE] : []), ...(current ? SCOPES : SCOPES.slice(1))]} value=${scope} onChange=${setScope} label="Look in" />`}
+      ${scope === 'found' && asked && html`<p class="muted small">Asking about the ${asked.sources.length} result${asked.sources.length === 1 ? '' : 's'} found for “${asked.label}”.</p>`}
 
       ${mode === 'summary' &&
       html`<div class="assistant-actions">

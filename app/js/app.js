@@ -37,6 +37,10 @@ import { CHANGES_FILES, cleanCommitMessage, commitMessageMessages } from './gitA
 import { gitError, mergeRequestLink, stageBlock } from './gitStatus.js';
 import { refreshAllGit } from './gitState.js';
 import { FolderSearchPanel } from './ui/folderSearch.js';
+import { AskPanel } from './ui/askPanel.js';
+import { findResults, measure, parseFindPlan, parsePick, pickMessages, plainPlan, planMessages, questionOf, rankMeasured, wantsPick } from './askFind.js';
+import { askPicture, diskPlace, docSources, foundLabel, itemSources, searchedWords, syncedSources, tabKeyOf, trackerItemUrl } from './askSources.js';
+import { FOUND } from './tabGroups.js';
 import { PropertiesDialog } from './ui/properties.js';
 import { lastSyncText, mirror as mirrorById, onMirrors, watchMirrors as watchMirrorStatus } from './mirrors.js';
 import { MirrorDeletesDialog, MirrorDialog, MirrorsDialog } from './ui/mirrors.js';
@@ -2825,6 +2829,158 @@ export function App() {
     setPanel('folderSearch');
   };
 
+  // Find by asking (0.40): a question in Ctrl+P (✦ Ask). The model plans the search (askFind.js),
+  // the page measures the synced files, tracker documents and tracker items, the main process the
+  // folders shown (askFolders.cjs), all ranked together; the model picks the best from snippets.
+  // Encrypted files go by name only and never reach the model. The results: panel 'ask'.
+  const [askRun, setAskRun] = useState(null);
+  const askRef = useRef(null); // { id, controller }
+  const [assistantFound, setAssistantFound] = useState(null); // { label, sources } for the model's panel
+  const askReady = () => {
+    const { llm } = getSettings();
+    return Boolean(llm.enabled && llm.chatModel && connectionOf(llm) !== 'async');
+  };
+  actions.askFind = async (asked) => {
+    const question = questionOf(asked);
+    if (!question) return;
+    if (!askReady()) return toast('Find by asking needs a model that answers at once: Settings → Model.', { kind: 'error', action: { label: 'Settings', run: () => actions.showSettings() } });
+    askRef.current?.controller.abort();
+    const id = `ask-${Date.now()}`;
+    const controller = new AbortController();
+    askRef.current = { id, controller };
+    const { signal } = controller;
+    const s = getSettings();
+    const current = (patch) => askRef.current?.id === id && setAskRun((r) => (r?.id === id ? { ...r, ...patch } : r));
+    setAskRun({ id, question, phase: 'planning', notes: [] });
+    setPanel('ask');
+    hostRef.current?.flushAll();
+    const files = store.live();
+    const docs = store.docs();
+    const items = store.trackerItems().filter((i) => !i.deleted);
+    const roots = folderRoots(s);
+    const picture = askPicture({ today: new Date().toISOString().slice(0, 10), files, docs, items, trackerProjects: store.projects(), folders: roots.map((r) => r.label) });
+    const notes = [];
+    const chat = (messages, purpose) => llmClient().chat({ model: s.llm.chatModel, messages, purpose, signal, temperature: 0.1 });
+    let plan;
+    try {
+      plan = parseFindPlan(await chat(planMessages(question, picture), 'find'), question, picture);
+    } catch (err) {
+      if (signal.aborted) return;
+      notes.push(`The model could not plan the search (${ipcMessage(err)}): searched for the question's words.`);
+      plan = plainPlan(question);
+    }
+    if (signal.aborted) return;
+    current({ phase: 'searching', plan, notes: [...notes] });
+    // Here: the synced files, the tracker's documents and items.
+    const sources = [...syncedSources(files, (fid) => store.text(fid)), ...docSources(docs, (path) => store.docText(path)), ...itemSources(items)];
+    const entries = [];
+    let total = 0;
+    for (const source of sources) {
+      const e = measure(source, plan);
+      if (!e) continue;
+      total++;
+      entries.push(e);
+    }
+    // The folders shown in Folders (desktop): read by the main process; only what matches comes back.
+    let folders = null;
+    const wantsFolders = roots.length && window.desktop?.ask && (plan.kinds.length ? plan.kinds.includes('disk') : plan.intent === 'find');
+    if (wantsFolders) {
+      try {
+        const projects = Object.fromEntries(roots.map((r) => [r.dir, s.folderProjects?.[r.dir] || '']));
+        const found = await window.desktop.ask.folders(id, roots.map((r) => r.dir), plan, { hidden: Boolean(s.showHidden), projects });
+        const labelOf = new Map(roots.map((r) => [r.dir, r.label]));
+        entries.push(...found.entries.map((e) => ({ ...e, place: diskPlace(e, labelOf.get(e.root) ?? '') })));
+        total += found.total;
+        folders = { scanned: found.scanned, roots: roots.length, truncated: found.truncated, stopped: found.stopped };
+        if (found.truncated) notes.push('The folders have many files: only the first ones (breadth first) were read.');
+      } catch (err) {
+        if (signal.aborted) return;
+        notes.push(`The folders could not be searched: ${ipcMessage(err)}`);
+      }
+    }
+    if (signal.aborted) return;
+    const candidates = rankMeasured(entries, plan, { total });
+    let picked = null;
+    if (wantsPick(plan, candidates)) {
+      current({ phase: 'picking', notes: [...notes] });
+      try {
+        picked = parsePick(await chat(pickMessages(question, candidates, { namesOnly: Boolean(s.askNamesOnly) }), 'find'), candidates);
+        if (!picked) notes.push('The model’s pick could not be read: these are the best matches as the editor ranked them.');
+      } catch (err) {
+        if (signal.aborted) return;
+        notes.push(`The model could not pick (${ipcMessage(err)}): these are the best matches as the editor ranked them.`);
+      }
+    }
+    if (signal.aborted) return;
+    const shown = findResults(candidates, picked, plan);
+    // A listing of one project's files: Show only these is that project's own view.
+    const listing = plan.intent === 'list' && plan.projects.length === 1 && !plan.kinds.some((k) => k !== 'synced' && k !== 'doc') ? { name: plan.projects[0] } : null;
+    const searched = searchedWords({ files: files.length, docs: docs.length, items: items.length, folders });
+    current({ phase: 'done', ...shown, listing, searched, notes: [...notes] });
+  };
+  actions.stopAskFind = () => {
+    const run = askRef.current;
+    if (!run) return;
+    run.controller.abort();
+    window.desktop?.ask?.stop(run.id).catch(() => {});
+    setAskRun((r) => (r?.id === run.id && r.phase !== 'done' ? { ...r, phase: 'done', notes: [...(r.notes ?? []), 'Stopped.'] } : r));
+  };
+  /** Opens one result: a tab (at the line that matched), or a tracker item in the Tracker app. */
+  actions.openFound = (r, line) => {
+    if (r.kind === 'item') {
+      const url = trackerItemUrl(getSettings().trackerUrl, r.itemId);
+      if (window.desktop?.tracker?.openItem && !isAndroidApp()) return window.desktop.tracker.openItem(r.itemId, url).catch((err) => toast(ipcMessage(err), { kind: 'error' }));
+      return window.open(url, '_blank', 'noopener');
+    }
+    const position = line ? { line } : {};
+    if (r.id.startsWith('f:')) return actions.openFile(r.id.slice(2), position);
+    if (r.id.startsWith('r:')) return actions.openFile(r.id, position);
+    if (r.id.startsWith('d:')) return actions.openDiskPath(r.id.slice(2), position);
+  };
+  /** Opens the results as tabs (not tracker items), the first in front at its line; returns their keys. */
+  actions.openFoundAll = async (list) => {
+    const keys = [];
+    for (const r of list) {
+      const key = tabKeyOf(r);
+      if (!key) continue;
+      if (key.startsWith('f:') && store.get(key.slice(2))) store.open(key, { silent: true });
+      else if (key.startsWith('r:')) await actions.openRepoFile(key.slice(2));
+      else if (key.startsWith('d:') && (await actions.openDiskPath(key.slice(2), { report: false }))) continue;
+      if (store.session.open.includes(key)) keys.push(key);
+    }
+    const first = list.find((r) => keys.includes(tabKeyOf(r)));
+    if (first) await actions.openFound(first, first.lines?.[0]?.line);
+    return keys;
+  };
+  /** The results as the only tabs the bar shows (its Found view); a project's own files: its view. */
+  actions.showFoundTabs = async (run) => {
+    const keys = await actions.openFoundAll((run.results ?? []).filter((r) => r.kind !== 'item'));
+    if (run.listing) {
+      const vs = tabViewState();
+      const project = vs.groups.find((g) => g.kind === 'project' && g.name.toLowerCase() === run.listing.name.toLowerCase());
+      if (project) return actions.setTabView([project.id]);
+    }
+    if (!keys.length) return toast('Nothing to show as tabs: tracker items open in the Tracker app.');
+    store.setFound({ label: run.label ?? foundLabel(run.question), keys });
+    actions.setTabView([FOUND]);
+  };
+  /** The model's panel, answering from just these results (files read from disk when needed; never encrypted ones). */
+  actions.askAboutFound = async (run) => {
+    const list = (run.results ?? []).filter((r) => !r.encrypted).slice(0, 15);
+    const sources = [];
+    for (const r of list) {
+      let text = '';
+      if (r.id.startsWith('f:')) text = store.get(r.id.slice(2))?.encrypted ? '' : store.text(r.id.slice(2));
+      else if (r.id.startsWith('r:')) text = store.docText(r.id.slice(2)) ?? '';
+      else if (r.id.startsWith('d:')) text = (await window.desktop?.disk?.read(r.id.slice(2)).catch(() => null))?.text ?? '';
+      else if (r.kind === 'item') text = itemSources(store.trackerItems().filter((i) => i.id === r.itemId))[0]?.text ?? '';
+      if (text) sources.push({ id: r.id, name: r.name, project: r.project ?? '', text: text.slice(0, 200_000) });
+    }
+    if (!sources.length) return toast('Nothing to read in these results.', { kind: 'error' });
+    setAssistantFound({ label: foundLabel(run.question), sources, at: Date.now() });
+    setPanel('assistant');
+  };
+
   // Terminals (desktop): on this computer ('local') and on servers, in the panel under the
   // editor. Hiding it keeps the shells running.
   const [terminalShown, setTerminalShown] = useState(false);
@@ -3647,6 +3803,8 @@ export function App() {
       replace: () => actions.run('replace'),
       'goto-line': () => actions.run('gotoLine'),
       'find-in-files': () => setPanel('search'),
+      'ask-find': () => (askReady() ? setDialog({ type: 'quickOpen', query: '? ' }) : toast('Find by asking needs a model that answers at once: Settings → Model.', { kind: 'error', action: { label: 'Settings', run: () => actions.showSettings() } })),
+      'ask-results': () => (askRun ? setPanel((p) => (p === 'ask' ? null : 'ask')) : actions.command('ask-find')),
       'goto-definition': () => actions.goToDefinition(),
       'find-usages': () => actions.findUsages(),
       'rename-symbol': () => actions.renameSymbol(),
@@ -3895,10 +4053,12 @@ export function App() {
     ${panel === 'outline' && activeKey && (activeFile || activeRepo || activeDisk) && !activeSealed &&
     html`<${OutlinePanel} name=${activeName} text=${activeText()} language=${languageName} fileId=${activeFile?.id}
       cursorLine=${cursor?.line} actions=${actions} onClose=${() => setPanel(null)} />`}
-    ${panel === 'assistant' && html`<${AssistantPanel} files=${scoped} docs=${scopedDocs} activeFile=${activeFile} activeRepo=${activeRepo} settings=${settings} actions=${actions} onClose=${() => setPanel(null)} />`}
+    ${panel === 'assistant' && html`<${AssistantPanel} key=${assistantFound?.at ?? 0} files=${scoped} docs=${scopedDocs} activeFile=${activeFile} activeRepo=${activeRepo} asked=${assistantFound} settings=${settings} actions=${actions} onClose=${() => setPanel(null)} />`}
+    ${panel === 'ask' && html`<${AskPanel} key=${askRun?.id} run=${askRun} actions=${actions} onClose=${() => (actions.stopAskFind(), setPanel(null))} />`}
 
     ${dialog?.type === 'quickOpen' &&
     html`<${QuickOpen} files=${store.live()} docs=${docs} openTabs=${openDiskTabs()} actions=${actions} initial=${dialog.query ?? ''} symbols=${() => (activeKey ? (hostRef.current?.codeContext()?.symbols ?? []) : [])}
+      onAsk=${askReady() ? (q) => actions.askFind(q) : null}
       roots=${folderRoots(settings)} hidden=${Boolean(settings.showHidden)} onSymbol=${(entry) => actions.revealSymbol(entry)} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'compareFolder' && html`<${CompareFolderDialog} other=${dialog.other} side=${dialog.side} panes=${dialog.panes} onPick=${dialog.onPick} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'saveCompare' && html`<${SaveCompareDialog} id=${dialog.id} actions=${actions} onClose=${() => setDialog(null)} />`}

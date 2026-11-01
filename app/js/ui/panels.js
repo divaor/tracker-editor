@@ -5,6 +5,7 @@ import { timeAgo } from '../format.js';
 import { fileKey, repoKey, store } from '../store.js';
 import { folderFiles, onFolderIndex } from '../folderIndex.js';
 import { pastedPath } from '../fileRefs.js';
+import { looksLikeQuestion, questionOf } from '../askFind.js';
 import { baseName } from '../folders.js';
 import { KINDS } from '../where.js';
 import { Icon } from './icons.js';
@@ -135,7 +136,7 @@ export function SearchPanel({ files, docs, allFiles, allDocs, openKeys, actions,
  * Ctrl+P: open a file by (fuzzy) name; also matches the project, and the files in the
  * folders open in Folders (`roots`: [{ dir, label, kind }]) by their path.
  */
-export function QuickOpen({ files, docs, actions, onClose, initial = '', symbols = null, onSymbol, roots = [], hidden = false, openTabs = [] }) {
+export function QuickOpen({ files, docs, actions, onClose, initial = '', symbols = null, onSymbol, roots = [], hidden = false, openTabs = [], onAsk = null }) {
   const [query, setQuery] = useState(initial);
   const [index, setIndex] = useState(0);
   // Files in the folders: listed in the background, the list grows when they come.
@@ -157,11 +158,18 @@ export function QuickOpen({ files, docs, actions, onClose, initial = '', symbols
   // A whole path typed or pasted (desktop): opening it comes first.
   const typed = !symbolMode && window.desktop?.disk?.openTyped ? pastedPath(query) : null;
   const found = quickOpen(query.trim() ? [...all, ...inFolders.files.filter((f) => !tabPaths.has(f.path))] : all, query, 60);
-  const list = typed ? [{ id: `typed:${typed}`, typed, name: baseName(typed) }, ...found] : found;
+  // Find by asking (with a model on): a question, or anything after "?", is asked of the model; first
+  // when it reads as a question (Enter asks), else after the names that match.
+  const words = query.trim().split(/\s+/).filter(Boolean);
+  const asking = Boolean(onAsk) && !symbolMode && (query.trim().startsWith('?') ? questionOf(query).length > 0 : words.length >= 3);
+  const askRow = asking ? { id: 'ask', ask: true, name: questionOf(query) } : null;
+  const named = typed ? [{ id: `typed:${typed}`, typed, name: baseName(typed) }, ...found] : found;
+  const list = askRow ? (looksLikeQuestion(query) ? [askRow, ...named] : [...named, askRow]) : named;
   const input = useRef(null);
   const choose = (file) => {
     onClose();
     if (symbolMode) onSymbol?.(file);
+    else if (file.ask) onAsk(query);
     else if (file.typed) actions.openTypedPath(file.typed);
     else if (file.path) actions.openDiskPath(file.path);
     else actions.openFile(file.id);
@@ -225,7 +233,13 @@ export function QuickOpen({ files, docs, actions, onClose, initial = '', symbols
         ${symbolMode && !symbolList.length && html`<p class="muted small quick-empty">${symbols().length ? 'No function or section matches.' : 'No functions or sections found in this file (classes, functions and headings show here).'}</p>`}
         ${!symbolMode &&
         list.map((f, i) =>
-          f.typed
+          f.ask
+            ? html`<button type="button" key="ask" role="option" aria-selected=${i === index} class="quick-row quick-ask ${i === index ? 'active' : ''}"
+                title="Find by asking: the model works out what to look for, the editor searches your files, documents, tracker items and folders, and the model picks the best"
+                onMouseEnter=${() => setIndex(i)} onClick=${() => choose(f)}>
+                <${Icon} name="sparkle" size=${15} /><span class="quick-name">Ask: ${f.name}</span><span class="spacer" /><span class="muted small">Find by asking</span>
+              </button>`
+            : f.typed
             ? html`<button type="button" key=${f.id} role="option" aria-selected=${i === index} class="quick-row quick-disk kind-disk ${i === index ? 'active' : ''}"
                 title=${f.typed} onMouseEnter=${() => setIndex(i)} onClick=${() => choose(f)}>
                 <${Icon} name="disk" size=${15} class="quick-kind" /><span class="quick-name">Open ${f.name}</span>

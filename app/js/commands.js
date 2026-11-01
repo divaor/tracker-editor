@@ -43,6 +43,8 @@ export const COMMAND_LIST = [
   { id: 'find-next', group: 'Find', label: 'Next / previous match', keys: 'Enter · Shift+Enter (or F3)', run: false },
   { id: 'goto-line', group: 'Find', label: 'Go to line', keys: 'Mod+G' },
   { id: 'find-in-files', group: 'Find', label: 'Find in files', keys: 'Mod+Shift+F' },
+  { id: 'ask-find', group: 'Find', label: 'Find by asking: a question about your files, documents, tracker items and folders', hint: 'Or type a question in Ctrl+P (✦ Ask); with a model on' },
+  { id: 'ask-results', group: 'Find', label: 'The last Find by asking results' },
   { id: 'filter-lines', group: 'Find', label: 'Filter lines (show or hide the ones that match)', keys: 'Alt+L' },
   { id: 'selectNext', group: 'Find', label: 'Select the next occurrence', keys: 'Mod+D' },
   { id: 'select-all-matches', group: 'Find', label: 'Select every occurrence', keys: 'Mod+Shift+L', run: false },

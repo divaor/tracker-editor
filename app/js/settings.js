@@ -56,6 +56,8 @@ export const DEFAULT_SETTINGS = {
   linkedTags: true,
   // Suggestions as you type from the model (grey text, Tab takes it); off until turned on.
   inlineSuggest: false,
+  // Find by asking (Ctrl+P, a question): send the model only the names of what was found, not the lines that matched.
+  askNamesOnly: false,
   // Language servers for code files on this computer (desktop): types, completion, F12 across files.
   languageServers: true,
   // Files on SSH servers get theirs there; synced files and tracker documents one of their own.

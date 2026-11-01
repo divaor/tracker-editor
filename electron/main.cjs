@@ -1659,6 +1659,7 @@ const loadAppModules = async () =>
     outline: await import(pathToFileURL(path.join(APP_DIR, 'js', 'outline.js')).href),
     gitStatus: await import(pathToFileURL(path.join(APP_DIR, 'js', 'gitStatus.js')).href),
     replace: await import(pathToFileURL(path.join(APP_DIR, 'js', 'replace.js')).href),
+    askFind: await import(pathToFileURL(path.join(APP_DIR, 'js', 'askFind.js')).href),
   });
 // The matching runs in a worker thread, so a pattern that takes very long (or a huge
 // minified file) never freezes the window; Stop, or 15 s on one file, ends the worker.
@@ -1798,6 +1799,106 @@ ipcMain.handle('folder:index', guard(async (_e, dir, opts = {}) => {
     concurrency: onServer ? (remote.isFtp(dir) ? 1 : 4) : 8,
   });
 }));
+// ---- Find by asking (0.40): the folders shown, measured against the page's plan ----
+// askFind.js `measure` runs in a worker thread (its source as a data: URL: it imports nothing), so
+// no file can freeze the window; one file taking over 10 s stops the search with what it found.
+const { askFolders, cleanPlan } = require('./askFolders.cjs');
+const MEASURE_WORKER = `
+const { parentPort, workerData } = require('node:worker_threads');
+const ready = import('data:text/javascript,' + encodeURIComponent(workerData.source));
+parentPort.on('message', async ({ id, source, plan }) => {
+  try {
+    const { measure } = await ready;
+    parentPort.postMessage({ id, entry: measure(source, plan) });
+  } catch (err) {
+    parentPort.postMessage({ id, error: String(err && err.message || err) });
+  }
+});`;
+function measureWorker(signal) {
+  const { Worker } = require('node:worker_threads');
+  const source = fs.readFileSync(path.join(APP_DIR, 'js', 'askFind.js'), 'utf8');
+  const worker = new Worker(MEASURE_WORKER, { eval: true, workerData: { source } });
+  const pending = new Map();
+  let n = 0;
+  let dead = null;
+  const end = (reason) => {
+    if (dead) return;
+    dead = reason;
+    worker.terminate();
+    for (const p of pending.values()) (clearTimeout(p.timer), p.reject(reason));
+    pending.clear();
+  };
+  worker.on('message', ({ id, entry, error }) => {
+    const p = pending.get(id);
+    if (!p) return;
+    pending.delete(id);
+    clearTimeout(p.timer);
+    error ? p.reject(new Error(error)) : p.resolve(entry);
+  });
+  worker.on('error', (err) => end(err));
+  signal.addEventListener('abort', () => end(new Error('Stopped.')));
+  return {
+    measure: (source, plan) =>
+      new Promise((resolve, reject) => {
+        if (dead) return reject(dead);
+        const id = ++n;
+        const timer = setTimeout(() => end(Object.assign(new Error(`Reading ${source.name} takes too long, so the search stopped.`), { fatal: true })), 10000);
+        pending.set(id, { resolve, reject, timer });
+        worker.postMessage({ id, source, plan });
+      }),
+    close: () => end(new Error('Done.')),
+  };
+}
+const askSearches = new Map(); // search id → AbortController
+ipcMain.handle('ask:folders', guard(async (_e, searchId, dirs, plan, opts = {}) => {
+  const { askFind, folders: names } = await loadAppModules();
+  const clean = cleanPlan(plan, askFind.patternProblem);
+  const roots = usableRoots(dirs);
+  if (!roots.length) return { entries: [], total: 0, scanned: 0, truncated: false, stopped: false };
+  const controller = new AbortController();
+  askSearches.get(searchId)?.abort();
+  askSearches.set(searchId, controller);
+  const worker = measureWorker(controller.signal);
+  const projects = opts.projects && typeof opts.projects === 'object' ? opts.projects : {};
+  const onServers = roots.some((d) => isRemote(d));
+  try {
+    return await askFolders({
+      roots,
+      plan: clean,
+      list: anyList,
+      read: anyRead,
+      decode: anyDecode,
+      isText: names.opensInEditor,
+      measure: worker.measure,
+      projectOf: (root) => (typeof projects[root] === 'string' ? projects[root].slice(0, 200) : ''),
+      relative: (root, p) => (isRemote(root) ? path.posix.relative(remoteFiles.parseUri(root).path, remoteFiles.parseUri(p).path) : path.relative(root, p).split(path.sep).join('/')),
+      hidden: Boolean(opts.hidden),
+      signal: controller.signal,
+      maxFiles: onServers ? 1500 : 4000,
+      timeLimit: onServers ? 15000 : 10000,
+      concurrency: roots.some((d) => isRemote(d) && remote.isFtp(d)) ? 1 : 4,
+    });
+  } finally {
+    worker.close();
+    if (askSearches.get(searchId) === controller) askSearches.delete(searchId);
+  }
+}));
+ipcMain.handle('ask:stop', guard((_e, searchId) => void askSearches.get(searchId)?.abort()));
+// A tracker item found by asking opens in the Tracker app when it is installed (tracker-app://),
+// else in the tracker's web app (`webUrl`, an https address the page gives).
+ipcMain.handle('tracker:open-item', guard(async (_e, id, webUrl) => {
+  if (typeof id !== 'string' || !/^[\w.-]{1,100}$/.test(id)) throw new Error('Not an item id.');
+  if (app.getApplicationNameForProtocol?.('tracker-app://')) {
+    await shell.openExternal(`tracker-app://item/${id}`);
+    return 'app';
+  }
+  if (typeof webUrl === 'string' && isSafeExternal(webUrl)) {
+    await shell.openExternal(webUrl);
+    return 'web';
+  }
+  return null;
+}));
+
 // ---- Code across the folders shown (F12 in other files, Ctrl+T), here and on servers ----
 // Listed and read through the same calls as the folders view: links are not followed here.
 const anyList = async (d) =>

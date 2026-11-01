@@ -8,7 +8,7 @@ import { isWithin, rootOf, withCurrent } from './folders.js';
 import { projectList } from './tracker-model.js';
 import { isRemotePath, kindOfKey, remoteParts, remoteRoot } from './where.js';
 import { server } from './servers.js';
-import { folderColor, groupName, groupOf, tabGroups, viewKey, viewLabel, viewTabs } from './tabGroups.js';
+import { FOUND, folderColor, groupName, groupOf, tabGroups, viewKey, viewLabel, viewTabs } from './tabGroups.js';
 
 let roots = null; // the folders picked in the open dialog (desktop)
 
@@ -64,16 +64,17 @@ export function tabViewState(settings = getSettings()) {
   const projects = projectList(store.live(), store.projects());
   const groups = tabGroups(facts, ctx, { projects, colors: settings.folderColors ?? {}, folderName });
   const view = session.view;
-  const shown = viewTabs(session.open, view, groupOfKey, { pinned: session.pinned, pinnedEverywhere: settings.pinnedEverywhere !== false, active: session.active, side: session.side });
-  // A group of the view with none of its tabs open still has a name.
-  const nameOf = (id) => groupName(id, { projects, folderName });
+  const found = session.found?.keys ?? [];
+  const shown = viewTabs(session.open, view, groupOfKey, { pinned: session.pinned, pinnedEverywhere: settings.pinnedEverywhere !== false, active: session.active, side: session.side, found });
+  // A group of the view with none of its tabs open still has a name (the tabs found: what was asked).
+  const nameOf = (id) => (id === FOUND ? (session.found ? `Found: ${session.found.label}` : 'Found') : groupName(id, { projects, folderName }));
   return { ctx, groups, groupOfKey, view, nameOf, label: viewLabel(view, groups, nameOf), ...shown };
 }
 
 /** The open tab for a view: the one it had last, else its first tab (null: none). */
 export function activeFor(view, state, settings = getSettings()) {
   const { session } = store;
-  const next = viewTabs(session.open, view, state.groupOfKey, { pinned: session.pinned, pinnedEverywhere: settings.pinnedEverywhere !== false });
+  const next = viewTabs(session.open, view, state.groupOfKey, { pinned: session.pinned, pinnedEverywhere: settings.pinnedEverywhere !== false, found: session.found?.keys ?? [] });
   if (session.active && next.keys.includes(session.active)) return session.active;
   const last = session.viewActive[viewKey(view)];
   if (last && next.keys.includes(last)) return last;

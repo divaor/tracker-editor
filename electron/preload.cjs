@@ -187,6 +187,14 @@ contextBridge.exposeInMainWorld('desktop', {
     },
   },
   // Servers (SFTP, FTP, FTPS): files there are remote://<id>/<path> and go through disk and folders above.
+  // Find by asking: the folders shown measured against a plan (askFind.js); a tracker item opened in the Tracker app.
+  ask: {
+    folders: (searchId, dirs, plan, opts) => ipcRenderer.invoke('ask:folders', searchId, dirs, plan, opts),
+    stop: (searchId) => ipcRenderer.invoke('ask:stop', searchId),
+  },
+  tracker: {
+    openItem: (id, webUrl) => ipcRenderer.invoke('tracker:open-item', id, webUrl),
+  },
   // Code across the folders shown: where a name is declared, symbols by name (Ctrl+T).
   code: {
     declarations: (dirs, word) => ipcRenderer.invoke('code:declarations', dirs, word),

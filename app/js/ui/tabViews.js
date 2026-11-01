@@ -7,7 +7,7 @@ import { Modal } from './components.js';
 import { Menu } from './menu.js';
 import { getSettings, saveSettings } from '../settings.js';
 import { store } from '../store.js';
-import { folderColor, PINNED, toggleInView } from '../tabGroups.js';
+import { FOUND, folderColor, PINNED, toggleInView } from '../tabGroups.js';
 import { projectList } from '../tracker-model.js';
 import { baseName } from '../folders.js';
 
@@ -101,6 +101,15 @@ export function TabViewMenu({ state, at, onClose, owner, actions, moving = null 
       <span class="view-check-space" />
       <button type="button" class="view-pick" aria-pressed=${!view.length} onClick=${() => pick(null)}>
         <${Icon} name="list" size=${15} /><span class="view-name">All tabs</span><span class="view-count">${session.open.length}</span>
+      </button>
+    </div>`}
+    ${!moving &&
+    !query &&
+    session.found &&
+    html`<div class="view-row ${view.includes(FOUND) ? 'on' : ''}">
+      <span class="view-check-space" />
+      <button type="button" class="view-pick" aria-pressed=${view.includes(FOUND)} title="The files found by asking (Ctrl+P, ✦ Ask)" onClick=${() => pick(FOUND)}>
+        <${Icon} name="sparkle" size=${15} /><span class="view-name">Found: ${session.found.label}</span><span class="view-count">${session.found.keys.length}</span>
       </button>
     </div>`}
     ${(!moving && !query) || rows.length ? html`<div class="menu-separator" role="separator" />` : ''}

@@ -46,7 +46,7 @@ let docs = { items: null, list: [] }; // trackerDocs(trackerItems), computed onc
 // lists project keys whose tab group is folded.
 // view: the tab groups the bar shows (null: all); viewActive: each view's last tab; assigned: tabs
 // moved to a group by hand; groupFolders: folders that stay tab groups while their tabs are open.
-const EMPTY_SESSION = () => ({ open: [], active: null, closed: [], pinned: [], side: null, collapsed: [], view: null, viewActive: {}, assigned: {}, groupFolders: [] });
+const EMPTY_SESSION = () => ({ open: [], active: null, closed: [], pinned: [], side: null, collapsed: [], view: null, viewActive: {}, assigned: {}, groupFolders: [], found: null });
 let session = EMPTY_SESSION();
 let meta = { lastSyncAt: null };
 let trashed = new Set(); // deleted files whose text this device kept (kv "trash:<id>")
@@ -140,6 +140,15 @@ function tidySession() {
   const open = new Set(session.open);
   session.assigned = Object.fromEntries(Object.entries(session.assigned ?? {}).filter(([k]) => open.has(k)));
   session.viewActive = Object.fromEntries(Object.entries(session.viewActive ?? {}).filter(([, k]) => open.has(k)));
+  // The tabs found by asking: those still open; none left, the view goes too.
+  if (session.found) {
+    const keys = (session.found.keys ?? []).filter((k) => open.has(k));
+    session.found = keys.length ? { label: String(session.found.label ?? ''), keys } : null;
+  }
+  if (!session.found && session.view?.includes('found')) {
+    const view = session.view.filter((v) => v !== 'found');
+    session.view = view.length ? view : null;
+  }
 }
 
 /** Writes everything still waiting for its debounce (before closing the app). */
@@ -517,6 +526,14 @@ export const store = {
       if (session.side === active) session.side = null;
       session.active = active;
     }
+    tidySession();
+    persist.session();
+    emit('session');
+  },
+
+  /** The tabs found by asking ({ label, keys }: open ones), for the bar's Found view; null forgets them. */
+  setFound(found) {
+    session.found = found?.keys?.length ? { label: String(found.label ?? ''), keys: [...new Set(found.keys)] } : null;
     tidySession();
     persist.session();
     emit('session');

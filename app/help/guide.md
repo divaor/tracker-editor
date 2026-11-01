@@ -2,7 +2,7 @@
 
 Tracker Editor is a Notepad++-style editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs. Everything is saved the moment you paste or type, on this computer with the tracker, or, once you turn on sync, in the same private GitHub data repo as the tracker, so your files are on your computers and your phone.
 
-Version 0.39.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.39.0 · Web app: https://divaor.github.io/tracker-editor/
+Version 0.40.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.40.0 · Web app: https://divaor.github.io/tracker-editor/
 
 ---
 
@@ -86,11 +86,22 @@ On an iPhone, apps added to the home screen each keep their own storage: the edi
 ### Finding things
 
 - `Ctrl+P` **Open a file**: type part of a name or project (fuzzy). Enter on a name that doesn't exist creates it. In the desktop app it also finds the files in the folders open in **Folders** (on this computer and on connected servers), by name or by path (`lib/util`); they show the folder they are in and open in place.
+- **Find by asking** (with a model on): type a question in `Ctrl+P`, or start with `?`. See [Find by asking](#find-by-asking) below.
 - `Ctrl+Shift+F` **Find in files**: in all files, the filtered ones or the open tabs, with case, whole word and regex options. Tick the files found and press **Open N selected**, or **Open all**: each opens at its first match, the first one in front. The ↗ button opens one file; the list button folds the results to file names. On a phone the panel closes so you see the file.
 - `Ctrl+F` **Find in this file**: a bar over the text. **Aa** (match case), **ab** (whole word) and **.\*** (regular expression) are toggles inside the field; next to it, how many matches there are and which one you are on ("3 of 12"). `Enter` / `Shift+Enter` (or ↓ / ↑) go to the next / previous one, the third button selects them all (`Alt+Enter`), × or `Escape` closes it.
 - `Ctrl+H` **Replace** (macOS: `Cmd+Alt+F`), or the chevron at the left of the bar: a second line with the replacement. **Replace** changes the next match in one click (`Enter` in the field), **Replace all** every one (`Ctrl+Enter`). The line stays open next time until you close it with the chevron.
 - `Ctrl+G`: go to a line.
 - **The sidebar** (`Ctrl+B`): every file, newest first, or by name or project. Filter by text or by a tag. **All / Work / Personal / Projects** at the top limits the list to some projects, as in the tracker.
+
+### Find by asking
+
+When you don't remember a file's name or where you left it, ask in your own words: press `Ctrl+P` and type the question, for example *the file where I copied a docker command*, *notes about the coal forest layer*, *the SQL I wrote for the gateway last month*, *show me the files of Deep Time*, *my notes with no name*, or *search my encrypted files*. A question shows **✦ Ask: …** at the top of the list (`Enter` asks); anything after a `?` is asked too. Plain words keep finding names as before. The command **Find by asking** (`Ctrl+Shift+P`) opens `Ctrl+P` ready for a question.
+
+- **How it works**: the model works out what to look for (words, other words with the same meaning, the shape of a command, a project, a time), the editor searches your files, the tracker's documents and items, and (desktop) the text files in the folders open in Folders, here and on connected servers, and the model picks the best ones, each with a line on why.
+- **The results** open in a panel: the file's name, where it is, why it fits and the line that matched. Click one to open it at that line. **Open all**, **Show only these** (the tab bar shows just these tabs, as a view called **Found: …**; **All tabs** in `Alt+V` brings the others back), **Ask about these** (the model's panel answers from just these files) and the ones that matched but were not picked, under **more**.
+- **Tracker items** show too, marked **Tracker**: clicking one opens it in the Tracker app (when it is installed on this computer), else in the tracker's web app.
+- **Encrypted files** (passwords, keys) are found by their name only, on this device, and shown apart: their contents never go to the model, nor their names. Ask for them (*search my encrypted files*, *password files*) and **Open all as a group** opens them together as the **Found** view.
+- **What goes to the model**: your question, the names of your projects, tags and folders, and the matching lines of the best candidates (never whole files). A model on your computer keeps it all there. **Settings → Editor → Find by asking: send the model only names** sends no lines at all. It needs a model that answers at once, not a service that answers later.
 
 ### Projects and tags
 
@@ -759,7 +770,7 @@ Turn them on in **Settings → Desktop**.
 | Keys | Action |
 | --- | --- |
 | `Alt+N` (desktop `Ctrl+N`) | New file |
-| `Ctrl+P` | Open a file by name |
+| `Ctrl+P` | Open a file by name; type a question (or `?` first) to find by asking |
 | `Alt+V` | Which tabs show: a project, a folder, Notes, Other files, several, or all |
 | `Ctrl+Alt+PageDown` / `Ctrl+Alt+PageUp` / `Ctrl+Alt+Home` | The next / previous group of tabs / all tabs |
 | `Ctrl+Shift+F` | Find in files |

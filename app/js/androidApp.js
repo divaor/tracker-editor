@@ -608,6 +608,10 @@ function install() {
       onData: (cb) => nodeOn('term:data', cb),
       onExit: (cb) => nodeOn('term:exit', cb),
     },
+    ask: {
+      folders: (searchId, dirs, plan, opts) => nodeInvoke('ask:folders', searchId, dirs, plan, opts),
+      stop: (searchId) => nodeInvoke('ask:stop', searchId),
+    },
     code: {
       declarations: (dirs, word) => nodeInvoke('code:declarations', dirs, word),
       symbols: (dirs, query) => nodeInvoke('code:symbols', dirs, query),
