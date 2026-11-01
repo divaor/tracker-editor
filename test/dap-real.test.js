@@ -88,19 +88,20 @@ async function debugTo(file, marks, opts = {}) {
 const PY = ['def add(a, b):', '    total = a + b', '    return total', '', '', 'items = [1, 2, 3]', 'result = add(2, 3)', 'print("result", result)', 'for i in items:', '    result += i', 'print("done", result)', ''].join('\n');
 const JS = ['function add(a, b) {', '  const total = a + b;', '  return total;', '}', '', 'const items = [1, 2, 3];', 'let result = add(2, 3);', "console.log('result', result);", 'for (const i of items) result += i;', "console.log('done', result);", ''].join('\n');
 
-async function walkThrough(file, { frameNames }) {
+async function walkThrough(file, { name }) {
   const { host, dbg, stops, ended, text } = await debugTo(file, { [file]: [{ line: 2 }] });
   const first = stops[0];
   assert.equal(first.place.path, file);
   assert.equal(first.place.line, 2);
   assert.equal(dbg.run.reason, 'Paused on a breakpoint');
-  // The stack: add, called from the module's line 7.
+  // The stack: add (debugpy says add, js-debug global.add), called from the module's line 7.
   const frames = dbg.threads().find((t) => t.paused).frames;
-  assert.match(frames[0].name, frameNames[0]);
+  assert.match(frames[0].name, name);
   assert.equal(frames[0].line, 2);
-  const caller = frames.find((f) => frameNames[1].test(f.name));
-  assert.ok(caller, `a caller frame in ${frames.map((f) => f.name).join(', ')}`);
-  assert.equal(caller.line, 7);
+  assert.ok(
+    frames.slice(1).some((f) => f.line === 7 && f.source?.path === file),
+    `the caller at line 7 in ${frames.map((f) => `${f.name} ${f.source?.path}:${f.line}`).join(', ')}`,
+  );
   // The locals: a and b.
   await until(() => dbg.rows().some((r) => r.depth === 1 && r.name === 'b'), 20000, 'the locals');
   const rows = dbg.rows();
@@ -126,7 +127,7 @@ test('debugpy: a breakpoint, the stack, variables, a step, the console, to the e
   const dir = tmp();
   const file = path.join(dir, 'prog.py');
   fs.writeFileSync(file, PY);
-  await walkThrough(file, { frameNames: [/^add$/, /<module>/] });
+  await walkThrough(file, { name: /^add$/ });
 });
 
 test('debugpy: a pytest test at its breakpoint', { skip: skip(pytest, 'pytest (with debugpy)'), timeout: 180000 }, async () => {
@@ -149,7 +150,7 @@ test('js-debug: a breakpoint (in its child session), the stack, variables, a ste
   const dir = tmp();
   const file = path.join(dir, 'prog.js');
   fs.writeFileSync(file, JS);
-  await walkThrough(file, { frameNames: [/^add$/, /^(<anonymous>|Object\.<anonymous>|global|Module\._compile)$/] });
+  await walkThrough(file, { name: /(^|\.)add$/ });
 });
 
 test('js-debug: a node:test test at its breakpoint', { skip: skip(jsDebug, 'js-debug'), timeout: 180000 }, async () => {
