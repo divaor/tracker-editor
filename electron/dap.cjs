@@ -43,9 +43,9 @@ function isFile(p) {
     return false;
   }
 }
-const isInside = (parent, child) => {
-  const rel = path.relative(path.resolve(parent), path.resolve(child));
-  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+const isInside = (parent, child, p = path) => {
+  const rel = p.relative(p.resolve(parent), p.resolve(child));
+  return rel === '' || (!rel.startsWith('..') && !p.isAbsolute(rel));
 };
 
 /**
@@ -55,16 +55,17 @@ const isInside = (parent, child) => {
  */
 function pythonCandidates(file, { stop = '', env = process.env, platform = process.platform, exists = isFile } = {}) {
   const out = [];
-  const join = platform === 'win32' ? path.win32.join : path.join;
-  const bin = (venv) => (platform === 'win32' ? join(venv, 'Scripts', 'python.exe') : join(venv, 'bin', 'python'));
-  const start = path.dirname(file);
-  const limit = stop && isInside(stop, start) ? path.resolve(stop) : null;
-  for (let dir = start; ; dir = path.dirname(dir)) {
+  // The platform's own paths (the tests ask for another platform's).
+  const P = platform === 'win32' ? path.win32 : platform === process.platform ? path : path.posix;
+  const bin = (venv) => (platform === 'win32' ? P.join(venv, 'Scripts', 'python.exe') : P.join(venv, 'bin', 'python'));
+  const start = P.dirname(file);
+  const limit = stop && isInside(stop, start, P) ? P.resolve(stop) : null;
+  for (let dir = start; ; dir = P.dirname(dir)) {
     for (const name of ['.venv', 'venv']) {
-      const p = bin(join(dir, name));
+      const p = bin(P.join(dir, name));
       if (exists(p) && !out.includes(p)) out.push(p);
     }
-    if (!limit || dir === limit || path.dirname(dir) === dir) break;
+    if (!limit || dir === limit || P.dirname(dir) === dir) break;
   }
   for (const name of platform === 'win32' ? ['python', 'python3'] : ['python3', 'python']) {
     const p = searchPath(name, { env, platform, exists });
