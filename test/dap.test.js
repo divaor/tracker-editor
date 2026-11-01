@@ -276,10 +276,11 @@ test('stopping while paused, exceptions, breakpoints changed while running', asy
   await dbg.setBreakpoints(file);
   assert.equal(dbg.breakpointStates(file).get(4).verified, true);
   await dbg.continue();
-  await until(() => stops.length === 2, 8000, 'the new breakpoint');
-  assert.equal(stops[1].place.line, 4);
+  // (The first stop may not have been shown: F5 came before its stack was read.)
+  await until(() => stops.some((s) => s.place?.line === 4), 8000, 'the new breakpoint');
+  const before = stops.length;
   await dbg.continue();
-  await until(() => stops.length === 3, 8000, 'the exception');
+  await until(() => stops.length > before, 8000, 'the exception');
   assert.equal(dbg.run.reason, 'Paused on an exception: ValueError(\'boom\')');
   await dbg.continue();
   await until(() => ended, 8000, 'the end');
