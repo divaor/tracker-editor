@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="1" name="run" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Results>
+    <UnitTestResult executionId="a" testId="t1" testName="Shop.Tests.CartTests.Adds" computerName="pc" duration="00:00:00.0010000" outcome="Passed" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" testListId="l" relativeResultsDirectory="a" />
+    <UnitTestResult executionId="b" testId="t2" testName="Shop.Tests.CartTests.Subtracts" computerName="pc" duration="00:00:00.0020000" outcome="Failed" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" testListId="l" relativeResultsDirectory="b">
+      <Output>
+        <ErrorInfo>
+          <Message>Assert.Equal() Failure: Values differ
+Expected: 1
+Actual:   2</Message>
+          <StackTrace>   at Shop.Tests.CartTests.Subtracts() in /work/cs/CartTests.cs:line 15
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="c" testId="t3" testName="Shop.Tests.CartTests.Param(n: 2)" computerName="pc" duration="00:00:00.0010000" outcome="Passed" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" testListId="l" relativeResultsDirectory="c" />
+    <UnitTestResult executionId="d" testId="t4" testName="Shop.Tests.CartTests.Later" computerName="pc" duration="00:00:00" outcome="NotExecuted" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" testListId="l" relativeResultsDirectory="d" />
+  </Results>
+</TestRun>

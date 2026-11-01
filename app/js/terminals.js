@@ -9,7 +9,7 @@
 import { outputTail } from './errorHelp.js';
 import { findFileRefs } from './fileRefs.js';
 import { getSettings, resolvedTheme } from './settings.js';
-import { addTab, closeTab, EMPTY_TABS, fromWsl, moveTab, oscCwd, shown, splitTab, unsplit, useTab } from './terminalTabs.js';
+import { addTab, closeTab, commandEnded, EMPTY_TABS, endMark, fromWsl, moveTab, oscCwd, shown, splitTab, unsplit, useTab } from './terminalTabs.js';
 
 let lib = null; // { Terminal, FitAddon }
 // { key, id, connId, cwd, cwdNow, label, name, title, term, fit, el, exited, code, starting, shell (its kind), shellId, profile, profileLabel, distro, runner, task }, in the tabs' order
@@ -110,6 +110,8 @@ async function load() {
 function ended(s, code) {
   s.exited = true;
   s.code = code;
+  // A run waiting for its command to end: the shell ended first.
+  for (const w of s.waiters.splice(0)) w(null);
   s.term.write(`\r\n\x1b[2m[The session ended${code ? ` (exit code ${code})` : ''}. Press Enter to start a new one.]\x1b[0m\r\n`);
   changed();
 }
@@ -146,7 +148,7 @@ async function start(s) {
   try {
     const cols = s.term.cols || lastSize.cols;
     const rows = s.term.rows || lastSize.rows;
-    const { id, shell, profile, label, distro } = await bridge().open(s.connId, { cols, rows, cwd: s.cwd, ...(s.shellId ? { shell: s.shellId } : {}) });
+    const { id, shell, profile, label, distro, integrated } = await bridge().open(s.connId, { cols, rows, cwd: s.cwd, ...(s.shellId ? { shell: s.shellId } : {}) });
     clearTimeout(slow);
     const before = takeEarly(id);
     // Closed while it was starting: the shell ends right away.
@@ -160,6 +162,7 @@ async function start(s) {
     s.profile = profile ?? '';
     s.profileLabel = label ?? '';
     s.distro = distro ?? '';
+    s.integrated = Boolean(integrated);
     s.exited = false;
     s.code = null;
     if (before?.data) s.term.write(before.data);
@@ -214,7 +217,7 @@ export async function openTerminal(connId, { cwd = '', label = 'Terminal', runne
   term.loadAddon(fit);
   // This computer's: the shell asked for, else the one chosen in Settings (else the default).
   const shellId = connId === 'local' ? (shell ?? getSettings().terminalShell ?? '') : '';
-  const s = { key: `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, id: null, connId, cwd, cwdNow: '', label, title: '', term, fit, el: null, exited: false, code: null, starting: false, typed: '', runner, task, shellId };
+  const s = { key: `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, id: null, connId, cwd, cwdNow: '', label, title: '', term, fit, el: null, exited: false, code: null, starting: false, typed: '', runner, task, shellId, integrated: false, waiters: [] };
   // The folder the shell says it is in after each command (OSC 7, 9;9, 633): links start there.
   const windows = connId === 'local' && window.desktop?.platform === 'win32';
   const onCwd = (ident) => (data) => {
@@ -226,7 +229,14 @@ export async function openTerminal(connId, { cwd = '', label = 'Terminal', runne
     }
     return Boolean(p);
   };
-  for (const ident of [7, 9, 633]) term.parser.registerOscHandler(ident, onCwd(ident));
+  for (const ident of [7, 9]) term.parser.registerOscHandler(ident, onCwd(ident));
+  // 633: the folder (P;Cwd=), or a command ended (D;code): what waits for it hears it.
+  term.parser.registerOscHandler(633, (data) => {
+    const end = commandEnded(data);
+    if (!end) return onCwd(633)(data);
+    for (const w of s.waiters.splice(0)) w(end);
+    return true;
+  });
   term.onData((data) => {
     if (s.exited) {
       if (data === '\r' && !s.starting) {
@@ -359,6 +369,7 @@ export function closeTerminal(s) {
   const at = sessions.indexOf(s);
   if (at === -1) return;
   s.closed = true;
+  for (const w of s.waiters.splice(0)) w(null);
   if (s.id && !s.exited) bridge().close(s.id);
   s.term.dispose();
   s.el?.remove();
@@ -386,6 +397,62 @@ export async function runInTerminal(connId, { cwd = '', line, label = 'Run', ent
   if (s.id && !s.starting) bridge().input(s.id, typed);
   else s.typed += typed;
   return s;
+}
+
+/** The next end of a command in `s` ({ code }), or null (the shell ended, or `ms` passed). */
+function nextEnd(s, ms = 0) {
+  return new Promise((resolve) => {
+    let timer = null;
+    const w = (end) => {
+      clearTimeout(timer);
+      resolve(end);
+    };
+    s.waiters.push(w);
+    if (ms)
+      timer = setTimeout(() => {
+        s.waiters.splice(s.waiters.indexOf(w), 1);
+        resolve(null);
+      }, ms);
+  });
+}
+
+/** The text of `s`'s screen from buffer line `from` on (wrapped lines joined). */
+function textFrom(s, from) {
+  const buffer = s.term.buffer.normal;
+  const lines = [];
+  for (let i = Math.max(0, from); i < buffer.length; i++) {
+    const line = buffer.getLine(i);
+    if (!line) continue;
+    const text = line.translateToString(true);
+    if (line.isWrapped && lines.length) lines[lines.length - 1] += text;
+    else lines.push(text);
+  }
+  while (lines.length && !lines.at(-1).trim()) lines.pop();
+  return lines.join('\n');
+}
+
+/**
+ * Like runInTerminal, then waits for the command to end: { session, done }, `done` resolving to
+ * { code, output } (what it printed from its line on) or null (the shell ended, or it was
+ * stopped). Shells with our integration say when a command ended at each prompt; the others
+ * get the line's own mark (endMark). A shell just started is waited for until its first prompt.
+ */
+export async function runAndWait(connId, { cwd = '', line, label = 'Run', task = '' }) {
+  let s = sessions.find((x) => x.runner && x.connId === connId && (x.task ?? '') === task && !x.exited && !x.closed);
+  if (!s) {
+    s = await openTerminal(connId, { cwd, label, runner: true, task });
+    if (s.exited) return { session: s, done: Promise.resolve(null) };
+    if (s.integrated) await nextEnd(s, 8000);
+  }
+  setActiveTerminal(s);
+  const kind = s.shell ?? 'posix';
+  const text = `${typeof line === 'function' ? line(kind) : line}${s.integrated ? '' : endMark(kind)}`;
+  const buffer = s.term.buffer.normal;
+  const from = buffer.baseY + buffer.cursorY;
+  const done = nextEnd(s).then((end) => end && { code: end.code, output: textFrom(s, from) });
+  if (s.id && !s.starting) bridge().input(s.id, `${text}\r`);
+  else s.typed += `${text}\r`;
+  return { session: s, done };
 }
 
 /** What to ask the model about in a terminal: its selection, else the last output (wrapped lines joined). */

@@ -18,8 +18,10 @@ import { diskAvailable, diskReadOnly, openDiskFiles, recheckServerTabs, reloadDi
 import { isContentPath, isRemotePath, KINDS, kindOfKey, remoteAddress, remoteParts, remoteRoot, toRemoteUri } from './where.js';
 import { onServers, server, watchServers } from './servers.js';
 import { HostKeyDialog, PromptDialog, ServerDialog, SshImportDialog } from './ui/servers.js';
-import { activeTerminal, focusTerminal, openTerminal, retheme, runInTerminal, setActiveTerminal, setRefHandler, setToggleHandler, showTerminalOn, splitTerminals, terminalFolder, terminals, terminalsAvailable, terminalText, unsplitTerminals } from './terminals.js';
-import { parseRunCommands, quoteFor, runCommandFor, runLine } from './runFile.js';
+import { activeTerminal, focusTerminal, openTerminal, retheme, runAndWait, runInTerminal, setActiveTerminal, setRefHandler, setToggleHandler, showTerminalOn, splitTerminals, terminalFolder, terminals, terminalsAvailable, terminalText, unsplitTerminals } from './terminals.js';
+import { parseRunCommands, quoteFor, runCommandFor, runLine, wslPath } from './runFile.js';
+import { detectFramework, firstMessageLine, FRAMEWORKS, looksLikeTestFile, parseOutput, parseReport, placeFailures, reportExt, summaryText, testAt, testCommand, testLanguage, testsInFile, testStates } from './testRun.js';
+import { TestsPanel } from './ui/tests.js';
 import { taskLine } from './tasks.js';
 import { TasksDialog } from './ui/tasks.js';
 import { findFileRefs, pastedPath, resolveRef } from './fileRefs.js';
@@ -698,6 +700,8 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         hostRef.current?.flushAll();
         try {
           const result = await saveDiskTab(path, { force });
+          // A test file: its tests' marks follow what was saved.
+          if (result === 'saved') actions.refreshTests?.(diskKey(path));
           if (result === 'conflict') toast(`The file changed ${isRemotePath(path) ? 'on the server' : 'on disk'} since you opened it, so it was not saved. Reload it, or keep yours and save over it.`, { kind: 'error', timeout: 10000 });
           return result;
         } catch (err) {
@@ -1599,6 +1603,7 @@ export function App() {
   const [gitDir, setGitDir] = useState(null); // the folder whose repository the Git panel shows
   const [gitTick, setGitTick] = useState(0); // Git's state may have changed: the panel reads it again
   const [gitAssist, setGitAssist] = useState(null); // Git with the model: { dir, start, id }
+  const [testRun, setTestRun] = useState(null); // the last test run, for the Tests panel
   const actions = useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setCompare, setUsagesOf, setSearchSeed });
   const editorOptions = (s) => ({ ...s, dark: resolvedTheme(s.theme) === 'dark', inlineSuggest: Boolean(s.inlineSuggest && s.llm.enabled && s.llm.provider !== 'async') });
 
@@ -1803,6 +1808,7 @@ export function App() {
       onPastePath: (path) => actions.offerPastedPath(path),
       onLineMenu: (at) => setLineMenu(at),
       onGitMark: (at) => setGitMenu(at),
+      onTestMark: ({ key, test }) => actions.runTests({ scope: 'test', key, test }),
       linkTargets: () => store.live().map((f) => linkName(f.name)),
       // A tab's editor state is gone (closed, or made again under a new path): its server forgets it.
       onDrop: (key) => lspRef.current?.forget(key),
@@ -2952,6 +2958,158 @@ export function App() {
   };
   useEffect(() => retheme(), [settings.theme]);
 
+  // ---- Running tests: Ctrl+F5 the test at the cursor, Ctrl+Shift+F5 the file's, ▶ next to a test ----
+  const testsBridge = () => (terminalsAvailable() && window.desktop?.terminal?.testProject ? window.desktop.terminal : null);
+  const testDirs = useRef(new Map()); // path → { dirs, at }: the project's files, read again after 30 s
+  const testStatesBy = useRef(new Map()); // tab key → Map(test name → state): how each test last went
+  const lastTestRun = useRef(null); // what Run again runs
+  /** The tab's test file: its framework, where it runs, its tests; null when it is not one. */
+  const testContext = async (key, { fresh = false } = {}) => {
+    const k = parseKey(key);
+    const bridge = testsBridge();
+    if (!bridge || k?.kind !== 'disk' || isContentPath(k.path) || store.diskTab(k.path)?.doc) return null;
+    const name = k.path.split(/[\\/]/).pop();
+    if (!testLanguage(name)) return null;
+    const text = hostRef.current?.stateOf(key)?.doc.toString() ?? store.diskTab(k.path)?.text ?? '';
+    if (!looksLikeTestFile(name, text)) return null;
+    const remote = isRemotePath(k.path);
+    if (remote && server(remoteParts(k.path).id)?.protocol !== 'sftp') return null;
+    let known = testDirs.current.get(k.path);
+    if (fresh || !known || Date.now() - known.at > 30_000) {
+      known = { dirs: await bridge.testProject(k.path).catch(() => []), at: Date.now() };
+      testDirs.current.set(k.path, known);
+    }
+    const setup = detectFramework({ name, text, dirs: known.dirs });
+    if (!setup) return null;
+    const plain = (p) => (remote && isRemotePath(p) ? remoteParts(p).path : p);
+    return { key, path: k.path, name, remote, connId: remote ? remoteParts(k.path).id : 'local', file: plain(k.path), setup: { ...setup, root: plain(setup.root) }, tests: testsInFile(text, setup.framework) };
+  };
+  /** The marks next to a test file's line numbers: each test's last state, and the failures given. */
+  const showTestMarks = (ctx, failures = [], running = []) => {
+    const byName = testStatesBy.current.get(ctx.key) ?? new Map();
+    const states = new Map(ctx.tests.filter((t) => byName.has(t.name)).map((t) => [t.line, byName.get(t.name)]));
+    for (const t of running) states.set(t.line, 'running');
+    hostRef.current?.setTestInfo(ctx.key, ctx.tests.length ? { tests: ctx.tests, states, failures } : null);
+  };
+  /** The marks again (a test file opened or saved): tests added or moved; failures stay where the edits took them. */
+  actions.refreshTests = async (key = store.session.active) => {
+    const ctx = await testContext(key).catch(() => null);
+    if (!ctx) return hostRef.current?.setTestInfo(key, null);
+    showTestMarks(ctx, hostRef.current?.testFailures(key) ?? []);
+  };
+  useEffect(() => {
+    if (activeKey && !hostRef.current?.hasTests(activeKey)) setTimeout(() => actions.refreshTests(activeKey), 0);
+  }, [activeKey]);
+  /**
+   * Runs tests in the "Tests" terminal: `scope` 'cursor' (the test or suite at the cursor, else
+   * the file's), 'file', 'test' (a mark's `test`), 'name' (a result's, from the panel) or 'again'.
+   * Then reads what came of it (the framework's report, else its output), marks each test,
+   * puts the failures at their lines and fills the Tests panel.
+   */
+  actions.runTests = async ({ scope = 'cursor', key = null, test = null, name = null, chain = null } = {}) => {
+    const bridge = testsBridge();
+    if (!bridge) return toast('Running tests works in the desktop app.', { kind: 'error' });
+    if (scope === 'again') {
+      if (!lastTestRun.current) return toast('No tests have run yet: Ctrl+F5 runs the test at the cursor, Ctrl+Shift+F5 the whole file.');
+      return actions.runTests(lastTestRun.current);
+    }
+    if (testRun?.status === 'running') return toast('Tests are running: wait for them to end (or stop them in the Tests terminal).');
+    key = key ?? store.session.active;
+    const ctx = await testContext(key, { fresh: true });
+    if (!ctx) {
+      const k = parseKey(key);
+      if (k?.kind !== 'disk' || isContentPath(k.path)) return toast('Tests run for files in a folder, on this computer or on an SSH server: open the test file from Folders.');
+      return toast(`${k.path.split(/[\\/]/).pop()} does not look like a test file (x.test.js, test_x.py, x_test.go, lib.rs with #[test], XTest.php, XTests.cs…).`);
+    }
+    const bare = (n) => String(n ?? '').replace(/\[.*\]$/, '').replace(/ with data set .*$/, '').replace(/\(.*\)$/, '').split(' > ').pop();
+    let target = null;
+    if (scope === 'test' && test) target = ctx.tests.find((t) => t.line === test.line && t.title === test.title) ?? ctx.tests.find((t) => t.title === test.title && t.kind === test.kind) ?? null;
+    else if (scope === 'name') target = ctx.tests.find((t) => t.kind === 'test' && t.title === bare(name) && (!chain?.length || t.chain.join(' ') === chain.join(' '))) ?? ctx.tests.find((t) => t.kind === 'test' && t.title === bare(name)) ?? null;
+    else if (scope === 'cursor') {
+      const state = hostRef.current?.stateOf(key);
+      const line = state ? state.doc.lineAt(state.selection.main.head).number : 0;
+      target = testAt(ctx.tests, line);
+      if (!target) toast(`No test at the cursor: running all of ${ctx.name}’s tests.`, { timeout: 3000 });
+    }
+    if ((scope === 'test' || scope === 'name') && !target) return toast('That test is not in the file any more.');
+    hostRef.current?.flushAll();
+    if (store.diskTab(ctx.path)?.dirty && (await actions.saveDisk(ctx.path)) !== 'saved') return;
+    lastTestRun.current = target ? { scope: 'test', key, test: { line: target.line, title: target.title, kind: target.kind } } : { scope: 'file', key };
+    const fw = ctx.setup.framework;
+    const ext = reportExt(fw);
+    const prep = ext ? await bridge.testPrepare(ctx.path, ext).catch(() => null) : null;
+    const platform = ctx.remote ? 'linux' : (window.desktop.platform ?? 'linux');
+    // The line for the terminal's shell (known once it runs): its names quoted for it, WSL's paths its own.
+    const command = (kind) => {
+      const wsl = kind === 'wsl';
+      const c = testCommand(ctx.setup, { file: ctx.file, target, report: prep ? (wsl ? wslPath(prep.report) : prep.report) : '', windows: platform === 'win32' && !wsl, tests: ctx.tests });
+      const word = (a) => (/^[\w.:@/+=,-]+$/.test(a) ? a : quoteFor(wsl ? 'posix' : kind, a));
+      return { line: runLine({ command: [c.program, ...c.args.map(word)].join(' '), dir: c.cwd, kind }), report: c.report, cwd: c.cwd };
+    };
+    const first = command(platform === 'win32' ? 'powershell' : 'posix');
+    const ran = target ? (target.kind === 'suite' ? ctx.tests.filter((t) => t.line >= target.line && t.end <= target.end) : [target]) : ctx.tests;
+    const label = target ? `${target.kind === 'suite' ? 'Suite: ' : ''}${target.name}` : `${ctx.name}: all its tests`;
+    showTestMarks(ctx, [], ran);
+    setTestRun({ key, path: ctx.path, framework: fw, label, status: 'running', results: null });
+    setTerminalShown(true);
+    let end = null;
+    try {
+      const { done } = await runAndWait(ctx.connId, { cwd: first.cwd, line: (kind) => command(kind).line, label: 'Tests', task: 'tests' });
+      // The keys stay with the file (the terminal shows the run; Ctrl+F5 again works from the text).
+      setTimeout(() => store.session.active === key && hostRef.current?.focus(), 120);
+      end = await done;
+    } catch (err) {
+      setTestRun((r) => ({ ...r, status: 'done', results: { tests: [], passed: 0, failed: 0, skipped: 0 }, error: ipcMessage(err) }));
+      return actions.refreshTests(key);
+    }
+    if (!end) {
+      setTestRun((r) => ({ ...r, status: 'stopped' }));
+      return showTestMarks(ctx, hostRef.current?.testFailures(key) ?? []);
+    }
+    let results = null;
+    const report = prep ? await bridge.testReport(prep.id).catch(() => null) : null;
+    if (report && first.report) {
+      try {
+        results = parseReport(first.report, report);
+      } catch {
+        // a report cut short: what it printed instead
+      }
+    }
+    if (!results?.tests.length) results = parseOutput(fw, end.output);
+    // The file as it is now (it may have changed while the tests ran).
+    const now = (await testContext(key)) ?? ctx;
+    placeFailures(results, { file: now.file, root: now.setup.root, tests: now.tests });
+    // Only what ran changes (frameworks report the tests a filter left out as skipped); a suite
+    // follows its tests.
+    const byName = new Map(testStatesBy.current.get(key) ?? []);
+    const ranNames = new Set(ran.filter((t) => t.kind === 'test').map((t) => t.name));
+    const fresh = testStates(now.tests, results);
+    for (const t of now.tests) {
+      if (t.kind !== 'test' || !ranNames.has(t.name)) continue;
+      if (fresh.has(t.line)) byName.set(t.name, fresh.get(t.line));
+      else byName.delete(t.name);
+    }
+    for (const suite of now.tests.filter((t) => t.kind === 'suite')) {
+      const inside = now.tests.filter((t) => t.kind === 'test' && t.line > suite.line && t.end <= suite.end).map((t) => byName.get(t.name)).filter(Boolean);
+      if (inside.length) byName.set(suite.name, inside.includes('failed') ? 'failed' : inside.includes('passed') ? 'passed' : 'skipped');
+      else byName.delete(suite.name);
+    }
+    testStatesBy.current.set(key, byName);
+    const failures = results.tests
+      .filter((t) => t.status === 'failed' && t.at)
+      .map((t) => ({ line: t.at.line, column: t.at.column, message: `${[...(t.chain ?? []), t.name].join(' › ')} failed: ${firstMessageLine(t.message)}`, source: FRAMEWORKS[fw].label }));
+    showTestMarks(now, failures);
+    setTestRun({ key, path: ctx.path, framework: fw, label, status: 'done', results, code: end.code, output: results.tests.length ? '' : String(end.output).slice(-4000) });
+    if (results.failed) setPanel('tests');
+    toast(results.tests.length ? `${results.failed ? '✗' : '✓'} ${summaryText(results)}` : 'No test results: see the Tests terminal', { kind: results.failed || !results.tests.length ? 'error' : 'info', timeout: 6000, action: { label: 'Tests', run: () => setPanel('tests') } });
+  };
+  /** A failure's place in its test file. */
+  actions.openTestPlace = (run, at) => actions.openDiskPath(run.path, { line: at.line, column: at.column ?? 1 });
+  /** The model explains a failed test (the file open at the failure, the message with it). */
+  actions.explainTestFailure = async (run, t) => {
+    if (store.session.active !== run.key) await actions.openDiskPath(run.path, { line: t.at.line, column: t.at.column ?? 1 });
+    actions.explainProblem({ line: t.at.line, column: t.at.column ?? 1, message: `The test "${[...(t.chain ?? []), t.name].join(' › ')}" failed: ${String(t.message ?? '').slice(0, 3000)}` }, run.key);
+  };
   // ---- Tasks (Ctrl+Shift+B): what the projects around name for themselves, run in terminals ----
   /** Where to look: the open file's folder, then the folders shown in Folders (on servers only SSH ones). */
   const taskDirs = () => {
@@ -3416,6 +3574,9 @@ export function App() {
       } else if (e.key === 'F5' && !mod && !e.altKey && !e.shiftKey && isDesktopApp()) {
         e.preventDefault();
         actions.runFile();
+      } else if (e.key === 'F5' && mod && !e.altKey && isDesktopApp()) {
+        e.preventDefault();
+        actions.runTests({ scope: e.shiftKey ? 'file' : 'cursor' });
       } else if (mod && e.key === '\\') {
         e.preventDefault();
         actions.toggleSplit();
@@ -3460,6 +3621,10 @@ export function App() {
       'terminal-split': () => actions.splitTerminal(),
       'terminal-rename': () => actions.renameTerminal(),
       'run-file': () => actions.runFile(),
+      'test-at-cursor': () => actions.runTests({ scope: 'cursor' }),
+      'test-file': () => actions.runTests({ scope: 'file' }),
+      'test-again': () => actions.runTests({ scope: 'again' }),
+      'tests-panel': () => setPanel((p) => (p === 'tests' ? null : 'tests')),
       'explain-error': () => actions.explainTerminalError(),
       'fix-problems': () => actions.fixProblems(),
       'open-in-claude': () => {
@@ -3721,6 +3886,7 @@ export function App() {
     ${panel === 'servers' && lspRef.current && html`<${LanguageServersPanel} lsp=${lspRef.current} tick=${lspTick} actions=${actions} onClose=${() => setPanel(null)} />`}
     ${panel === 'references' && refs && html`<${ReferencesPanel} refs=${refs} actions=${actions} onClose=${() => setPanel(null)} />`}
     ${panel === 'usages' && usagesOf && activeKey && !activeSealed && html`<${UsagesPanel} word=${usagesOf.word} name=${activeName} fileKey=${activeKey} text=${activeText()} actions=${actions} onClose=${() => setPanel(null)} />`}
+    ${panel === 'tests' && html`<${TestsPanel} run=${testRun} actions=${actions} onClose=${() => setPanel(null)} />`}
     ${panel === 'problems' && activeKey && !activeSealed && html`<${ProblemsPanel} name=${activeName} fileKey=${activeKey} problems=${settings.problems !== false ? problems[activeKey] : null} actions=${actions} onClose=${() => setPanel(null)} />`}
     ${panel === 'search' && html`<${SearchPanel} key=${searchSeed?.at ?? 0} seed=${searchSeed} files=${scoped} docs=${scopedDocs} allFiles=${store.live()} allDocs=${docs} openKeys=${store.session.open} settings=${settings} actions=${actions} onClose=${() => setPanel(null)} />`}
     ${panel === 'history' && activeKey && (activeFile || activeRepo) && html`<${HistoryPanel} key=${activeKey} selected=${compare?.sha}

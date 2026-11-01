@@ -1,6 +1,8 @@
 // Shell integration for the terminal on this computer (desktop): each shell is started so that
 // it says its folder after each command, so the terminal's file:line links stay right after a
-// cd (the page reads OSC 7 "file://host/path", or OSC 9;9 "path" from PowerShell and cmd). The
+// cd (the page reads OSC 7 "file://host/path", or OSC 9;9 "path" from PowerShell and cmd), and
+// that a command ended, with its exit code (OSC 633;D;code, as VS Code's shell integration: a test
+// run's results are read then). The
 // person's own startup files run first, as they would without it.
 // - bash, Git Bash: --init-file with a script that runs ~/.bashrc (or the login files), then
 //   adds a PROMPT_COMMAND;
@@ -22,7 +24,7 @@ else
   [ -r ~/.bashrc ] && . ~/.bashrc
 fi
 __te_osc7() {
-  local LC_ALL=C __te_s __te_o= __te_c __te_i
+  local __te_ec=$? LC_ALL=C __te_s __te_o= __te_c __te_i
   __te_s="$(pwd -W 2>/dev/null || pwd)"
   [[ "$__te_s" == /* ]] || __te_s="/$__te_s"
   for ((__te_i = 0; __te_i < ${'$'}{#__te_s}; __te_i++)); do
@@ -32,7 +34,7 @@ __te_osc7() {
       *) printf -v __te_c '%%%02X' "'$__te_c"; __te_o+="$__te_c" ;;
     esac
   done
-  printf '\e]7;file://%s%s\a' "${'$'}{HOSTNAME:-}" "$__te_o"
+  printf '\e]7;file://%s%s\a\e]633;D;%s\a' "${'$'}{HOSTNAME:-}" "$__te_o" "$__te_ec"
 }
 if [[ "$(declare -p PROMPT_COMMAND 2>/dev/null)" == "declare -a"* ]]; then
   PROMPT_COMMAND+=(__te_osc7)
@@ -51,7 +53,7 @@ TE_ZDOTDIR="$ZDOTDIR"
 ZDOTDIR="$__te_here"
 ${extra}`;
 const ZSH_HOOK = String.raw`__te_osc7() {
-  local LC_ALL=C s="$PWD" o= c i
+  local ec=$? LC_ALL=C s="$PWD" o= c i
   for (( i = 1; i <= ${'$'}{#s}; i++ )); do
     c="${'$'}{s[i]}"
     case "$c" in
@@ -59,7 +61,7 @@ const ZSH_HOOK = String.raw`__te_osc7() {
       (*) printf -v c '%%%02X' "'$c"; o+="$c" ;;
     esac
   done
-  printf '\e]7;file://%s%s\a' "$HOST" "$o"
+  printf '\e]7;file://%s%s\a\e]633;D;%s\a' "$HOST" "$o" "$ec"
 }
 autoload -Uz add-zsh-hook 2>/dev/null && add-zsh-hook precmd __te_osc7 || precmd_functions+=(__te_osc7)
 # Not a login shell: no .zlogin comes, so ZDOTDIR is the person's again now.
@@ -72,19 +74,23 @@ const ZSH = {
   '.zlogin': `${zshFile('.zlogin')}ZDOTDIR="$TE_ZDOTDIR"\n`,
 };
 
-const FISH = String.raw`function __te_osc7 --on-variable PWD; printf '\e]7;file://%s%s\a' (hostname) (string escape --style=url -- $PWD); end; __te_osc7`;
+const FISH = String.raw`function __te_osc7 --on-variable PWD; printf '\e]7;file://%s%s\a' (hostname) (string escape --style=url -- $PWD); end; function __te_done --on-event fish_postexec; printf '\e]633;D;%s\a' $status; end; __te_osc7`;
 
 // After the profile: the prompt function, wrapped so it first writes the folder (OSC 9;9,
 // which Windows Terminal reads too). Only for folders of the file system.
 const POWERSHELL = String.raw`$global:__TeOldPrompt = $function:prompt
 function global:prompt {
+  $ok = $?
+  $code = $global:LASTEXITCODE
+  $done = "$([char]27)]633;D;$(if ($ok) { 0 } elseif ($code) { $code } else { 1 })$([char]7)"
   $l = $ExecutionContext.SessionState.Path.CurrentLocation
   $s = if ($global:__TeOldPrompt) { & $global:__TeOldPrompt } else { "PS $($l.Path)> " }
-  if ($l.Provider.Name -eq 'FileSystem') { "$([char]27)]9;9;$([char]34)$($l.ProviderPath)$([char]34)$([char]7)" + $s } else { $s }
+  if ($l.Provider.Name -eq 'FileSystem') { $done + "$([char]27)]9;9;$([char]34)$($l.ProviderPath)$([char]34)$([char]7)" + $s } else { $done + $s }
 }`;
 
-// cmd: $E is Escape, $P the folder; the person's own PROMPT (or cmd's usual $P$G) after it.
-const cmdPrompt = (own) => `$E]9;9;$P$E\\${own || '$P$G'}`;
+// cmd: $E is Escape, $P the folder; the person's own PROMPT (or cmd's usual $P$G) after it. cmd
+// cannot put the exit code in its prompt: a command ended, without it.
+const cmdPrompt = (own) => `$E]633;D$E\\$E]9;9;$P$E\\${own || '$P$G'}`;
 
 /** Writes the scripts into `dir` (once per version of them); returns where they are. */
 function writeHooks(dir, { write = fs.writeFileSync, mkdir = fs.mkdirSync, read = (p) => fs.readFileSync(p, 'utf8') } = {}) {
@@ -105,11 +111,12 @@ function writeHooks(dir, { write = fs.writeFileSync, mkdir = fs.mkdirSync, read 
 }
 
 /**
- * How to start `shell` (from listShells) so it says its folder: { args, env } to use instead
- * of its own, given the scripts written in `dir`. Unknown shells start as they are.
+ * How to start `shell` (from listShells) so it says its folder and when a command ended:
+ * { args, env, integrated } to use instead of its own, given the scripts written in `dir`.
+ * Unknown shells start as they are (`integrated` false).
  */
 function integrate(shell, env, dir, opts = {}) {
-  const base = { args: shell.args, env };
+  const base = { args: shell.args, env, integrated: false };
   if (!dir || !shell.integration) return base;
   try {
     if (shell.integration === 'bash') {
@@ -118,19 +125,19 @@ function integrate(shell, env, dir, opts = {}) {
       const login = shell.args.includes('-l') || shell.args.includes('--login');
       // Git Bash takes C:/… better than C:\… as an argument.
       const file = /^[A-Za-z]:\\/.test(bash) ? bash.replace(/\\/g, '/') : bash;
-      return { args: ['--init-file', file, '-i'], env: { ...env, ...(login ? { TRACKER_LOGIN: '1' } : {}) } };
+      return { args: ['--init-file', file, '-i'], env: { ...env, ...(login ? { TRACKER_LOGIN: '1' } : {}) }, integrated: true };
     }
     if (shell.integration === 'zsh') {
       const { zsh } = writeHooks(dir, opts);
-      return { args: shell.args, env: { ...env, ZDOTDIR: zsh, ...(env.ZDOTDIR ? { TE_ZDOTDIR: env.ZDOTDIR } : {}) } };
+      return { args: shell.args, env: { ...env, ZDOTDIR: zsh, ...(env.ZDOTDIR ? { TE_ZDOTDIR: env.ZDOTDIR } : {}) }, integrated: true };
     }
   } catch {
     // the folder cannot be written: the shell as it is
     return base;
   }
-  if (shell.integration === 'fish') return { args: [...shell.args, '--init-command', FISH], env };
-  if (shell.integration === 'powershell') return { args: [...shell.args, '-NoExit', '-EncodedCommand', Buffer.from(POWERSHELL, 'utf16le').toString('base64')], env };
-  if (shell.integration === 'cmd') return { args: shell.args, env: { ...env, PROMPT: cmdPrompt(env.PROMPT) } };
+  if (shell.integration === 'fish') return { args: [...shell.args, '--init-command', FISH], env, integrated: true };
+  if (shell.integration === 'powershell') return { args: [...shell.args, '-NoExit', '-EncodedCommand', Buffer.from(POWERSHELL, 'utf16le').toString('base64')], env, integrated: true };
+  if (shell.integration === 'cmd') return { args: shell.args, env: { ...env, PROMPT: cmdPrompt(env.PROMPT) }, integrated: true };
   return base;
 }
 

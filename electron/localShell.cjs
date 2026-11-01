@@ -159,6 +159,8 @@ function openLocalShell({ cols = 100, rows = 24, cwd = '', shell = '', hooksDir 
   stream.profile = chosen.id;
   stream.label = chosen.label;
   stream.distro = chosen.distro ?? '';
+  // It says when a command ended (shellHooks.cjs); without, a run adds its own mark.
+  stream.integrated = Boolean(start.integrated);
   stream.write = (data) => {
     if (!closed) proc.write(data);
   };

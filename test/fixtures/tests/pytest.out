@@ -1,0 +1,22 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.18, pytest-9.1.1, pluggy-1.6.0
+rootdir: /work/py
+configfile: pyproject.toml
+collected 5 items
+
+tests/test_math.py .F..s                                                 [100%]
+
+=================================== FAILURES ===================================
+___________________________ TestMath.test_subtracts ____________________________
+
+self = <test_math.TestMath object at 0x7fa6a0be3110>
+
+    def test_subtracts(self):
+>       assert 3 - 1 == 1
+E       assert (3 - 1) == 1
+
+tests/test_math.py:10: AssertionError
+- generated xml file: /work/fixtures/pytest.xml -
+=========================== short test summary info ============================
+FAILED tests/test_math.py::TestMath::test_subtracts - assert (3 - 1) == 1
+==================== 1 failed, 3 passed, 1 skipped in 0.03s ====================

@@ -578,6 +578,78 @@ ipcMain.handle('tasks:files', guard(async (_e, dirs) => {
   }
   return out;
 }));
+// ---- Running tests: the project around a test file, and where a run writes its report ----
+const testProject = require('./testProject.cjs');
+const testReports = new Map(); // id → { path } here, or { uri } on a server
+const TEST_REPORTS = path.join(os.tmpdir(), 'tracker-editor-tests');
+// Reports left by runs that never finished, a day old: gone.
+setTimeout(() => {
+  try {
+    for (const name of fs.readdirSync(TEST_REPORTS)) {
+      const p = path.join(TEST_REPORTS, name);
+      if (Date.now() - fs.statSync(p).mtimeMs > 86_400_000) fs.rmSync(p, { force: true });
+    }
+  } catch {
+    // none yet
+  }
+}, 30_000).unref?.();
+ipcMain.handle('tests:project', guard(async (_e, file) => {
+  if (typeof file !== 'string') return [];
+  if (isRemote(file)) {
+    const { id, path: p } = remoteFiles.parseUri(file);
+    const dirs = await testProject.projectAround(path.posix.dirname(p), {
+      list: async (d) => (await remote.list(remoteFiles.toUri(id, d))).map((e) => e.name),
+      read: (f) => remote.readBytes(remoteFiles.toUri(id, f), testProject.MAX_READ),
+      join: path.posix.join,
+      dirname: path.posix.dirname,
+    });
+    return dirs.map((d) => ({ ...d, dir: remoteFiles.toUri(id, d.dir) }));
+  }
+  checkFile(file);
+  const stop = allowedFolders.find((f) => folders.allowedBy([f], file)) ?? '';
+  return testProject.projectAround(path.dirname(file), {
+    list: (d) => fs.readdirSync(d),
+    read: (f) => (fs.statSync(f).size <= testProject.MAX_READ ? fs.readFileSync(f) : null),
+    join: path.join,
+    dirname: path.dirname,
+    stop: stop ? path.resolve(stop) : '',
+  });
+}));
+// The page asks where a run may write its report; the main process names the file (a temporary
+// one, here or on the server), so the page never names a path to read back.
+ipcMain.handle('tests:prepare', guard(async (_e, file, ext) => {
+  const id = crypto.randomBytes(8).toString('hex');
+  const suffix = ['.xml', '.json', '.tap', '.trx'].includes(ext) ? ext : '.txt';
+  if (typeof file === 'string' && isRemote(file)) {
+    const conn = remoteFiles.parseUri(file).id;
+    const p = `/tmp/tracker-editor-test-${id}${suffix}`;
+    testReports.set(id, { uri: remoteFiles.toUri(conn, p) });
+    return { id, report: p };
+  }
+  fs.mkdirSync(TEST_REPORTS, { recursive: true });
+  const p = path.join(TEST_REPORTS, `${id}${suffix}`);
+  testReports.set(id, { path: p });
+  return { id, report: p };
+}));
+// The report a run wrote (null: none), then removed.
+ipcMain.handle('tests:report', guard(async (_e, id) => {
+  const r = testReports.get(String(id));
+  if (!r) return null;
+  testReports.delete(String(id));
+  try {
+    if (r.uri) {
+      const bytes = await remote.readBytes(r.uri, 16 * 1024 * 1024);
+      await remote.remove([r.uri]).catch(() => {});
+      return bytes ? bytes.toString('utf8') : null;
+    }
+    if (fs.statSync(r.path).size > 16 * 1024 * 1024) return null;
+    const text = fs.readFileSync(r.path, 'utf8');
+    fs.rmSync(r.path, { force: true });
+    return text;
+  } catch {
+    return null;
+  }
+}));
 ipcMain.handle('term:open', guard(async (event, connId, opts = {}) => {
   const cols = clampInt(opts.cols, 20, 500, 100);
   const rows = clampInt(opts.rows, 5, 200, 24);
@@ -616,7 +688,7 @@ ipcMain.handle('term:open', guard(async (event, connId, opts = {}) => {
   });
   terminals.set(id, { stream, sender });
   watchTerminalPage(sender);
-  return { id, shell: stream.shell ?? 'posix', profile: stream.profile ?? '', label: stream.label ?? '', distro: stream.distro ?? '' };
+  return { id, shell: stream.shell ?? 'posix', profile: stream.profile ?? '', label: stream.label ?? '', distro: stream.distro ?? '', integrated: Boolean(stream.integrated) };
 }));
 // A page reloaded or closed: its shells end (once per page, not once per shell).
 const terminalPages = new WeakSet();
@@ -2858,6 +2930,10 @@ function buildMenu() {
         shown('Outline and Links', 'CmdOrCtrl+Shift+O', 'outline'),
         shown('Terminal', 'Ctrl+`', 'terminal'),
         shown('Run This File', 'F5', 'run-file'),
+        shown('Run the Test at the Cursor', 'CmdOrCtrl+F5', 'test-at-cursor'),
+        shown('Run This File’s Tests', 'CmdOrCtrl+Shift+F5', 'test-file'),
+        item('Run the Tests Again', undefined, 'test-again'),
+        item('Tests Panel', undefined, 'tests-panel'),
         { type: 'separator' },
         item('Indentation Guides', undefined, 'indent-guides'),
         item('Colored Bracket Pairs', undefined, 'bracket-colors'),

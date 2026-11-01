@@ -11093,3 +11093,165 @@ html[data-native='android'] body:has(.edit-bar) .toasts {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* Running tests: the marks next to the line numbers (testGutter.js) and the Tests panel (ui/tests.js) */
+.cm-test-gutter {
+  width: 16px;
+}
+
+.cm-test-gutter .cm-gutterElement {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.cm-test-mark {
+  width: 14px;
+  border-radius: 3px;
+  color: var(--text-3);
+  font-size: 10px;
+  line-height: 1.6;
+  text-align: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.cm-test-mark:hover {
+  background: var(--surface-3);
+  color: var(--accent);
+}
+
+.cm-test-mark.passed {
+  color: var(--done);
+  font-weight: 700;
+}
+
+.cm-test-mark.failed {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.cm-test-mark.running {
+  color: var(--accent);
+  animation: test-pulse 1s ease-in-out infinite;
+}
+
+.cm-test-mark.suite.idle {
+  opacity: 0.7;
+}
+
+@keyframes test-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.tests-body {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.tests-run {
+  display: grid;
+  gap: 4px;
+}
+
+.tests-what {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.tests-summary {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 0;
+  font-weight: 600;
+}
+
+.tests-summary.good {
+  color: var(--done);
+}
+
+.tests-summary.bad {
+  color: var(--danger);
+}
+
+.test-row {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.test-row.failed {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--danger);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.test-row.passed > .test-row-head {
+  color: var(--text-2);
+}
+
+.test-row.skipped > .test-row-head {
+  color: var(--text-3);
+}
+
+.test-row-head {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.test-row.failed .test-row-head > svg {
+  color: var(--danger);
+}
+
+.test-row.passed .test-row-head > svg {
+  color: var(--done);
+}
+
+.test-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.test-message {
+  margin: 0;
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+.test-detail {
+  max-height: 240px;
+  margin: 4px 0 0;
+  overflow: auto;
+  padding: 6px;
+  border-radius: 5px;
+  background: var(--surface);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.test-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tests-others summary {
+  padding: 4px 0;
+  cursor: pointer;
+}

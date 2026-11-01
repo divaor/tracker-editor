@@ -1,0 +1,37 @@
+
+ RUN  v5.0.5 /work/vitest
+
+ ❯ test/math.test.js (3 tests | 1 failed | 1 skipped) 10ms
+   ❯ math (3)
+     ✓ adds 2ms
+     × subtracts 6ms
+     ↓ later
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/math.test.js > math > subtracts
+AssertionError: expected 2 to be 1 // Object.is equality
+
+- Expected
++ Received
+
+- 1
++ 2
+
+ ❯ test/math.test.js:7:19
+      5|   });
+      6|   it('subtracts', () => {
+      7|     expect(3 - 1).toBe(1);
+       |                   ^
+      8|   });
+      9|   it.skip('later', () => {});
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed | 1 skipped (3)
+   Start at  03:41:24
+   Duration  233ms (transform 48%, import 35%, tests 12%, worker 5%)
+
+JUNIT report written to /work/fixtures/vitest.xml

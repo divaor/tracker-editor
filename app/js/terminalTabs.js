@@ -143,3 +143,17 @@ export function fromWsl(p, distro = '') {
   if (m) return `${m[1].toUpperCase()}:${(m[2] ?? '\\').replace(/\//g, '\\')}`;
   return distro ? `\\\\wsl.localhost\\${distro}${p.replace(/\//g, '\\')}` : null;
 }
+
+// ---- A command ended (OSC 633;D), for runs whose end is waited for (tests) ----
+
+/** OSC 633's data when it says a command ended ("D" or "D;<code>"): { code } (null: not said), else null. */
+export function commandEnded(data) {
+  const m = /^D(?:;(-?\d{1,9}))?$/.exec(String(data ?? ''));
+  return m ? { code: m[1] === undefined ? null : Number(m[1]) } : null;
+}
+
+/**
+ * What a command line gets so a shell without our integration (WSL, servers) says when it
+ * ended and with what code: printf's OSC 633;D after it. '' for shells that say it themselves.
+ */
+export const endMark = (kind) => (kind === 'posix' || kind === 'wsl' ? `; printf '\\033]633;D;%s\\007' "$?"` : '');

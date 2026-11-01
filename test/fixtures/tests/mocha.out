@@ -1,0 +1,29 @@
+
+
+  math
+    ✔ adds
+    1) subtracts
+    - later
+
+
+  1 passing (5ms)
+  1 pending
+  1 failing
+
+  1) math
+       subtracts:
+
+      AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+2 !== 1
+
+      + expected - actual
+
+      -2
+      +1
+      
+      at Context.<anonymous> (test/math.test.js:7:12)
+      at process.processImmediate (node:internal/timers:484:21)
+
+
+

@@ -2,7 +2,7 @@
 
 Tracker Editor is a Notepad++-style editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs. Everything is saved the moment you paste or type, on this computer with the tracker, or, once you turn on sync, in the same private GitHub data repo as the tracker, so your files are on your computers and your phone.
 
-Version 0.38.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.38.0 · Web app: https://divaor.github.io/tracker-editor/
+Version 0.39.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.39.0 · Web app: https://divaor.github.io/tracker-editor/
 
 ---
 
@@ -14,9 +14,9 @@ Download from **https://github.com/divaor/tracker-editor/releases/latest**:
 
 | System | File |
 | --- | --- |
-| Windows | `Tracker Editor Setup 0.38.0.exe` (installer) or `Tracker Editor-0.38.0-portable.exe` (no install, no admin rights) |
-| macOS | `Tracker Editor-0.38.0-arm64.dmg` |
-| Linux | `Tracker Editor-0.38.0.AppImage` |
+| Windows | `Tracker Editor Setup 0.39.0.exe` (installer) or `Tracker Editor-0.39.0-portable.exe` (no install, no admin rights) |
+| macOS | `Tracker Editor-0.39.0-arm64.dmg` |
+| Linux | `Tracker Editor-0.39.0.AppImage` |
 
 The builds are not code-signed, so the first launch warns you. On Windows, choose *More info → Run anyway*. On macOS, right-click the app → *Open*. Installing the desktop app also registers `tracker-editor://` links, so the tracker's **Open in editor** opens files straight in it.
 
@@ -27,7 +27,7 @@ The builds are not code-signed, so the first launch warns you. On Windows, choos
 The editor as an Android app, with what a web page cannot do: **Open with** from other apps, **Folders** on the phone, **servers** and **terminals**. For Android 7 and later on 64-bit phones (nearly all from the last ten years).
 
 1. Install **Obtainium** (from https://github.com/ImranR98/Obtainium/releases or F-Droid). It installs apps from their GitHub releases and keeps them up to date.
-2. In Obtainium: **Add app**, paste `https://github.com/divaor/tracker-editor`, **Add**, then **Install** (`Tracker-Editor-0.38.0.apk`). The first time, Android asks to let Obtainium install apps: allow it.
+2. In Obtainium: **Add app**, paste `https://github.com/divaor/tracker-editor`, **Add**, then **Install** (`Tracker-Editor-0.39.0.apk`). The first time, Android asks to let Obtainium install apps: allow it.
 3. Obtainium tells you when there is a new version and installs it over the old one; your files and settings stay. (Or download the `.apk` from the releases page and open it; then updates are by hand.)
 
 What the app adds:
@@ -587,6 +587,18 @@ It types real key presses into whichever window has the focus when the countdown
 - **`file:line` opens the file there**: in a terminal, the places programs print (`src/app.js:12:5`, `File "main.py", line 7`, `Foo.cs:line 42`, `a.ts(12,5)`) are links; click one. In the text (a log, a pasted stack trace), `Ctrl+click` one. Relative paths start from the folder the terminal is in now (after a `cd`), or the file's. Files outside the folders you opened in Folders do not open (open their folder first).
 - **When it fails**, ✦ in the terminal's bar asks the model about the error, and offers to fix the file it points to: see [Help with errors](#help-with-errors).
 
+### Running tests (desktop)
+
+Open a test file from Folders (on this computer, or on an SSH server: it runs there) and:
+
+- **The test at the cursor**: `Ctrl+F5` runs the test the cursor is in (or the suite, `describe` or class, when it is on its line); outside any test, the whole file.
+- **The whole file**: `Ctrl+Shift+F5`.
+- **▶ next to the line numbers**: each test and suite has one; click it to run that one. After a run it shows **✓** passed, **✗** failed or **–** skipped, and keeps that until the test runs again.
+- **Failures at their lines**: the line where it failed (the assertion, found in the stack trace) is underlined like a problem, with the message; `F8` goes to it, and the Problems list has it (with a language server's own problems).
+- **The Tests panel** opens when something failed (or **View → Tests Panel**): what ran, how many failed, passed and were skipped, each failure with its message, **line N** to go there, **Run it** (that test again) and **Explain** (the model explains the failure and how to fix it). **Run again** (↻, or **Run the Tests Again**) repeats the last run.
+- **Which framework**: worked out from the file and the project above it: **Jest**, **Vitest**, **Mocha** or **node:test** for JavaScript and TypeScript (run with `npx`, or `pnpm exec`, `yarn`, `bunx` by the lock file), **pytest** (or **unittest** when the file uses only that; through `uv run`, `poetry run` or `pdm run` by the lock file), **go test**, **cargo test**, **PHPUnit** or **Pest** (`vendor/bin`), and **dotnet test** for C# (xUnit, NUnit, MSTest).
+- The tests run in a terminal of their own (**Tests**), so you see everything they print; the editor reads the results from a report the framework writes (JUnit XML, Jest's JSON, TAP, .NET's TRX) or, for Mocha, unittest, Go and Rust, from what they print. Nothing is installed: the framework must already be in the project (`npm install`, `pip install pytest`, `composer install`…); if it is not, the panel says no results came back and the terminal shows why.
+
 ### Terminal tabs: names, order, two side by side (desktop)
 
 Each terminal is a tab in the panel. With a few open (a server, this computer, a build running), these keep them apart:
@@ -756,6 +768,7 @@ Turn them on in **Settings → Desktop**.
 | In the folders view | `Enter` open, `Backspace` up, `→` / `←` open / close a folder in place, `Space` view large, `F2` rename, `Del` delete, `Ctrl+C` / `Ctrl+X` / `Ctrl+V`, `Ctrl+A`, `Ctrl+Shift+N` new folder, `F5` refresh, `Alt+Enter` properties, `Ctrl+Shift+F` find in this folder |
 | `` Ctrl+` `` | Terminal (this computer or a server): show or hide (desktop) |
 | `F5` | Run this file in the terminal (desktop) |
+| `Ctrl+F5` / `Ctrl+Shift+F5` | Run the test at the cursor / this file's tests (desktop) |
 | `Tab` / `Ctrl+→` / `Escape` | With a grey suggestion: take it / take a word / drop it |
 | `Ctrl+click` on `file:line` | Open that file at that line (in a terminal, a plain click) |
 | In the terminal | `Ctrl+Shift+C` / `Ctrl+Shift+V` copy / paste; `Ctrl+C` copies a selection, `Ctrl+V` pastes |

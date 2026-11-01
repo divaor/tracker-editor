@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="Tests\MathTest" file="/work/php/tests/MathTest.php" tests="5" assertions="4" errors="0" failures="1" skipped="1" time="0.003092">
+    <testcase name="testAdds" file="/work/php/tests/MathTest.php" line="10" class="Tests\MathTest" classname="Tests.MathTest" assertions="1" time="0.000437"/>
+    <testcase name="subtracts" file="/work/php/tests/MathTest.php" line="16" class="Tests\MathTest" classname="Tests.MathTest" assertions="1" time="0.002204">
+      <failure type="PHPUnit\Framework\ExpectationFailedException">Tests\MathTest::subtracts
+three minus one
+Failed asserting that 2 is identical to 1.
+
+/work/php/tests/MathTest.php:18</failure>
+    </testcase>
+    <testsuite name="Tests\MathTest::testParam" tests="2" assertions="2" errors="0" failures="0" skipped="0" time="0.000303">
+      <testcase name="testParam with data set #0" file="/work/php/tests/MathTest.php" line="27" class="Tests\MathTest" classname="Tests.MathTest" assertions="1" time="0.000167"/>
+      <testcase name="testParam with data set #1" file="/work/php/tests/MathTest.php" line="27" class="Tests\MathTest" classname="Tests.MathTest" assertions="1" time="0.000136"/>
+    </testsuite>
+    <testcase name="testLater" file="/work/php/tests/MathTest.php" line="32" class="Tests\MathTest" classname="Tests.MathTest" assertions="0" time="0.000148">
+      <skipped/>
+    </testcase>
+  </testsuite>
+</testsuites>

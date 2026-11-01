@@ -103,6 +103,7 @@ import { createSearchPanel, openReplacePanel } from './searchPanel.js';
 import { SYNTAX_LANGUAGES, problemsFor, treeErrors } from './problems.js';
 import { convertIndent, detectIndent } from './indent.js';
 import { gitGutter, gitInfo, gitMarkClick, setGitBase } from './gitGutter.js';
+import { hasTestGutter, setTestInfo, testGutter, testMarkClick, testProblems } from './testGutter.js';
 import { emmetOnTab, linkedTags } from './htmlTools.js';
 import { inlineSuggestions } from './inlineSuggest.js';
 import { findFileRefs, pastedPath } from './fileRefs.js';
@@ -354,6 +355,8 @@ const problemsLinter = (key, onProblems, onProblemAction) =>
         const { errors, parsed } = language === 'JSON' ? { errors: [], parsed: state.doc.length } : parserErrors(state);
         list = problemsFor(state.doc.toString(), { language, name: state.facet(fileName), errors }).filter((p) => p.from <= parsed);
       }
+      // A test run's failures, at their lines (testGutter.js), with the rest.
+      list = [...list, ...testProblems(state)];
       const end = state.doc.length;
       const found = list.map((p) => {
         const from = Math.min(p.from, end);
@@ -379,7 +382,7 @@ const problemsLinter = (key, onProblems, onProblemAction) =>
       needsRefresh: (update) =>
         update.startState.facet(languageName) !== update.state.facet(languageName) ||
         update.startState.facet(serverProblems) !== update.state.facet(serverProblems) ||
-        update.transactions.some((tr) => tr.effects.some((e) => e.is(problemsChanged))),
+        update.transactions.some((tr) => tr.effects.some((e) => e.is(problemsChanged) || e.is(setTestInfo))),
     },
   );
 
@@ -998,7 +1001,7 @@ function fileRefAt(state, pos) {
  * `openSide(key, el, …)` shows a second tab next to it (the split view); a tab's
  * state, with its undo history, moves between the panes.
  */
-export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpenLink, onOpenRef, onSuggest, onImage, onPasteFiles, onPastePath, onProblems, onProblemAction, onDrop, onLineMenu, onGitMark, linkTargets, settings }) {
+export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpenLink, onOpenRef, onSuggest, onImage, onPasteFiles, onPastePath, onProblems, onProblemAction, onDrop, onLineMenu, onGitMark, onTestMark, linkTargets, settings }) {
   const states = new Map(); // key → EditorState
   const scroll = new Map(); // key → scroll position
   const pending = new Map(); // key → timer for onChange
@@ -1012,6 +1015,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
   const checks = new Compartment(); // problems as you type
   const aids = new Compartment(); // indentation guides, bracket colors, sticky scroll
   const gitBar = new Compartment(); // lines changed since the last commit (files in a Git repository)
+  const testBar = new Compartment(); // a test file's tests: ▶ to run each, then how it went (testGutter.js)
   const server = new Compartment(); // a language server's completion, hover, problems (lsp.js)
   const indents = new Map(); // key → { tabs, size, source: 'detected' | 'editorconfig' | 'chosen' }
   let options = settings;
@@ -1248,6 +1252,9 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       gitBar.of([]),
       // A click on a changed line's mark: the app offers to stage that change.
       gitMarkClick.of((v, line, at) => onGitMark?.({ key: keyOfView(v), line, ...at })),
+      testBar.of([]),
+      // A click on a test's mark: the app runs it.
+      testMarkClick.of((v, test, at) => onTestMark?.({ key: keyOfView(v), test, ...at })),
       server.of([]),
       EditorView.updateListener.of((update) => {
         if (update.docChanged && !update.transactions.some((tr) => tr.annotation(remote))) {
@@ -1633,6 +1640,41 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       }
       if (!has) apply({ effects: gitBar.reconfigure(gitGutter) });
       apply({ effects: setGitBase.of(text) });
+    },
+    /**
+     * A test file's tests and how the last run went (testGutter.js: { tests, states, failures }):
+     * a mark at each test, failures with the problems. null takes them away.
+     */
+    setTestInfo(key, info) {
+      const apply = (spec) => {
+        const v = viewOf(key);
+        if (v) v.dispatch(spec);
+        else if (states.has(key)) states.set(key, states.get(key).update(spec).state);
+      };
+      const state = viewOf(key)?.state ?? states.get(key);
+      if (!state || bigKeys.has(key)) return;
+      const has = hasTestGutter(state);
+      if (!info) {
+        if (has) apply({ effects: [testBar.reconfigure([]), problemsChanged.of(null)] });
+        return;
+      }
+      // A field just added starts empty: the info goes in the next transaction.
+      if (!has) apply({ effects: testBar.reconfigure(testGutter) });
+      apply({ effects: setTestInfo.of(info) });
+    },
+    /** Does a tab have the test marks? */
+    hasTests(key) {
+      const state = viewOf(key)?.state ?? states.get(key);
+      return state ? hasTestGutter(state) : false;
+    },
+    /** A tab's test failures where edits since took them: [{ line, column, message, source }]. */
+    testFailures(key) {
+      const state = viewOf(key)?.state ?? states.get(key);
+      if (!state || !hasTestGutter(state)) return [];
+      return testProblems(state).map((p) => {
+        const line = state.doc.lineAt(p.from);
+        return { line: line.number, column: p.from - line.from + 1, message: p.message, source: p.source };
+      });
     },
     /** { base, changes } of a tab's file against the last commit, or null. */
     gitChanges(key) {

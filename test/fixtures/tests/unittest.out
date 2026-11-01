@@ -1,0 +1,16 @@
+test_adds (tests.test_unit.MathTest.test_adds) ... ok
+test_subtracts (tests.test_unit.MathTest.test_subtracts) ... FAIL
+
+======================================================================
+FAIL: test_subtracts (tests.test_unit.MathTest.test_subtracts)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/work/py/tests/test_unit.py", line 9, in test_subtracts
+    self.assertEqual(3 - 1, 1)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^
+AssertionError: 2 != 1
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.001s
+
+FAILED (failures=1)

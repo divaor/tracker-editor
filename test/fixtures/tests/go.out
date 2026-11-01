@@ -1,0 +1,15 @@
+=== RUN   TestAdd
+--- PASS: TestAdd (0.00s)
+=== RUN   TestSub
+    math_test.go:13: 3-1 = 2, want 1
+--- FAIL: TestSub (0.00s)
+=== RUN   TestTable
+=== RUN   TestTable/one
+=== RUN   TestTable/two
+    math_test.go:19: later
+--- PASS: TestTable (0.00s)
+    --- PASS: TestTable/one (0.00s)
+    --- SKIP: TestTable/two (0.00s)
+FAIL
+FAIL	example.com/m	0.003s
+FAIL

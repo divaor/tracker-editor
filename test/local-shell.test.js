@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -88,11 +89,12 @@ test('each shell is started so it says its folder, its own startup files still r
   const ps = integrate({ id: 'pwsh', args: ['-NoLogo'], integration: 'powershell' }, env, dir);
   assert.deepEqual(ps.args.slice(0, 3), ['-NoLogo', '-NoExit', '-EncodedCommand']);
   assert.equal(Buffer.from(ps.args[3], 'base64').toString('utf16le'), POWERSHELL);
-  assert.equal(integrate({ id: 'cmd', args: [], integration: 'cmd' }, { PROMPT: '$P$_$G' }, dir).env.PROMPT, '$E]9;9;$P$E\\$P$_$G');
-  assert.equal(cmdPrompt(''), '$E]9;9;$P$E\\$P$G');
+  assert.equal(integrate({ id: 'cmd', args: [], integration: 'cmd' }, { PROMPT: '$P$_$G' }, dir).env.PROMPT, '$E]633;D$E\\$E]9;9;$P$E\\$P$_$G');
+  assert.equal(cmdPrompt(''), '$E]633;D$E\\$E]9;9;$P$E\\$P$G');
+  assert.equal(bash.integrated, true);
   // A shell without integration (WSL, sh), or no folder to keep the scripts: as it is.
-  assert.deepEqual(integrate({ id: 'wsl', args: ['-d', 'Ubuntu'], integration: null }, env, dir), { args: ['-d', 'Ubuntu'], env });
-  assert.deepEqual(integrate({ id: 'bash', args: [], integration: 'bash' }, env, ''), { args: [], env });
+  assert.deepEqual(integrate({ id: 'wsl', args: ['-d', 'Ubuntu'], integration: null }, env, dir), { args: ['-d', 'Ubuntu'], env, integrated: false });
+  assert.deepEqual(integrate({ id: 'bash', args: [], integration: 'bash' }, env, ''), { args: [], env, integrated: false });
 });
 
 // A real shell with its integration: after a cd it says the new folder (OSC 7), and the
@@ -110,10 +112,14 @@ async function saysFolder(shell, home, extraEnv = {}) {
   await until(() => out.length > 0);
   s.write(`cd '${target}'\r`);
   s.write('echo "own=$OWN_RC"\r');
+  // A command that fails: the prompt after it says it ended, with its code.
+  s.write('false\r');
   const said = await until(() => out.includes(`\u001b]7;file://`) && out.includes(target.split(' ')[0].split('/').pop()) && /\u001b\]7;file:\/\/[^\u0007]*a%20dir/.test(out));
   const own = await until(() => out.includes('own=yes'));
+  const ended = await until(() => out.includes('\u001b]633;D;1\u0007') && out.includes('\u001b]633;D;0\u0007'));
   s.close();
-  return { said, own, out };
+  assert.equal(s.integrated, true, 'it says when commands end');
+  return { said, own, ended, out };
 }
 
 test('bash says its folder after a cd, and runs ~/.bashrc (macOS: a login shell, ~/.bash_profile)', { skip: !existsSync('/usr/bin/bash') && !existsSync('/bin/bash') }, async () => {
@@ -122,6 +128,7 @@ test('bash says its folder after a cd, and runs ~/.bashrc (macOS: a login shell,
   const r = await saysFolder('bash', home);
   assert.ok(r.said, `no OSC 7 after the cd:\n${r.out}`);
   assert.ok(r.own, `own startup file not run:\n${r.out}`);
+  assert.ok(r.ended, `no end of command (OSC 633;D) with its code:\n${r.out}`);
 });
 
 test('zsh says its folder after a cd, and runs ~/.zshrc', { skip: !existsSync('/usr/bin/zsh') && !existsSync('/bin/zsh') }, async () => {
@@ -130,6 +137,7 @@ test('zsh says its folder after a cd, and runs ~/.zshrc', { skip: !existsSync('/
   const r = await saysFolder('zsh', home);
   assert.ok(r.said, `no OSC 7 after the cd:\n${r.out}`);
   assert.ok(r.own, `own startup file not run:\n${r.out}`);
+  assert.ok(r.ended, `no end of command (OSC 633;D) with its code:\n${r.out}`);
 });
 
 test('fish says its folder after a cd', { skip: !existsSync('/usr/bin/fish') }, async () => {
@@ -139,4 +147,28 @@ test('fish says its folder after a cd', { skip: !existsSync('/usr/bin/fish') }, 
   const r = await saysFolder('fish', home, { XDG_CONFIG_HOME: path.join(home, '.config') });
   assert.ok(r.said, `no OSC 7 after the cd:\n${r.out}`);
   assert.ok(r.own, `own startup file not run:\n${r.out}`);
+  assert.ok(r.ended, `no end of command (OSC 633;D) with its code:\n${r.out}`);
+});
+
+// PowerShell's prompt, for real where it is installed (GitHub's Windows, macOS and Ubuntu machines
+// have pwsh): the folder (OSC 9;9) and the end of the command before, with its code (OSC 633;D).
+const pwshOnPath = (() => {
+  try {
+    execFileSync(process.platform === 'win32' ? 'where' : 'which', ['pwsh'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+test('PowerShell’s prompt says the folder and how the last command ended', { skip: !pwshOnPath }, () => {
+  const run = (before) =>
+    execFileSync('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', `${POWERSHELL}\n${before}\nprompt`], { encoding: 'utf8', cwd: os.tmpdir() });
+  const failed = run("$null = Get-Item 'no-such-thing-here' -ErrorAction SilentlyContinue");
+  assert.match(failed, /\u001b\]633;D;1\u0007/, JSON.stringify(failed));
+  assert.match(failed, /\u001b\]9;9;"[^"]+"\u0007/, 'the folder');
+  const ok = run('$null = 1');
+  assert.match(ok, /\u001b\]633;D;0\u0007/, JSON.stringify(ok));
+  // A program's own exit code.
+  const code = run(process.platform === 'win32' ? 'cmd /c exit 3' : "sh -c 'exit 3'");
+  assert.match(code, /\u001b\]633;D;3\u0007/, JSON.stringify(code));
 });

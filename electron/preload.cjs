@@ -265,6 +265,10 @@ contextBridge.exposeInMainWorld('desktop', {
     shells: () => ipcRenderer.invoke('term:shells'),
     // Tasks in the projects around these folders (package.json, Makefile, pyproject.toml, composer.json).
     tasks: (dirs) => ipcRenderer.invoke('tasks:files', dirs),
+    // Running tests: the project around a test file, a report file for a run, and what it wrote.
+    testProject: (file) => ipcRenderer.invoke('tests:project', file),
+    testPrepare: (file, ext) => ipcRenderer.invoke('tests:prepare', file, ext),
+    testReport: (id) => ipcRenderer.invoke('tests:report', id),
     input: (id, data) => ipcRenderer.send('term:input', id, data),
     resize: (id, cols, rows) => ipcRenderer.invoke('term:resize', id, cols, rows),
     close: (id) => ipcRenderer.invoke('term:close', id),
