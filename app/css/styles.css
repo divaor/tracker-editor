@@ -11256,6 +11256,460 @@ html[data-native='android'] body:has(.edit-bar) .toasts {
   cursor: pointer;
 }
 
+/* ---- Debugging (0.41): breakpoints in the gutter (debugGutter.js), the Debug panel (ui/debugPanel.js) ---- */
+.cm-breakpoint-gutter {
+  width: 15px;
+  cursor: pointer;
+}
+
+.cm-breakpoint-gutter .cm-gutterElement {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.cm-breakpoint-gutter .cm-gutterElement:hover::before {
+  content: '';
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--danger) 35%, transparent);
+}
+
+.cm-breakpoint-gutter .cm-gutterElement:has(.cm-breakpoint):hover::before {
+  content: none;
+}
+
+.cm-breakpoint-space {
+  width: 9px;
+  height: 9px;
+}
+
+.cm-breakpoint {
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid var(--danger);
+  border-radius: 50%;
+  background: var(--danger);
+}
+
+.cm-breakpoint.conditional {
+  background: linear-gradient(var(--danger) 0 0) center / 5px 1.5px no-repeat, var(--surface);
+  box-shadow: inset 0 2px 0 -0.5px var(--danger), inset 0 -2px 0 -0.5px var(--danger);
+}
+
+.cm-breakpoint.log {
+  border-radius: 1px;
+  transform: rotate(45deg) scale(0.9);
+}
+
+.cm-breakpoint.off {
+  border-color: var(--text-3);
+  background: var(--text-3);
+  opacity: 0.6;
+}
+
+.cm-breakpoint.unverified {
+  background: transparent;
+}
+
+.cm-debug-arrow {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0;
+  pointer-events: none;
+}
+
+/* A yellow arrow over the line's breakpoint, if it has one. */
+.cm-debug-arrow::before {
+  content: '';
+  width: 13px;
+  height: 11px;
+  background: var(--warn);
+  clip-path: polygon(0 28%, 50% 28%, 50% 0, 100% 50%, 50% 100%, 50% 72%, 0 72%);
+  filter: drop-shadow(0 0 1px var(--bg));
+}
+
+/* Over the active line's own background (the theme's rule has two classes). */
+.cm-editor .cm-content .cm-debug-paused {
+  background: color-mix(in srgb, var(--warn) 24%, transparent);
+  box-shadow: inset 2px 0 0 var(--warn);
+}
+
+.status-debug {
+  gap: 4px;
+  max-width: 34ch;
+}
+
+.status-debug span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-debug.state-paused {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.debug-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.debug-controls-gap {
+  flex: 1;
+}
+
+.debug-controls .debug-go:not(:disabled) {
+  color: var(--done);
+}
+
+.debug-controls .debug-stop:not(:disabled) {
+  color: var(--danger);
+}
+
+.debug-body {
+  gap: 6px;
+  padding: 8px 10px;
+}
+
+.debug-state {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.debug-state-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.debug-state.running .debug-state-dot,
+.debug-state.starting .debug-state-dot {
+  background: var(--done);
+}
+
+.debug-state.paused .debug-state-dot {
+  background: var(--warn);
+}
+
+.debug-intro p {
+  margin: 0 0 8px;
+}
+
+.debug-section {
+  border-top: 1px solid var(--border);
+}
+
+.debug-section-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+}
+
+.debug-section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 2px;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.debug-section-body {
+  padding: 0 0 8px;
+}
+
+.debug-empty {
+  margin: 2px 0 4px 18px;
+}
+
+.debug-thread-name {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 0;
+  color: var(--text-2);
+}
+
+.debug-frame {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  width: 100%;
+  min-width: 0;
+  padding: 2px 6px 2px 18px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.debug-frame:hover {
+  background: var(--surface-2);
+}
+
+.debug-frame.on {
+  background: var(--accent-soft);
+}
+
+.debug-frame.subtle,
+.debug-frame.no-place {
+  color: var(--text-3);
+}
+
+.debug-frame-name {
+  overflow: hidden;
+  font-family: var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.debug-frame-place {
+  flex: none;
+  margin-left: auto;
+  font-size: 11.5px;
+}
+
+.debug-var,
+.debug-watch-row {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  min-width: 0;
+  padding: 1px 4px 1px calc(4px + var(--depth, 0) * 14px);
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.debug-var[aria-expanded] {
+  cursor: pointer;
+}
+
+.debug-var:hover {
+  background: var(--surface-2);
+}
+
+.debug-var.scope {
+  font-family: var(--font);
+  font-weight: 600;
+}
+
+.debug-var-twisty {
+  display: inline-flex;
+  flex: none;
+  width: 12px;
+  color: var(--text-3);
+}
+
+.debug-var-name {
+  flex: none;
+  max-width: 50%;
+  overflow: hidden;
+  color: var(--accent);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.debug-var-name::after {
+  content: ':';
+  color: var(--text-3);
+}
+
+.debug-var.scope .debug-var-name {
+  color: var(--text);
+}
+
+.debug-var.scope .debug-var-name::after {
+  content: none;
+}
+
+.debug-var-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.debug-var-value.error {
+  color: var(--text-3);
+  font-style: italic;
+}
+
+.debug-watch-row .debug-var-value {
+  flex: 1;
+}
+
+.debug-watch-add input,
+.debug-console-in input {
+  width: 100%;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.debug-watch-add {
+  margin: 4px 0 0 4px;
+}
+
+.debug-bp {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  padding: 1px 2px;
+  font-size: 12.5px;
+}
+
+.debug-bp.off .debug-bp-place {
+  color: var(--text-3);
+}
+
+.debug-bp-place {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 0 4px;
+  align-items: center;
+  min-width: 0;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.debug-bp-place:hover {
+  background: var(--surface-2);
+}
+
+.debug-bp-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-right: 2px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+
+.debug-bp-dot.log {
+  border-radius: 1px;
+  transform: rotate(45deg) scale(0.85);
+}
+
+.debug-bp-dot.conditional {
+  background: var(--surface);
+  box-shadow: inset 0 0 0 2px var(--danger);
+}
+
+.debug-bp.off .debug-bp-dot {
+  background: var(--text-3);
+  box-shadow: none;
+}
+
+.debug-bp-note {
+  flex-basis: 100%;
+  overflow: hidden;
+  font-family: var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.debug-exceptions {
+  display: grid;
+  gap: 3px;
+  margin: 6px 0 0 4px;
+}
+
+.debug-exceptions label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.debug-console {
+  display: grid;
+  gap: 4px;
+}
+
+.debug-console-out {
+  max-height: 260px;
+  min-height: 60px;
+  overflow: auto;
+  padding: 6px;
+  border-radius: 5px;
+  background: var(--surface);
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.debug-out.stderr,
+.debug-out.error {
+  color: var(--danger);
+}
+
+.debug-out.console {
+  color: var(--text-3);
+}
+
+.debug-out.important {
+  font-weight: 600;
+}
+
+.debug-out.input {
+  color: var(--accent);
+}
+
+.debug-console-in {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.debug-prompt {
+  color: var(--accent);
+  font-family: var(--mono);
+}
+
 /* ---- Find by asking (0.40): Ctrl+P's Ask row and the results panel ---- */
 .quick-row.quick-ask .icon,
 .quick-row.quick-ask .quick-name {

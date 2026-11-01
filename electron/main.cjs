@@ -880,6 +880,56 @@ ipcMain.handle('lsp:custom-remove', guard((_e, id) => {
 }));
 app.on('before-quit', () => lspHost.stopAll());
 
+// ---- Debugging (dap.cjs) -------------------------------------------------------------
+// For files on this computer inside what the person opened: the page names the file, and
+// dap.cjs picks the adapter (debugpy, js-debug), finds what runs it and makes the launch
+// configuration (a launch the page sends is filled in there). A page reloaded or closed ends
+// its sessions. While one runs, F11 is the page's (Step into), not the View menu's.
+const dap = require('./dap.cjs');
+const dapHost = dap.createDapHost({
+  send: (sender, channel, payload) => {
+    if (!sender.isDestroyed()) sender.send(channel, payload);
+  },
+  debuggersDir: path.join(app.getPath('userData'), 'debuggers'),
+});
+const dapPages = new WeakSet();
+function dapSender(sender) {
+  if (!dapPages.has(sender)) {
+    dapPages.add(sender);
+    const gone = () => {
+      dapHost.stopAll(sender);
+      if (debugging) {
+        debugging = false;
+        buildMenu();
+      }
+    };
+    sender.on('did-navigate', gone);
+    sender.once('destroyed', gone);
+  }
+  return sender;
+}
+ipcMain.handle('dap:start', guard(async (event, file, opts = {}) => {
+  if (typeof file !== 'string' || isRemote(file)) return { none: 'Debugging works for files on this computer (open them from Folders).' };
+  checkFile(file);
+  // The project (and its .venv) is looked for up to the folder the person picked, not above it.
+  const stop = allowedFolders.find((f) => folders.allowedBy([f], file)) ?? '';
+  return dapHost.start(dapSender(event.sender), file, { stop, test: opts?.test ?? null });
+}));
+ipcMain.handle('dap:child', guard((event, parentId, seq) => dapHost.child(event.sender, Number(parentId), Number(seq))));
+ipcMain.on('dap:send', (event, id, message) => {
+  if (fromApp(event)) dapHost.write(Number(id), message, event.sender);
+});
+ipcMain.handle('dap:stop', guard((event, id) => dapHost.stop(Number(id), event.sender)));
+let debugging = false;
+ipcMain.on('debug:active', (event, on) => {
+  if (!fromApp(event) || Boolean(on) === debugging) return;
+  debugging = Boolean(on);
+  buildMenu();
+});
+app.on('before-quit', () => dapHost.stopAll());
+// What did not end by then does not outlive the app.
+app.on('will-quit', () => dapHost.killAll());
+
 // A file on a server is checked now and then while the server is connected (never
 // connecting by itself), and 'disk:changed' says when it changed there.
 const remoteWatches = new Map(); // remote:// path → { timer, last, busy }
@@ -3030,11 +3080,31 @@ function buildMenu() {
         item('The Model', 'CmdOrCtrl+Shift+A', 'assistant'),
         shown('Outline and Links', 'CmdOrCtrl+Shift+O', 'outline'),
         shown('Terminal', 'Ctrl+`', 'terminal'),
-        shown('Run This File', 'F5', 'run-file'),
+        // While debugging, F5 continues (the page's keys; the menu only shows them).
+        shown('Run This File', debugging ? undefined : 'F5', 'run-file'),
         shown('Run the Test at the Cursor', 'CmdOrCtrl+F5', 'test-at-cursor'),
         shown('Run This File’s Tests', 'CmdOrCtrl+Shift+F5', 'test-file'),
         item('Run the Tests Again', undefined, 'test-again'),
         item('Tests Panel', undefined, 'tests-panel'),
+        {
+          label: 'Debug',
+          submenu: [
+            shown('Debug This File', 'Alt+F5', 'debug-file'),
+            shown('Debug the Test at the Cursor', 'CmdOrCtrl+Alt+F5', 'debug-test'),
+            shown('Toggle a Breakpoint', 'F9', 'breakpoint-toggle'),
+            { type: 'separator' },
+            { ...shown('Continue', debugging ? 'F5' : undefined, 'debug-continue'), enabled: debugging },
+            { ...shown('Pause', undefined, 'debug-pause'), enabled: debugging },
+            { ...shown('Step Over', 'F10', 'debug-step-over'), enabled: debugging },
+            { ...shown('Step Into', 'F11', 'debug-step-into'), enabled: debugging },
+            { ...shown('Step Out', 'Shift+F11', 'debug-step-out'), enabled: debugging },
+            { ...shown('Restart', undefined, 'debug-restart'), enabled: debugging },
+            { ...shown('Stop Debugging', 'Shift+F5', 'debug-stop'), enabled: debugging },
+            { type: 'separator' },
+            item('Debug Panel', undefined, 'debug-panel'),
+            item('Remove All Breakpoints', undefined, 'breakpoints-remove-all'),
+          ],
+        },
         { type: 'separator' },
         item('Indentation Guides', undefined, 'indent-guides'),
         item('Colored Bracket Pairs', undefined, 'bracket-colors'),
@@ -3057,7 +3127,8 @@ function buildMenu() {
         { label: 'Zoom the Whole Window Out', click: () => zoomWindow(-0.5) },
         { label: 'Whole Window at Its Usual Size', click: () => zoomWindow(0) },
         { type: 'separator' },
-        { role: 'togglefullscreen' },
+        // While debugging, F11 steps into (the page's key): full screen keeps its item, not the key.
+        debugging ? { label: 'Toggle Full Screen', click: () => mainWindow?.setFullScreen(!mainWindow.isFullScreen()) } : { role: 'togglefullscreen' },
         { role: 'reload' },
         { role: 'toggleDevTools' },
       ],

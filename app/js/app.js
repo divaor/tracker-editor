@@ -22,6 +22,9 @@ import { activeTerminal, focusTerminal, openTerminal, retheme, runAndWait, runIn
 import { parseRunCommands, quoteFor, runCommandFor, runLine, wslPath } from './runFile.js';
 import { detectFramework, firstMessageLine, FRAMEWORKS, looksLikeTestFile, parseOutput, parseReport, placeFailures, reportExt, summaryText, testAt, testCommand, testLanguage, testsInFile, testStates } from './testRun.js';
 import { TestsPanel } from './ui/tests.js';
+import { createDebugger } from './dap.js';
+import { allOff, cleanBreakpoints, cleanWatches, debugAdapterFor, DEBUG_FRAMEWORKS, movedBreakpoints, setAllEnabled, toggleBreakpoint, updateBreakpoint, withBreakpoints } from './debugTools.js';
+import { BreakpointDialog, DebugPanel, debugStatus, SetupDebuggerDialog } from './ui/debugPanel.js';
 import { taskLine } from './tasks.js';
 import { TasksDialog } from './ui/tasks.js';
 import { findFileRefs, pastedPath, resolveRef } from './fileRefs.js';
@@ -916,6 +919,9 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         const marks = getSettings().docBookmarks;
         const moved = movedBookmarks(marks, moves);
         if (moved !== marks) saveSettings({ docBookmarks: moved });
+        // Breakpoints too, where edits took them.
+        actions.syncBreakpoints?.();
+        if (Object.keys(getSettings().breakpoints ?? {}).length) saveSettings({ breakpoints: movedBreakpoints(getSettings().breakpoints, moves) });
         for (const tab of store.diskTabs()) {
           const to = moves.map((m) => remapPath(tab.path, m.from, m.to)).find(Boolean);
           if (!to || !store.renameDiskTab(tab.path, to)) continue;
@@ -1608,6 +1614,9 @@ export function App() {
   const [gitTick, setGitTick] = useState(0); // Git's state may have changed: the panel reads it again
   const [gitAssist, setGitAssist] = useState(null); // Git with the model: { dir, start, id }
   const [testRun, setTestRun] = useState(null); // the last test run, for the Tests panel
+  const debugRef = useRef(null); // the debugger (dap.js), desktop
+  const [debugTick, setDebugTick] = useState(0); // it changed: the panel and the status bar draw again
+  const [bpMenu, setBpMenu] = useState(null); // { key, line, x, y }: the breakpoint gutter right-clicked
   const actions = useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setCompare, setUsagesOf, setSearchSeed });
   const editorOptions = (s) => ({ ...s, dark: resolvedTheme(s.theme) === 'dark', inlineSuggest: Boolean(s.inlineSuggest && s.llm.enabled && s.llm.provider !== 'async') });
 
@@ -1812,10 +1821,16 @@ export function App() {
       onPastePath: (path) => actions.offerPastedPath(path),
       onLineMenu: (at) => setLineMenu(at),
       onGitMark: (at) => setGitMenu(at),
-      onTestMark: ({ key, test }) => actions.runTests({ scope: 'test', key, test }),
+      onTestMark: ({ key, test, debug }) => (debug ? actions.debugTest({ key, test }) : actions.runTests({ scope: 'test', key, test })),
+      // The breakpoint gutter: a click toggles, a right-click opens the menu; edits move them.
+      onBreakpointClick: ({ key, line, x, y, menu }) => (menu ? setBpMenu({ key, line, x, y }) : actions.toggleBreakpoint(key, line)),
+      onBreakpointsMoved: ({ key, list }) => actions.breakpointsMoved(key, list),
       linkTargets: () => store.live().map((f) => linkName(f.name)),
       // A tab's editor state is gone (closed, or made again under a new path): its server forgets it.
-      onDrop: (key) => lspRef.current?.forget(key),
+      onDrop: (key) => {
+        lspRef.current?.forget(key);
+        actions.flushBreakpointMoves(key);
+      },
       onChange(key, text, { urgent } = {}) {
         const k = parseKey(key);
         if (k?.kind === 'repo') return store.setRepoText(k.path, text, { urgent });
@@ -2416,13 +2431,14 @@ export function App() {
     setLspTick((n) => n + 1);
   };
   /** Opens a terminal (on this computer, or on the server `connId`) with `command` typed in, for the person to run. */
-  actions.typeInTerminal = async (command, cwd = '', connId = 'local') => {
+  actions.typeInTerminal = async (command, cwd = '', connId = 'local', { then = 'Then start the server from the status bar.' } = {}) => {
     if (!terminalsAvailable()) return toast('Terminals work in the desktop app.', { kind: 'error' });
     setTerminalShown(true);
     try {
+      // `command` may be a function of the shell's kind (each its own quoting).
       await runInTerminal(connId, { cwd, line: command, label: 'Set up', enter: false });
       setTimeout(() => focusTerminal(), 100);
-      toast('The command is typed in the terminal: press Enter to run it. Then start the server from the status bar.', { timeout: 10000 });
+      toast(`The command is typed in the terminal: press Enter to run it. ${then}`, { timeout: 10000 });
     } catch (err) {
       toast(ipcMessage(err), { kind: 'error' });
     }
@@ -3266,6 +3282,257 @@ export function App() {
     if (store.session.active !== run.key) await actions.openDiskPath(run.path, { line: t.at.line, column: t.at.column ?? 1 });
     actions.explainProblem({ line: t.at.line, column: t.at.column ?? 1, message: `The test "${[...(t.chain ?? []), t.name].join(' › ')}" failed: ${String(t.message ?? '').slice(0, 3000)}` }, run.key);
   };
+  // ---- Debugging (Alt+F5 the file, Ctrl+Alt+F5 the test at the cursor, F9 a breakpoint) ----
+  // The debugger (dap.js) speaks to the adapters the main process runs (dap.cjs); breakpoints
+  // live in the settings by path and, while a tab is open, in its gutter (debugGutter.js),
+  // which moves them with edits: the gutter's list is the one that counts then.
+  const debugAvailable = () => Boolean(window.desktop?.dap) && isDesktopApp();
+  const lastDebug = useRef(null); // { key, test }: what Restart and "It is installed" debug again
+  const pausedAt = useRef(null); // { key, line }: the paused line shown
+  const movedTimers = useRef(new Map()); // key → timer: breakpoints moved by edits, saved a moment later
+  const breakpointShown = useRef(new Map()); // key → what the gutter was given last (marks and their verified state)
+  /** Can this tab's file be debugged (a Python, JavaScript or TypeScript file on this computer)? */
+  const debuggableKey = (key) => {
+    const k = parseKey(key);
+    return debugAvailable() && k?.kind === 'disk' && !isRemotePath(k.path) && !isContentPath(k.path) && !store.diskTab(k.path)?.doc && Boolean(debugAdapterFor(k.path));
+  };
+  const savedBreakpoints = (path) => cleanBreakpoints(getSettings().breakpoints)[path] ?? [];
+  /** A tab's breakpoints now: its gutter's (moved by edits) when it has one, else the settings'. */
+  const breakpointsNow = (key) => hostRef.current?.breakpointsOf(key) ?? savedBreakpoints(parseKey(key).path);
+  /** The gutter shows `list` (with what the adapters said of each, while a run goes on). */
+  const showBreakpoints = (key, list) => {
+    const states = debugRef.current?.breakpointStates(parseKey(key).path);
+    const marks = list.map((b) => (states?.has(b.line) ? { ...b, verified: states.get(b.line).verified } : b));
+    const sig = JSON.stringify(marks);
+    if (breakpointShown.current.get(key) === sig && hostRef.current?.breakpointsOf(key)) return;
+    breakpointShown.current.set(key, sig);
+    hostRef.current?.setBreakpoints(key, marks);
+  };
+  /** A tab shown: its gutter (or none, for files that cannot be debugged) and the paused line. */
+  actions.applyBreakpoints = (key) => {
+    if (!key || !hostRef.current) return;
+    if (!debuggableKey(key)) {
+      breakpointShown.current.delete(key);
+      return hostRef.current.setBreakpoints(key, null);
+    }
+    showBreakpoints(key, breakpointsNow(key));
+    if (pausedAt.current?.key === key) hostRef.current.setPausedLine(key, pausedAt.current.line);
+  };
+  /** The open tabs' breakpoints (where edits took them) into the settings. */
+  actions.syncBreakpoints = () => {
+    let all = getSettings().breakpoints ?? {};
+    let changed = false;
+    for (const key of store.session.open ?? []) {
+      const list = parseKey(key)?.kind === 'disk' ? hostRef.current?.breakpointsOf(key) : null;
+      if (!list) continue;
+      clearTimeout(movedTimers.current.get(key));
+      movedTimers.current.delete(key);
+      const path = parseKey(key).path;
+      if (JSON.stringify(cleanBreakpoints(all)[path] ?? []) === JSON.stringify(list)) continue;
+      all = withBreakpoints(all, path, list);
+      changed = true;
+    }
+    if (changed) saveSettings({ breakpoints: all });
+  };
+  /** Edits moved a tab's breakpoints: kept in the settings a moment later. */
+  actions.breakpointsMoved = (key, list) => {
+    const k = parseKey(key);
+    if (k?.kind !== 'disk') return;
+    clearTimeout(movedTimers.current.get(key));
+    movedTimers.current.set(
+      key,
+      setTimeout(() => {
+        movedTimers.current.delete(key);
+        saveSettings({ breakpoints: withBreakpoints(getSettings().breakpoints, k.path, list) });
+      }, 400),
+    );
+  };
+  /** A tab's editor state goes (closed, renamed): its breakpoints' last places are kept now. */
+  actions.flushBreakpointMoves = (key) => {
+    breakpointShown.current.delete(key);
+    const list = hostRef.current?.breakpointsOf(key);
+    if (!movedTimers.current.has(key) || !list) return;
+    clearTimeout(movedTimers.current.get(key));
+    movedTimers.current.delete(key);
+    saveSettings({ breakpoints: withBreakpoints(getSettings().breakpoints, parseKey(key).path, list) });
+  };
+  /** A file's breakpoints changed by hand: the settings, its gutter if open, the run if one goes on. */
+  const changeBreakpoints = (path, fn) => {
+    const key = diskKey(path);
+    const live = hostRef.current?.breakpointsOf(key);
+    const list = fn(live ?? savedBreakpoints(path));
+    clearTimeout(movedTimers.current.get(key));
+    movedTimers.current.delete(key);
+    saveSettings({ breakpoints: withBreakpoints(getSettings().breakpoints, path, list) });
+    if (live) showBreakpoints(key, list);
+    debugRef.current?.setBreakpoints(path);
+  };
+  /** F9: a breakpoint on the cursor's line (or `line`), or the one there removed. */
+  actions.toggleBreakpoint = (key = store.session.active, line = null) => {
+    if (!debuggableKey(key)) return toast(debugAvailable() ? 'Breakpoints go in Python, JavaScript and TypeScript files opened from Folders (on this computer).' : 'Debugging works in the desktop app.');
+    const at = line ?? hostRef.current?.cursorLine(key);
+    if (at) changeBreakpoints(parseKey(key).path, (list) => toggleBreakpoint(list, at));
+  };
+  actions.setBreakpoint = (path, line, patch) => changeBreakpoints(path, (list) => updateBreakpoint(list, line, patch));
+  actions.removeBreakpoint = (path, line) => changeBreakpoints(path, (list) => list.filter((b) => b.line !== line));
+  /** A breakpoint's condition, hit count or log message, asked for in a dialog. */
+  actions.editBreakpoint = (path, line, field) => setDialog({ type: 'breakpoint', field, path, line, value: breakpointsNow(diskKey(path)).find((b) => b.line === line)?.[field] ?? '' });
+  /** Every breakpoint removed (each file's sent again to a run). */
+  actions.removeAllBreakpoints = () => {
+    actions.syncBreakpoints();
+    const paths = Object.keys(cleanBreakpoints(getSettings().breakpoints));
+    if (!paths.length) return toast('There are no breakpoints.');
+    saveSettings({ breakpoints: {} });
+    for (const path of paths) {
+      if (hostRef.current?.breakpointsOf(diskKey(path))) showBreakpoints(diskKey(path), []);
+      debugRef.current?.setBreakpoints(path);
+    }
+    toast(`${paths.length === 1 ? 'The breakpoints of 1 file were' : `The breakpoints of ${paths.length} files were`} removed.`);
+  };
+  /** All breakpoints off (or, when all are off, on). */
+  actions.toggleAllBreakpoints = () => {
+    actions.syncBreakpoints();
+    const all = cleanBreakpoints(getSettings().breakpoints);
+    const next = setAllEnabled(all, allOff(all));
+    saveSettings({ breakpoints: next });
+    for (const path of Object.keys(next)) {
+      if (hostRef.current?.breakpointsOf(diskKey(path))) showBreakpoints(diskKey(path), next[path]);
+      debugRef.current?.setBreakpoints(path);
+    }
+  };
+  actions.setDebugExceptions = (patch) => {
+    saveSettings({ debugExceptions: { uncaught: true, all: false, ...getSettings().debugExceptions, ...patch } });
+    debugRef.current?.setExceptions();
+  };
+  actions.addWatch = (expression) => {
+    saveSettings({ debugWatches: cleanWatches([...(getSettings().debugWatches ?? []), expression]) });
+    debugRef.current?.refreshWatches();
+  };
+  actions.removeWatch = (expression) => {
+    saveSettings({ debugWatches: cleanWatches((getSettings().debugWatches ?? []).filter((w) => w !== expression)) });
+    debugRef.current?.refreshWatches();
+  };
+  const clearPaused = () => {
+    const at = pausedAt.current;
+    pausedAt.current = null;
+    if (at) hostRef.current?.setPausedLine(at.key, 0);
+  };
+
+  // The debugger, its events: a stop shows its place (the file opened at the line, marked), a
+  // run going on or ending takes the mark away.
+  useEffect(() => {
+    if (!debugAvailable()) return;
+    const dbg = createDebugger({
+      bridge: window.desktop.dap,
+      breakpoints: () => cleanBreakpoints(getSettings().breakpoints),
+      exceptions: () => ({ uncaught: true, all: false, ...getSettings().debugExceptions }),
+      watches: () => cleanWatches(getSettings().debugWatches),
+      onChange: () => setDebugTick((n) => n + 1),
+      onStop: ({ place, picked }) => actions.debugStopped(place, { picked }),
+      onRun: () => clearPaused(),
+      onEnd: () => clearPaused(),
+    });
+    debugRef.current = dbg;
+    return () => {
+      dbg.stop();
+      dbg.dispose();
+    };
+  }, []);
+  /** A run stopped (or a frame was picked in the call stack): its file at the line, the line marked. */
+  actions.debugStopped = async (place, { picked = false } = {}) => {
+    clearPaused();
+    setPanel('debug');
+    if (!place) return;
+    const key = diskKey(place.path);
+    if (store.session.active !== key || !picked) {
+      const failed = await actions.openDiskPath(place.path, { report: false, line: place.line, column: place.column });
+      if (failed) return toast(`Paused in ${baseName(place.path)}, line ${place.line} (not opened here: ${failed})`, { key: 'debug-place', timeout: 6000 });
+    } else hostRef.current?.reveal(place.line, place.column, 0);
+    if (!debugRef.current?.paused()) return;
+    pausedAt.current = { key, line: place.line };
+    actions.applyBreakpoints(key);
+    hostRef.current?.setPausedLine(key, place.line);
+  };
+  /**
+   * Alt+F5: debugs the open file (a disk tab: Python through debugpy, JavaScript and TypeScript
+   * through js-debug), saved first; `test` ({ framework, target }) debugs a test instead.
+   */
+  actions.debugFile = async ({ key = null, test = null } = {}) => {
+    if (!debugAvailable()) return toast('Debugging works in the desktop app.', { kind: 'error' });
+    key = key ?? store.session.active;
+    const k = parseKey(key);
+    if (k?.kind !== 'disk' || isRemotePath(k.path) || isContentPath(k.path)) return toast('Debugging works for files on this computer: open a Python, JavaScript or TypeScript file from Folders.');
+    if (!debugAdapterFor(k.path)) return toast(`${baseName(k.path)} cannot be debugged: Python, JavaScript and TypeScript files can (.py, .js, .mjs, .cjs, .ts, .mts, .cts).`);
+    hostRef.current?.flushAll();
+    if (store.diskTab(k.path)?.dirty && (await actions.saveDisk(k.path)) !== 'saved') return;
+    actions.syncBreakpoints();
+    lastDebug.current = { key, test };
+    setPanel('debug');
+    const res = await debugRef.current.start(k.path, { test });
+    if (res?.missing) return setDialog({ type: 'debugSetup', missing: res.missing });
+    if (res?.none) return toast(res.none);
+    if (res?.error) return toast(res.error, { kind: 'error', timeout: 10000 });
+  };
+  /** Debugs again what was debugged last (Restart, and "It is installed" after setting one up). */
+  actions.debugRetry = () => (lastDebug.current ? actions.debugFile(lastDebug.current) : actions.debugFile());
+  actions.debugRestart = () => actions.debugRetry();
+  /** Ctrl+Alt+F5: the test at the cursor (or `test`, a ▶ right-clicked), under the debugger. */
+  actions.debugTest = async ({ key = null, test = null } = {}) => {
+    if (!debugAvailable()) return toast('Debugging works in the desktop app.', { kind: 'error' });
+    key = key ?? store.session.active;
+    const ctx = await testContext(key, { fresh: true });
+    if (!ctx) {
+      const k = parseKey(key);
+      if (k?.kind !== 'disk' || isContentPath(k.path)) return toast('Tests are debugged for files on this computer: open the test file from Folders.');
+      return toast(`${baseName(k.path)} does not look like a test file (test_x.py, x.test.js…).`);
+    }
+    if (ctx.remote) return toast('Debugging works for files on this computer, not on servers.');
+    const fw = ctx.setup.framework;
+    if (!(fw in DEBUG_FRAMEWORKS)) return toast(`Tests run with ${FRAMEWORKS[fw]?.label ?? fw} cannot be debugged here: pytest, unittest, node:test, Vitest and Jest tests can.`);
+    let target = null;
+    if (test) target = ctx.tests.find((t) => t.line === test.line && t.title === test.title) ?? ctx.tests.find((t) => t.title === test.title && t.kind === test.kind) ?? null;
+    else target = testAt(ctx.tests, hostRef.current?.cursorLine(key) ?? 0);
+    if (!target && !test) toast(`No test at the cursor: debugging all of ${ctx.name}’s tests.`, { timeout: 3000 });
+    return actions.debugFile({ key, test: { framework: fw, target: target && { title: target.title, kind: target.kind, cls: target.cls ?? '', chain: target.chain ?? [] } } });
+  };
+  actions.debugContinue = () => debugRef.current?.continue();
+  actions.debugPause = () => debugRef.current?.pause();
+  actions.debugStepOver = () => debugRef.current?.stepOver();
+  actions.debugStepInto = () => debugRef.current?.stepInto();
+  actions.debugStepOut = () => debugRef.current?.stepOut();
+  actions.debugStop = () => debugRef.current?.stop();
+  actions.toggleDebugPanel = () => setPanel((p) => (p === 'debug' ? null : 'debug'));
+  // The gutter of the tabs shown, and the marks' verified state while a run goes on.
+  useEffect(() => {
+    if (activeKey) actions.applyBreakpoints(activeKey);
+    if (store.session.side) actions.applyBreakpoints(store.session.side);
+  }, [activeKey, store.session.side, debugTick, settings.breakpoints]);
+  /** The breakpoint menu (the gutter right-clicked): change, add, turn off, remove. */
+  const breakpointMenu = ({ key, line }) => {
+    const path = parseKey(key).path;
+    const bp = breakpointsNow(key).find((b) => b.line === line);
+    const edit = (field) => () => actions.editBreakpoint(path, line, field);
+    const items = bp
+      ? [
+          { key: 'condition', label: bp.condition ? 'Change the condition…' : 'Add a condition…', icon: 'edit', hint: bp.condition || 'Stop only when an expression is true', run: edit('condition') },
+          { key: 'hit', label: bp.hitCondition ? 'Change the hit count…' : 'Stop only on a hit count…', icon: 'clock', hint: bp.hitCondition || '3, or >= 3', run: edit('hitCondition') },
+          { key: 'log', label: bp.logMessage ? 'Change the log message…' : 'Log a message instead…', icon: 'chat', hint: bp.logMessage || 'A log point: it writes, the program goes on', run: edit('logMessage') },
+          { key: 'onoff', label: bp.enabled === false ? 'Turn it on' : 'Turn it off', icon: bp.enabled === false ? 'play' : 'pause', run: () => actions.setBreakpoint(path, line, { enabled: bp.enabled === false }) },
+          { key: 'remove', label: 'Remove it', icon: 'x', hint: 'F9, or a click', run: () => actions.removeBreakpoint(path, line) },
+        ]
+      : [
+          { key: 'add', label: 'Add a breakpoint', icon: 'bug', hint: 'F9, or a click', run: () => actions.toggleBreakpoint(key, line) },
+          { key: 'cond', label: 'Add a conditional breakpoint…', icon: 'edit', run: edit('condition') },
+          { key: 'log', label: 'Add a log point…', icon: 'chat', run: edit('logMessage') },
+        ];
+    return [
+      ...items,
+      { separator: true },
+      { key: 'debug', label: debugRef.current?.active() ? 'Debug this file again' : 'Debug this file', icon: 'bug', hint: 'Alt+F5', run: () => actions.debugFile({ key }) },
+      { key: 'panel', label: 'The Debug panel', icon: 'panelRight', run: () => setPanel('debug') },
+      { key: 'all', label: 'Remove all breakpoints', icon: 'trash', danger: true, run: () => actions.removeAllBreakpoints() },
+    ];
+  };
   // ---- Tasks (Ctrl+Shift+B): what the projects around name for themselves, run in terminals ----
   /** Where to look: the open file's folder, then the folders shown in Folders (on servers only SSH ones). */
   const taskDirs = () => {
@@ -3727,6 +3994,20 @@ export function App() {
       } else if (e.ctrlKey && e.key === '`') {
         e.preventDefault();
         actions.toggleTerminal();
+      } else if (e.key === 'F9' && !mod && !e.altKey && !e.shiftKey && window.desktop?.dap) {
+        e.preventDefault();
+        actions.toggleBreakpoint();
+      } else if (e.key === 'F5' && e.altKey && !e.shiftKey && window.desktop?.dap) {
+        // Alt+F5 debugs the file, Ctrl+Alt+F5 the test at the cursor.
+        e.preventDefault();
+        if (mod) actions.debugTest();
+        else actions.debugFile();
+      } else if (!mod && !e.altKey && debugRef.current?.active() && (e.key === 'F5' || e.key === 'F11' || (e.key === 'F10' && !e.shiftKey))) {
+        // While debugging: F5 continues (Shift: stops), F10 steps over, F11 into (Shift: out).
+        e.preventDefault();
+        if (e.key === 'F5') (e.shiftKey ? actions.debugStop : actions.debugContinue)();
+        else if (e.key === 'F10') actions.debugStepOver();
+        else (e.shiftKey ? actions.debugStepOut : actions.debugStepInto)();
       } else if (e.key === 'F5' && !mod && !e.altKey && !e.shiftKey && isDesktopApp()) {
         e.preventDefault();
         actions.runFile();
@@ -3781,6 +4062,19 @@ export function App() {
       'test-file': () => actions.runTests({ scope: 'file' }),
       'test-again': () => actions.runTests({ scope: 'again' }),
       'tests-panel': () => setPanel((p) => (p === 'tests' ? null : 'tests')),
+      'debug-file': () => actions.debugFile(),
+      'debug-test': () => actions.debugTest(),
+      'breakpoint-toggle': () => actions.toggleBreakpoint(),
+      'debug-continue': () => actions.debugContinue(),
+      'debug-pause': () => actions.debugPause(),
+      'debug-step-over': () => actions.debugStepOver(),
+      'debug-step-into': () => actions.debugStepInto(),
+      'debug-step-out': () => actions.debugStepOut(),
+      'debug-restart': () => actions.debugRestart(),
+      'debug-stop': () => actions.debugStop(),
+      'debug-panel': () => actions.toggleDebugPanel(),
+      'breakpoints-remove-all': () => actions.removeAllBreakpoints(),
+      'breakpoints-toggle-all': () => actions.toggleAllBreakpoints(),
       'explain-error': () => actions.explainTerminalError(),
       'fix-problems': () => actions.fixProblems(),
       'open-in-claude': () => {
@@ -4035,7 +4329,8 @@ export function App() {
           : html`<${StatusBar} recording=${recording} big=${big && Boolean(activeKey) && !docShown} cursor=${activeKey && !docShown && !activeCompare ? cursor : null} language=${languageName} file=${activeFile} repo=${activeRepo} disk=${activeDisk} settings=${settings} sync=${sync} actions=${actions} group=${activeGroup}
           problems=${settings.problems !== false && activeKey ? problems[activeKey] : null} problemsOpen=${panel === 'problems'}
           lsp=${activeKey && settings.languageServers !== false ? lspRef.current?.statusOf(activeKey) : null} lspOpen=${panel === 'servers'}
-          git=${activeKey && gitHeads[activeKey] ? { ...gitHeads[activeKey], changes: hostRef.current?.gitChanges(activeKey)?.changes ?? null } : null} />`}
+          git=${activeKey && gitHeads[activeKey] ? { ...gitHeads[activeKey], changes: hostRef.current?.gitChanges(activeKey)?.changes ?? null } : null}
+          debug=${debugRef.current?.active() ? { status: debugRef.current.run.status, text: debugStatus(debugRef.current.run), label: debugRef.current.run.label, tick: debugTick } : null} debugOpen=${panel === 'debug'} />`}
       </div>
     </main>
     ${lineMenu && hostRef.current && html`<${LineMenu} key=${`${lineMenu.key}:${lineMenu.top}:${lineMenu.x}`} at=${lineMenu} host=${hostRef.current} actions=${actions} onClose=${() => setLineMenu(null)} />`}
@@ -4045,6 +4340,7 @@ export function App() {
     ${panel === 'references' && refs && html`<${ReferencesPanel} refs=${refs} actions=${actions} onClose=${() => setPanel(null)} />`}
     ${panel === 'usages' && usagesOf && activeKey && !activeSealed && html`<${UsagesPanel} word=${usagesOf.word} name=${activeName} fileKey=${activeKey} text=${activeText()} actions=${actions} onClose=${() => setPanel(null)} />`}
     ${panel === 'tests' && html`<${TestsPanel} run=${testRun} actions=${actions} onClose=${() => setPanel(null)} />`}
+    ${panel === 'debug' && debugRef.current && html`<${DebugPanel} dbg=${debugRef.current} tick=${debugTick} settings=${settings} actions=${actions} onClose=${() => setPanel(null)} />`}
     ${panel === 'problems' && activeKey && !activeSealed && html`<${ProblemsPanel} name=${activeName} fileKey=${activeKey} problems=${settings.problems !== false ? problems[activeKey] : null} actions=${actions} onClose=${() => setPanel(null)} />`}
     ${panel === 'search' && html`<${SearchPanel} key=${searchSeed?.at ?? 0} seed=${searchSeed} files=${scoped} docs=${scopedDocs} allFiles=${store.live()} allDocs=${docs} openKeys=${store.session.open} settings=${settings} actions=${actions} onClose=${() => setPanel(null)} />`}
     ${panel === 'history' && activeKey && (activeFile || activeRepo) && html`<${HistoryPanel} key=${activeKey} selected=${compare?.sha}
@@ -4080,6 +4376,7 @@ export function App() {
         { key: 'compare', label: 'Compare with the last commit', icon: 'compare', run: () => actions.compareWithHead() },
         { key: 'panel', label: 'The Git panel', icon: 'branch', hint: 'Ctrl+Shift+G', run: () => actions.toggleGit(parentDir(gitMenu.key.slice(2))) },
       ]} />`}
+    ${bpMenu && html`<${Menu} label="Breakpoint" at=${{ x: bpMenu.x, y: bpMenu.y }} onClose=${() => setBpMenu(null)} items=${breakpointMenu(bpMenu)} />`}
     ${codeMenu &&
     html`<${Menu} className="code-actions" label="Quick fixes and refactorings" at=${codeMenu.at} onClose=${() => (setCodeMenu(null), hostRef.current?.focus())}
       items=${codeMenu.rows.flatMap((r, i) => [
@@ -4089,6 +4386,8 @@ export function App() {
     ${dialog?.type === 'folderGroup' && html`<${FolderGroupDialog} path=${dialog.path} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'sideBySide' && html`<${SideBySideDialog} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'lspSetup' && html`<${SetupServerDialog} missing=${dialog.missing} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'debugSetup' && html`<${SetupDebuggerDialog} missing=${dialog.missing} platform=${window.desktop?.platform ?? ''} actions=${{ ...actions, typeInTerminal: (command, cwd, connId) => actions.typeInTerminal(command, cwd, connId, { then: 'Then debug again (Alt+F5).' }) }} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'breakpoint' && html`<${BreakpointDialog} field=${dialog.field} path=${dialog.path} line=${dialog.line} value=${dialog.value} onClose=${() => (setDialog(null), hostRef.current?.focus())} onSave=${(value) => (setDialog(null), actions.setBreakpoint(dialog.path, dialog.line, { [dialog.field]: value }), hostRef.current?.focus())} />`}
     ${dialog?.type === 'renameSymbol' && html`<${RenameSymbolDialog} word=${dialog.word} onClose=${() => (setDialog(null), hostRef.current?.focus())} onRename=${(name) => (setDialog(null), actions.renameWithServer(dialog, name), hostRef.current?.focus())} />`}
     ${dialog?.type === 'declarations' && html`<${DeclarationPicker} word=${dialog.word} places=${dialog.places} roots=${folderRoots(settings)} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'ocr' && html`<${OcrDialog} images=${dialog.images} saveTo=${dialog.saveTo} actions=${actions} onClose=${() => setDialog(null)} />`}

@@ -104,6 +104,7 @@ import { SYNTAX_LANGUAGES, problemsFor, treeErrors } from './problems.js';
 import { convertIndent, detectIndent } from './indent.js';
 import { gitGutter, gitInfo, gitMarkClick, setGitBase } from './gitGutter.js';
 import { hasTestGutter, setTestInfo, testGutter, testMarkClick, testProblems } from './testGutter.js';
+import { breakpointClick, breakpointsIn, breakpointsMoved, debugGutter, hasDebugGutter, pausedLineOf, setBreakpointMarks, setPausedLine } from './debugGutter.js';
 import { emmetOnTab, linkedTags } from './htmlTools.js';
 import { inlineSuggestions } from './inlineSuggest.js';
 import { findFileRefs, pastedPath } from './fileRefs.js';
@@ -1001,7 +1002,7 @@ function fileRefAt(state, pos) {
  * `openSide(key, el, …)` shows a second tab next to it (the split view); a tab's
  * state, with its undo history, moves between the panes.
  */
-export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpenLink, onOpenRef, onSuggest, onImage, onPasteFiles, onPastePath, onProblems, onProblemAction, onDrop, onLineMenu, onGitMark, onTestMark, linkTargets, settings }) {
+export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpenLink, onOpenRef, onSuggest, onImage, onPasteFiles, onPastePath, onProblems, onProblemAction, onDrop, onLineMenu, onGitMark, onTestMark, onBreakpointClick, onBreakpointsMoved, linkTargets, settings }) {
   const states = new Map(); // key → EditorState
   const scroll = new Map(); // key → scroll position
   const pending = new Map(); // key → timer for onChange
@@ -1016,6 +1017,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
   const aids = new Compartment(); // indentation guides, bracket colors, sticky scroll
   const gitBar = new Compartment(); // lines changed since the last commit (files in a Git repository)
   const testBar = new Compartment(); // a test file's tests: ▶ to run each, then how it went (testGutter.js)
+  const debugBar = new Compartment(); // breakpoints and the paused line, for files that can be debugged (debugGutter.js)
   const server = new Compartment(); // a language server's completion, hover, problems (lsp.js)
   const indents = new Map(); // key → { tabs, size, source: 'detected' | 'editorconfig' | 'chosen' }
   let options = settings;
@@ -1188,6 +1190,10 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       stickyCtrl,
       recorder,
       lineFilterField,
+      // Breakpoints, before the line numbers; a click or right-click goes to the app, as do the lines edits moved them to.
+      debugBar.of([]),
+      breakpointClick.of((v, at) => onBreakpointClick?.({ key: keyOfView(v), ...at })),
+      breakpointsMoved.of((v, list) => onBreakpointsMoved?.({ key: keyOfView(v), list })),
       gutter.of(config.gutter),
       highlightActiveLineGutter(),
       highlightSpecialChars(),
@@ -1675,6 +1681,49 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
         const line = state.doc.lineAt(p.from);
         return { line: line.number, column: p.from - line.from + 1, message: p.message, source: p.source };
       });
+    },
+    /**
+     * A tab's breakpoints (debugGutter.js: [{ line, enabled?, condition?, logMessage?,
+     * hitCondition?, verified? }]), shown in the gutter before the line numbers; null takes
+     * the gutter away (a file that cannot be debugged).
+     */
+    setBreakpoints(key, list) {
+      const apply = (spec) => {
+        const v = viewOf(key);
+        if (v) v.dispatch(spec);
+        else if (states.has(key)) states.set(key, states.get(key).update(spec).state);
+      };
+      const state = viewOf(key)?.state ?? states.get(key);
+      if (!state || bigKeys.has(key)) return;
+      const has = hasDebugGutter(state);
+      if (!list) {
+        if (has) apply({ effects: debugBar.reconfigure([]) });
+        return;
+      }
+      // A field just added starts empty: the marks go in the next transaction.
+      if (!has) apply({ effects: debugBar.reconfigure(debugGutter) });
+      apply({ effects: setBreakpointMarks.of(list) });
+    },
+    /** A tab's breakpoints where edits took them: [{ line, … }]; null without the gutter. */
+    breakpointsOf(key) {
+      const state = viewOf(key)?.state ?? states.get(key);
+      return state && hasDebugGutter(state) ? breakpointsIn(state) : null;
+    },
+    /** The line a debugging run is paused on in a tab (0: none); the gutter must be there (setBreakpoints). */
+    setPausedLine(key, line) {
+      const v = viewOf(key);
+      const state = v?.state ?? states.get(key);
+      if (!state || !hasDebugGutter(state) || pausedLineOf(state) === (line || 0)) return;
+      const spec = { effects: setPausedLine.of(line || 0) };
+      if (v) {
+        v.dispatch(spec);
+        if (line && line <= v.state.doc.lines) v.dispatch({ effects: EditorView.scrollIntoView(v.state.doc.line(line).from, { y: 'center' }) });
+      } else states.set(key, state.update(spec).state);
+    },
+    /** The line of a tab's cursor (1-based), or 0. */
+    cursorLine(key) {
+      const state = viewOf(key)?.state ?? states.get(key);
+      return state ? state.doc.lineAt(state.selection.main.head).number : 0;
     },
     /** { base, changes } of a tab's file against the last commit, or null. */
     gitChanges(key) {

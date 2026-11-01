@@ -319,6 +319,26 @@ contextBridge.exposeInMainWorld('desktop', {
       return () => ipcRenderer.removeListener('lsp:status', listener);
     },
   },
+  // Debugging (dap.cjs): the page names a file; the main process picks the adapter and fills
+  // in the launch. `child` opens a session the adapter asked for (js-debug's startDebugging).
+  dap: {
+    start: (path, opts) => ipcRenderer.invoke('dap:start', path, opts),
+    child: (parentId, seq) => ipcRenderer.invoke('dap:child', parentId, seq),
+    send: (id, message) => ipcRenderer.send('dap:send', id, message),
+    stop: (id) => ipcRenderer.invoke('dap:stop', id),
+    // F11 is Step into while a session runs (the View menu gives it up).
+    active: (on) => ipcRenderer.send('debug:active', Boolean(on)),
+    onMessage(callback) {
+      const listener = (_event, message) => callback(message);
+      ipcRenderer.on('dap:message', listener);
+      return () => ipcRenderer.removeListener('dap:message', listener);
+    },
+    onExit(callback) {
+      const listener = (_event, info) => callback(info);
+      ipcRenderer.on('dap:exit', listener);
+      return () => ipcRenderer.removeListener('dap:exit', listener);
+    },
+  },
   // Dragging tabs or files out to other apps: { path } or { paths } on disk, or { name, text } for a copy.
   drag: {
     start: (item) => ipcRenderer.send('drag:start', item),

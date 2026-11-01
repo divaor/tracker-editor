@@ -3,7 +3,7 @@
 // Alt (Option); `desktop` keys apply in the desktop app instead; `only` marks commands
 // that exist only there ('desktop'). Pure, so the Node tests can check it.
 
-export const COMMAND_GROUPS = ['Files and tabs', 'Find', 'Edit and text', 'Code', 'Git', 'View', 'Tools', 'Folders view', 'Terminal'];
+export const COMMAND_GROUPS = ['Files and tabs', 'Find', 'Edit and text', 'Code', 'Git', 'Debug', 'View', 'Tools', 'Folders view', 'Terminal'];
 
 /**
  * [{ id, group, label, keys?, desktop?, only?, hint?, run?, local? }]; `run: false` for keys that only work in place;
@@ -128,6 +128,19 @@ export const COMMAND_LIST = [
   { id: 'test-again', group: 'Tools', label: 'Run the tests again (the last ones run)', only: 'desktop' },
   { id: 'tests-panel', group: 'Tools', label: 'Tests panel: the last run’s results', only: 'desktop' },
   { id: 'run-file', group: 'Tools', label: 'Run this file in the terminal (Python, Node, shell, Go…)', keys: 'F5', only: 'desktop', hint: 'The command per type is in Settings → Editor → Run commands' },
+  { id: 'debug-file', group: 'Debug', label: 'Debug this file (Python, JavaScript, TypeScript)', keys: 'Alt+F5', only: 'desktop', hint: 'Python through debugpy, JavaScript and TypeScript through js-debug: it stops at the breakpoints' },
+  { id: 'debug-test', group: 'Debug', label: 'Debug the test at the cursor', keys: 'Mod+Alt+F5', only: 'desktop', hint: 'pytest, unittest, node:test, Vitest and Jest; or right-click the ▶ next to a test' },
+  { id: 'breakpoint-toggle', group: 'Debug', label: 'Toggle a breakpoint on this line', keys: 'F9', only: 'desktop', hint: 'Or click left of the line number; right-click there for a condition, a hit count or a log message' },
+  { id: 'debug-continue', group: 'Debug', label: 'Continue (while debugging)', keys: 'F5', only: 'desktop', hint: 'When nothing is being debugged, F5 runs the file' },
+  { id: 'debug-pause', group: 'Debug', label: 'Pause the program being debugged', only: 'desktop' },
+  { id: 'debug-step-over', group: 'Debug', label: 'Step over (to the next line)', keys: 'F10', only: 'desktop' },
+  { id: 'debug-step-into', group: 'Debug', label: 'Step into (the call on this line)', keys: 'F11', only: 'desktop', hint: 'While debugging; otherwise F11 is full screen' },
+  { id: 'debug-step-out', group: 'Debug', label: 'Step out (back to the caller)', keys: 'Shift+F11', only: 'desktop' },
+  { id: 'debug-restart', group: 'Debug', label: 'Restart debugging (or debug the last file again)', only: 'desktop' },
+  { id: 'debug-stop', group: 'Debug', label: 'Stop debugging', keys: 'Shift+F5', only: 'desktop' },
+  { id: 'debug-panel', group: 'Debug', label: 'Debug panel: the call stack, variables, watch, breakpoints, the debug console', only: 'desktop', hint: 'Or the Debug item in the status bar while a run goes on' },
+  { id: 'breakpoints-toggle-all', group: 'Debug', label: 'Turn all breakpoints off (or on again)', only: 'desktop' },
+  { id: 'breakpoints-remove-all', group: 'Debug', label: 'Remove all breakpoints', only: 'desktop' },
   { id: 'indent-guides', group: 'View', label: 'Indentation guides (on or off)' },
   { id: 'bracket-colors', group: 'View', label: 'Colored bracket pairs (on or off)' },
   { id: 'sticky-scroll', group: 'View', label: 'Sticky scroll: the function or section you are in stays on top (on or off)' },

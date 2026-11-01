@@ -116,6 +116,12 @@ export const DEFAULT_SETTINGS = {
   // Bookmarks in documents (PDFs, e-books, Word…) by the file's path: { page } or { block, into }
   // with their label's parts (docBookmarks.js). A document opens at its bookmark until cleared.
   docBookmarks: {},
+  // Debugging (desktop): breakpoints by the file's path ([{ line, enabled?, condition?,
+  // logMessage?, hitCondition? }], debugTools.js), the exceptions a run stops on, the watch
+  // expressions evaluated at each stop.
+  breakpoints: {},
+  debugExceptions: { uncaught: true, all: false },
+  debugWatches: [],
   // Servers: permissions (rwxr-xr-x) next to each file in the folders view.
   showPermissions: false,
   // The terminal panel's height (desktop), in pixels.

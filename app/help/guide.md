@@ -2,7 +2,7 @@
 
 Tracker Editor is a Notepad++-style editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs. Everything is saved the moment you paste or type, on this computer with the tracker, or, once you turn on sync, in the same private GitHub data repo as the tracker, so your files are on your computers and your phone.
 
-Version 0.40.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.40.0 · Web app: https://divaor.github.io/tracker-editor/
+Version 0.41.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.41.0 · Web app: https://divaor.github.io/tracker-editor/
 
 ---
 
@@ -604,11 +604,44 @@ Open a test file from Folders (on this computer, or on an SSH server: it runs th
 
 - **The test at the cursor**: `Ctrl+F5` runs the test the cursor is in (or the suite, `describe` or class, when it is on its line); outside any test, the whole file.
 - **The whole file**: `Ctrl+Shift+F5`.
-- **▶ next to the line numbers**: each test and suite has one; click it to run that one. After a run it shows **✓** passed, **✗** failed or **–** skipped, and keeps that until the test runs again.
+- **▶ next to the line numbers**: each test and suite has one; click it to run that one (right-click it to debug it: see [Debugging](#debugging-desktop)). After a run it shows **✓** passed, **✗** failed or **–** skipped, and keeps that until the test runs again.
 - **Failures at their lines**: the line where it failed (the assertion, found in the stack trace) is underlined like a problem, with the message; `F8` goes to it, and the Problems list has it (with a language server's own problems).
 - **The Tests panel** opens when something failed (or **View → Tests Panel**): what ran, how many failed, passed and were skipped, each failure with its message, **line N** to go there, **Run it** (that test again) and **Explain** (the model explains the failure and how to fix it). **Run again** (↻, or **Run the Tests Again**) repeats the last run.
 - **Which framework**: worked out from the file and the project above it: **Jest**, **Vitest**, **Mocha** or **node:test** for JavaScript and TypeScript (run with `npx`, or `pnpm exec`, `yarn`, `bunx` by the lock file), **pytest** (or **unittest** when the file uses only that; through `uv run`, `poetry run` or `pdm run` by the lock file), **go test**, **cargo test**, **PHPUnit** or **Pest** (`vendor/bin`), and **dotnet test** for C# (xUnit, NUnit, MSTest).
 - The tests run in a terminal of their own (**Tests**), so you see everything they print; the editor reads the results from a report the framework writes (JUnit XML, Jest's JSON, TAP, .NET's TRX) or, for Mocha, unittest, Go and Rust, from what they print. Nothing is installed: the framework must already be in the project (`npm install`, `pip install pytest`, `composer install`…); if it is not, the panel says no results came back and the terminal shows why.
+
+### Debugging (desktop)
+
+Stop a program on a line and look inside it: **Python** (through **debugpy**) and **JavaScript and TypeScript** (through **js-debug**, VS Code's JavaScript debugger), for files you opened from Folders on this computer.
+
+- **Breakpoints**: `F9` puts one on the cursor's line (again: removes it), or click left of a line number. A red dot marks it; it moves with its line as you edit, and stays from one run to the next (and when you close the file or the editor). **Right-click** the dot (or the empty space there) for its menu:
+  - **Add a condition…**: stop only when an expression is true (`count > 3`).
+  - **Stop only on a hit count…**: `3` (the third time), `>= 3`, `% 2`.
+  - **Log a message instead…**: a *log point* (a diamond): it writes the message to the debug console and the program goes on; `{expressions}` in braces are filled in (`count is {count}`).
+  - **Turn it off** (grey) and on again, **Remove it**, **Remove all breakpoints**.
+- **Debug this file**: `Alt+F5` (or **View → Debug → Debug This File**). It saves the file, runs it under the debugger in its folder, and stops at the first breakpoint it reaches. The line it stopped on is marked (a yellow band and ➜), in its file, opened if it was not.
+- **Debug the test at the cursor**: `Ctrl+Alt+F5`, or right-click the **▶** next to a test (see [Running tests](#running-tests-desktop)): **pytest** and **unittest** for Python, **node:test**, **Vitest** and **Jest** for JavaScript and TypeScript (outside any test: the whole file's tests). It runs from the project's folder, with the framework the project has.
+- **While it runs** (the keys work wherever you are, except in the terminal):
+
+  | Keys | |
+  | --- | --- |
+  | `F5` | Continue (to the next breakpoint, or the end) |
+  | `F10` | Step over: the next line |
+  | `F11` | Step into: into the function called on this line (while debugging, `F11` is not full screen: **View → Toggle Full Screen** still is) |
+  | `Shift+F11` | Step out: back to the line that called this function |
+  | `Shift+F5` | Stop (the program ends) |
+
+  When nothing is being debugged, `F5` runs the file as before.
+- **The Debug panel** (it opens when a run starts, or **View → Debug → Debug Panel**; the **Debug** item in the status bar while a run goes on): Continue or Pause, the steps, **Restart** and **Stop** at the top, then:
+  - **Call stack**: each thread and where it is, the innermost call first. Click a frame to see its variables (and its line, in its file).
+  - **Variables**: the frame's local variables are open; click ▸ to look into a list, an object or the globals (loaded as you open them; what you opened stays open at the next stop).
+  - **Watch**: expressions you want to see at every stop (type one and press `Enter`; × removes it). They are kept for the next runs.
+  - **Breakpoints**: every file's, with their conditions; untick to turn one off, click to go there, × removes it, **All off** / **Remove all**. **Stop on uncaught exceptions** (on unless you untick it: it stops where the program would have crashed, the error in the panel) and **Stop on every exception** (caught ones too).
+  - **Debug console**: what the program writes (errors in red), and a field to evaluate an expression in the frame shown (`items[0]`, `len(names)`, `user.name`); `↑` / `↓` bring back the earlier ones.
+- **Setting it up**: the first time, if the debugger is not installed, a dialog says what to install and types the command into a terminal for you to run (nothing is downloaded behind your back):
+  - **Python**: debugpy, installed into the project's Python (its `.venv` or `venv` next to the file or above it, up to the folder you opened; else `python3` / `python`): `python -m pip install debugpy`. If pip refuses (an “externally managed” Python, as on Ubuntu and Debian), make a virtual environment in the project first: `python3 -m venv .venv`, then `.venv/bin/python -m pip install debugpy`.
+  - **JavaScript and TypeScript**: js-debug's server, downloaded from its GitHub release into the editor's own folder (`debuggers` next to its settings) with `curl` and `tar` (Windows 10 and later have both). The programs run on your own **Node.js** (nodejs.org). TypeScript files run through the project's **tsx** when it has one, else Node's own (Node 23.6 or later runs `.ts` files as they are).
+- Programs run in the debug console, not in a terminal: what they print shows there; a program that waits for typed input cannot get it there (run it with `F5` in a terminal instead).
 
 ### Terminal tabs: names, order, two side by side (desktop)
 
@@ -780,6 +813,9 @@ Turn them on in **Settings → Desktop**.
 | `` Ctrl+` `` | Terminal (this computer or a server): show or hide (desktop) |
 | `F5` | Run this file in the terminal (desktop) |
 | `Ctrl+F5` / `Ctrl+Shift+F5` | Run the test at the cursor / this file's tests (desktop) |
+| `F9` | Put a breakpoint on this line, or remove it (desktop; right-click the dot to change it) |
+| `Alt+F5` / `Ctrl+Alt+F5` | Debug this file / the test at the cursor (desktop) |
+| While debugging | `F5` continue, `F10` step over, `F11` step into, `Shift+F11` step out, `Shift+F5` stop |
 | `Tab` / `Ctrl+→` / `Escape` | With a grey suggestion: take it / take a word / drop it |
 | `Ctrl+click` on `file:line` | Open that file at that line (in a terminal, a plain click) |
 | In the terminal | `Ctrl+Shift+C` / `Ctrl+Shift+V` copy / paste; `Ctrl+C` copies a selection, `Ctrl+V` pastes |

@@ -6,11 +6,11 @@ import { Facet, GutterMarker, RangeSetBuilder, StateEffect, StateField, gutter }
 
 /** { tests: [{ line, kind, title, name }], states: Map(line → state) | null, failures: [{ line, column, message, source }] } */
 export const setTestInfo = StateEffect.define();
-/** (view, test, { x, y }) for a click on a mark; the editor host provides it. */
+/** (view, test, { x, y, debug }) for a click on a mark (a right-click debugs); the editor host provides it. */
 export const testMarkClick = Facet.define({ combine: (values) => values[0] ?? null });
 
 const TITLES = {
-  idle: (t) => `Run ${t.kind === 'suite' ? 'these tests' : 'this test'} (Ctrl+F5)`,
+  idle: (t) => `Run ${t.kind === 'suite' ? 'these tests' : 'this test'} (Ctrl+F5) · right-click: debug ${t.kind === 'suite' ? 'them' : 'it'} (Ctrl+Alt+F5)`,
   running: () => 'Running…',
   passed: (t) => `Passed: ${t.title} (click to run again)`,
   failed: (t) => `Failed: ${t.title} (click to run again)`,
@@ -75,15 +75,23 @@ export const testGutter = [
     domEventHandlers: {
       mousedown(view, line, event) {
         const onClick = view.state.facet(testMarkClick);
-        if (!onClick || event.button !== 0) return false;
+        if (!onClick || (event.button !== 0 && event.button !== 2)) return false;
         let test = null;
         view.state.field(testField).marks.between(line.from, line.from, (_from, _to, mark) => {
           test = mark.test;
         });
         if (!test) return false;
         event.preventDefault();
-        onClick(view, test, { x: event.clientX, y: event.clientY });
+        onClick(view, test, { x: event.clientX, y: event.clientY, debug: event.button === 2 });
         return true;
+      },
+      contextmenu(view, line, event) {
+        let on = false;
+        view.state.field(testField).marks.between(line.from, line.from, () => {
+          on = true;
+        });
+        if (on) event.preventDefault();
+        return on;
       },
     },
   }),

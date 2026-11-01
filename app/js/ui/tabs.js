@@ -743,7 +743,7 @@ function ServerStatus({ lsp, open, actions }) {
   </button>`;
 }
 
-export function StatusBar({ recording, big, cursor, language, file, repo, disk, settings, actions, problems, problemsOpen, git, lsp, lspOpen, group }) {
+export function StatusBar({ recording, big, cursor, language, file, repo, disk, settings, actions, problems, problemsOpen, git, lsp, lspOpen, group, debug, debugOpen }) {
   const setLanguage = (value) => file && actions.patch(file.id, { language: value === 'auto' ? '' : value });
   let state = '';
   const kind = file ? 'synced' : repo ? 'doc' : disk ? (isRemotePath(disk.path) ? 'remote' : 'disk') : null;
@@ -774,6 +774,10 @@ export function StatusBar({ recording, big, cursor, language, file, repo, disk, 
       aria-pressed=${Boolean(problemsOpen)} title=${`${problemsSummary(problems.list)} (Ctrl+Shift+M; F8 goes to the next)`} onClick=${actions.toggleProblems}>
       <${Icon} name="xCircle" size=${13} /><span>${problems.list.filter((p) => p.severity === 'error').length}</span>
       <${Icon} name="alert" size=${13} /><span>${problems.list.filter((p) => p.severity !== 'error').length}</span>
+    </button>`}
+    ${debug &&
+    html`<button type="button" class=${`status-item status-btn-text status-debug state-${debug.status}`} aria-pressed=${Boolean(debugOpen)} title=${`Debugging ${debug.label}: ${debug.text}. F5 continues, F10 steps over, F11 into, Shift+F5 stops. Click for the Debug panel.`} onClick=${() => actions.toggleDebugPanel()}>
+      <${Icon} name="bug" size=${13} /><span>${debug.text}</span>
     </button>`}
     ${lsp && html`<${ServerStatus} lsp=${lsp} open=${lspOpen} actions=${actions} />`}
     ${git &&
