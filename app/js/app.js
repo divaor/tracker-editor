@@ -2863,7 +2863,7 @@ export function App() {
     const chat = (messages, purpose) => llmClient().chat({ model: s.llm.chatModel, messages, purpose, signal, temperature: 0.1 });
     let plan;
     try {
-      plan = parseFindPlan(await chat(planMessages(question, picture), 'find'), question, picture);
+      plan = parseFindPlan(await chat(planMessages(question, picture), 'find-plan'), question, picture);
     } catch (err) {
       if (signal.aborted) return;
       notes.push(`The model could not plan the search (${ipcMessage(err)}): searched for the question's words.`);
@@ -2904,7 +2904,7 @@ export function App() {
     if (wantsPick(plan, candidates)) {
       current({ phase: 'picking', notes: [...notes] });
       try {
-        picked = parsePick(await chat(pickMessages(question, candidates, { namesOnly: Boolean(s.askNamesOnly) }), 'find'), candidates);
+        picked = parsePick(await chat(pickMessages(question, candidates, { namesOnly: Boolean(s.askNamesOnly) }), 'find-pick'), candidates);
         if (!picked) notes.push('The model’s pick could not be read: these are the best matches as the editor ranked them.');
       } catch (err) {
         if (signal.aborted) return;
