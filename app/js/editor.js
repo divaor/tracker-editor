@@ -113,7 +113,7 @@ import { breadcrumbsBar, refreshCrumbs } from './breadcrumbs.js';
 import { kindOfType, minimap } from './minimap.js';
 import { findFileRefs, pastedPath } from './fileRefs.js';
 import { addCursorAbove, addCursorBelow, columnBox, columnKeymap } from './columnSelect.js';
-import { EDITOR_COMMANDS, cmKey, keysChanged } from './keybindings.js';
+import { EDITOR_COMMANDS, builtInClashes, cmKey, keysChanged } from './keybindings.js';
 import { currentKeys, isKeyFor, isMacKeys } from './keys.js';
 import { clipRanges, codeOfKey, lineTapSelection, selectLineRanges } from './editKeys.js';
 import { DASHED_LANGUAGES, wordAt } from './codeNav.js';
@@ -1393,10 +1393,12 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       if (run) for (const combo of table.keys.get(id) ?? []) ours.push({ key: cmKey(combo), run, preventDefault: true, ...(scope ? { scope } : {}) });
     }
     const changed = [...table.keys.keys()].filter((id) => keysChanged(table, id));
-    const taken = changed
+    // Taken from CodeMirror: a window command's key someone gave it, and its own keys that one of
+    // CodeMirror's bindings holds too (Ctrl+Shift+G is find previous there; Shift+F3 still is).
+    const given = changed
       .filter((id) => !EDITOR_COMMANDS.has(id))
-      .flatMap((id) => (table.keys.get(id) ?? []).filter((combo) => !(table.own.get(id) ?? []).includes(combo)))
-      .map((combo) => ({ key: cmKey(combo), run: () => true, preventDefault: true }));
+      .flatMap((id) => (table.keys.get(id) ?? []).filter((combo) => !(table.own.get(id) ?? []).includes(combo)));
+    const taken = [...new Set([...given, ...builtInClashes(table, builtInKeys, { mac: isMacKeys() })])].map((combo) => ({ key: cmKey(combo), run: () => true, preventDefault: true }));
     const dropped = new Set(changed.filter((id) => EDITOR_COMMANDS.has(id)).map(runOf).filter(Boolean));
     return keymap.of([...ours, ...taken, ...builtInKeys.filter((b) => !dropped.has(b.run))]);
   }

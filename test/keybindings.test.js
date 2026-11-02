@@ -252,3 +252,23 @@ test('0.48: the next and previous change since the last commit: Alt+F3, and VS C
   assert.deepEqual(vs.get('debug-file'), ['F5']);
   assert.equal(effectiveKeys(COMMAND_LIST, WEB).has('git-next-change'), false, 'the desktop app’s');
 });
+
+// A window command's own key that CodeMirror also binds is taken from CodeMirror, so only the
+// command runs (0.49): Ctrl+Shift+G opened the find bar (find previous) with the Git panel.
+test('the window commands’ keys CodeMirror also holds: found, the editor’s own commands not', async () => {
+  const cm = await import('../app/vendor/cm/codemirror.js');
+  const { COMMAND_LIST } = await import('../app/js/commands.js');
+  const { builtInClashes, keyTable } = await import('../app/js/keybindings.js');
+  const bindings = [...cm.defaultKeymap, ...cm.searchKeymap, ...cm.historyKeymap, ...cm.foldKeymap, ...cm.completionKeymap, ...cm.closeBracketsKeymap];
+  const pc = builtInClashes(keyTable(COMMAND_LIST, { desktop: true, mac: false }), bindings, { mac: false });
+  assert.ok(pc.includes('Mod+Shift+G'), 'the Git panel against find previous');
+  assert.ok(pc.includes('Alt+L'), 'Filter lines against select line');
+  // Only window commands: undo (Mod+Z) is the editor's own and stays CodeMirror's.
+  assert.ok(!pc.includes('Mod+Z') && !pc.includes('Mod+F'));
+  // A Mac: Cmd+Shift+G is find previous there too; Alt+L is not CodeMirror's (Ctrl+L is).
+  const mac = builtInClashes(keyTable(COMMAND_LIST, { desktop: true, mac: true }), bindings, { mac: true });
+  assert.ok(mac.includes('Mod+Shift+G') && !mac.includes('Alt+L'), mac.join(' '));
+  // A key no one else holds is not taken.
+  const one = { keys: new Map([['tasks', ['Mod+Shift+B']]]) };
+  assert.deepEqual(builtInClashes(one, bindings, { mac: false }), []);
+});

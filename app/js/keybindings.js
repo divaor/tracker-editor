@@ -443,6 +443,44 @@ export function menuAccelerators(table) {
 }
 
 /** A combination as a CodeMirror key: "Mod-Shift-p", "Alt-ArrowUp", "Ctrl-Shift-[", "Mod-+". */
+/** CodeMirror's name for a key, its modifiers in one order; Mod is Cmd on a Mac and Ctrl elsewhere. */
+function cmName(k, mac) {
+  const parts = String(k).split(/-(?!$)/);
+  const key = parts.pop();
+  const mods = new Set(
+    parts.map((m) => {
+      const x = { Cmd: 'Meta', Control: 'Ctrl', c: 'Ctrl', a: 'Alt', s: 'Shift', m: 'Meta' }[m] ?? m;
+      return (!mac && x === 'Ctrl') || (mac && x === 'Meta') ? 'Mod' : x;
+    }),
+  );
+  return [...['Mod', 'Ctrl', 'Meta', 'Alt', 'Shift'].filter((m) => mods.has(m)), key.length === 1 ? key.toLowerCase() : key].join('-');
+}
+
+/**
+ * The keys of the window's commands (not EDITOR_COMMANDS) that CodeMirror's own keymaps also hold
+ * (`bindings`: { key, mac, win, linux, shift }): both would run while a text has the focus, so
+ * editor.js takes them from CodeMirror. Until 0.49 only keys someone changed were taken, and
+ * Ctrl+Shift+G opened the find bar (find previous) with the Git panel, Alt+L selected the line as
+ * Filter lines opened.
+ */
+export function builtInClashes(table, bindings, { mac = false } = {}) {
+  const held = new Set();
+  for (const b of bindings ?? []) {
+    const keys = mac ? [b.mac ?? b.key] : [b.win ?? b.key, b.linux ?? b.key];
+    for (const k of keys) {
+      if (!k) continue;
+      held.add(cmName(k, mac));
+      if (b.shift) held.add(cmName(`Shift-${k}`, mac));
+    }
+  }
+  const out = new Set();
+  for (const [id, combos] of table.keys) {
+    if (EDITOR_COMMANDS.has(id)) continue;
+    for (const combo of combos) if (held.has(cmName(cmKey(combo), mac))) out.add(combo);
+  }
+  return [...out];
+}
+
 export function cmKey(combo) {
   const parts = String(combo).split('+');
   const key = parts.pop();
