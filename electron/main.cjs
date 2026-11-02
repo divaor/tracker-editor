@@ -2359,6 +2359,8 @@ ipcMain.handle('git:act', guard(async (event, dir, action) => {
     let result = await t.tool.act(root, action, { onProgress: (line) => !sender.isDestroyed() && sender.send('git:progress', { root: pageRoot, line }) });
     // The model's picture says where Git runs (a server's own Git, with its own sign-ins).
     if (action?.op === 'snapshot' && t.id && result) result = { ...result, place: gitPlaceOf(t.id) };
+    // A file's three sides in a conflict, decoded like files (the merge view shows them).
+    if (action?.op === 'conflict-sides' && result) result = Object.fromEntries(Object.entries(result).map(([k, bytes]) => [k, bytes ? disk.decode(bytes) : null]));
     return { ok: true, result: typeof result === 'object' && result && 'stdout' in result ? { stdout: result.stdout, stderr: result.stderr } : result };
   } catch (err) {
     // Git's own words go back, for the page to say in its own (gitError).
