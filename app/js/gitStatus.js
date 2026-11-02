@@ -564,3 +564,64 @@ export function mergeRequestUrl(remote, source, target = '') {
   if (/bitbucket/i.test(host)) return { url: `https://${host}/${repoPath}/pull-requests/new?source=${encodeURIComponent(source)}${target ? `&dest=${encodeURIComponent(target)}` : ''}`, label: 'pull request' };
   return null;
 }
+
+// ---- History: the commits of the history view (git.cjs history, ui/gitHistory.js) ----
+
+/**
+ * The refs `git log --decorate=full` names for a commit ("HEAD -> refs/heads/main, tag:
+ * refs/tags/v1, refs/remotes/origin/main") → [{ kind, name }]: 'head' (the branch checked out),
+ * 'detached' (HEAD on no branch), 'branch', 'remote', 'tag'. A remote's own HEAD is left out.
+ */
+export function parseRefs(decoration) {
+  const refs = [];
+  for (const raw of String(decoration ?? '').split(', ')) {
+    const part = raw.trim();
+    if (!part) continue;
+    if (part === 'HEAD') refs.push({ kind: 'detached', name: 'HEAD' });
+    else if (part.startsWith('HEAD -> ')) refs.push({ kind: 'head', name: part.slice(8).replace(/^refs\/heads\//, '') });
+    else if (part.startsWith('tag: ')) refs.push({ kind: 'tag', name: part.slice(5).replace(/^refs\/tags\//, '') });
+    else if (part.startsWith('refs/heads/')) refs.push({ kind: 'branch', name: part.slice(11) });
+    else if (part.startsWith('refs/remotes/')) {
+      if (!/\/HEAD$/.test(part)) refs.push({ kind: 'remote', name: part.slice(13) });
+    } else refs.push({ kind: 'branch', name: part });
+  }
+  const order = { head: 0, detached: 0, branch: 1, remote: 2, tag: 3 };
+  return refs.sort((a, b) => order[a.kind] - order[b.kind]);
+}
+
+/**
+ * The commits git.cjs's history op asked for: records that start with \x1e, fields split by \x1f
+ * (hash, parents, author, mail, author time, committer, commit time, refs, subject), and with a
+ * file followed (`--name-status`) its status lines after → [{ hash, parents, author, mail, time,
+ * committer, committerTime, refs, subject, path? (the file's name at that commit), status? }].
+ */
+export function parseHistory(out) {
+  const commits = [];
+  for (const record of String(out ?? '').split('\x1e')) {
+    if (!record.trim()) continue;
+    const [head, ...rest] = record.split('\n');
+    const f = head.split('\x1f');
+    if (f.length < 9 || !/^[0-9a-f]{7,64}$/.test(f[0])) continue;
+    const commit = {
+      hash: f[0],
+      parents: f[1].split(' ').filter(Boolean),
+      author: f[2],
+      mail: f[3],
+      time: Number(f[4]) || 0,
+      committer: f[5],
+      committerTime: Number(f[6]) || 0,
+      refs: parseRefs(f[7]),
+      subject: f.slice(8).join('\x1f'),
+    };
+    // The file followed: its status line names it as it was then (a rename: the new name last).
+    const line = rest.find((l) => /^[ACDMRTU]\d*\t/.test(l));
+    if (line) {
+      const parts = line.split('\t');
+      commit.status = parts[0][0];
+      commit.path = unquotePath(parts[parts.length - 1]);
+      if (commit.status === 'R' || commit.status === 'C') commit.from = unquotePath(parts[1]);
+    }
+    commits.push(commit);
+  }
+  return commits;
+}

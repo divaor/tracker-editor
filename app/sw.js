@@ -84,6 +84,7 @@ const ASSETS = [
   'js/gitStatus.js',
   'js/gitGutter.js',
   'js/gitBlame.js',
+  'js/gitGraph.js',
   'js/gitState.js',
   'js/replace.js',
   'js/quickRows.js',

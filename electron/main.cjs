@@ -2302,7 +2302,7 @@ async function gitTool(id = null, { quiet = false } = {}) {
   if (gitTools.has(key)) return gitTools.get(key);
   const { gitStatus } = await loadAppModules();
   const runner = id ? shellRunner({ run: (script, args, opts) => remote.runArgs(id, script, args, { ...opts, what: 'Git', connect: !quiet }), where: () => gitPlaceName(id) }) : null;
-  const tool = createGit({ parseStatus: gitStatus.parseStatus, parse: { parseBranches: gitStatus.parseBranches, parseStashes: gitStatus.parseStashes, parseBlame: gitStatus.parseBlame }, runner });
+  const tool = createGit({ parseStatus: gitStatus.parseStatus, parse: { parseBranches: gitStatus.parseBranches, parseStashes: gitStatus.parseStashes, parseBlame: gitStatus.parseBlame, parseHistory: gitStatus.parseHistory }, runner });
   if (!gitTools.has(key)) gitTools.set(key, tool);
   return gitTools.get(key);
 }
@@ -2359,12 +2359,25 @@ ipcMain.handle('git:act', guard(async (event, dir, action) => {
     let result = await t.tool.act(root, action, { onProgress: (line) => !sender.isDestroyed() && sender.send('git:progress', { root: pageRoot, line }) });
     // The model's picture says where Git runs (a server's own Git, with its own sign-ins).
     if (action?.op === 'snapshot' && t.id && result) result = { ...result, place: gitPlaceOf(t.id) };
+    // A file at a commit (the history view): decoded as the editor reads files.
+    if (action?.op === 'file-text') result = gitFileText(result, action.path);
+    // The history names the repository's top folder as the page names folders (its files open from there).
+    if (action?.op === 'history' && result) result = { ...result, root: pageRoot };
     return { ok: true, result: typeof result === 'object' && result && 'stdout' in result ? { stdout: result.stdout, stderr: result.stderr } : result };
   } catch (err) {
     // Git's own words go back, for the page to say in its own (gitError).
     return { ok: false, message: err.message, stdout: String(err.stdout ?? ''), stderr: String(err.stderr ?? ''), ...(gitGone(err) ? { offline: true } : {}) };
   }
 }));
+/** A file's bytes at a commit (git.cjs file-text) → { text, rel } or { text: null, binary, rel } (not text), or null (not there). */
+function gitFileText(bytes, rel) {
+  if (!bytes) return null;
+  try {
+    return { text: disk.decode(bytes).text, rel };
+  } catch {
+    return { text: null, binary: true, rel };
+  }
+}
 // One change of a file staged: the page gives the file's whole text as it should be staged
 // (stageBlock); it is written with the file's own line endings and encoding.
 ipcMain.handle('git:index', guard(async (_e, file) => {
