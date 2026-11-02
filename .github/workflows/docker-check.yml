@@ -1,0 +1,58 @@
+name: Docker check
+
+# Builds and runs what Dockerize writes, for a real project of each kind (scripts/docker-projects.mjs,
+# scripts/docker-check.mjs): docker compose up -d --build as a person would, then its pages, who it
+# runs as and that .env stayed out of the image. On changes to Dockerize, by hand, and every week
+# (the images and tools it names change under it: a new Node, Gradle or Composer can break a build).
+on:
+  workflow_dispatch:
+    inputs:
+      projects:
+        description: 'Projects to check, space-separated (empty: all)'
+        required: false
+        default: ''
+  push:
+    paths:
+      - app/js/dockerize.js
+      - scripts/docker-check.mjs
+      - scripts/docker-projects.mjs
+      - .github/workflows/docker-check.yml
+  schedule:
+    - cron: '17 4 * * 1'
+
+jobs:
+  list:
+    runs-on: ubuntu-latest
+    outputs:
+      projects: ${{ steps.list.outputs.projects }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: list
+        env:
+          CHOSEN: ${{ github.event.inputs.projects }}
+        run: |
+          node --input-type=module -e "
+            const { PROJECTS } = await import('./scripts/docker-projects.mjs');
+            const asked = (process.env.CHOSEN || '').split(/\s+/).filter(Boolean);
+            const names = asked.length ? asked : Object.keys(PROJECTS);
+            const unknown = names.filter((n) => !PROJECTS[n]);
+            if (unknown.length) { console.error('Not a project: ' + unknown.join(', ')); process.exit(1); }
+            console.log('projects=' + JSON.stringify(names));
+          " >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: list
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        project: ${{ fromJSON(needs.list.outputs.projects) }}
+    name: ${{ matrix.project }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: docker version --format 'Docker {{.Server.Version}}' && docker compose version
+      - run: node scripts/docker-check.mjs ${{ matrix.project }}

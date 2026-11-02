@@ -388,6 +388,8 @@ export function portIn(text) {
   const patterns = [
     /\.listen\(\s*(\d{2,5})\b/g,
     /\bPORT\b['"]?\s*(?:\|\||\?\?|\bor\b|,|:-)\s*['"]?(\d{2,5})\b/g,
+    // Number(process.env.PORT) || 3000, parseInt(process.env.PORT, 10) || 3000, int(os.getenv("PORT")) or 8000.
+    /\bPORT\b['"]?(?:\s*,\s*\d+)?(?:\s*\))+\s*(?:\|\||\?\?|\bor\b)\s*['"]?(\d{2,5})\b/g,
     /\b(?:run|serve|listen)\([^)\n]*\bport\s*=\s*(\d{2,5})\b/g,
     /(?:ListenAndServe|Listen|Run|bind|Addr\s*:)\s*\(?\s*["'](?:0\.0\.0\.0|\[::\]|localhost|127\.0\.0\.1)?:(\d{2,5})["']/g,
     /\bbind\(\(\s*["'][^"']*["']\s*,\s*(\d{2,5})\s*\)/g,
@@ -951,10 +953,13 @@ function detectRust(ctx) {
   const rv = /^(\d+\.\d+)/.exec(String(toml.package?.['rust-version'] ?? ''))?.[1];
   const notes = [];
   if (listensLocally(mainText)) notes.push('src/main.rs listens on this computer only (127.0.0.1): in a container it must listen on all addresses (0.0.0.0), or the app cannot be reached.');
+  // A program that binds a port of its own (std's TcpListener, a framework not listed here) serves
+  // too: before 0.48.1 it got no port, and its container could not be reached.
+  const serves = web || port !== null;
   return {
-    kind: 'rust', what: web ? `a Rust web server (${deps.find((d) => /^(actix-web|axum|rocket|warp|poem|tide|salvo|hyper)$/.test(d))})` : 'a Rust program',
+    kind: 'rust', what: web ? `a Rust web server (${deps.find((d) => /^(actix-web|axum|rocket|warp|poem|tide|salvo|hyper)$/.test(d))})` : serves ? 'a Rust server' : 'a Rust program',
     version: rv ?? VERSIONS.rust.preferred, versionFrom: rv ? 'Cargo.toml rust-version' : 'the current Rust', tool: 'cargo', found: ['Cargo.toml'], notes,
-    start: null, port: web ? (port ?? 8080) : null, portFrom: port ? 'src/main.rs' : web ? 'the usual port' : null, web,
+    start: null, port: serves ? (port ?? 8080) : null, portFrom: port ? 'src/main.rs' : web ? 'the usual port' : null, web: serves,
     rust: { bin: name, lock: ctx.has('Cargo.lock') },
   };
 }

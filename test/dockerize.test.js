@@ -31,6 +31,7 @@ import {
   splitWords,
   VERSIONS,
 } from '../app/js/dockerize.js';
+import { PROJECTS as CHECKED } from '../scripts/docker-projects.mjs';
 
 /** A folder in memory: { 'dir/name': text, 'empty-dir/': null }. `reads` lists what was read. */
 function memIo(files) {
@@ -863,6 +864,11 @@ test('portIn and listensLocally', () => {
   assert.equal(portIn('HttpServer::new(f).bind(("127.0.0.1", 8088))?'), 8088);
   assert.equal(portIn('const db = { port: 5432 }; const PORT = 4000'), 4000, 'a database’s port is not the app’s');
   assert.equal(portIn('nothing here'), null);
+  // The port's variable inside a call (0.48.1): Number(…), parseInt(…, 10), int(…).
+  assert.equal(portIn('await app.listen({ port: Number(process.env.PORT) || 3000, host: "0.0.0.0" })'), 3000);
+  assert.equal(portIn('const port = parseInt(process.env.PORT, 10) || 4100;'), 4100);
+  assert.equal(portIn('port = int(os.environ.get("PORT")) or 8000'), 8000);
+  assert.equal(portIn('let listener = TcpListener::bind("0.0.0.0:8080")?;'), 8080);
   assert.ok(listensLocally("app.listen(3000, 'localhost')"));
   assert.ok(listensLocally('app.run(host="127.0.0.1")'));
   assert.ok(listensLocally('http.ListenAndServe("localhost:8080", nil)'));
@@ -923,4 +929,26 @@ test('scanProject reads only what detection needs, and stops at its limit', asyn
   const many = memIo(Object.fromEntries(Array.from({ length: 80 }, (_, i) => [`P${i}.csproj`, '<Project/>'])));
   await scanProject(many, { maxReads: 10 });
   assert.equal(many.reads.length, 10);
+});
+
+// The projects CI builds and runs (scripts/docker-check.mjs, .github/workflows/docker-check.yml):
+// each is detected here as it expects, so the check builds what it means to, and each gets a page
+// to ask for. A Rust program serving with std's TcpListener had no port before 0.48.1.
+test('the projects the Docker check builds are detected as they expect', async () => {
+  for (const [name, p] of Object.entries(CHECKED)) {
+    const project = detectProject(await scanProject(memIo(p.files)), { name });
+    const o = { ...defaultOptions(project), ...(p.options ?? {}) };
+    const plan = dockerPlan(project, o);
+    const e = p.expect;
+    assert.equal(project.kind, e.kind, name);
+    if (e.what) assert.ok(project.what.includes(e.what), `${name}: ${project.what}`);
+    for (const k of ['tool', 'version', 'start', 'serves']) if (e[k] !== undefined) assert.equal(project[k], e[k], `${name}: ${k}`);
+    if (e.port !== undefined) assert.equal(project.port, e.port, `${name}: port`);
+    if (e.volumes) assert.deepEqual(project.volumes, e.volumes, `${name}: volumes`);
+    assert.equal(optionProblem(project, o), '', name);
+    assert.ok(plan.url, `${name}: a page to ask for`);
+    assert.ok(p.pages.length > 0, name);
+    const ignore = plan.files.find((f) => /dockerignore$/.test(f.path)).text;
+    assert.match(ignore, /^\.env$/m, `${name}: .env stays out of the image`);
+  }
 });
