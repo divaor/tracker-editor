@@ -2363,6 +2363,8 @@ ipcMain.handle('git:act', guard(async (event, dir, action) => {
     if (action?.op === 'file-text') result = gitFileText(result, action.path);
     // The history names the repository's top folder as the page names folders (its files open from there).
     if (action?.op === 'history' && result) result = { ...result, root: pageRoot };
+    // A file's three sides in a conflict, decoded like files (the merge view shows them).
+    if (action?.op === 'conflict-sides' && result) result = Object.fromEntries(Object.entries(result).map(([k, bytes]) => [k, bytes ? disk.decode(bytes) : null]));
     return { ok: true, result: typeof result === 'object' && result && 'stdout' in result ? { stdout: result.stdout, stderr: result.stderr } : result };
   } catch (err) {
     // Git's own words go back, for the page to say in its own (gitError).

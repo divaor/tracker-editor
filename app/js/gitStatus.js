@@ -11,7 +11,8 @@
  */
 export function parseStatus(out) {
   const records = out.split('\0');
-  const result = { branch: '', upstream: '', ahead: 0, behind: 0, files: {}, staged: {}, unstaged: {} };
+  // `conflicts`: each file in conflict with its XY (UU both changed, AA both added, DU/UD deleted on one side…).
+  const result = { branch: '', upstream: '', ahead: 0, behind: 0, files: {}, staged: {}, unstaged: {}, conflicts: {} };
   const split = (path, xy) => {
     if (xy[0] !== '.') result.staged[path] = codeOf(`${xy[0]}.`);
     if (xy[1] !== '.') result.unstaged[path] = codeOf(`.${xy[1]}`);
@@ -37,9 +38,11 @@ export function parseStatus(out) {
       if (result.staged[path]) result.staged[path] = 'R';
       i++; // the original path follows
     } else if (r.startsWith('u ')) {
-      const path = r.split(' ').slice(10).join(' ');
+      const parts = r.split(' ');
+      const path = parts.slice(10).join(' ');
       result.files[path] = 'C';
       result.unstaged[path] = 'C';
+      result.conflicts[path] = parts[1];
     } else if (r.startsWith('? ')) {
       result.files[r.slice(2)] = 'U';
       result.unstaged[r.slice(2)] = 'U';

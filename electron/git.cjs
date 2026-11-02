@@ -447,7 +447,9 @@ function nameStatus(out, max = 300) {
 }
 
 // A merge, rebase, cherry-pick or revert left halfway: the file each leaves in the .git folder.
-const IN_PROGRESS = [['MERGE_HEAD', 'merge'], ['REBASE_HEAD', 'rebase'], ['rebase-merge', 'rebase'], ['rebase-apply', 'rebase'], ['CHERRY_PICK_HEAD', 'cherry-pick'], ['REVERT_HEAD', 'revert']];
+// A rebase by its folders: REBASE_HEAD stays behind after a rebase finishes (git 2.43 keeps it until
+// the next one), so it said "a rebase is halfway" after every finished rebase until 0.49.
+const IN_PROGRESS = [['MERGE_HEAD', 'merge'], ['rebase-merge', 'rebase'], ['rebase-apply', 'rebase'], ['CHERRY_PICK_HEAD', 'cherry-pick'], ['REVERT_HEAD', 'revert']];
 const BACKUP_FILE = 'tracker-editor-backups.json';
 // No git program: not asked again for a while (installing it needs no restart).
 const MISSING_MS = 30_000;
@@ -608,7 +610,7 @@ function createGit({ parseStatus, parse = {}, runner = null, runGit: runGitHere 
     if (!entry) throw new Error('That backup is gone');
     const before = await makeBackup(root, `before undoing “${entry.label}”`);
     const w = (args, opts) => runGitWrite(args, root, opts);
-    for (const op of await halfway(root, IN_PROGRESS.filter(([n]) => n !== 'REBASE_HEAD'))) await w([op, '--abort']).catch(() => {});
+    for (const op of await halfway(root)) await w([op, '--abort']).catch(() => {});
     // Branches deleted since are made again where they were (the others stay where they are now).
     for (const [b, sha] of Object.entries(entry.tips ?? {})) {
       if (!safeBranch(b) || (await tryGit(['rev-parse', '--verify', '-q', `refs/heads/${b}`], root)).trim()) continue;
@@ -810,6 +812,31 @@ function createGit({ parseStatus, parse = {}, runner = null, runGit: runGitHere 
           const op = { merge: 'merge', rebase: 'rebase', 'cherry-pick': 'cherry-pick', revert: 'revert' }[action.what];
           if (!op) throw new Error('Nothing to abort');
           return w([op, '--abort']);
+        }
+        // ---- Conflicts (the Git panel's Conflicts section, the merge view) ----
+        case 'conflict-take': {
+          // One side for whole files (both sides changed or added them): checked out, then staged.
+          if (action.side !== 'ours' && action.side !== 'theirs') throw new Error('Not a side of a conflict');
+          const paths = rels(action.paths);
+          await w(['checkout', `--${action.side}`, '--', ...paths]);
+          return w(['add', '--', ...paths]);
+        }
+        case 'conflict-remove':
+          // A file one side deleted: the deletion taken (gone from the folder and the next commit).
+          return w(['rm', '-q', '--', ...rels(action.paths)]);
+        case 'conflict-sides': {
+          // A file's three sides while it is in conflict: the base (:1:), the current (:2:) and the
+          // incoming (:3:), as bytes (main decodes them like files); null where a side has none.
+          if (!safeRel(action.path)) throw new Error('Not a file of this repository');
+          const side = async (n) => {
+            try {
+              return await runGit(['show', `:${n}:${action.path}`], root, { encoding: 'buffer', maxBuffer: 32 * 1024 * 1024 });
+            } catch (err) {
+              if (gone(err)) throw err;
+              return null;
+            }
+          };
+          return { base: await side(1), ours: await side(2), theirs: await side(3) };
         }
         // ---- Looking (Git with the model): what it asks to see, cut to size ----
         case 'log': {
