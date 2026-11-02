@@ -3652,6 +3652,23 @@ button.where-chip:hover {
   overflow-x: auto;
   border-bottom: 1px solid var(--border);
   scrollbar-width: none;
+  container-type: inline-size;
+}
+
+/* The file bar measures itself (a panel open beside it, a narrow window): under 820px its
+   buttons show their icons alone, under 700px the chip its icon alone (its title says where),
+   so the file's name keeps its room. */
+@container (max-width: 820px) {
+  .filebar .label {
+    display: none;
+  }
+}
+
+@container (max-width: 700px) {
+  .filebar .where-state,
+  .filebar .where-label {
+    display: none;
+  }
 }
 
 .filebar-tags {
@@ -3667,9 +3684,16 @@ button.where-chip:hover {
   align-items: center;
   gap: 6px;
   min-width: 0;
+  overflow: hidden;
   color: var(--text-2);
   font-size: 13px;
   white-space: nowrap;
+}
+
+/* The name keeps its width; the folder after it gives way first. */
+.filebar-note > .filebar-title {
+  flex-shrink: 0;
+  max-width: 100%;
 }
 
 .filebar-note svg {
@@ -4054,6 +4078,76 @@ button.where-chip:hover {
 .filebar .btn.on {
   background: var(--accent-soft);
   color: var(--accent);
+}
+
+/* The file bar's Run group: run, debug and the rest of it together in one frame, thin lines
+   between its buttons; while debugging, the debugger's controls in its place (amber). */
+.run-group {
+  display: inline-flex;
+  flex: none;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.run-btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.run-group > * + * {
+  border-left: 1px solid var(--border);
+}
+
+.run-btn:hover:not(:disabled),
+.run-btn:focus-visible {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.run-btn:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.run-btn.go {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.run-btn.go svg {
+  color: var(--git-added);
+}
+
+.run-btn.stop svg {
+  color: var(--danger);
+}
+
+.run-btn.run-more {
+  width: auto;
+  padding: 0 5px;
+}
+
+.run-group.debugging {
+  border-color: color-mix(in srgb, var(--warn) 55%, var(--border));
+  background: color-mix(in srgb, var(--warn) 9%, var(--surface));
+}
+
+.run-group.debugging > * + * {
+  border-left-color: color-mix(in srgb, var(--warn) 30%, var(--border));
 }
 
 .editor-area {

@@ -25,6 +25,8 @@ import { TabViewMenu } from './tabViews.js';
 import { terminalsAvailable } from '../terminals.js';
 import { clampFont, DEFAULT_FONT, MAX_FONT, MIN_FONT } from '../textSize.js';
 import { compareName, compareTitle } from '../compares.js';
+import { COMMAND_LIST } from '../commands.js';
+import { shownKeys } from '../keys.js';
 
 /** The server of a file on one ({ conn, status }), or null. */
 const serverOf = (path) => {
@@ -450,6 +452,63 @@ export function TabBar({ session, projects, settings, actions }) {
 // "1.2 MB"
 const formatSize = (bytes) => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`);
 
+// A command's keys as they are now (Settings → Keys may have changed them), for titles and menus.
+const keysOfCommand = (id) => {
+  const command = COMMAND_LIST.find((c) => c.id === id);
+  return command ? shownKeys(command) : '';
+};
+const titled = (label, id) => {
+  const keys = keysOfCommand(id);
+  return keys ? `${label} (${keys})` : label;
+};
+
+/**
+ * Run, debug and what goes with them, for the open file: one group in the file bar. ▶ runs the
+ * file (a test file: its tests), the bug debugs it (a test file: the test at the cursor), ▾ has
+ * the rest (the test at the cursor, the file's tests, again, the project's tasks, the panels).
+ * While a debug run goes on, its controls take the group's place. `run`: { runs, debugs, tests,
+ * debug: { status } | null } (app.js `runInfo`).
+ */
+export function RunGroup({ run, actions }) {
+  const { runs, debugs, tests, debug } = run;
+  const btn = (label, icon, id, onClick, { cls = '', text = '', disabled = false } = {}) =>
+    html`<button type="button" class=${`run-btn ${cls}`} aria-label=${label} title=${titled(label, id)} disabled=${disabled} onMouseDown=${(e) => e.preventDefault()} onClick=${onClick}>
+      <${Icon} name=${icon} size=${15} />${text && html`<span class="label">${text}</span>`}
+    </button>`;
+  if (debug && debug.status !== 'ended') {
+    const paused = debug.status === 'paused';
+    return html`<div class="run-group debugging" role="toolbar" aria-label="Debugging">
+      ${paused ? btn('Continue', 'play', 'debug-continue', actions.debugContinue, { cls: 'go' }) : btn('Pause', 'pause', 'debug-pause', actions.debugPause, { disabled: debug.status !== 'running' })}
+      ${btn('Step over', 'stepOver', 'debug-step-over', actions.debugStepOver, { disabled: !paused })}
+      ${btn('Step into', 'stepInto', 'debug-step-into', actions.debugStepInto, { disabled: !paused })}
+      ${btn('Step out', 'stepOut', 'debug-step-out', actions.debugStepOut, { disabled: !paused })}
+      ${btn('Restart', 'rotate', 'debug-restart', actions.debugRestart)}
+      ${btn('Stop', 'stop', 'debug-stop', actions.debugStop, { cls: 'stop' })}
+    </div>`;
+  }
+  const items = () => [
+    runs && { label: 'Run this file', icon: 'play', hint: keysOfCommand('run-file'), run: actions.runFile },
+    debugs && { label: 'Debug this file', icon: 'bug', hint: keysOfCommand('debug-file'), run: () => actions.debugFile() },
+    tests && (runs || debugs) && { separator: true },
+    tests && { label: 'Run the test at the cursor', icon: 'play', hint: keysOfCommand('test-at-cursor'), run: () => actions.runTests({ scope: 'cursor' }) },
+    tests && { label: 'Run this file’s tests', icon: 'checklist', hint: keysOfCommand('test-file'), run: () => actions.runTests({ scope: 'file' }) },
+    tests && { label: 'Run the tests again', icon: 'rotate', hint: keysOfCommand('test-again'), run: () => actions.runTests({ scope: 'again' }) },
+    tests && debugs && { label: 'Debug the test at the cursor', icon: 'bug', hint: keysOfCommand('debug-test'), run: () => actions.debugTest() },
+    { separator: true },
+    { label: 'The project’s tasks…', icon: 'list', hint: keysOfCommand('tasks') || 'npm scripts, make targets…', run: actions.showTasks },
+    tests && { label: 'The Tests panel', icon: 'panelRight', run: () => actions.command('tests-panel') },
+    debugs && { label: 'The Debug panel', icon: 'panelRight', run: actions.toggleDebugPanel },
+    runs && { label: 'How files of this type run…', icon: 'settings', hint: 'Settings → Editor → Run commands', run: actions.showSettings },
+  ];
+  return html`<div class="run-group" role="group" aria-label="Run and debug">
+    ${tests
+      ? btn('Run this file’s tests', 'play', 'test-file', () => actions.runTests({ scope: 'file' }), { cls: 'go', text: 'Run' })
+      : runs && btn('Run this file', 'play', 'run-file', actions.runFile, { cls: 'go', text: 'Run' })}
+    ${debugs && (tests ? btn('Debug the test at the cursor', 'bug', 'debug-test', () => actions.debugTest()) : btn('Debug this file', 'bug', 'debug-file', () => actions.debugFile()))}
+    <${MenuButton} label="More to run: tests, tasks, the panels" icon="chevronDown" className="run-btn run-more" items=${items} />
+  </div>`;
+}
+
 /** The bar of a file on disk (or on a server) edited in place: saving, reloading, following it as it grows. */
 function DiskBar({ disk, buttons, moreItems, actions }) {
   const { path, dirty, follow, conflict, missing, truncated, offline } = disk;
@@ -519,7 +578,7 @@ function DiskBar({ disk, buttons, moreItems, actions }) {
   </div>`;
 }
 
-export function FileBar({ file, repo, disk, sealed, projects, canPreview, preview, settings, sync, actions }) {
+export function FileBar({ file, repo, disk, sealed, projects, canPreview, preview, settings, sync, run = null, actions }) {
   const previewButton =
     canPreview &&
     html`<button type="button" class="btn ghost sm ${preview ? 'on' : ''}" aria-pressed=${preview} title="Show a reading view next to the text" onClick=${actions.togglePreview}><${Icon} name="eye" size=${15} /><span class="label">Preview</span></button>`;
@@ -572,7 +631,7 @@ export function FileBar({ file, repo, disk, sealed, projects, canPreview, previe
     id && { label: 'Move to trash', icon: 'trash', danger: true, run: () => actions.remove(id) },
   ];
   if (disk?.doc) return html`<${DiskBar} disk=${disk} buttons=${[(disk.asText || readsAloud(disk.doc)) && listenButton, shareButton]} moreItems=${docItems} actions=${actions} />`;
-  if (disk) return html`<${DiskBar} disk=${disk} buttons=${[previewButton, listenButton, shareButton]} moreItems=${() => moreItems()} actions=${actions} />`;
+  if (disk) return html`<${DiskBar} disk=${disk} buttons=${[run && html`<${RunGroup} run=${run} actions=${actions} />`, previewButton, listenButton, shareButton]} moreItems=${() => moreItems()} actions=${actions} />`;
   if (repo) {
     // A tracker document: its item's title and project; the path is in the tooltip.
     const doc = store.doc(repo.path);

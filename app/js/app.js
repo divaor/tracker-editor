@@ -3722,6 +3722,25 @@ export function App() {
     if (!target && !test) toast(`No test at the cursor: debugging all of ${ctx.name}’s tests.`, { timeout: 3000 });
     return actions.debugFile({ key, test: { framework: fw, target: target && { title: target.title, kind: target.kind, cls: target.cls ?? '', chain: target.chain ?? [] } } });
   };
+  /**
+   * What the file bar's Run group offers for the open tab (the desktop app; a file in a folder
+   * here or on an SSH server): { runs, debugs, tests, debug } or null when none of it fits.
+   */
+  const runInfo = () => {
+    const k = parseKey(store.session.active);
+    const disk = k?.kind === 'disk' ? store.diskTab(k.path) : null;
+    if (!isDesktopApp() || !disk || disk.doc || isContentPath(k.path) || !terminalsAvailable()) return null;
+    const remote = isRemotePath(k.path);
+    if (remote && server(remoteParts(k.path).id)?.protocol !== 'sftp') return null;
+    const name = baseName(k.path);
+    const platform = remote ? 'linux' : (window.desktop.platform ?? 'linux');
+    const runs = (!remote && /\.html?$/i.test(name)) || Boolean(runCommandFor({ path: k.path, dir: parentDir(k.path), name }, { platform, kind: platform === 'win32' ? 'powershell' : 'posix', custom: parseRunCommands(getSettings().runCommands) }));
+    const debugs = !remote && debugAvailable() && Boolean(debugAdapterFor(k.path));
+    const tests = looksLikeTestFile(name) || Boolean(hostRef.current?.hasTests(store.session.active));
+    if (!runs && !debugs && !tests) return null;
+    const live = debugRef.current?.active() ? debugRef.current.run : null;
+    return { runs, debugs, tests, debug: live && { status: live.status } };
+  };
   actions.debugContinue = () => debugRef.current?.continue();
   actions.debugPause = () => debugRef.current?.pause();
   actions.debugStepOver = () => debugRef.current?.stepOver();
@@ -4523,7 +4542,7 @@ export function App() {
       <div class="editor-view" hidden=${view === 'settings'}>
         <${TabBar} session=${store.session} projects=${projects} settings=${settings} actions=${actions} />
         ${activeKey && !activeCompare && html`<${FileBar} file=${activeFile} repo=${activeRepo} disk=${activeDisk} sealed=${activeSealed} projects=${projects} language=${languageName} sync=${sync}
-          canPreview=${Boolean(previewType)} preview=${showPreview} settings=${settings} actions=${actions} />`}
+          canPreview=${Boolean(previewType)} preview=${showPreview} settings=${settings} run=${runInfo()} actions=${actions} />`}
         ${activeKey && filterKeys.has(activeKey) && !compare && !activeSealed &&
         html`<${FilterBar} key=${activeKey} tabKey=${activeKey} actions=${actions} onClose=${actions.toggleFilter} />`}
         ${dictating && dictating === activeKey && html`<${DictationBar} lang=${settings.dictationLang} onPhrase=${actions.dictate} onStop=${actions.stopDictation} />`}
