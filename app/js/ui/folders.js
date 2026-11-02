@@ -27,8 +27,9 @@ const branchTitle = (g) => {
   const sync = [g.ahead && `${g.ahead} to push`, g.behind && `${g.behind} to pull`].filter(Boolean).join(', ');
   return `Git: branch ${g.branch}${g.upstream ? ` (${g.upstream}${sync ? `: ${sync}` : ''})` : ''} · ${changed ? `${changed} changed file${changed === 1 ? '' : 's'}` : 'nothing changed'} since the last commit\nClick for the Git panel`;
 };
-// Git can be asked about this folder (desktop, on this computer; not the Android app or servers).
-const gitHere = (dir) => Boolean(window.desktop?.git?.init) && Boolean(dir) && !isRemotePath(dir);
+// Git can be asked about this folder (desktop: on this computer, on an SSH server or in a place;
+// not FTP servers, which have no shell, nor the Android app).
+const gitHere = (dir) => Boolean(window.desktop?.git?.init) && Boolean(dir) && (!isRemotePath(dir) || hasShell(server(remoteParts(dir).id)));
 const dockerHere = (dir) => Boolean(window.desktop?.docker) && Boolean(dir) && !isRemotePath(dir);
 
 // What a folder's header carries when it is dragged to another place in the order.
@@ -261,7 +262,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       which.forEach((s, i) => next.set(s, lists[i]));
       return next;
     });
-    refreshGit(which.filter((s) => !isRemotePath(s)), { force: true });
+    refreshGit(which.filter(gitHere), { force: true });
     const present = new Set([...lists.flatMap((l) => l.entries), ...deeper].map((e) => e.path));
     const read = (p) => which.some((s) => rootOf(p, [s]));
     if (pendingSelect.current && present.has(pendingSelect.current)) {
@@ -272,10 +273,10 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   useEffect(() => {
     if (live.length) load();
   }, [liveKey]);
-  // Git (folders on this computer): rows colored by what changed since the last commit.
+  // Git (folders here, on SSH servers and in places): rows colored by what changed since the last commit.
   const [, setGitVersion] = useState(0);
   useEffect(() => onGitState(() => setGitVersion((v) => v + 1)), []);
-  const gitOn = (p) => (isRemotePath(p) ? null : gitCodeOf(rootOf(p, live) ?? dir, p, false));
+  const gitOn = (p) => gitCodeOf(rootOf(p, live) ?? dir, p, false);
   // The folders shown are watched, and read again when the window comes back.
   useEffect(() => {
     if (!live.length) return;
@@ -1062,7 +1063,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     const files = items.filter((e) => !e.dir);
     const images = files.filter((e) => isImageName(e.name));
     // Git: files with changes to stage, or staged ones to leave out of the next commit.
-    const states = remote ? [] : files.map((e) => stageStateOf(rootOf(e.path, live) ?? dir, e.path)).filter(Boolean);
+    const states = files.map((e) => stageStateOf(rootOf(e.path, live) ?? dir, e.path)).filter(Boolean);
     const toStage = states.filter((st) => st.unstaged);
     const toUnstage = states.filter((st) => st.staged);
     const stageFiles = async (list, op) => {
@@ -1079,7 +1080,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       toUnstage.length > 0 && { label: toUnstage.length === 1 ? 'Unstage (Git)' : `Unstage ${toUnstage.length} files (Git)`, icon: 'undo', hint: 'Leave out of the next commit', run: () => stageFiles(toUnstage, 'unstage') },
       images.length && images.length === items.length && { label: `Text from ${images.length === 1 ? 'the image' : `${images.length} images`}…`, icon: 'scan', run: () => actions.readImageFiles(images.map((e) => e.path), folderOf(images)) },
       files.length === 2 && items.length === 2 && files.every((e) => opensInEditor(e.name)) && { label: 'Compare the two', icon: 'compare', run: () => actions.compareDiskFiles(files[0].path, files[1].path) },
-      one?.dir && !remote && gitHere(one.path) && !gitOf(rootOf(one.path, live) ?? dir) && { label: 'Make it a Git repository…', icon: 'branch', hint: 'git init: Git starts keeping its history', run: () => actions.gitInit(one.path) },
+      one?.dir && gitHere(one.path) && !gitOf(rootOf(one.path, live) ?? dir) && { label: 'Make it a Git repository…', icon: 'branch', hint: 'git init: Git starts keeping its history', run: () => actions.gitInit(one.path) },
       one?.dir && !remote && dockerItem(one.path),
       window.desktop?.compare && items.length === 2 && items.every((e) => e.dir) && { label: 'Compare the two folders', icon: 'compare', run: () => actions.compareFolders(items[0].path, items[1].path) },
       window.desktop?.compare && one?.dir && { label: 'Compare with another folder…', icon: 'compare', run: () => actions.compareFolders(one.path) },
@@ -1257,7 +1258,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   const perms = live.some(isRemotePath) && settings.showPermissions;
   const row = ({ entry: e, depth, expanded: open }) => {
     const key = diskKey(e.path);
-    const git = isRemotePath(e.path) ? null : gitCodeOf(rootOf(e.path, live) ?? dir, e.path, e.dir);
+    const git = gitCodeOf(rootOf(e.path, live) ?? dir, e.path, e.dir);
     const isSelected = selected.has(e.path);
     const twisty = e.dir
       ? html`<button type="button" class="tree-twisty ${open ? 'open' : ''}" tabindex="-1" aria-label=${open ? `Close ${e.name}` : `Open ${e.name} here`}
@@ -1378,7 +1379,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       <${Icon} name=${iconOf(d)} size=${15} class="root-head-icon" />
       <span class="root-head-name">${name}</span>
       <span class="root-head-where">${where}</span>
-      ${!rem && gitOf(d) && html`<button type="button" class="git-branch" title=${branchTitle(gitOf(d))} aria-label=${`Git panel: ${placeName(d)}, branch ${gitOf(d).branch}`}
+      ${gitOf(d) && html`<button type="button" class="git-branch" title=${branchTitle(gitOf(d))} aria-label=${`Git panel: ${placeName(d)}, branch ${gitOf(d).branch}`}
         draggable="false" onClick=${(ev) => (ev.stopPropagation(), actions.toggleGit(d))} onDblClick=${(ev) => ev.stopPropagation()}><${Icon} name="branch" size=${12} /><span>${gitOf(d).branch}</span></button>`}
       ${rem && html`<span class="conn-dot state-${state}" />`}
       ${shut_ && matches > 0 && html`<span class="root-head-count" title=${`${matches} ${matches === 1 ? 'match' : 'matches'} in it: click to see`}>${matches}</span>`}
@@ -1410,7 +1411,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
             title=${remote ? `${connDetail(conn)} · ${connState?.state === 'connected' ? 'connected' : `not connected${connState?.error ? `: ${connState.error}` : ''}`}` : root} onClick=${() => go(root)} ...${dropProps(root)}>
             <${Icon} name=${iconOf(root)} size=${15} /><span>${rootName(root)}</span>${remote && html`<span class="conn-dot state-${connState?.state}" />`}
           </button>
-          ${!multi && !remote && gitHere(dir) &&
+          ${!multi && gitHere(dir) &&
           (gitOf(dir)
             ? html`<button type="button" class="git-branch git-pill" title=${branchTitle(gitOf(dir))} aria-label=${`Git panel, branch ${gitOf(dir).branch}`} onClick=${() => actions.toggleGit(dir)}><${Icon} name="branch" size=${12} /><span>${gitOf(dir).branch}</span></button>`
             : html`<button type="button" class="git-branch git-pill none" title="Git: this folder is not in a repository. Click for the Git panel, to make it one" aria-label="Git panel" onClick=${() => actions.toggleGit(dir)}><${Icon} name="branch" size=${13} /></button>`)}

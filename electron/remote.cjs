@@ -26,6 +26,11 @@ const MAX_COPY_ENTRIES = 10000;
 // Transfers with progress (putFile/getFile): requests in flight at once, and their size.
 const XFER_PARALLEL = 32;
 const XFER_CHUNK = 32 * 1024;
+// Fixed scripts run on an SSH server (runArgs): at most this many at once on one connection
+// (OpenSSH allows 10 sessions per connection: the file channel, terminals and language servers
+// take some), and a command line well under the 256 KB of one SSH packet.
+const EXEC_PARALLEL = 3;
+const MAX_EXEC_COMMAND = 200 * 1024;
 const stoppedError = () => Object.assign(new Error('Stopped.'), { stopped: true });
 
 const isRemote = (p) => typeof p === 'string' && p.startsWith(SCHEME);
@@ -344,6 +349,128 @@ class SftpSession {
   /** A command on the server without a terminal (a language server): resolves with its channel. */
   exec(command) {
     return new Promise((resolve, reject) => this.client.exec(command, (err, stream) => (err ? reject(err) : resolve(stream))));
+  }
+
+  /** Why a command did not finish: the connection went away meanwhile. */
+  lostError() {
+    return Object.assign(new Error(`The connection to ${this.conn.name} was lost while the command ran (it may or may not have finished there).`), { lost: true });
+  }
+
+  // At most EXEC_PARALLEL commands at once on this connection.
+  async execSlot(fn) {
+    this.execRunning ??= 0;
+    this.execWaiting ??= [];
+    if (this.execRunning >= EXEC_PARALLEL) await new Promise((resolve) => this.execWaiting.push(resolve));
+    this.execRunning++;
+    try {
+      return await fn();
+    } finally {
+      this.execRunning--;
+      this.execWaiting.shift()?.();
+    }
+  }
+
+  // An exec channel; the server's limit on sessions ("open failed") is waited out a moment.
+  async openExec(command) {
+    for (let attempt = 0; ; attempt++) {
+      if (!this.alive) throw this.lostError();
+      try {
+        return await this.exec(command);
+      } catch (err) {
+        if (!this.alive) throw this.lostError();
+        if (attempt >= 4 || !/open failed|Channel open failure|administratively prohibited/i.test(err.message)) throw err;
+        await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+      }
+    }
+  }
+
+  /**
+   * A fixed sh script of the caller's (git.cjs's: never made from what the page sends) run on the
+   * server with `args`, as places.cjs runs one in a container: the script and each value
+   * base64-encoded (places.bootCommand), so no value goes through the login shell's quoting,
+   * whichever shell it is. Resolves { code, stdout, stderr } (Buffers), whatever the code. `input`
+   * goes to its stdin; `onStderr(chunk)` sees its error output as it comes. Past `timeout` ms it is
+   * stopped (an error with `timedOut`); a connection that goes away meanwhile rejects with `lost`.
+   */
+  async runArgs(script, args = [], { input = null, timeout = 30000, onStderr = null, maxOut = 256 * 1024 * 1024 } = {}) {
+    const command = places.bootCommand(script, args);
+    if (command.length > MAX_EXEC_COMMAND) throw new Error('That command is too long to send to the server.');
+    return this.execSlot(
+      () =>
+        new Promise((resolve, reject) => {
+          const out = [];
+          const err = [];
+          let outSize = 0;
+          let errSize = 0;
+          let code = null;
+          let signal = null;
+          let settled = false;
+          let stream = null;
+          const stop = () => {
+            if (!stream) return;
+            try {
+              stream.signal('KILL');
+            } catch {
+              // not every server takes signals: closing the channel ends it
+            }
+            try {
+              stream.close();
+            } catch {
+              // closed already
+            }
+          };
+          const settle = (fn) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            fn();
+          };
+          // The time limit counts from the asking: a channel the server never opens is given up too.
+          const timer = setTimeout(() => {
+            settle(() => reject(Object.assign(new Error(`${this.conn.name} did not answer in ${Math.round(timeout / 1000)} s.`), { timedOut: true })));
+            stop();
+          }, timeout);
+          timer.unref?.();
+          this.openExec(command).then(
+            (opened) => {
+              stream = opened;
+              if (settled) return stop();
+              stream.on('data', (chunk) => {
+                outSize += chunk.length;
+                if (outSize > maxOut) {
+                  settle(() => reject(new Error(`More came back from ${this.conn.name} than expected; it was stopped.`)));
+                  return stop();
+                }
+                out.push(chunk);
+              });
+              stream.stderr.on('data', (chunk) => {
+                if (errSize < 1024 * 1024) err.push(chunk);
+                errSize += chunk.length;
+                onStderr?.(chunk);
+              });
+              // The exit status comes with 'exit', and again with 'close' (a fast command's 'exit' can
+              // come in the same packet as the channel's opening, before anyone listens).
+              const exited = (c, sig) => {
+                if (typeof c === 'number') code = c;
+                else if (sig) signal = sig;
+              };
+              stream.on('exit', exited);
+              stream.on('close', (c, sig) =>
+                settle(() => {
+                  exited(c, sig);
+                  if (code !== null) return resolve({ code, stdout: Buffer.concat(out), stderr: Buffer.concat(err) });
+                  if (signal && this.alive) return reject(new Error(`The command on ${this.conn.name} was stopped (${signal}).`));
+                  reject(this.lostError());
+                }),
+              );
+              stream.on('error', (e) => settle(() => reject(this.alive ? e : this.lostError())));
+              if (input !== null && input !== undefined) stream.write(input);
+              stream.end();
+            },
+            (e) => settle(() => reject(e)),
+          );
+        }),
+    );
   }
 
   call(method, ...args) {
@@ -1224,6 +1351,11 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
       const protocol = data.connections.find((c) => c.id === parseUri(uri).id)?.protocol;
       return ['ftp', 'ftps'].includes(protocol) ? 1 : places.isPlace(protocol) ? 16 : 4;
     },
+    /** What a connection is, without its secrets: { id, name, protocol, container, distro, user }, or null. */
+    describe(id) {
+      const c = data.connections.find((x) => x.id === id);
+      return c ? { id: c.id, name: c.name, protocol: c.protocol, container: c.container ?? '', distro: c.distro ?? '', user: c.user ?? '' } : null;
+    },
     /** A readable name for a path: "name: /path". */
     label(uri) {
       const { id, path: p } = parseUri(uri);
@@ -1251,6 +1383,31 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
       const s = await session(id);
       if (await s.windows()) throw new Error(`${conn.name} runs Windows: language servers run there only on Linux and macOS servers.`);
       return s;
+    },
+    /**
+     * A fixed sh script (git.cjs's) with its arguments on an SSH server (not Windows) or in a place,
+     * each value base64-encoded (no value is ever shell text): { code, stdout, stderr } (Buffers).
+     * Connects when needed, unless `connect` is false (then a server not connected is `offline`).
+     * Errors say why: `noShell` (FTP), `offline` (it could not be reached), `lost` (it went away
+     * while the command ran), `timedOut`.
+     */
+    async runArgs(id, script, args = [], { connect = true, what = 'Git', ...opts } = {}) {
+      const conn = find(id);
+      if (!SHELL_PROTOCOLS.includes(conn.protocol)) throw Object.assign(new Error(`${conn.name} is an ${protocolLabel(conn.protocol)} server: ${what} needs a shell there (an SSH server, a Docker container or WSL).`), { noShell: true, unusable: true });
+      if (!connect && !api.isConnected(id)) throw Object.assign(new Error(`${conn.name} is not connected.`), { offline: true });
+      let s;
+      try {
+        s = await session(id);
+      } catch (err) {
+        throw Object.assign(friendlyError(err, conn), { offline: true });
+      }
+      if (await s.windows()) throw Object.assign(new Error(`${conn.name} runs Windows: ${what} runs there only on Linux and macOS servers.`), { unusable: true });
+      try {
+        return await s.runArgs(script, args, opts);
+      } catch (err) {
+        if (!s.alive) err.lost = true;
+        throw err.lost || err.timedOut || err.place || err.stopped ? err : friendlyError(err, conn);
+      }
     },
     /** Runs a shell script on the server: its output (`max` bytes at most), within `timeout` ms. */
     async run(id, script, { timeout = 30000, max = 256 * 1024 } = {}) {
@@ -1666,4 +1823,4 @@ function tempCopyPath(uri) {
   return nodePath.join(dir, posix.basename(parseUri(uri).path));
 }
 
-module.exports = { createRemote, isRemote, parseUri, toUri, fingerprintOf, friendlyError, tempCopyPath, localUnder, listedTime, SCHEME, PROTOCOLS, DEFAULT_PORT };
+module.exports = { createRemote, isRemote, parseUri, toUri, fingerprintOf, friendlyError, tempCopyPath, localUnder, listedTime, SCHEME, PROTOCOLS, SHELL_PROTOCOLS, DEFAULT_PORT };

@@ -1,6 +1,7 @@
-// Git state for the folders shown in Folders (desktop, folders on this computer): asked of
-// the main process (git:status), kept a few seconds, read again when a folder changes or
-// the window comes back. The folders view colors its rows with it.
+// Git state for the folders shown in Folders (desktop: folders on this computer, on SSH servers
+// and in places): asked of the main process (git:status), kept a few seconds, read again when a
+// folder changes or the window comes back. The folders view colors its rows with it. A server not
+// connected now answers { offline }: what it said last stays.
 import { statusOf } from './gitStatus.js';
 
 const FRESH_MS = 5000;
@@ -26,6 +27,7 @@ export function refreshGit(dirs, { force = false } = {}) {
     entry.loading = bridge
       .status(dir)
       .then((status) => {
+        if (status?.offline) return;
         const same = JSON.stringify(status) === JSON.stringify(entry.status);
         entry.status = status;
         if (!same) changed();

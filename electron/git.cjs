@@ -1,14 +1,21 @@
-// Git for folders on this computer (desktop): the repository a folder is in, `git status`
-// for it, and a file's text at the last commit; and the commands that change things (stage,
-// commit, branches, stash, fetch, pull, push), run by `act`. It runs the `git` program
-// installed on the computer; without one, or outside a repository, reading answers null.
-// Reading uses GIT_OPTIONAL_LOCKS=0, so it never takes the index lock another Git program may
-// need. Nothing ever waits for a question in a terminal: no prompts (a credential helper or
-// an SSH agent signs in, or the command fails saying so), no editor (messages are given).
+// Git for folders on this computer, on SSH servers and in places (Docker containers, WSL
+// distributions), desktop: the repository a folder is in, `git status` for it, a file's text at
+// the last commit, and the commands that change things (stage, commit, branches, stash, fetch,
+// pull, push…), run by `act`. Every git invocation goes through a runner: `localRunner` runs the
+// git program installed here; `shellRunner` runs the one on a server or in a place, through a
+// fixed sh script whose values travel base64-encoded (remote.cjs runArgs: an SSH exec channel of
+// the connection, or docker exec / wsl.exe), so no path, branch or message ever becomes shell
+// text. The page names a folder and an action, never a command: the arguments are made here from
+// the checked action. Without git, or outside a repository, reading answers null. Reading uses
+// GIT_OPTIONAL_LOCKS=0, so it never takes the index lock another Git program may need. Nothing
+// ever waits for a question: no prompts (a credential helper or an SSH agent signs in, or the
+// command fails saying so), no editor (messages are given), and every command has a time limit.
 
 const { execFile, spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
+
+const posix = path.posix;
 
 function run(args, cwd, { encoding = 'utf8', timeout = 15000, maxBuffer = 64 * 1024 * 1024 } = {}) {
   return new Promise((resolve, reject) => {
@@ -27,6 +34,16 @@ function writeEnv(env = process.env) {
   return out;
 }
 
+/** Calls `onProgress(line)` with each line of what comes in chunks (--progress writes "\r" between updates). */
+function progressLines(onProgress) {
+  let partial = '';
+  return (chunk) => {
+    const parts = (partial + chunk.toString()).split(/\r\n|\r|\n/);
+    partial = parts.pop();
+    for (const line of parts) if (line.trim()) onProgress(line);
+  };
+}
+
 /**
  * Runs git and collects what it says: { stdout, stderr }; rejects with them (`err.stdout`,
  * `err.stderr`). `input` goes to its stdin; `onProgress(line)` gets each line of stderr as it
@@ -42,15 +59,12 @@ function runWrite(args, cwd, { input = null, timeout = 120_000, onProgress = nul
     }
     let stdout = '';
     let stderr = '';
-    let partial = '';
+    const progress = onProgress ? progressLines(onProgress) : null;
     const timer = setTimeout(() => proc.kill(), timeout);
     proc.stdout.on('data', (d) => (stdout += d));
     proc.stderr.on('data', (d) => {
       stderr += d;
-      if (!onProgress) return;
-      const parts = (partial + d.toString()).split(/\r\n|\r|\n/);
-      partial = parts.pop();
-      for (const line of parts) if (line.trim()) onProgress(line);
+      progress?.(d);
     });
     proc.on('error', (err) => {
       clearTimeout(timer);
@@ -64,6 +78,324 @@ function runWrite(args, cwd, { input = null, timeout = 120_000, onProgress = nul
     proc.stdin.on('error', () => {});
     proc.stdin.end(input ?? undefined);
   });
+}
+
+// ---- Runners: where git runs, and the few files Git with the model reads and writes ---------
+//
+// A runner is { kind ('local' | 'shell'), path (node's path, or path.posix there), where() (a
+// name for messages, or null here), git(args, cwd, { encoding, timeout, maxBuffer }) → stdout
+// (reading), gitWrite(args, cwd, { input, timeout, onProgress }) → { stdout, stderr } (writing),
+// exists(paths) → [boolean], readFile(path, max) → { size, bytes } | null, writeFile(path,
+// bytes), realpath(path), readInRepo(root, rel, max) → { size, bytes } (never outside the
+// repository: links followed and checked), installHint() → { command, manager, asRoot } | null }.
+// git's failures reject with { code, stdout, stderr } as runWrite's do; no git program: code
+// 'ENOENT'; a server or place that went away meanwhile: `lost`; one that could not be reached:
+// `offline`; too slow: `timedOut`.
+
+/** git and the files on this computer. `runGit` / `runGitWrite` stand in for the real ones in tests. */
+function localRunner({ runGit = run, runGitWrite = runWrite } = {}) {
+  return {
+    kind: 'local',
+    path,
+    where: null,
+    git: runGit,
+    gitWrite: runGitWrite,
+    async exists(paths) {
+      return paths.map((p) => fs.existsSync(p));
+    },
+    async readFile(p, max = 8 * 1024 * 1024) {
+      let fd;
+      try {
+        const st = fs.statSync(p);
+        if (!st.isFile()) return null;
+        fd = fs.openSync(p, 'r');
+        const buf = Buffer.alloc(Math.min(st.size, max));
+        const n = fs.readSync(fd, buf, 0, buf.length, 0);
+        return { size: st.size, bytes: buf.subarray(0, n) };
+      } catch (err) {
+        if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return null;
+        throw err;
+      } finally {
+        if (fd !== undefined) fs.closeSync(fd);
+      }
+    },
+    async writeFile(p, bytes) {
+      fs.writeFileSync(p, bytes);
+    },
+    async realpath(p) {
+      try {
+        return fs.realpathSync.native(p);
+      } catch {
+        return path.resolve(p);
+      }
+    },
+    async readInRepo(root, rel, max) {
+      const real = fs.realpathSync(path.join(root, rel));
+      const top = fs.realpathSync(root);
+      if (real !== top && !real.startsWith(top + path.sep)) throw new Error('Not a file of this repository');
+      const stat = fs.statSync(real);
+      if (!stat.isFile()) throw new Error('Not a file');
+      const fd = fs.openSync(real, 'r');
+      try {
+        const buf = Buffer.alloc(Math.min(stat.size, max));
+        fs.readSync(fd, buf, 0, buf.length, 0);
+        return { size: stat.size, bytes: buf };
+      } finally {
+        fs.closeSync(fd);
+      }
+    },
+    installHint: async () => null,
+  };
+}
+
+// The scripts run on a server or in a place (shellRunner), fixed text: what they work on comes in
+// as values. remote.cjs puts places.cjs's PRELUDE before them and sends them, and the first two
+// arguments, base64-encoded. SHELL_PROLOGUE takes those two: where the values are ('argv': the
+// next argument; 'stdin': the first line of the input, when they are long) and the values, each
+// with ":" before it, separated by \037 (a value never holds a NUL, a line break or \037); then
+// "$@" is the values. It prints a start mark (a login shell's profile may print before it) and,
+// whatever happens, an end mark with the exit code (a channel cut short has none), and puts the
+// usual install places after PATH (git from Homebrew, Linuxbrew, ~/.local/bin). Only what POSIX
+// sh and busybox have (Alpine images, macOS servers): no GNU-only flags.
+const SHELL_PROLOGUE = `trap 'printf "\\036TE>%s\\n" "$?"' EXIT
+printf '\\036TE<\\n'
+from=$(arg "$1") || exit 97
+if [ "$from" = stdin ]; then IFS= read -r all || exit 97; else all=$(arg "$2") || exit 97; fi
+set --
+if [ -n "$all" ]; then IFS=$(printf '\\037'); set -f; set -- $all; set +f; unset IFS; fi
+k=$#
+while [ "$k" -gt 0 ]; do a=$1; shift; set -- "$@" "\${a#:}"; k=$((k - 1)); done
+unset CDPATH
+PATH="$PATH:/usr/local/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin:/snap/bin:$HOME/.local/bin:$HOME/bin"
+export PATH
+`;
+
+// Exit codes of the scripts (as places.cjs's): 40 not found, 41 a folder, 42 no permission, 44
+// failed, 45 not a folder (git's folder), 47 outside the repository, 96 no git, 97 no base64.
+const SHELL_SCRIPTS = {
+  // git in a folder: $1 'read' or 'write', $2 the folder, then git's arguments. The repository is
+  // the folder's (a GIT_DIR or GIT_WORK_TREE set there does not count). Reading takes no optional
+  // locks; writing gets no editor, and ssh in batch mode unless the server says how to run ssh
+  // itself (GIT_SSH_COMMAND, GIT_SSH or core.sshCommand). Never a prompt: no terminal,
+  // GIT_TERMINAL_PROMPT=0, Git Credential Manager not interactive.
+  git: `how=$1
+dir=$2
+shift 2
+cd -- "$dir" 2>/dev/null || exit 45
+command -v git >/dev/null 2>&1 || exit 96
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+LC_ALL=C
+GIT_TERMINAL_PROMPT=0
+GCM_INTERACTIVE=never
+export LC_ALL GIT_TERMINAL_PROMPT GCM_INTERACTIVE
+if [ "$how" = write ]; then
+  unset GIT_OPTIONAL_LOCKS
+  GIT_EDITOR=true
+  GIT_MERGE_AUTOEDIT=no
+  export GIT_EDITOR GIT_MERGE_AUTOEDIT
+  if [ -z "$GIT_SSH_COMMAND$GIT_SSH" ] && [ -z "$(git config --get core.sshCommand 2>/dev/null)" ]; then
+    GIT_SSH_COMMAND='ssh -o BatchMode=yes'
+    export GIT_SSH_COMMAND
+  fi
+else
+  GIT_OPTIONAL_LOCKS=0
+  export GIT_OPTIONAL_LOCKS
+fi
+git "$@"`,
+
+  // Which of the paths are there: 1 or 0, a line each.
+  exists: `for p do if [ -e "$p" ] || [ -h "$p" ]; then echo 1; else echo 0; fi; done`,
+
+  // A file: its size on a line, then its first $2 bytes.
+  read: `p=$1
+max=$2
+[ -e "$p" ] || exit 40
+[ -d "$p" ] && exit 41
+[ -r "$p" ] || exit 42
+n=$(wc -c < "$p" | tr -d ' \\t') || exit 44
+printf '%s\\n' "$n"
+head -c "$max" < "$p"`,
+
+  // A file written with the input.
+  write: `cat > "$1" || exit 44`,
+
+  // A folder's real path.
+  realpath: `cd -P -- "$1" 2>/dev/null || exit 40
+pwd -P`,
+
+  // A file in the repository $1 (its path inside it $2), links followed and checked: never
+  // outside it. Its size on a line, then its first $3 bytes.
+  inrepo: `root=$1
+f=$1/$2
+max=$3
+top=$(cd -P -- "$root" 2>/dev/null && pwd -P) || exit 40
+i=0
+while [ -h "$f" ]; do
+  i=$((i + 1))
+  [ "$i" -gt 40 ] && exit 47
+  t=$(readlink -- "$f") || exit 44
+  case $t in /*) f=$t ;; *) f=$(dirname -- "$f")/$t ;; esac
+done
+d=$(cd -P -- "$(dirname -- "$f")" 2>/dev/null && pwd -P) || exit 40
+real=$d/$(basename -- "$f")
+case $real in "$top"/*) ;; *) exit 47 ;; esac
+[ -e "$real" ] || exit 40
+[ -f "$real" ] || exit 41
+[ -r "$real" ] || exit 42
+n=$(wc -c < "$real" | tr -d ' \\t') || exit 44
+printf '%s\\n' "$n"
+head -c "$max" < "$real"`,
+
+  // What installing git would take there: the package managers, root or not, sudo, the system.
+  install: `for m in apt-get dnf yum microdnf apk zypper pacman brew; do command -v "$m" >/dev/null 2>&1 && printf 'pm/%s\\n' "$m"; done
+printf 'uid/%s\\n' "$(id -u 2>/dev/null)"
+command -v sudo >/dev/null 2>&1 && echo sudo
+if [ -r /etc/os-release ]; then sed -n 's/^ID=//p' /etc/os-release | tr -d '"' | head -n 1 | sed 's/^/os\\//'; fi
+printf 'uname/%s\\n' "$(uname -s 2>/dev/null)"`,
+};
+
+const START_MARK = Buffer.from('\x1eTE<\n', 'latin1');
+const END_MARK = /\x1eTE>(\d+)\n$/;
+// Values longer than this many bytes (a long list of paths) go on stdin rather than the command
+// line (base64 makes them a third longer; a Windows command line holds 32 K characters for
+// docker.exe and wsl.exe, one SSH packet 256 KB).
+const ARGS_INLINE = 12_000;
+const lastLine = (text) =>
+  String(text ?? '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .pop() ?? '';
+
+/** What the install script printed → { managers, root, sudo, os, system }. */
+function parseInstallProbe(text) {
+  const out = { managers: [], root: false, sudo: false, os: '', system: '' };
+  for (const line of String(text).split('\n')) {
+    if (line.startsWith('pm/')) out.managers.push(line.slice(3));
+    else if (line.startsWith('uid/')) out.root = line.slice(4).trim() === '0';
+    else if (line === 'sudo') out.sudo = true;
+    else if (line.startsWith('os/')) out.os = line.slice(3).trim().toLowerCase();
+    else if (line.startsWith('uname/')) out.system = line.slice(6).trim();
+  }
+  return out;
+}
+
+const INSTALL_LINES = {
+  'apt-get': ['apt-get update', 'apt-get install -y git'],
+  dnf: ['dnf install -y git'],
+  yum: ['yum install -y git'],
+  microdnf: ['microdnf install -y git'],
+  apk: ['apk add git'],
+  zypper: ['zypper install -y git'],
+  pacman: ['pacman -S --noconfirm git'],
+};
+const BY_SYSTEM = { alpine: 'apk', debian: 'apt-get', ubuntu: 'apt-get', linuxmint: 'apt-get', raspbian: 'apt-get', fedora: 'dnf', rhel: 'dnf', centos: 'yum', rocky: 'dnf', almalinux: 'dnf', amzn: 'yum', ol: 'dnf', opensuse: 'zypper', 'opensuse-leap': 'zypper', 'opensuse-tumbleweed': 'zypper', sles: 'zypper', arch: 'pacman', manjaro: 'pacman' };
+
+/**
+ * The command that installs git there, to type into its terminal (never run here): { command,
+ * manager, asRoot (no sudo there: run it as root) }, or null when it is not known. The package
+ * manager found first (apt-get, dnf, yum, microdnf, apk, zypper, pacman, Homebrew), else the one
+ * of the system /etc/os-release names; sudo before it unless root (never for Homebrew).
+ */
+function installCommand({ managers = [], root = false, sudo = false, os = '', system = '' } = {}) {
+  const manager = managers.find((m) => m === 'brew' || INSTALL_LINES[m]) ?? BY_SYSTEM[os] ?? (system === 'Darwin' ? 'xcode' : null);
+  if (!manager) return null;
+  if (manager === 'brew') return { command: 'brew install git', manager, asRoot: false };
+  if (manager === 'xcode') return { command: 'xcode-select --install', manager, asRoot: false };
+  const lines = INSTALL_LINES[manager];
+  const withSudo = !root && sudo;
+  return { command: lines.map((l) => (withSudo ? `sudo ${l}` : l)).join(' && '), manager, asRoot: !root && !sudo };
+}
+
+/**
+ * git and the files it needs on an SSH server or in a place. `run(script, args, opts)` runs a
+ * fixed script there with its arguments base64-encoded (remote.cjs `runArgs` for one connection:
+ * { code, stdout, stderr }); `where()` names the place in messages ("build-box", "web-1 (Docker)").
+ */
+function shellRunner({ run: runScript, where = () => 'the server' }) {
+  // One of SHELL_SCRIPTS with `values` (as "$1"…): { code, stdout, stderr } with the marks taken off.
+  async function call(name, values, { input = null, timeout = 30000, onStderr = null } = {}) {
+    for (const v of values) if (/[\0\n\x1f]/.test(String(v))) throw new Error('A name with a line break or a control character cannot be used there.');
+    const blob = values.map((v) => `:${v}`).join('\x1f');
+    const viaStdin = Buffer.byteLength(blob, 'utf8') > ARGS_INLINE;
+    const data = input === null || input === undefined ? null : Buffer.isBuffer(input) ? input : Buffer.from(String(input), 'utf8');
+    const stdin = viaStdin ? Buffer.concat([Buffer.from(`${blob}\n`, 'utf8'), data ?? Buffer.alloc(0)]) : data;
+    const got = await runScript(SHELL_PROLOGUE + SHELL_SCRIPTS[name], viaStdin ? ['stdin'] : ['argv', blob], { input: stdin, timeout, onStderr });
+    const stdout = Buffer.isBuffer(got.stdout) ? got.stdout : Buffer.from(String(got.stdout ?? ''));
+    const stderr = Buffer.isBuffer(got.stderr) ? got.stderr.toString('utf8') : String(got.stderr ?? '');
+    const at = stdout.indexOf(START_MARK);
+    const end = END_MARK.exec(stdout.subarray(Math.max(0, stdout.length - 16)).toString('latin1'));
+    if (at < 0 || !end) {
+      const said = lastLine(stderr);
+      // Nothing runs there this way (`unusable`: not taken for "no repository" or "no git").
+      if (got.code === 97 || (at < 0 && !said && got.code === 0)) throw Object.assign(new Error(`The command did not run on ${where()}: it needs sh and base64 there (busybox and coreutils have both).`), { unusable: true });
+      if (at < 0) throw Object.assign(new Error(`The command did not run on ${where()}${said ? `: ${said}` : ` (code ${got.code})`}.`), { unusable: true });
+      throw Object.assign(new Error(`The command on ${where()} stopped before it finished${said ? `: ${said}` : ''}.`), { lost: true });
+    }
+    return { code: Number(end[1]), stdout: stdout.subarray(at + START_MARK.length, stdout.length - end[0].length), stderr };
+  }
+  const failed = (got, what) => Object.assign(new Error(`${what} on ${where()}${lastLine(got.stderr) ? `: ${lastLine(got.stderr)}` : ` (code ${got.code})`}`), { code: got.code, stdout: '', stderr: got.stderr });
+  async function gitCall(how, args, cwd, { input = null, timeout, onProgress = null }) {
+    const got = await call('git', [how, cwd, ...args], { input, timeout, onStderr: onProgress ? progressLines(onProgress) : null });
+    if (got.code === 96) throw Object.assign(new Error(`Git is not installed on ${where()}`), { code: 'ENOENT', stdout: '', stderr: '' });
+    if (got.code === 45) throw Object.assign(new Error(`${cwd} is not a folder on ${where()}`), { code: 45, stdout: '', stderr: `fatal: cannot change to '${cwd}': No such folder` });
+    return got;
+  }
+  // A size line, then the bytes.
+  const sized = (got) => {
+    const nl = got.stdout.indexOf(10);
+    return { size: Number(got.stdout.subarray(0, Math.max(nl, 0)).toString('latin1')) || 0, bytes: nl < 0 ? Buffer.alloc(0) : got.stdout.subarray(nl + 1) };
+  };
+  return {
+    kind: 'shell',
+    path: posix,
+    where,
+    async git(args, cwd, { encoding = 'utf8', timeout = 15000 } = {}) {
+      const got = await gitCall('read', args, cwd, { timeout });
+      const stdout = encoding === 'buffer' ? got.stdout : got.stdout.toString('utf8');
+      if (got.code !== 0) throw Object.assign(new Error(`git ${args[0]} failed (${got.code})`), { code: got.code, stdout: encoding === 'buffer' ? '' : stdout, stderr: got.stderr });
+      return stdout;
+    },
+    async gitWrite(args, cwd, { input = null, timeout = 120_000, onProgress = null } = {}) {
+      const got = await gitCall('write', args, cwd, { input, timeout, onProgress });
+      const out = { stdout: got.stdout.toString('utf8'), stderr: got.stderr };
+      if (got.code !== 0) throw Object.assign(new Error(`git ${args[0]} failed (${got.code})`), { code: got.code, ...out });
+      return out;
+    },
+    async exists(paths) {
+      if (!paths.length) return [];
+      const got = await call('exists', paths, { timeout: 15000 });
+      if (got.code !== 0) throw failed(got, 'Could not look at the files');
+      const lines = got.stdout.toString('utf8').split('\n');
+      return paths.map((_, i) => lines[i] === '1');
+    },
+    async readFile(p, max = 8 * 1024 * 1024) {
+      const got = await call('read', [p, String(max)], { timeout: 30000 });
+      if (got.code === 40 || got.code === 41) return null;
+      if (got.code !== 0) throw failed(got, `Could not read ${posix.basename(p)}`);
+      return sized(got);
+    },
+    async writeFile(p, bytes) {
+      const got = await call('write', [p], { input: bytes, timeout: 30000 });
+      if (got.code !== 0) throw failed(got, `Could not write ${posix.basename(p)}`);
+    },
+    async realpath(p) {
+      const got = await call('realpath', [p], { timeout: 15000 });
+      return got.code === 0 ? got.stdout.toString('utf8').replace(/\n$/, '') || p : p;
+    },
+    async readInRepo(root, rel, max) {
+      const got = await call('inrepo', [root, rel, String(max)], { timeout: 30000 });
+      if (got.code === 47) throw new Error('Not a file of this repository');
+      if (got.code === 41) throw new Error('Not a file');
+      if (got.code === 40) throw new Error(`${rel}: no such file`);
+      if (got.code !== 0) throw failed(got, `Could not read ${rel}`);
+      return sized(got);
+    },
+    async installHint() {
+      const got = await call('install', [], { timeout: 15000 });
+      return got.code === 0 ? installCommand(parseInstallProbe(got.stdout.toString('utf8'))) : null;
+    },
+  };
 }
 
 // What the page may name: paths inside the repository (with "/"), branches, stashes.
@@ -89,23 +421,48 @@ const cleanUrl = (url) => String(url).replace(/^([a-z][\w+.-]*:\/\/)[^/@\s]*@/i,
 const BACKUP_REFS = 'refs/tracker-editor/backups';
 const MAX_BACKUPS = 50;
 
-/** Git for a computer: `parseStatus` is gitStatus.js's (the page's module), `parse` its other parsers. */
-function createGit({ parseStatus, parse = {}, runGit = run, runGitWrite = runWrite } = {}) {
-  const roots = new Map(); // folder → { root (or null), at }
-  let missing = false; // no git program
-  const ROOT_MS = 30_000;
+// A merge, rebase, cherry-pick or revert left halfway: the file each leaves in the .git folder.
+const IN_PROGRESS = [['MERGE_HEAD', 'merge'], ['REBASE_HEAD', 'rebase'], ['rebase-merge', 'rebase'], ['rebase-apply', 'rebase'], ['CHERRY_PICK_HEAD', 'cherry-pick'], ['REVERT_HEAD', 'revert']];
+const BACKUP_FILE = 'tracker-editor-backups.json';
+// No git program: not asked again for a while (installing it needs no restart).
+const MISSING_MS = 30_000;
 
-  /** The top folder of the repository `dir` is in, or null. */
+/**
+ * Git through `runner` (localRunner by default; shellRunner for a server or a place):
+ * `parseStatus` is gitStatus.js's (the page's module), `parse` its other parsers. `runGit` /
+ * `runGitWrite` stand in for the local runner's git in tests.
+ */
+function createGit({ parseStatus, parse = {}, runner = null, runGit: runGitHere = run, runGitWrite: runWriteHere = runWrite } = {}) {
+  const r = runner ?? localRunner({ runGit: runGitHere, runGitWrite: runWriteHere });
+  const p = r.path;
+  const runGit = (args, cwd, opts) => r.git(args, cwd, opts);
+  const runGitWrite = (args, cwd, opts) => r.gitWrite(args, cwd, opts);
+  // A server or place that went away, could not be reached, or cannot run git this way (a Windows
+  // server, no sh there): said as it is, never taken as "no repository" or "no git".
+  const gone = (err) => Boolean(err?.lost || err?.offline || err?.unusable);
+  const roots = new Map(); // folder → { root (or null), at }
+  let missing = 0; // when git was found missing (0: it was not)
+  const ROOT_MS = 30_000;
+  const oneLine = (out) => String(out).replace(/\r?\n$/, '');
+
+  /**
+   * The top folder of the repository `dir` is in, or null. Named as the page names `dir` when it
+   * is the same folder (a link above the repository: git gives the real path).
+   */
   async function repoOf(dir) {
-    if (missing) return null;
+    if (missing && Date.now() - missing < MISSING_MS) return null;
     const known = roots.get(dir);
     if (known && Date.now() - known.at < ROOT_MS) return known.root;
     let root = null;
     try {
-      const out = await runGit(['rev-parse', '--show-toplevel'], dir, { timeout: 5000 });
-      root = path.resolve(out.trim());
+      const [top, cdup = ''] = String(await runGit(['rev-parse', '--show-toplevel', '--show-cdup'], dir, { timeout: 5000 })).split('\n').map((l) => l.replace(/\r$/, ''));
+      missing = 0;
+      root = p.resolve(top);
+      const named = p.resolve(dir, cdup || '.');
+      if (named !== root && (await r.realpath(named)) === root) root = named;
     } catch (err) {
-      if (err.code === 'ENOENT') missing = true;
+      if (gone(err)) throw err;
+      if (err.code === 'ENOENT') missing = Date.now();
     }
     roots.set(dir, { root, at: Date.now() });
     return root;
@@ -114,9 +471,23 @@ function createGit({ parseStatus, parse = {}, runGit = run, runGitWrite = runWri
   const tryGit = async (args, root, opts) => {
     try {
       return await runGit(args, root, { timeout: 10000, ...opts });
-    } catch {
+    } catch (err) {
+      if (gone(err)) throw err;
       return '';
     }
+  };
+  /** Where Git keeps `names` for the repository (rev-parse --git-path, one call): full paths, or [] when it cannot say. */
+  const gitPaths = async (root, names) => {
+    const out = await tryGit(['rev-parse', ...names.flatMap((n) => ['--git-path', n])], root, { timeout: 5000 });
+    const lines = String(out).split('\n').map((l) => l.replace(/\r$/, '')).filter(Boolean);
+    return lines.length === names.length ? lines.map((l) => p.resolve(root, l)) : [];
+  };
+  /** What is halfway in `root` (of `list`), in its order. */
+  const halfway = async (root, list = IN_PROGRESS) => {
+    const paths = await gitPaths(root, list.map(([n]) => n));
+    if (!paths.length) return [];
+    const there = await r.exists(paths);
+    return list.filter((_, i) => there[i]).map(([, op]) => op);
   };
 
   /**
@@ -125,7 +496,8 @@ function createGit({ parseStatus, parse = {}, runGit = run, runGitWrite = runWri
    * without passwords), the reflog's last moves, tags, who commits, and our backups.
    */
   async function snapshot(root, parse) {
-    const [statusOut, graph, branchesOut, stashOut, remotes, reflog, tags, name, email, ignore] = await Promise.all([
+    const names = IN_PROGRESS.map(([n]) => n);
+    const [statusOut, graph, branchesOut, stashOut, remotes, reflog, tags, name, email, kept] = await Promise.all([
       tryGit(['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all'], root),
       tryGit(['log', '--graph', `--exclude=${BACKUP_REFS}/*`, '--all', '--date-order', '--decorate=short', '--format=%h%d %s · %an, %cr', '-n', '60'], root),
       tryGit(['for-each-ref', '--format=%(refname)%00%(upstream:short)%00%(upstream:track)%00%(committerdate:relative)%00%(HEAD)', 'refs/heads', 'refs/remotes'], root),
@@ -135,16 +507,11 @@ function createGit({ parseStatus, parse = {}, runGit = run, runGitWrite = runWri
       tryGit(['tag', '--sort=-creatordate', '--format=%(refname:short) %(objectname:short) %(creatordate:relative)'], root),
       tryGit(['config', 'user.name'], root),
       tryGit(['config', 'user.email'], root),
-      Promise.resolve(fs.existsSync(path.join(root, '.gitignore'))),
+      gitPaths(root, [...names, BACKUP_FILE]),
     ]);
-    let inProgress = null;
-    for (const [n, op] of [['MERGE_HEAD', 'merge'], ['REBASE_HEAD', 'rebase'], ['rebase-merge', 'rebase'], ['rebase-apply', 'rebase'], ['CHERRY_PICK_HEAD', 'cherry-pick'], ['REVERT_HEAD', 'revert']]) {
-      const p = (await tryGit(['rev-parse', '--git-path', n], root)).trim();
-      if (p && fs.existsSync(path.resolve(root, p))) {
-        inProgress = op;
-        break;
-      }
-    }
+    const there = await r.exists([...kept.slice(0, names.length), p.join(root, '.gitignore')]);
+    const ignore = Boolean(there.at(-1));
+    const inProgress = kept.length ? (IN_PROGRESS.find((_, i) => there[i])?.[1] ?? null) : null;
     const status = statusOut ? parseStatus(statusOut) : null;
     const remoteList = [...new Set(remotes.split('\n').filter(Boolean).map((l) => {
       const [rname, url] = l.split(/\s+/);
@@ -162,19 +529,21 @@ function createGit({ parseStatus, parse = {}, runGit = run, runGitWrite = runWri
       tags: tags.split('\n').filter(Boolean).slice(0, 10),
       identity: { name: Boolean(name.trim()), email: Boolean(email.trim()) },
       gitignore: ignore,
-      backups: (await readBackups(root)).slice(0, 10).map(({ tips, ...b }) => b),
+      backups: (await readBackups(root, kept[names.length])).slice(0, 10).map(({ tips, ...b }) => b),
     };
   }
 
   // Backups (Git with the model): before a step that changes history or files, the commit HEAD
   // is on (a ref of ours, so Git never collects it) and the changes not committed (`git stash
   // create`: a commit, the files untouched), listed in a file in the .git folder.
-  const backupFile = async (root) => path.resolve(root, (await runGit(['rev-parse', '--git-path', 'tracker-editor-backups.json'], root, { timeout: 5000 })).trim());
-  async function readBackups(root) {
+  const backupFile = async (root) => p.resolve(root, oneLine(await runGit(['rev-parse', '--git-path', BACKUP_FILE], root, { timeout: 5000 })));
+  async function readBackups(root, known = null) {
     try {
-      const list = JSON.parse(fs.readFileSync(await backupFile(root), 'utf8'));
+      const got = await r.readFile(known || (await backupFile(root)), 8 * 1024 * 1024);
+      const list = got ? JSON.parse(got.bytes.toString('utf8')) : [];
       return Array.isArray(list) ? list : [];
-    } catch {
+    } catch (err) {
+      if (gone(err)) throw err;
       return [];
     }
   }
@@ -201,7 +570,7 @@ function createGit({ parseStatus, parse = {}, runGit = run, runGitWrite = runWri
       await tryGit(['update-ref', '-d', `${BACKUP_REFS}/${old.id}-changes`], root);
       for (let i = 0; i < (old.kept ?? 0); i++) await tryGit(['update-ref', '-d', `${BACKUP_REFS}/${old.id}-kept-${i}`], root);
     }
-    fs.writeFileSync(await backupFile(root), JSON.stringify(list.slice(0, MAX_BACKUPS), null, 1));
+    await r.writeFile(await backupFile(root), Buffer.from(JSON.stringify(list.slice(0, MAX_BACKUPS), null, 1), 'utf8'));
     return entry;
   }
   /**
@@ -214,10 +583,7 @@ function createGit({ parseStatus, parse = {}, runGit = run, runGitWrite = runWri
     if (!entry) throw new Error('That backup is gone');
     const before = await makeBackup(root, `before undoing “${entry.label}”`);
     const w = (args, opts) => runGitWrite(args, root, opts);
-    for (const [n, op] of [['MERGE_HEAD', 'merge'], ['rebase-merge', 'rebase'], ['rebase-apply', 'rebase'], ['CHERRY_PICK_HEAD', 'cherry-pick'], ['REVERT_HEAD', 'revert']]) {
-      const p = (await tryGit(['rev-parse', '--git-path', n], root)).trim();
-      if (p && fs.existsSync(path.resolve(root, p))) await w([op, '--abort']).catch(() => {});
-    }
+    for (const op of await halfway(root, IN_PROGRESS.filter(([n]) => n !== 'REBASE_HEAD'))) await w([op, '--abort']).catch(() => {});
     // Branches deleted since are made again where they were (the others stay where they are now).
     for (const [b, sha] of Object.entries(entry.tips ?? {})) {
       if (!safeBranch(b) || (await tryGit(['rev-parse', '--verify', '-q', `refs/heads/${b}`], root)).trim()) continue;
@@ -253,20 +619,22 @@ function createGit({ parseStatus, parse = {}, runGit = run, runGitWrite = runWri
       try {
         const out = await runGit(['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all'], root);
         return { root, ...parseStatus(out) };
-      } catch {
+      } catch (err) {
+        if (gone(err)) throw err;
         return null;
       }
     },
     /** A file's bytes at the last commit (HEAD): { root, rel, bytes }, or null (not in a repository, or new). */
     async headBytes(file) {
-      const root = await repoOf(path.dirname(file));
+      const root = await repoOf(p.dirname(file));
       if (!root) return null;
-      const rel = path.relative(root, file).split(path.sep).join('/');
+      const rel = p.relative(root, file).split(p.sep).join('/');
       if (!rel || rel.startsWith('..')) return null;
       try {
         const bytes = await runGit(['show', `HEAD:${rel}`], root, { encoding: 'buffer', maxBuffer: 32 * 1024 * 1024 });
         return { root, rel, bytes };
-      } catch {
+      } catch (err) {
+        if (gone(err)) throw err;
         return null;
       }
     },
@@ -275,7 +643,8 @@ function createGit({ parseStatus, parse = {}, runGit = run, runGitWrite = runWri
       try {
         const name = (await runGit(['rev-parse', '--abbrev-ref', 'HEAD'], root, { timeout: 5000 })).trim();
         return name === 'HEAD' ? 'detached' : name;
-      } catch {
+      } catch (err) {
+        if (gone(err)) throw err;
         return '';
       }
     },
@@ -295,7 +664,8 @@ function createGit({ parseStatus, parse = {}, runGit = run, runGitWrite = runWri
         try {
           await runGit(['rev-parse', '--verify', '-q', 'HEAD'], root, { timeout: 5000 });
           return true;
-        } catch {
+        } catch (err) {
+          if (gone(err)) throw err;
           return false;
         }
       };
@@ -371,14 +741,9 @@ function createGit({ parseStatus, parse = {}, runGit = run, runGitWrite = runWri
         case 'stash-drop':
           if (!safeStash(action.ref)) throw new Error('Not a stash');
           return w(['stash', action.op.slice(6), action.ref]);
-        case 'in-progress': {
+        case 'in-progress':
           // A merge or a rebase left halfway (conflicts): what can be aborted.
-          for (const [name, op] of [['MERGE_HEAD', 'merge'], ['REBASE_HEAD', 'rebase'], ['rebase-merge', 'rebase'], ['rebase-apply', 'rebase'], ['CHERRY_PICK_HEAD', 'cherry-pick'], ['REVERT_HEAD', 'revert']]) {
-            const p = (await runGit(['rev-parse', '--git-path', name], root, { timeout: 5000 })).trim();
-            if (fs.existsSync(path.resolve(root, p))) return op;
-          }
-          return null;
-        }
+          return (await halfway(root))[0] ?? null;
         case 'abort': {
           const op = { merge: 'merge', rebase: 'rebase', 'cherry-pick': 'cherry-pick', revert: 'revert' }[action.what];
           if (!op) throw new Error('Nothing to abort');
@@ -412,19 +777,8 @@ function createGit({ parseStatus, parse = {}, runGit = run, runGitWrite = runWri
         case 'read': {
           // A file as it is now in the repository's folder (never outside it: links are followed and checked).
           if (!safeRel(action.path)) throw new Error('Not a file of this repository');
-          const real = fs.realpathSync(path.join(root, action.path));
-          const top = fs.realpathSync(root);
-          if (real !== top && !real.startsWith(top + path.sep)) throw new Error('Not a file of this repository');
-          const stat = fs.statSync(real);
-          if (!stat.isFile()) throw new Error('Not a file');
-          const fd = fs.openSync(real, 'r');
-          try {
-            const buf = Buffer.alloc(Math.min(stat.size, 64 * 1024));
-            fs.readSync(fd, buf, 0, buf.length, 0);
-            return cap(buf.toString('utf8'), 40_000) + (stat.size > buf.length ? `\n… (the file is ${stat.size} bytes; the rest left out)` : '');
-          } finally {
-            fs.closeSync(fd);
-          }
+          const got = await r.readInRepo(root, action.path, 64 * 1024);
+          return cap(got.bytes.toString('utf8'), 40_000) + (got.size > got.bytes.length ? `\n… (the file is ${got.size} bytes; the rest left out)` : '');
         }
         case 'reflog': {
           const count = Math.min(Math.max(Number(action.count) || 30, 1), 200);
@@ -496,18 +850,16 @@ function createGit({ parseStatus, parse = {}, runGit = run, runGitWrite = runWri
         case 'ignore': {
           const patterns = Array.isArray(action.patterns) ? action.patterns.filter(safePattern).slice(0, 50) : [];
           if (!patterns.length) throw new Error('No patterns');
-          const file = path.join(root, '.gitignore');
-          let text = '';
-          try {
-            text = fs.readFileSync(file, 'utf8');
-          } catch {
-            // none yet
-          }
+          const file = p.join(root, '.gitignore');
+          // None yet: ''.
+          const got = await r.readFile(file, 4 * 1024 * 1024);
+          if (got && got.size > got.bytes.length) throw new Error('The .gitignore is too large to change here');
+          const text = got ? got.bytes.toString('utf8') : '';
           const have = new Set(text.split(/\r?\n/).map((l) => l.trim()));
-          const added = patterns.map((p) => p.trim()).filter((p) => !have.has(p));
+          const added = patterns.map((x) => x.trim()).filter((x) => !have.has(x));
           if (added.length) {
             const eol = text.includes('\r\n') ? '\r\n' : '\n';
-            fs.writeFileSync(file, `${text}${text && !text.endsWith('\n') ? eol : ''}${added.join(eol)}${eol}`);
+            await r.writeFile(file, Buffer.from(`${text}${text && !text.endsWith('\n') ? eol : ''}${added.join(eol)}${eol}`, 'utf8'));
           }
           return { added, already: patterns.length - added.length };
         }
@@ -524,21 +876,22 @@ function createGit({ parseStatus, parse = {}, runGit = run, runGitWrite = runWri
     },
     /** The text staged for a file (the index), as bytes: { root, rel, bytes } or null (not staged, or not in a repository). */
     async indexBytes(file) {
-      const root = await repoOf(path.dirname(file));
+      const root = await repoOf(p.dirname(file));
       if (!root) return null;
-      const rel = path.relative(root, file).split(path.sep).join('/');
+      const rel = p.relative(root, file).split(p.sep).join('/');
       if (!safeRel(rel)) return null;
       try {
         return { root, rel, bytes: await runGit(['show', `:${rel}`], root, { encoding: 'buffer', maxBuffer: 32 * 1024 * 1024 }) };
-      } catch {
+      } catch (err) {
+        if (gone(err)) throw err;
         return null;
       }
     },
     /** Stages `bytes` as a file's text (one change of it staged): written as a blob, put in the index with the file's mode. */
     async setIndexBytes(file, bytes) {
-      const root = await repoOf(path.dirname(file));
+      const root = await repoOf(p.dirname(file));
       if (!root) throw new Error('Not in a Git repository');
-      const rel = path.relative(root, file).split(path.sep).join('/');
+      const rel = p.relative(root, file).split(p.sep).join('/');
       if (!safeRel(rel)) throw new Error('Not a file of this repository');
       const sha = (await runGitWrite(['hash-object', '-w', '--stdin', `--path=${rel}`], root, { input: bytes })).stdout.trim();
       const staged = (await runGit(['ls-files', '-s', '--', rel], root, { timeout: 5000 })).trim();
@@ -546,26 +899,38 @@ function createGit({ parseStatus, parse = {}, runGit = run, runGitWrite = runWri
       await runGitWrite(['update-index', '--add', '--cacheinfo', `${mode},${sha},${rel}`], root);
       return { root, rel };
     },
-    /** Forgets which folders are in which repository (a repository was made or removed). */
-    forget: () => roots.clear(),
+    /** Forgets which folders are in which repository (a repository was made or removed), and that git was missing. */
+    forget: () => {
+      roots.clear();
+      missing = 0;
+    },
     /**
      * What making `dir` a repository would mean: { installed (the git program is there), root
      * (the repository `dir` is in already, or null), defaultBranch (the person's
-     * init.defaultBranch, or '') }.
+     * init.defaultBranch, or ''), version }; where git is missing on a server or in a place,
+     * `install` too: the command that installs it there (installCommand), when known.
      */
     async info(dir) {
-      if (!missing) {
-        try {
-          await runGit(['--version'], dir, { timeout: 5000 });
-        } catch (err) {
-          if (err.code === 'ENOENT') missing = true;
-        }
+      let version = '';
+      try {
+        version = /(\d+\.\d+(\.\d+)?)/.exec(await runGit(['--version'], dir, { timeout: 5000 }))?.[1] ?? '';
+        missing = 0;
+      } catch (err) {
+        if (err.code === 'ENOENT') missing = Date.now();
+        // Why nothing ran there (it went away, it runs Windows, it has no sh): said as it is.
+        else if (gone(err)) throw err;
       }
-      if (missing) return { installed: false, root: null, defaultBranch: '' };
+      if (missing) {
+        const install = await r.installHint().catch((err) => {
+          if (gone(err)) throw err;
+          return null;
+        });
+        return { installed: false, root: null, defaultBranch: '', ...(install ? { install } : {}) };
+      }
       roots.delete(dir);
       const root = await repoOf(dir);
       const named = (await tryGit(['config', '--get', 'init.defaultBranch'], dir)).trim();
-      return { installed: true, root, defaultBranch: safeBranch(named) ? named : '' };
+      return { installed: true, root, defaultBranch: safeBranch(named) ? named : '', ...(version ? { version } : {}) };
     },
     /**
      * Makes `dir` a Git repository (git init), its first branch named `branch` (else Git's own
@@ -576,16 +941,12 @@ function createGit({ parseStatus, parse = {}, runGit = run, runGitWrite = runWri
       if (branch && !safeBranch(branch)) throw new Error('Not a branch name');
       roots.delete(dir);
       const before = await repoOf(dir);
-      if (missing) throw new Error('Git is not installed on this computer');
-      const real = (p) => {
-        try {
-          return fs.realpathSync.native(p);
-        } catch {
-          return path.resolve(p);
-        }
+      if (missing) throw new Error(`Git is not installed ${r.where ? `on ${r.where()}` : 'on this computer'}`);
+      const key = async (x) => {
+        const real = await r.realpath(x);
+        return r.kind === 'local' && process.platform === 'win32' ? real.toLowerCase() : real;
       };
-      const key = (p) => (process.platform === 'win32' ? real(p).toLowerCase() : real(p));
-      if (before && key(before) === key(dir)) throw new Error('This folder is a Git repository already');
+      if (before && (await key(before)) === (await key(dir))) throw new Error('This folder is a Git repository already');
       // Git's own check of the name, before anything is made.
       if (branch) await runGit(['check-ref-format', '--branch', branch], dir, { timeout: 5000 });
       await runGitWrite(['init', '-q'], dir);
@@ -595,9 +956,13 @@ function createGit({ parseStatus, parse = {}, runGit = run, runGitWrite = runWri
       return { root, branch: (await tryGit(['symbolic-ref', '--short', 'HEAD'], dir)).trim() };
     },
     get missing() {
-      return missing;
+      return Boolean(missing);
+    },
+    /** Where git runs: 'local' or 'shell' (a server or a place). */
+    get kind() {
+      return r.kind;
     },
   };
 }
 
-module.exports = { createGit, writeEnv, safeRel, safeBranch, safeRev, safeRange, cleanUrl };
+module.exports = { createGit, localRunner, shellRunner, installCommand, parseInstallProbe, SHELL_PROLOGUE, SHELL_SCRIPTS, ARGS_INLINE, writeEnv, safeRel, safeBranch, safeRev, safeRange, cleanUrl };

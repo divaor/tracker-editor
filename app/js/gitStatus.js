@@ -283,13 +283,21 @@ export function branchNameProblem(name) {
 }
 
 /**
+ * Where a server's or a place's Git runs, in words ("the server build-box", "the container
+ * web-1", "Ubuntu (WSL)"), from { kind: 'ssh'|'docker'|'wsl', name }; '' for this computer.
+ */
+export const placeWords = (place) => (!place?.name ? '' : place.kind === 'docker' ? `the container ${place.name}` : place.kind === 'wsl' ? `${place.name} (WSL)` : `the server ${place.name}`);
+
+/**
  * What a Git command said when it failed, for a person: { kind, message, detail } (`detail`:
  * Git's own last lines). Kinds: 'auth' (signing in), 'identity' (no name and email), 'diverged'
  * (a pull that cannot just move forward), 'rejected' (a push the remote refused: pull first),
  * 'conflict' (files in conflict, or local changes a switch or pull would overwrite), 'nothing'
- * (nothing to commit), 'noupstream' (a branch not on the remote, pulled), 'noremote', 'other'.
+ * (nothing to commit), 'noupstream' (a branch not on the remote, pulled), 'noremote', 'old' (a
+ * Git without switch and restore, older than 2.23), 'other'. `place` ({ kind, name }): Git ran on
+ * a server or in a place, with its own sign-ins and settings, and the words say so.
  */
-export function gitError(stderr = '', stdout = '') {
+export function gitError(stderr = '', stdout = '', { place = null } = {}) {
   const text = `${stderr}\n${stdout}`;
   const lines = String(stderr || stdout)
     .split(/\r?\n|\r/)
@@ -297,10 +305,19 @@ export function gitError(stderr = '', stdout = '') {
     .filter((l) => l && !/^hint:/.test(l) && !/^(remote: )?(Counting|Compressing|Enumerating|Receiving|Resolving|Writing|Total|Unpacking) /.test(l));
   const detail = lines.slice(-6).join('\n');
   const is = (re) => re.test(text);
+  const there = placeWords(place);
   if (is(/Authentication failed|could not read Username|Permission denied \(publickey|terminal prompts disabled|Host key verification failed|HTTP Basic: Access denied|returned error: 403/i))
-    return { kind: 'auth', message: 'Git could not sign in to the remote. Set up a credential helper (Git Credential Manager on Windows, the keychain on macOS) or an SSH key with its agent running, then try again.', detail };
+    return {
+      kind: 'auth',
+      message: there
+        ? `Git on ${there} could not sign in to the remote. It signs in as Git does in a terminal there, never asking here: with an SSH key on ${there} (in its agent, or without a passphrase, the remote's host known there) or a credential helper set up there. Set one up there, then try again.`
+        : 'Git could not sign in to the remote. Set up a credential helper (Git Credential Manager on Windows, the keychain on macOS) or an SSH key with its agent running, then try again.',
+      detail,
+    };
   if (is(/Please tell me who you are|empty ident|unable to auto-detect email/i))
-    return { kind: 'identity', message: 'Git does not know your name and email yet: run git config --global user.name "Your Name" and git config --global user.email you@example.com in a terminal, then commit again.', detail };
+    return { kind: 'identity', message: `Git${there ? ` on ${there}` : ''} does not know your name and email yet: run git config --global user.name "Your Name" and git config --global user.email you@example.com in a terminal${there ? ' there' : ''}, then commit again.`, detail };
+  if (is(/is not a git command|unknown option [`']porcelain=v2/i))
+    return { kind: 'old', message: `Git${there ? ` on ${there}` : ''} is too old for this: switching branches and restoring files need Git 2.23 or newer. Update Git${there ? ' there' : ''}, then try again.`, detail };
   if (is(/Not possible to fast-forward|divergent branches|have diverged/i))
     return { kind: 'diverged', message: 'Your branch and the remote both have new commits: pull by merging them or by rebasing yours on top.', detail };
   if (is(/\[rejected\]|non-fast-forward|fetch first|Updates were rejected/i))

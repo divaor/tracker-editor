@@ -1,5 +1,5 @@
-// Git with the model (desktop, repositories on this computer): ask about the repository and
-// have the model do things in it. Each question goes with a snapshot (git.cjs); the model's
+// Git with the model (desktop: repositories on this computer, on SSH servers and in places, where
+// the git there runs the steps): ask about the repository and have the model do things in it. Each question goes with a snapshot (git.cjs); the model's
 // ```git-steps blocks (gitAssist.js) become cards: looking steps run at once and go back to
 // it; steps that are easy to undo run by themselves; the others wait for Run (danger ones in
 // red), each backed up first so Undo can bring things back. Steps run in order and stop at the

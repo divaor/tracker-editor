@@ -152,8 +152,11 @@ export function snapshotText(snap) {
   const staged = files(s.staged);
   const unstaged = files(s.unstaged);
   const b = snap.branches ?? { local: [], remote: [] };
+  // On a server or in a place: Git runs there, with its own sign-ins (`place` from main.cjs).
+  const there = snap.place?.name ? { ssh: `the SSH server ${snap.place.name}`, docker: `the Docker container ${snap.place.name}`, wsl: `the WSL distribution ${snap.place.name}` }[snap.place.kind] ?? snap.place.name : '';
   return [
     `Repository: ${snap.root}`,
+    there ? `Where: on ${there}. Every step runs there, with Git there and its own sign-ins to the remotes (an SSH key or a credential helper on that machine; nothing is asked here).` : '',
     `On branch: ${s.branch || '(none)'}${s.upstream ? `, following ${s.upstream} (${s.ahead ?? 0} to push, ${s.behind ?? 0} to pull)` : s.branch && s.branch !== 'detached' ? ', not on a remote yet' : ''}`,
     snap.inProgress ? `IN PROGRESS: a ${snap.inProgress} stopped halfway (conflicts are files marked C).` : '',
     `Who commits: name ${snap.identity?.name ? 'set' : 'NOT set'}, email ${snap.identity?.email ? 'set' : 'NOT set'}`,

@@ -83,6 +83,19 @@ function placeArgs(conn, script, args = [], opts = {}) {
   return [...placePrefix(conn, opts), 'sh', '-c', BOOT, 'sh', encodeScript(script), ...args.map(encodeArg)];
 }
 
+/** A word for a POSIX shell: in single quotes, a quote in it as '\'' (fish and csh read it so too). */
+const shellQuote = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+
+/**
+ * The same as one command line for an SSH server, whose login shell (bash, zsh, fish, csh…) parses
+ * it: sh -c 'BOOT' sh <script> <args…>. BOOT is the only word quoted (it has no quote or
+ * backslash, so its quotes only wrap it); the others are base64, letters every shell reads as they
+ * are. No value the page or a script gives ever reaches that shell.
+ */
+function bootCommand(script, args = []) {
+  return ['sh', '-c', shellQuote(BOOT), 'sh', encodeScript(script), ...args.map(encodeArg)].join(' ');
+}
+
 /**
  * The checked fields of a place's connection: { container } or { distro }, and `user` ('' = the
  * container's or the distribution's own).
@@ -613,9 +626,10 @@ async function startContainer(tools, name, { spawn } = {}) {
 /**
  * Runs `program` with `args`: { code, signal, stdout (Buffer), stderr (Buffer), timedOut, stopped }.
  * `input`: a Buffer or string for stdin, or a readable stream piped to it; `onStdout(chunk)`
- * takes the output instead of keeping it; `signal` stops it; `timeout` (ms, 0 = none) kills it.
+ * takes the output instead of keeping it; `onStderr(chunk)` sees the error output as it comes (it
+ * is kept too); `signal` stops it; `timeout` (ms, 0 = none) kills it.
  */
-function runCommand({ program, args, env, input = null, timeout = 30000, onStdout = null, signal = null, spawn = childProcess.spawn, maxOut = 512 * 1024 * 1024 }) {
+function runCommand({ program, args, env, input = null, timeout = 30000, onStdout = null, onStderr = null, signal = null, spawn = childProcess.spawn, maxOut = 512 * 1024 * 1024 }) {
   return new Promise((resolve, reject) => {
     let child;
     try {
@@ -661,6 +675,7 @@ function runCommand({ program, args, env, input = null, timeout = 30000, onStdou
     child.stderr.on('data', (chunk) => {
       if (errSize < 65536) err.push(chunk);
       errSize += chunk.length;
+      onStderr?.(chunk);
     });
     child.on('error', (e) => settle(() => reject(e)));
     child.on('close', (code, sig) => settle(() => resolve({ code, signal: sig, stdout: Buffer.concat(out), stderr: Buffer.concat(err), timedOut, stopped })));
@@ -872,20 +887,20 @@ class ExecSession {
   }
 
   /** Runs one of SCRIPTS (or a script of the caller's: `raw`) with `args`; the result as runCommand gives it. */
-  async script(name, args = [], { input = null, timeout = 30000, onStdout = null, signal = null, raw = null } = {}) {
-    if (this.closed && name !== 'hello') throw placeError(`${this.name} is not connected.`);
+  async script(name, args = [], { input = null, timeout = 30000, onStdout = null, onStderr = null, signal = null, raw = null } = {}) {
+    if (this.closed && name !== 'hello') throw placeError(`${this.name} is not connected.`, { lost: true });
     const argv = placeArgs(this.conn, raw ?? SCRIPTS[name], args);
-    const r = await this.slot(() => runCommand({ program: this.tool.program, args: argv, env: this.tool.env, input, timeout, onStdout, signal, spawn: this.spawn })).catch((err) => {
-      if (err.code === 'ENOENT') throw placeError(`${this.tool.program} is not there any more.`);
+    const r = await this.slot(() => runCommand({ program: this.tool.program, args: argv, env: this.tool.env, input, timeout, onStdout, onStderr, signal, spawn: this.spawn })).catch((err) => {
+      if (err.code === 'ENOENT') throw placeError(`${this.tool.program} is not there any more.`, { lost: true });
       throw err;
     });
     if (r.stopped) throw stoppedError();
-    if (r.timedOut) throw placeError(`${this.name} did not answer in ${Math.round(timeout / 1000)} s.`);
+    if (r.timedOut) throw placeError(`${this.name} did not answer in ${Math.round(timeout / 1000)} s.`, { timedOut: true });
     if (r.code !== 0) {
       const problem = cliProblem(r.stderr, this.conn);
       if (problem && (r.code < 40 || r.code > 46) && r.code !== 97) {
         if (problem.lost) this.lost(problem.message);
-        throw placeError(problem.message, { stopped: Boolean(problem.stopped) });
+        throw placeError(problem.message, { stopped: Boolean(problem.stopped), lost: Boolean(problem.lost) });
       }
     }
     return r;
@@ -1243,6 +1258,22 @@ class ExecSession {
     const r = await this.script('', [], { raw: String(script), timeout });
     return r.stdout.subarray(0, max).toString('utf8');
   }
+
+  /**
+   * A fixed script of the caller's (Git: git.cjs's, never made from what the page sends) with its
+   * arguments, as SftpSession.runArgs runs one on an SSH server: { code, stdout, stderr } (Buffers),
+   * whatever the code. `input` goes to its stdin, `onStderr(chunk)` sees its error output as it
+   * comes. A place that went away rejects with `lost`, one that did not answer with `timedOut`.
+   */
+  async runArgs(script, args = [], { input = null, timeout = 30000, onStderr = null } = {}) {
+    try {
+      const r = await this.script('', args, { raw: String(script), input, timeout, onStderr });
+      return { code: r.code, stdout: r.stdout, stderr: r.stderr };
+    } catch (err) {
+      if (this.closed) err.lost = true;
+      throw err;
+    }
+  }
 }
 
 module.exports = {
@@ -1259,6 +1290,8 @@ module.exports = {
   encodeArg,
   placePrefix,
   placeArgs,
+  bootCommand,
+  shellQuote,
   cleanPlace,
   checkPath,
   cliProblem,

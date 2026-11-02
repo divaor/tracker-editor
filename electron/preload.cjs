@@ -204,7 +204,8 @@ contextBridge.exposeInMainWorld('desktop', {
   docker: {
     info: () => ipcRenderer.invoke('docker:info'),
   },
-  // Git for folders on this computer: status, a file at the last commit.
+  // Git for folders on this computer, on SSH servers and in places (remote:// folders with a
+  // shell): status, a file at the last commit ({ offline } for a server not connected now).
   git: {
     status: (dir) => ipcRenderer.invoke('git:status', dir),
     head: (file) => ipcRenderer.invoke('git:head', file),

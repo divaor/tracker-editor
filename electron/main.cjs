@@ -261,6 +261,8 @@ ipcMain.handle('remote:start-container', guard((_e, name) => remote.startContain
 ipcMain.handle('remote:save', guard((_e, conn, secrets) => remote.saveConnection(conn ?? {}, secrets ?? {})));
 ipcMain.handle('remote:delete', guard((_e, id) => {
   lspHost.stopRemote(id);
+  gitTools.delete(id);
+  gitTools.delete(`${id}:quiet`);
   return remote.deleteConnection(id);
 }));
 ipcMain.handle('remote:test', guard((_e, conn, secrets) => remote.test(conn ?? {}, secrets ?? {})));
@@ -1894,7 +1896,7 @@ ipcMain.handle('folder:watch', guard((event, dirs, group = 'folders') => {
 // with matches goes to the page as soon as it is read ('folder:found').
 const { findInFolder, findNames, listFiles } = require('./findInFolder.cjs');
 const { findDeclarations, createSymbolIndex } = require('./codeIndex.cjs');
-const { createGit } = require('./git.cjs');
+const { createGit, shellRunner } = require('./git.cjs');
 const folderSearches = new Map(); // search id → AbortController
 let appModules = null;
 const loadAppModules = async () =>
@@ -2282,91 +2284,184 @@ ipcMain.handle('folder:replace-undo', guard(async (_e, id) => {
   return { restored, skipped };
 }));
 
-// ---- Git for folders on this computer ----
+// ---- Git: folders on this computer, on SSH servers and in places (Docker, WSL) ----
 // Reading (status, a file at HEAD) and, asked by the person in the page, the commands that
 // change the repository a folder they opened is in (git.cjs `act`: stage, commit, branches,
-// stash, fetch, pull, push). The page names a folder (checked) and paths inside the
-// repository, never a command; git.cjs checks every name it passes on.
-let gitTool = null;
-const git = async () => {
-  if (gitTool) return gitTool;
+// stash, fetch, pull, push…). The page names a folder (checked here, or a remote:// one on a
+// connection with a shell) and paths inside the repository, never a command; git.cjs checks every
+// name it passes on, and on a server or in a place no value ever becomes shell text (shellRunner:
+// a fixed script, its values base64-encoded, through remote.cjs runArgs).
+const gitTools = new Map(); // 'local', a connection's id, or `<id>:quiet` → git.cjs's tool (each with its runner)
+/**
+ * The git tool for this computer (`id` null) or a connection. `quiet`: for the reads made when a
+ * folder or tab shows (status, HEAD), which never connect to a server by themselves (nor ask for
+ * its password): a server not connected now is `offline` to them.
+ */
+async function gitTool(id = null, { quiet = false } = {}) {
+  const key = id ? `${id}${quiet ? ':quiet' : ''}` : 'local';
+  if (gitTools.has(key)) return gitTools.get(key);
   const { gitStatus } = await loadAppModules();
-  return (gitTool ??= createGit({ parseStatus: gitStatus.parseStatus, parse: { parseBranches: gitStatus.parseBranches, parseStashes: gitStatus.parseStashes } }));
+  const runner = id ? shellRunner({ run: (script, args, opts) => remote.runArgs(id, script, args, { ...opts, what: 'Git', connect: !quiet }), where: () => gitPlaceName(id) }) : null;
+  const tool = createGit({ parseStatus: gitStatus.parseStatus, parse: { parseBranches: gitStatus.parseBranches, parseStashes: gitStatus.parseStashes }, runner });
+  if (!gitTools.has(key)) gitTools.set(key, tool);
+  return gitTools.get(key);
+}
+// "build-box", "web-1 (Docker)", "Ubuntu (WSL)": where Git ran, in its messages.
+const gitPlaceName = (id) => {
+  const c = remote.describe(id);
+  return !c ? 'the server' : c.protocol === 'docker' ? `${c.name} (Docker)` : c.protocol === 'wsl' ? `${c.name} (WSL)` : c.name;
+};
+// For the model's picture of the repository and the page's words: { kind: 'ssh'|'docker'|'wsl', name }.
+const gitPlaceOf = (id) => {
+  const c = remote.describe(id);
+  return c ? { kind: c.protocol === 'sftp' ? 'ssh' : c.protocol, name: c.name } : null;
+};
+/**
+ * Where a Git call goes: a folder (or with `file`, a file) on this computer, checked as every
+ * page path is, or a remote:// one on a connection that has a shell (SFTP or a place; FTP has
+ * none: an error with `noShell`). { tool, at (the path where git runs), uri (a path there → as
+ * the page names it), id }. With `connected`, a server not connected now answers { offline }
+ * (status and HEAD reads never connect by themselves).
+ */
+async function gitTarget(p, { file = false, connected = false } = {}) {
+  if (typeof p !== 'string' || !p) throw new Error(file ? 'Not a file' : 'Not a folder');
+  if (!isRemote(p)) {
+    if (file) checkFile(p);
+    else checkDir(p);
+    return { tool: await gitTool(null), at: p, uri: (x) => x, id: null };
+  }
+  const { id, path: at } = remoteFiles.parseUri(p);
+  const conn = remote.describe(id);
+  if (!conn) throw new Error('That server is not set up here any more.');
+  if (!remoteFiles.SHELL_PROTOCOLS.includes(conn.protocol)) throw Object.assign(new Error(`${conn.name} is an FTP server: Git needs a shell there (an SSH server, a Docker container or WSL).`), { noShell: true });
+  if (connected && !remote.isConnected(id)) return { offline: true, id };
+  return { tool: await gitTool(id, { quiet: connected }), at, uri: (x) => remoteFiles.toUri(id, x), id };
+}
+// A server or place that went away, or could not be reached.
+const gitGone = (err) => Boolean(err?.lost || err?.offline);
+const quietNoShell = (err) => {
+  if (err?.noShell) return null;
+  throw err;
 };
 ipcMain.handle('git:act', guard(async (event, dir, action) => {
-  if (typeof dir !== 'string' || isRemote(dir)) throw new Error('Git works on folders on this computer');
-  checkDir(dir);
-  const tool = await git();
-  const root = await tool.repoOf(dir);
-  if (!root) throw new Error('This folder is not in a Git repository');
-  const sender = event.sender;
+  const t = await gitTarget(dir);
+  let root;
   try {
-    const result = await tool.act(root, action, { onProgress: (line) => !sender.isDestroyed() && sender.send('git:progress', { root, line }) });
+    root = await t.tool.repoOf(t.at);
+  } catch (err) {
+    if (gitGone(err)) return { ok: false, offline: true, message: err.message, stdout: '', stderr: '' };
+    throw err;
+  }
+  if (!root) throw new Error(t.tool.missing ? `Git is not installed ${t.id ? `on ${gitPlaceName(t.id)}` : 'on this computer'}` : 'This folder is not in a Git repository');
+  const sender = event.sender;
+  const pageRoot = t.uri(root);
+  try {
+    let result = await t.tool.act(root, action, { onProgress: (line) => !sender.isDestroyed() && sender.send('git:progress', { root: pageRoot, line }) });
+    // The model's picture says where Git runs (a server's own Git, with its own sign-ins).
+    if (action?.op === 'snapshot' && t.id && result) result = { ...result, place: gitPlaceOf(t.id) };
     return { ok: true, result: typeof result === 'object' && result && 'stdout' in result ? { stdout: result.stdout, stderr: result.stderr } : result };
   } catch (err) {
     // Git's own words go back, for the page to say in its own (gitError).
-    return { ok: false, message: err.message, stdout: String(err.stdout ?? ''), stderr: String(err.stderr ?? '') };
+    return { ok: false, message: err.message, stdout: String(err.stdout ?? ''), stderr: String(err.stderr ?? ''), ...(gitGone(err) ? { offline: true } : {}) };
   }
 }));
 // One change of a file staged: the page gives the file's whole text as it should be staged
 // (stageBlock); it is written with the file's own line endings and encoding.
 ipcMain.handle('git:index', guard(async (_e, file) => {
-  if (typeof file !== 'string' || isRemote(file)) return null;
-  const found = await (await git()).indexBytes(checkFile(file));
+  const t = await gitTarget(file, { file: true }).catch(quietNoShell);
+  if (!t) return null;
+  const found = await t.tool.indexBytes(t.at);
   if (!found) return null;
   try {
-    return { text: disk.decode(found.bytes).text, rel: found.rel, root: found.root };
+    return { text: disk.decode(found.bytes).text, rel: found.rel, root: t.uri(found.root) };
   } catch {
     return null;
   }
 }));
 ipcMain.handle('git:stage-text', guard(async (_e, file, text) => {
-  if (typeof file !== 'string' || isRemote(file) || typeof text !== 'string') throw new Error('Not a file on this computer');
-  checkFile(file);
+  if (typeof text !== 'string') throw new Error('Not a text');
+  const t = await gitTarget(file, { file: true });
   let format = {};
   try {
-    format = disk.decode(fs.readFileSync(file));
-  } catch {
+    format = t.id ? await remote.read(file) : disk.decode(fs.readFileSync(file));
+  } catch (err) {
+    if (gitGone(err)) throw err;
     // gone or not text: as plain UTF-8 with LF
   }
-  return (await git()).setIndexBytes(file, disk.encode(text, format));
+  const done = await t.tool.setIndexBytes(t.at, disk.encode(text, format));
+  return { ...done, root: t.uri(done.root) };
 }));
 // Making a folder the person opened a repository (git init): what it would mean, then doing it.
+// On a server or in a place where git is missing, `install` is the command that installs it
+// there (typed into its terminal by the page, never run here).
 ipcMain.handle('git:info', guard(async (_e, dir) => {
-  if (typeof dir !== 'string' || isRemote(dir)) return null;
-  checkDir(dir);
-  return (await git()).info(dir);
+  const t = await gitTarget(dir).catch((err) => (err?.noShell ? { noShell: err.message } : Promise.reject(err)));
+  if (t.noShell) return { installed: false, root: null, defaultBranch: '', unsupported: t.noShell };
+  try {
+    const info = await t.tool.info(t.at);
+    // Asked again (git just installed there, a repository made): the reads ask again too.
+    if (t.id) gitTools.get(`${t.id}:quiet`)?.forget();
+    return { ...info, root: info.root && t.uri(info.root), ...(t.id ? { place: gitPlaceOf(t.id) } : {}) };
+  } catch (err) {
+    if (gitGone(err)) return { installed: null, root: null, defaultBranch: '', offline: true, message: err.message, place: gitPlaceOf(t.id) };
+    // A Windows server: Git runs only on Linux and macOS servers.
+    if (t.id) return { installed: false, root: null, defaultBranch: '', unsupported: err.message, place: gitPlaceOf(t.id) };
+    throw err;
+  }
 }));
 ipcMain.handle('git:init', guard(async (_e, dir, opts = {}) => {
-  if (typeof dir !== 'string' || isRemote(dir)) throw new Error('Git works on folders on this computer');
-  checkDir(dir);
-  return (await git()).init(dir, { branch: typeof opts?.branch === 'string' ? opts.branch.trim() : '' });
+  const t = await gitTarget(dir);
+  const made = await t.tool.init(t.at, { branch: typeof opts?.branch === 'string' ? opts.branch.trim() : '' });
+  // The reads' own tool forgets which folders were in no repository.
+  if (t.id) gitTools.get(`${t.id}:quiet`)?.forget();
+  return { ...made, root: made.root && t.uri(made.root) };
 }));
 // Docker here, for Dockerize: installed, its engine running (or why not), Compose and Buildx.
 // docker.cjs runs `docker` with fixed arguments only; building and running are typed in a terminal.
 const dockerTool = require('./docker.cjs');
 ipcMain.handle('docker:info', guard(async () => dockerTool.dockerInfo({ env: dockerTool.dockerEnv(lsp.searchEnv(lsp.serverEnv(process.env), await lsp.shellPath())) })));
+// Status and a file at HEAD are read when a folder or tab shows, and when the window comes back:
+// on a server not connected now they answer { offline } (the page keeps what it had) rather
+// than connecting by themselves.
 ipcMain.handle('git:status', guard(async (_e, dir) => {
-  if (typeof dir !== 'string' || isRemote(dir)) return null;
-  checkDir(dir);
-  return (await git()).status(dir);
+  if (typeof dir !== 'string') return null;
+  const t = await gitTarget(dir, { connected: true }).catch(quietNoShell);
+  if (!t) return null;
+  if (t.offline) return { offline: true };
+  try {
+    const status = await t.tool.status(t.at);
+    return status && { ...status, root: t.uri(status.root) };
+  } catch (err) {
+    if (gitGone(err)) return { offline: true };
+    // Git cannot run there this way (a Windows server, no sh): none, quietly (git:info says why).
+    if (err.unusable) return null;
+    throw err;
+  }
 }));
 ipcMain.handle('git:head', guard(async (_e, file) => {
-  if (typeof file !== 'string' || isRemote(file)) return null;
-  const tool = await git();
-  const found = await tool.headBytes(checkFile(file));
-  if (!found) {
-    // A new file in a repository still has a branch to show.
-    const root = await tool.repoOf(path.dirname(file));
-    return root ? { text: null, root, branch: await tool.branch(root) } : null;
-  }
-  let text = null;
+  if (typeof file !== 'string') return null;
+  const t = await gitTarget(file, { file: true, connected: true }).catch(quietNoShell);
+  if (!t) return null;
+  if (t.offline) return { offline: true };
   try {
-    text = disk.decode(found.bytes).text;
-  } catch {
-    // not text
+    const found = await t.tool.headBytes(t.at);
+    if (!found) {
+      // A new file in a repository still has a branch to show.
+      const root = await t.tool.repoOf((t.id ? path.posix : path).dirname(t.at));
+      return root ? { text: null, root: t.uri(root), branch: await t.tool.branch(root) } : null;
+    }
+    let text = null;
+    try {
+      text = disk.decode(found.bytes).text;
+    } catch {
+      // not text
+    }
+    return { text, rel: found.rel, root: t.uri(found.root), branch: await t.tool.branch(found.root) };
+  } catch (err) {
+    if (gitGone(err)) return { offline: true };
+    if (err.unusable) return null;
+    throw err;
   }
-  return { text, rel: found.rel, root: found.root, branch: await tool.branch(found.root) };
 }));
 ipcMain.handle('folder:find-stop', guard((_e, searchId) => {
   folderSearches.get(searchId)?.abort();

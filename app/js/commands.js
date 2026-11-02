@@ -102,7 +102,7 @@ export const COMMAND_LIST = [
   { id: 'foldLevel2', group: 'Code', label: 'Fold one level in (methods in classes)', keys: 'Alt+2' },
   { id: 'foldLevel3', group: 'Code', label: 'Fold two levels in', keys: 'Alt+3' },
   { id: 'problems', group: 'Code', label: 'Problems in this file (errors as you type)', keys: 'Mod+Shift+M', hint: 'JSON, YAML, XML, HTML, CSS and code' },
-  { id: 'git-compare', group: 'Git', label: 'Compare with the last commit (Git)', only: 'desktop', hint: 'A file on this computer in a Git repository; or click ±N in the status bar' },
+  { id: 'git-compare', group: 'Git', label: 'Compare with the last commit (Git)', only: 'desktop', hint: 'A file in a Git repository (here, on an SSH server, in a container or WSL); or click ±N in the status bar' },
   { id: 'git-ask', group: 'Git', label: 'Ask the model about Git: explain, fix, or do it for you', only: 'desktop', hint: 'It sees the repository; steps that are hard to undo wait for your Run and are backed up first. Or ✦ in the Git panel' },
   { id: 'git-panel', group: 'Git', label: 'Git panel: stage, commit, pull, push, stash', keys: 'Mod+Shift+G', only: 'desktop', hint: 'For the repository of the open file, or of the folder in Folders' },
   { id: 'git-init', group: 'Git', label: 'Make a folder a Git repository (git init)…', only: 'desktop', hint: 'The folder in Folders; or right-click a folder in Folders, or the Git panel of a folder that is not in one' },

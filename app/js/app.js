@@ -1834,6 +1834,9 @@ export function App() {
         recheckServerTabs(id);
         // Language servers that stopped with the connection start again.
         lspRef.current?.reconnected(id);
+        // Git there is read again (its folders in Folders, its tabs' bars of changed lines).
+        refreshAllGit();
+        for (const key of [store.session.active, ...store.session.panes]) if (key?.startsWith(`d:remote://${id}/`)) lookUpGit(key);
       },
     });
     const offList = onServers(rerender);
@@ -2680,15 +2683,23 @@ export function App() {
     });
   };
   useEffect(() => lookUpEditorConfig(activeKey), [activeKey]);
-  // ---- Git: files on this computer in a repository ----
+  // ---- Git: files in a repository, here, on SSH servers and in places (Docker, WSL) ----
   // The text at the last commit gives the editor its bar of changed lines; the branch goes
   // to the status bar. Asked when a tab shows and when the window comes back (a commit
-  // made elsewhere).
+  // made elsewhere); a server not connected now answers { offline } and what it said stays.
   const [gitHeads, setGitHeads] = useState({}); // key → { branch, root, tracked } or null
+  /** Whether Git works for a path: on this computer, or on a server with a shell (SSH, Docker, WSL); not FTP. */
+  const gitWorksAt = (p) => Boolean(p) && !isContentPath(p) && (!isRemotePath(p) || hasShell(server(remoteParts(p).id)));
+  /** Where a path's Git runs, for its messages: { kind: 'ssh'|'docker'|'wsl', name }, or null here. */
+  const gitPlaceOf = (p) => {
+    const conn = isRemotePath(p) ? server(remoteParts(p).id) : null;
+    return conn ? { kind: conn.protocol === 'sftp' ? 'ssh' : conn.protocol, name: conn.name } : null;
+  };
   const lookUpGit = (key) => {
-    if (!key?.startsWith('d:') || isRemotePath(key.slice(2)) || !window.desktop?.git || store.diskTab(key.slice(2))?.doc) return;
+    if (!key?.startsWith('d:') || !gitWorksAt(key.slice(2)) || !window.desktop?.git || store.diskTab(key.slice(2))?.doc) return;
     window.desktop.git.head(key.slice(2)).then(
       (head) => {
+        if (head?.offline) return;
         hostRef.current?.setGitBase(key, head?.text ?? null);
         const next = head ? { branch: head.branch, root: head.root, tracked: head.text !== null } : null;
         setGitHeads((all) => (JSON.stringify(all[key]) === JSON.stringify(next) ? all : { ...all, [key]: next }));
@@ -2710,8 +2721,13 @@ export function App() {
   actions.compareWithHead = async (path = null) => {
     const key = path ? diskKey(path) : store.session.active;
     if (!key?.startsWith('d:') || !window.desktop?.git) return;
+    if (!gitWorksAt(key.slice(2))) return toast('Git needs a shell where the file is: an SSH server, a Docker container or WSL (not FTP).');
     if (path && store.session.active !== key && (await actions.openDiskPath(path))) return;
     const head = await window.desktop.git.head(key.slice(2)).catch(() => null);
+    if (head?.offline) {
+      const id = remoteParts(key.slice(2)).id;
+      return toast(`${server(id)?.name ?? 'The server'} is not connected: connect again, then compare.`, { action: { label: 'Reconnect', run: () => actions.reconnectServer(id) } });
+    }
     if (!head) return toast('This file is not in a Git repository.');
     if (head.text === null) return toast('This file is new: it is not in the last commit yet.');
     hostRef.current?.flushAll();
@@ -2808,18 +2824,19 @@ export function App() {
     const low = /^[a-z]:/i.test(root) ? (x) => x.toLowerCase() : (x) => x;
     return low(n(p)).startsWith(`${low(n(root))}/`);
   };
-  /** The folder whose repository Git shows: the open file's (on this computer), else the one in Folders. */
+  /** The folder whose repository Git shows: the open file's (here, on an SSH server or in a place), else the one in Folders. */
   const gitFolderNow = () => {
     const key = store.session.active;
-    if (key?.startsWith('d:') && !isRemotePath(key.slice(2))) return parentDir(key.slice(2));
+    if (key?.startsWith('d:') && gitWorksAt(key.slice(2))) return parentDir(key.slice(2));
     const f = getSettings().folder;
-    return f && !isRemotePath(f) ? f : null;
+    return gitWorksAt(f) ? f : null;
   };
+  const NO_GIT_FOLDER = 'Open a file or a folder first (on this computer, on an SSH server, or in a Docker container or WSL): the Git panel shows its repository.';
   /** The Git panel (Ctrl+Shift+G): for `dir`'s repository, or the open file's / the folder's. */
   actions.toggleGit = (dir = null) => {
-    if (!gitBridge()) return toast('Git works in the desktop app, for folders on this computer.');
+    if (!gitBridge()) return toast('Git works in the desktop app.');
     const at = dir ?? gitFolderNow();
-    if (!at) return toast('Open a file or a folder from this computer first: the Git panel shows its repository.');
+    if (!at) return toast(NO_GIT_FOLDER);
     setGitDir(at);
     setPanel((p) => (p === 'git' && !dir ? null : 'git'));
   };
@@ -2832,8 +2849,13 @@ export function App() {
     if (!bridge) return { ok: false, error: { kind: 'other', message: 'Git works in the desktop app.', detail: '' } };
     hostRef.current?.flushAll();
     if (WORKING_TREE_OPS.has(action.op)) {
-      const status = await bridge.status(dir).catch(() => null);
-      const unsaved = status ? store.session.open.filter((k) => k.startsWith('d:') && !isRemotePath(k.slice(2)) && store.diskTab(k.slice(2))?.dirty && insideRoot(status.root, k.slice(2))).map((k) => store.diskTab(k.slice(2)).name) : [];
+      let status = await bridge.status(dir).catch(() => null);
+      // A server not connected now: connected first, so its unsaved tabs are known before files change there.
+      if (status?.offline) {
+        await window.desktop.remote?.connect(remoteParts(dir).id).catch(() => {});
+        status = await bridge.status(dir).catch(() => null);
+      }
+      const unsaved = status?.root ? store.session.open.filter((k) => k.startsWith('d:') && store.diskTab(k.slice(2))?.dirty && insideRoot(status.root, k.slice(2))).map((k) => store.diskTab(k.slice(2)).name) : [];
       if (unsaved.length) {
         const what = action.op === 'switch' ? 'Switching branches' : action.op.startsWith('stash') ? 'The stash' : action.op === 'pull' ? 'Pulling' : `git ${action.op}`;
         return { ok: false, error: { kind: 'unsaved', message: `Save ${unsaved.slice(0, 3).join(', ')}${unsaved.length > 3 ? ` and ${unsaved.length - 3} more` : ''} first: ${what} changes files on disk.`, detail: '' } };
@@ -2841,7 +2863,10 @@ export function App() {
     }
     const r = await bridge.act(dir, action).catch((err) => ({ ok: false, message: ipcMessage(err), stdout: '', stderr: '' }));
     actions.gitChanged();
-    return r.ok ? { ok: true, result: r.result } : { ok: false, error: gitError(r.stderr, r.stdout || r.message) };
+    if (r.ok) return { ok: true, result: r.result };
+    // The server or place went away (or could not be reached): said so, with Reconnect in the panel.
+    if (r.offline) return { ok: false, error: { kind: 'offline', message: r.message || 'Not connected.', detail: '' } };
+    return { ok: false, error: gitError(r.stderr, r.stdout || r.message, { place: gitPlaceOf(dir) }) };
   };
   /** Git's state may have changed (a command here, a commit elsewhere): Folders, the status bar, the bar of changed lines and the panel read it again. */
   actions.gitChanged = () => {
@@ -2880,14 +2905,14 @@ export function App() {
     dockerTerminal(root, (kind) => offlineBuildLine(plan, kind), () => toast('Building the offline package: once the terminal says it is ready, copy the docker/offline folder to the server and run its install script.', { timeout: 15000 }));
   actions.dockerReview = (root, plan) => actions.assistFiles({ folder: root, question: reviewQuestion(plan) });
   /**
-   * Making a folder on this computer a Git repository (git init): `dir`, else the folder in
+   * Making a folder a Git repository (git init; here, on an SSH server or in a place): `dir`, else the folder in
    * Folders, else the open file's folder. The dialog asks the first branch's name.
    */
   actions.gitInit = (dir = null) => {
-    if (!gitBridge()?.init) return toast('Git works in the desktop app, for folders on this computer.');
+    if (!gitBridge()?.init) return toast('Git works in the desktop app.');
     const f = getSettings().folder;
-    const at = dir ?? (f && !isRemotePath(f) ? f : gitFolderNow());
-    if (!at || isRemotePath(at)) return toast('Open a folder from this computer in Folders first.');
+    const at = dir ?? (gitWorksAt(f) ? f : gitFolderNow());
+    if (!at || !gitWorksAt(at)) return toast('Open a folder in Folders first: on this computer, on an SSH server, or in a Docker container or WSL.');
     setDialog({ type: 'gitInit', dir: at });
   };
   /** A folder just made a repository: Folders and the status bar read Git again, and its panel opens. */
@@ -2907,9 +2932,9 @@ export function App() {
    * in (else the open file's or the folder's); `start.question` is asked at once.
    */
   actions.gitAssist = (dir = null, start = null) => {
-    if (!gitBridge()) return toast('Git with the model works in the desktop app, for folders on this computer.');
+    if (!gitBridge()) return toast('Git with the model works in the desktop app.');
     const at = dir ?? gitDir ?? gitFolderNow();
-    if (!at) return toast('Open a file or a folder from this computer in a Git repository first.');
+    if (!at) return toast(NO_GIT_FOLDER);
     setAssist(false);
     setFilesAssist(null);
     setGitAssist({ dir: at, start, id: Date.now() });
@@ -2945,7 +2970,7 @@ export function App() {
   /** Fetch, pull or push from a command, without the panel: a toast says how it went. */
   actions.gitQuick = async (op) => {
     const dir = gitFolderNow();
-    if (!dir || !gitBridge()) return toast('Open a file or a folder from this computer in a Git repository first.');
+    if (!dir || !gitBridge()) return toast(NO_GIT_FOLDER);
     const doing = { fetch: 'Fetching', pull: 'Pulling', push: 'Pushing' }[op];
     toast(`${doing}…`, { key: 'git-quick', timeout: 60000 });
     const r = await actions.gitRun(dir, { op });
@@ -2960,7 +2985,7 @@ export function App() {
    */
   actions.stageChangeAt = async (key, line) => {
     const bridge = gitBridge();
-    if (!bridge || !key?.startsWith('d:') || isRemotePath(key.slice(2))) return;
+    if (!bridge || !key?.startsWith('d:') || !gitWorksAt(key.slice(2))) return;
     const path = key.slice(2);
     const text = hostRef.current?.stateOf(key)?.doc.toString();
     if (text == null) return;
@@ -2968,7 +2993,8 @@ export function App() {
     if (!index) {
       // Not in Git yet: the whole file.
       const status = await bridge.status(parentDir(path)).catch(() => null);
-      if (!status || !insideRoot(status.root, path)) return toast('This file is not in a Git repository.');
+      if (status?.offline) return toast(`${server(remoteParts(path).id)?.name ?? 'The server'} is not connected: connect again, then stage it.`, { kind: 'error' });
+      if (!status?.root || !insideRoot(status.root, path)) return toast('This file is not in a Git repository.');
       const rel = path.slice(status.root.replace(/[\\/]+$/, '').length + 1).replace(/\\/g, '/');
       const r = await actions.gitRun(parentDir(path), { op: 'stage', paths: [rel] });
       return toast(r.ok ? `Staged ${store.diskTab(path)?.name ?? rel}, a new file` : r.error.message, { kind: r.ok ? 'info' : 'error' });

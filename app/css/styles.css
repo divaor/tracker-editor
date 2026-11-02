@@ -10393,7 +10393,8 @@ button.git-branch:focus-visible {
 
 /* One folder shown: its name and its branch (or the Git mark alone, when it is not in a
    repository) as a pill. The two keep their whole width while they fit; the buttons after them
-   give way first (down to 20px each, `--tools` of them), and only then the name and the pill. */
+   give way first (down to 20px each, `--tools` of them), and only then the name and the pill,
+   about evenly (a long branch never squeezes the name, a server's with its dot, to a letter). */
 .folders-root-title {
   display: flex;
   flex: 0 0 auto;
@@ -10408,7 +10409,7 @@ button.git-branch:focus-visible {
 }
 
 .git-pill {
-  flex: 0 0.4 auto;
+  flex: 0 1.5 auto;
   min-width: 24px;
   max-width: 12ch;
   padding: 1px 6px !important;
@@ -10471,6 +10472,34 @@ button.git-branch:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: normal;
+}
+
+/* Where Git runs, for a repository on a server or in a place ("build-box", "web-1 (Docker)"). */
+.git-where {
+  flex-shrink: 1;
+  min-width: 0;
+  margin-left: 6px;
+  padding: 0 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: normal;
+  color: var(--kind-remote);
+  border: 1px solid color-mix(in srgb, var(--kind-remote) 40%, transparent);
+  border-radius: 999px;
+}
+
+/* Git missing on a server or in a place: the command that installs it there. */
+.git-install {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--surface-2, var(--surface));
+  border-radius: var(--radius-sm);
 }
 
 .git-body {

@@ -200,7 +200,7 @@ The status bar names it (**TypeScript 7.0.2 · ready**, **gopls · ready**, **Py
 
 ### Git: stage, commit, branches, stash, pull and push (desktop)
 
-For folders on this computer in a Git repository, with the `git` program installed. **`Ctrl+Shift+G`** opens the **Git panel** for the repository of the open file (or of the folder in Folders):
+For folders in a Git repository, on this computer, on an **SSH (SFTP) server**, or in a **Docker container** or a **WSL distribution**, with the `git` program installed there: on a server or in a place, Git runs there, with its own `git` (see [Git on a server](#git-on-a-server)). **`Ctrl+Shift+G`** opens the **Git panel** for the repository of the open file (or of the folder in Folders):
 
 - **From Folders**: click the **branch** next to a folder's name for that folder's Git panel. With one folder shown, the branch (or **Git**, when the folder is not in a repository) is a button next to its name; with several side by side, each one's branch is on its header. Right-click a folder (or its header) → **Git panel**.
 - **A new repository**: in a folder that is not in one, the Git panel offers **Make it a Git repository…** (also right-click a folder in Folders, or **Make a folder a Git repository** in the command palette, `Ctrl+Shift+P`). Name the first branch (your Git's usual name, else **main**) and Git starts keeping the folder's history: nothing changes in its files and nothing is committed yet, so stage and commit them in the panel next. A folder inside another repository says so first, since a second repository for the same files is rarely what you want.
@@ -214,8 +214,9 @@ For folders on this computer in a Git repository, with the `git` program install
 - **A merge or rebase halfway** (files in conflict): the panel says so; fix each file (look for `<<<<<<<`), stage it, then commit, or **Abort the merge**.
 - In **Folders**, right-click changed files → **Stage (Git)** or **Unstage (Git)**.
 - Commands that change your files (pull, switching branches, the stash) wait while a file of the repository has edits not saved: save it first.
-- Signing in to the remote is Git's own: a credential helper (Git Credential Manager on Windows, the keychain on macOS) or an SSH key with its agent. The editor never asks for a password in a terminal; when Git cannot sign in, it says so. Git that writes is for folders on this computer; files on SSH servers and the Android app show none of it.
-- Blame, reverting a change from the bar, and Git for folders on SSH servers come in a later version.
+- Signing in to the remote is Git's own: a credential helper (Git Credential Manager on Windows, the keychain on macOS) or an SSH key with its agent; on a server, the server's own (its key, its agent, its credential helper). The editor never asks for a password in a terminal; when Git cannot sign in, it says so, naming where Git ran.
+- FTP and FTPS servers have no Git (no shell there to run it), and neither does the Android app.
+- Blame and reverting a change from the bar come in a later version.
 
 ### Git with the model: ask, and have it done (desktop)
 
@@ -228,6 +229,7 @@ Git can be confusing, and a wrong command can seem to lose work. With a model co
 - **Help me do it** or **Only explain, I'll do it** (above the question box): with **Only explain**, nothing runs: the model says what to click in the Git panel, step by step, and gives the same as git commands for a terminal; its steps show as a list for you. Saying "just tell me how" in the question does the same.
 - **Merge requests**: the model can open the site's page for a merge request (pull request) of your branch into another (GitHub, GitLab, Bitbucket, Azure DevOps), after pushing it. A new branch made from a remote one (from `origin/dev`) does not follow it, so its first push makes a branch of its own name, never a push to dev.
 - **Commit messages**: ✦ next to **Commit** writes the message from what is staged, in the style of the repository's recent commits; edit it, then commit.
+- **On a server or in a place**, it knows the repository is there: every step runs there, with that machine's Git and its sign-ins.
 - It cannot run an interactive rebase, change Git's settings, sign in for you or delete files Git does not track; for those it gives the commands to type in a terminal and says what they do.
 
 Common things to ask:
@@ -793,7 +795,7 @@ The sidebar has two views on the desktop: **My files** (synced) and **Folders** 
 | Pictures | Right-click → **Text from the image…** reads the text on this computer; **Save as photo.txt here** keeps it next to the picture (or insert it, copy it, or make a synced file). |
 | Find text | `Ctrl+Shift+F` in the list (or 🔍, or right-click a folder → **Find in this folder…**): type, `Enter`. It looks in the folder and the folders inside it; **Files** narrows it (`*.log, !debug*`), **Hidden** includes dot files. Click a line to open the file there. **Stop** stops a long one. `.git`, `node_modules`, non-text and very large files are skipped. |
 | Replace in files | In Find in this folder, the arrow at the left of the field shows **Replace with**: each line found shows what it becomes (old struck out, new in green). Untick the files to leave alone, then **Replace in N files** (or `Enter`). With `.*` (a regular expression), `$1` puts back a group and `\n` a new line. The message has **Undo** (it puts back only files nobody changed since). Files open with unsaved edits are left out; open tabs show the new text. On servers too. |
-| Git | In a folder that is a Git repository (on this computer), the branch shows next to the folder's name, and files show what changed since the last commit: **M** changed, **U** new, **A** added, **R** renamed, **C** in conflict; folders with changes inside have a dot. Hover the branch for how many files changed and what is to push or pull; click it for the folder's Git panel. A folder that is not in a repository: right-click → **Make it a Git repository…**. Right-click a changed file → **Compare with the last commit**, **Stage (Git)** or **Unstage (Git)**. It uses the `git` program installed on the computer; the Git panel (`Ctrl+Shift+G`) commits, pulls, pushes, switches branches and stashes (see *Git* under Code tools). |
+| Git | In a folder that is a Git repository (on this computer, on an SSH server, in a Docker container or WSL), the branch shows next to the folder's name, and files show what changed since the last commit: **M** changed, **U** new, **A** added, **R** renamed, **C** in conflict; folders with changes inside have a dot. Hover the branch for how many files changed and what is to push or pull; click it for the folder's Git panel. A folder that is not in a repository: right-click → **Make it a Git repository…**. Right-click a changed file → **Compare with the last commit**, **Stage (Git)** or **Unstage (Git)**. It uses the `git` program installed where the folder is (on a server: the server's); the Git panel (`Ctrl+Shift+G`) commits, pulls, pushes, switches branches and stashes (see *Git* under Code tools). |
 | Properties | `Alt+Enter` or right-click → **Properties**: where it is, size (**Count what is inside** for a folder), dates, owner, permissions. On Mac/Linux tick Read/Write/Run for Owner/Group/Others or type `644`, **Save permissions**; for a folder, **Also for everything inside**. On Windows: **Read-only**. |
 | Terminal | Right-click a folder → **Open a terminal here** (a file: **Open a terminal in its folder**), near the top of the menu: a terminal in the panel under the editor, in that folder. **Open in the system’s terminal** opens your system's own (Windows Terminal or PowerShell, Terminal, …) there instead. |
 
@@ -862,6 +864,16 @@ Working there:
 - `` Ctrl+` `` again (or ⌄) hides the panel; the shells keep running. When one ends (`exit`), `Enter` starts it again. **×** on a tab closes that shell.
 - FTP servers have no terminal.
 
+### Git on a server
+
+A folder in a Git repository on an SFTP server (Linux or macOS), or in a Docker container or WSL distribution, gets the same Git as one on this computer: its branch and changed files in Folders, the bar of changed lines and **Compare with the last commit** for its files, **Stage this change**, the status bar's branch, the **Git panel** (stage, commit, fetch, pull, push, branches, stash), **Make it a Git repository…** and **Git with the model**.
+
+- **It is the server's Git**: the commands run there, over the same connection as the files, with the `git` installed there and its settings. Fetch, pull and push sign in to the remote as Git does in a terminal there: an SSH key on the server (in its agent, or without a passphrase, with the remote's host already known there) or a credential helper set up there. Nothing is asked here; when that fails, the message says the server's Git could not sign in.
+- **Git not installed there?** The Git panel says so and shows the command that installs it (`sudo apt-get install -y git`, `sudo dnf install -y git`, `apk add git`…, by what the server has); **Type it in its terminal** types it into a terminal there for you to check and run with `Enter`. Then **Read again** (⟳).
+- **The connection went away?** A command that was running says so at once (it may or may not have finished there); the panel offers **Connect**. Folders keeps the branch and changes it last read, and reads them again when the server is back. Git does not connect to a server by itself just to read its status: only when you open its folder or run a command.
+- It reads the status when the folder is read (after a command, when you save there, when the window comes back), never in a loop.
+- Not on FTP or FTPS servers (no shell there), nor on Windows servers.
+
 ### Mirrors: a server folder on this computer
 
 For when you want the server's files in a folder here (to use other tools on them) and kept the same.
@@ -896,7 +908,7 @@ Good to know:
 - **The container stopped?** Its tabs say **Not connected** and the reason shows (Folders, the status bar); your edits stay here. Start it again (**Start it** in the message, or `docker compose start`), then **Reconnect** or open it again.
 - The editor uses the `docker` command you would (it must be installed and running: Docker Desktop, or Docker's engine on Linux), and only for `docker exec` into the container you picked, and `docker start` when you ask. It runs no image, mounts nothing and installs nothing in the container. An image without a shell (`sh`), like distroless or scratch, cannot be opened.
 - **Copy path** gives `web-1:/app/x.js` (the form `docker cp` takes), and in WSL `\\wsl.localhost\Ubuntu\home\you\x.js`, which Windows programs open.
-- **Git** and **debugging** work on folders on this computer only, not inside a container or a distribution (use Git in the place's terminal).
+- **Git** works there with the container's or the distribution's own `git`, as on a server (see [Git on a server](#git-on-a-server)): the branch and changes in Folders, the Git panel, the bar of changed lines. In an Alpine container without git, the Git panel offers `apk add git`, typed into its terminal. **Debugging** works on folders on this computer only.
 - Not in the Android app.
 
 ## 12. Quick capture, clipboard history and screenshots (desktop)
