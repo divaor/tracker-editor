@@ -29,7 +29,13 @@ export const allSources = () => [...fileSources(store.live()), ...docSources(sto
 
 let index = null; // source id → { id, hash, model, chunks: [{ from, to, text, vector }] }
 async function load() {
-  index ??= new Map(((await kvGet('vectors')) ?? []).map((e) => [e.id, e]));
+  if (!index) {
+    index = new Map(((await kvGet('vectors')) ?? []).map((e) => [e.id, e]));
+    // Chunks of files encrypted since (or indexed before 0.46, which took them in) go now.
+    const sealed = [...index.keys()].filter((id) => store.get(id)?.encrypted);
+    for (const id of sealed) index.delete(id);
+    if (sealed.length) await kvSet('vectors', [...index.values()]);
+  }
   return index;
 }
 const save = () => kvSet('vectors', [...index.values()]);
