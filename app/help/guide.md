@@ -357,7 +357,15 @@ History, a fix from the model and **Compare** in "changed on disk" still open ov
 
 ### Compare two folders (desktop, Android app)
 
-Right-click a folder in Folders (long-press it in the Android app; or empty space in it, or a header when several are shown) → **Compare with another folder…**, then pick the other one: the folders next to it (another copy of the project), the ones in Folders, picked before, favorites and recent ones, a server's start folder or recent folders there, a path on a server (its folders are suggested as you type), or **Pick a folder…**. With two folders shown side by side, the menu offers **Compare with *the other one*** at once; with two folders selected, **Compare the two folders**. Also ⋯ → **Compare this folder with another…** and `Ctrl+Shift+P` → **Compare two folders…**. A folder on this computer and one on a server compare like any two.
+Right-click a folder in Folders (long-press it in the Android app; or empty space in it, or a header when several are shown) → **Compare with another folder…**, then pick the other one in a tree, in blocks, each with its color and a light background of its own, so you always see which folder holds which:
+
+- **Next to *it*** (first, when it is inside a folder): the folders beside it, such as another copy of the project.
+- **Each folder shown in Folders**, in the color its header has there. The ones you have open come open, and the one holding the folder you compare opens down to it (marked *the other side*).
+- **Folders you picked before**, then **each server**: opening a server connects and lists its start folder.
+
+Open a folder with its ▸ (or → and ←) to go deeper. **Filter the folders shown** narrows what is listed so far by name (`*` and `?` work too). The chips above (★ favorites, 🕑 recent folders, each with a dot in its folder's color) open the tree down to theirs. The line at the bottom says where the folder you picked is (*site › src › lib*); **Compare**, a double-click or `Enter` takes it. Below the tree: **Browse this computer…** (the system's folder dialog), **Connect to a new server…** (once saved, you are back here with it open) and **A path on a server…** (type it; its folders are suggested as you go).
+
+With two folders shown side by side, the menu offers **Compare with *the other one*** at once; with two folders selected, **Compare the two folders**. Also ⋯ → **Compare this folder with another…** and `Ctrl+Shift+P` → **Compare two folders…**. A folder on this computer and one on a server compare like any two.
 
 The comparison opens in a tab: the first folder on the left, the other on the right, in one tree that lines them up file by file (size and date on each side), with a mark between them: **≠** different, **◧** only on the left, **◨** only on the right, **=** the same. A folder takes the mark of what is inside it.
 
@@ -376,7 +384,7 @@ The comparison opens in a tab: the first folder on the left, the other on the ri
 
 Two folders in a tab, each a file list you browse on its own, like WinSCP or Total Commander: your project here and its copy on the server, two projects, a folder and a backup. Files go from one to the other with a key.
 
-Open it from Folders: right-click a folder (long-press it in the Android app) → **Open in two panes…** and pick the other one (the folders next to it, the ones in Folders, favorites and recent ones, a server's folder or a path on a server, or **Pick a folder…**). With two folders shown side by side in Folders, a header's menu offers **Two panes with *the other one***; with two folders selected, **Open the two in two panes**. Also Folders' ⋯ → **Two panes…** and `Ctrl+Shift+P` → **Two panes: two folders side by side…**. The tab is named after both (`site | site`), and its name follows as you go into folders.
+Open it from Folders: right-click a folder (long-press it in the Android app) → **Open in two panes…** and pick the other one in the same tree as for comparing (see [Compare two folders](#compare-two-folders-desktop-android-app)), then **Use this folder**. With two folders shown side by side in Folders, a header's menu offers **Two panes with *the other one***; with two folders selected, **Open the two in two panes**. Also Folders' ⋯ → **Two panes…** and `Ctrl+Shift+P` → **Two panes: two folders side by side…**. The tab is named after both (`site | site`), and its name follows as you go into folders.
 
 Each side has its header (in the color of where it is: amber this computer, pink a server, with its connection dot), the path to click back up, and **Name**, **Size** and **Modified** columns that sort. `..` at the top goes up (not above the folder you picked in Folders; on a server, up to `/`). The side in use is the stronger one; `Tab` goes to the other.
 

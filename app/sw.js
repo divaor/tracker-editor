@@ -48,6 +48,7 @@ const ASSETS = [
   'js/comparePick.js',
   'js/compares.js',
   'js/folderCompare.js',
+  'js/folderPick.js',
   'js/panes.js',
   'js/columnSelect.js',
   'js/tabGroups.js',

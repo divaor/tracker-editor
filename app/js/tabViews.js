@@ -91,8 +91,26 @@ export function folderGroupOf(section, settings = getSettings()) {
   const open = now.find((g) => g.id === groupOf(tab, ctx));
   if (open) return { ...open, folder };
   const [group] = tabGroups([tab], ctx, { projects: projectList(store.live(), store.projects()), colors: settings.folderColors ?? {}, folderName });
-  if (group.kind === 'folder' && !settings.folderColors?.[folder]) group.color = folderColor(folder, new Set(now.map((g) => g.color).filter(Boolean)));
+  if (group.kind === 'folder' && !settings.folderColors?.[folder]) group.color = sectionColor(folder, settings, now, ctx.links ?? {});
   return { ...group, folder };
+}
+
+/**
+ * The color of a folder without tabs open or a color of its own: one that neither the bar's
+ * groups nor the folders shown before it in Folders show (each of those gets its color the same
+ * way, in Folders' order), so folders side by side never share one. A folder not shown there
+ * comes after them all.
+ */
+function sectionColor(folder, settings, now, links) {
+  const taken = new Set(now.map((g) => g.color).filter(Boolean));
+  for (const s of sectionFolders(settings)) {
+    if (s === folder) break;
+    // A folder linked to a project shows the project's color.
+    if (links[s]) continue;
+    const color = now.find((g) => g.kind === 'folder' && g.path === s)?.color || settings.folderColors?.[s] || folderColor(s, taken);
+    taken.add(color);
+  }
+  return folderColor(folder, taken);
 }
 
 /** Keeps the folders whose tabs are still open as groups, when Folders shows others. */

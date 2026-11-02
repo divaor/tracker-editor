@@ -802,8 +802,11 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
           toast(ipcMessage(err), { kind: 'error', timeout: 8000 });
         }
       },
-      /** Adds a server ({}), or edits one. */
-      editServer: (conn = {}) => setDialog({ type: 'server', conn }),
+      /**
+       * Adds a server ({}), or edits one. `back`: the dialog to come back to when it closes;
+       * `onSaved(conn, open)` instead of opening it in Folders (Save and open) or the toast.
+       */
+      editServer: (conn = {}, { back = null, onSaved = null } = {}) => setDialog({ type: 'server', conn, back, onSaved }),
       /** Servers from ~/.ssh/config. */
       importSshConfig: () => setDialog({ type: 'sshImport' }),
       /** Properties (and permissions) of a file or folder here or on a server. */
@@ -4376,7 +4379,8 @@ export function App() {
       onAsk=${askReady() ? (q) => actions.askFind(q) : null}
       roots=${folderRoots(settings)} hidden=${Boolean(settings.showHidden)} onSymbol=${(entry) => actions.revealSymbol(entry)} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'gitInit' && html`<${GitInitDialog} dir=${dialog.dir} actions=${actions} onClose=${() => setDialog(null)} />`}
-    ${dialog?.type === 'compareFolder' && html`<${CompareFolderDialog} other=${dialog.other} side=${dialog.side} panes=${dialog.panes} onPick=${dialog.onPick} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'compareFolder' && html`<${CompareFolderDialog} other=${dialog.other} side=${dialog.side} panes=${dialog.panes} openServer=${dialog.openServer} onPick=${dialog.onPick} actions=${actions} onClose=${() => setDialog(null)}
+      onNewServer=${() => actions.editServer({}, { back: { ...dialog, openServer: '' }, onSaved: (conn) => setDialog({ ...dialog, openServer: conn.id }) })} />`}
     ${dialog?.type === 'saveCompare' && html`<${SaveCompareDialog} id=${dialog.id} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'savedCompares' && html`<${SavedComparesDialog} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'compare' && activeKey &&
@@ -4411,7 +4415,7 @@ export function App() {
     ${dialog?.type === 'renameSymbol' && html`<${RenameSymbolDialog} word=${dialog.word} onClose=${() => (setDialog(null), hostRef.current?.focus())} onRename=${(name) => (setDialog(null), actions.renameWithServer(dialog, name), hostRef.current?.focus())} />`}
     ${dialog?.type === 'declarations' && html`<${DeclarationPicker} word=${dialog.word} places=${dialog.places} roots=${folderRoots(settings)} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'ocr' && html`<${OcrDialog} images=${dialog.images} saveTo=${dialog.saveTo} actions=${actions} onClose=${() => setDialog(null)} />`}
-    ${dialog?.type === 'server' && html`<${ServerDialog} conn=${dialog.conn} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'server' && html`<${ServerDialog} conn=${dialog.conn} actions=${actions} onSaved=${dialog.onSaved} onClose=${() => setDialog(dialog.back ?? null)} />`}
     ${dialog?.type === 'sshImport' && html`<${SshImportDialog} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'mirror' && html`<${MirrorDialog} draft=${dialog.draft} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'mirrors' && html`<${MirrorsDialog} actions=${actions} onClose=${() => setDialog(null)} />`}

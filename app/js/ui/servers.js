@@ -23,7 +23,7 @@ const AUTHS = [
  * passphrases go to this computer's keychain and are never shown again; a blank
  * field keeps the saved one.
  */
-export function ServerDialog({ conn = {}, actions, onClose }) {
+export function ServerDialog({ conn = {}, actions, onClose, onSaved = null }) {
   const editing = Boolean(conn.id);
   const [form, setForm] = useState(() => ({ protocol: 'sftp', auth: 'password', port: '', autoSave: false, allowSelfSigned: false, ...conn, port: conn.port ? String(conn.port) : '' }));
   const [password, setPassword] = useState('');
@@ -51,7 +51,9 @@ export function ServerDialog({ conn = {}, actions, onClose }) {
       const saved = await window.desktop.remote.save(draft(), secrets());
       await refreshServers();
       onClose();
-      if (andOpen) actions.openServer(saved.id);
+      // Added from another dialog (the folder to compare with): back there, with it.
+      if (onSaved) onSaved(saved, andOpen);
+      else if (andOpen) actions.openServer(saved.id);
       else toast(`${saved.name} is saved. Open it from Folders.`);
     } catch (err) {
       setCheck({ state: 'error', text: message(err) });
