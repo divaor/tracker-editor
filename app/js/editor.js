@@ -118,6 +118,7 @@ import { currentKeys, isKeyFor, isMacKeys } from './keys.js';
 import { clipRanges, codeOfKey, lineTapSelection, selectLineRanges } from './editKeys.js';
 import { DASHED_LANGUAGES, wordAt } from './codeNav.js';
 import { definesNames } from './codeMenu.js';
+import { conflictAction, conflictAt as conflictAtPos, conflictInfoOf, conflictLintActions, conflictProblems, conflictResolution, conflictsIn, conflictTexts, conflictView, gotoConflict as gotoConflictIn, hasConflictBlocks, setConflictInfo } from './conflictView.js';
 
 export { languages };
 
@@ -362,12 +363,16 @@ const problemsLinter = (key, onProblems, onProblemAction) =>
       const fromServer = state.facet(serverProblems);
       let list = [];
       if (fromServer) list = fromServer(state);
-      else if (language === 'JSON' || SYNTAX_LANGUAGES.has(language)) {
+      // Git's conflict markers make the parser's errors (an "unexpected return" lines below them):
+      // left out while blocks are there, the blocks are the problems then.
+      else if ((language === 'JSON' || SYNTAX_LANGUAGES.has(language)) && !hasConflictBlocks(state)) {
         const { errors, parsed } = language === 'JSON' ? { errors: [], parsed: state.doc.length } : parserErrors(state);
         list = problemsFor(state.doc.toString(), { language, name: state.facet(fileName), errors }).filter((p) => p.from <= parsed);
       }
       // A test run's failures, at their lines (testGutter.js), with the rest.
       list = [...list, ...testProblems(state)];
+      // Git's conflict blocks (conflictView.js): warnings, whatever the language.
+      list = [...list, ...conflictProblems(state)];
       const end = state.doc.length;
       const found = list.map((p) => {
         const from = Math.min(p.from, end);
@@ -385,7 +390,7 @@ const problemsLinter = (key, onProblems, onProblemAction) =>
               { name: 'Fix with the model', apply: () => onProblemAction('fix', key, p) },
             ]
           : undefined;
-      return found.map((p) => ({ from: p.from, to: p.to, severity: p.severity, message: p.message, actions: actions(p) }));
+      return found.map((p) => ({ from: p.from, to: p.to, severity: p.severity, message: p.message, actions: (p.source === 'Git' && conflictLintActions(state, p.from)) || actions(p) }));
     },
     // Again when the language has loaded (the first look was before), a server came or went, or it reported.
     {
@@ -653,6 +658,9 @@ function minimalChange(old, text) {
  * for phones) one text with the removed lines shown in place. Unchanged
  * stretches fold away. Returns { destroy, next, previous, changes }.
  */
+/** The editor's look for other views of text (the merge view's columns): its theme and highlighting. */
+export const textLook = (dark) => [baseTheme(dark), syntaxHighlighting(dark ? DARK_STYLE : LIGHT_STYLE, { fallback: true })];
+
 export function createCompareView(parent, { left, right, name = '', language = '', dark = false, unified = false, wrap = false }) {
   const lang = new Compartment();
   const extensions = () => [
@@ -1095,6 +1103,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
   const crumbs = new Compartment(); // the breadcrumbs bar over the text (breadcrumbs.js)
   const mini = new Compartment(); // the minimap along the right (minimap.js)
   const keysCfg = new Compartment(); // the keymap, from the keys in effect (keys.js)
+  const conflictsCfg = new Compartment(); // Git's conflict blocks: tints and their bars (conflictView.js)
   const indents = new Map(); // key → { tabs, size, source: 'detected' | 'editorconfig' | 'chosen' }
   let options = settings;
   let active = null;
@@ -1160,6 +1169,10 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
   const blameEvent = (v, info) => onBlame?.({ key: keyOfView(v), ...info });
   const blamePlugin = inlineBlame({ enabled: () => options.gitBlame !== 'off', onEvent: blameEvent });
   const blameCol = blameColumn({ onEvent: blameEvent });
+  // Git's conflict blocks (conflictView.js) in every text with markers; a bar's Compare, merge
+  // view and model's merge go to the app (setConflictHandler).
+  let conflictHandler = null;
+  const conflictExt = [conflictView, conflictAction.of((v, a) => conflictHandler?.({ key: keyOfView(v), ...a }))];
 
   // A key in a view as the keyboard would press it (the edit bar's keys, Ctrl+letter): the
   // editor's keymaps take it, and the window's shortcuts see it bubble up.
@@ -1332,7 +1345,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
   const report = (state, key) => {
     const sel = state.selection.main;
     const line = state.doc.lineAt(sel.head);
-    onCursor?.({ key, line: line.number, column: sel.head - line.from + 1, selected: state.selection.ranges.reduce((n, r) => n + (r.to - r.from), 0), lines: state.doc.lines, cursors: state.selection.ranges.length, scope: scopeAt(state, sel.head), indent: indentFor(key) });
+    onCursor?.({ key, line: line.number, column: sel.head - line.from + 1, selected: state.selection.ranges.reduce((n, r) => n + (r.to - r.from), 0), lines: state.doc.lines, cursors: state.selection.ranges.length, scope: scopeAt(state, sel.head), indent: indentFor(key), conflicts: conflictsIn(state).length });
   };
 
   // The editor's commands with keys (keybindings.js EDITOR_COMMANDS) and how each runs here: the
@@ -1441,6 +1454,8 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       gitMarkClick.of((v, line, at) => onGitMark?.({ key: keyOfView(v), line, ...at })),
       // The peek's Revert and Stage: the app does them (its toasts, the staged text).
       gitChangeAction.of((v, { action, line }) => onGitChange?.({ key: keyOfView(v), action, line })),
+      // Git's conflict blocks; not in the lighter editor for very large files.
+      conflictsCfg.of(big ? [] : conflictExt),
       testBar.of([]),
       // A click on a test's mark: the app runs it.
       testMarkClick.of((v, test, at) => onTestMark?.({ key: keyOfView(v), test, ...at })),
@@ -2058,6 +2073,64 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       const moved = gotoChange(v, dir);
       if (moved) v.focus();
       return moved;
+    },
+    // ---- Git's conflict blocks (conflictView.js) ----
+    /** The app's handler for a bar's Compare, merge view and model's merge: ({ key, action, index }). */
+    setConflictHandler(fn) {
+      conflictHandler = fn;
+    },
+    /** A tab's conflict blocks (shown or not): [{ index, start, end, line, endLine, labels, hasBase }]. */
+    conflicts(key) {
+      const state = viewOf(key)?.state ?? states.get(key);
+      if (!state) return [];
+      return conflictsIn(state).map((c) => ({ index: c.index, start: c.start, end: c.end, line: state.doc.lineAt(c.start).number, endLine: state.doc.lineAt(Math.max(c.start, c.end - 1)).number, labels: c.labels, hasBase: Boolean(c.base) }));
+    },
+    /**
+     * A conflict block of tab `key` with its texts: block `index`, else the one at the cursor (null
+     * when there is none): { index, count, from, to, labels, op, ours, base, theirs, block, before,
+     * after, line }.
+     */
+    conflictAt(key, index = null) {
+      const state = viewOf(key)?.state ?? states.get(key);
+      if (!state) return null;
+      const list = conflictsIn(state);
+      const c = index == null ? conflictAtPos(state) : list[index];
+      if (!c) return null;
+      return { index: c.index, count: list.length, from: c.start, to: c.end, labels: c.labels, op: conflictInfoOf(state).op, ...conflictTexts(state, c) };
+    },
+    /**
+     * Resolves a conflict block as `how` ('ours', 'theirs', 'both'…): of tab `key` (else the pane
+     * typed in last), block `index` (else the one at the cursor). One edit: Ctrl+Z brings the block
+     * back. { key, index, left (the blocks still there) } or null.
+     */
+    resolveConflict(how, { key = null, index = null } = {}) {
+      const k = key ?? current().key;
+      const state = viewOf(k)?.state ?? states.get(k);
+      if (!state) return null;
+      const i = index ?? conflictAtPos(state)?.index;
+      const spec = i == null ? null : conflictResolution(state, i, how);
+      if (!spec || !this.applyChanges(k, spec)) return null;
+      return { key: k, index: i, left: conflictsIn(viewOf(k)?.state ?? states.get(k)).length };
+    },
+    /**
+     * The next (1) or previous (-1) conflict block in the pane showing `key` (else the one typed in
+     * last), wrapping round: the cursor goes to it. { key, index, count } or null when there is none.
+     */
+    gotoConflict(step, key = null) {
+      const k = key ?? current().key;
+      const v = viewOf(k);
+      const moved = v ? gotoConflictIn(v, step) : null;
+      if (!moved) return null;
+      v.focus();
+      focusedView = v === view ? null : v;
+      return { key: k, ...moved };
+    },
+    /** What the app knows of a tab's conflicts: { op, compare, mergeView, model } (conflictView.js setConflictInfo). */
+    setConflictInfo(key, info) {
+      const spec = { effects: [setConflictInfo.of(info), problemsChanged.of(null)] };
+      const v = viewOf(key);
+      if (v) v.dispatch(spec);
+      else if (states.has(key)) states.set(key, states.get(key).update(spec).state);
     },
     // ---- Blame (gitBlame.js) ----
     /** A tab's blame (git:blame's answer, or { status: 'big', size, max }), or null to take it away. */

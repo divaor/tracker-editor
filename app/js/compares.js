@@ -56,7 +56,7 @@ export function compareName(c) {
 }
 
 /** What a comparison tab is: "Folders compared", "Two panes"… */
-export const compareKind = (c) => (c?.mode === 'panes' ? 'Two panes' : c?.mode === 'folders' ? 'Folders compared' : 'Files compared');
+export const compareKind = (c) => (c?.mode === 'merge' ? 'Merge view' : c?.mode === 'panes' ? 'Two panes' : c?.mode === 'folders' ? 'Folders compared' : 'Files compared');
 
 /** Its tooltip: both sides in full. */
 export function compareTitle(c) {
@@ -66,7 +66,7 @@ export function compareTitle(c) {
 }
 
 /** Whether a comparison can be saved: both sides are places (not a text taken once). */
-export const canSave = (c) => Boolean(c) && [c.left, c.right].every((s) => s && (s.path || s.key));
+export const canSave = (c) => Boolean(c) && c.mode !== 'merge' && [c.left, c.right].every((s) => s && (s.path || s.key));
 
 /** The same two places, for a saved comparison and to tell whether one is saved already. */
 export const sameSides = (a, b) => Boolean(a && b) && a.mode === b.mode && ['left', 'right'].every((s) => (a[s]?.path ?? a[s]?.key) === (b[s]?.path ?? b[s]?.key));

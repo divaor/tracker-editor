@@ -17,6 +17,7 @@ import { Modal } from './components.js';
 import { Splitter } from './splitter.js';
 import { PanesTab } from './twoPanes.js';
 import { SidewaysButton, usePhoneLayout } from './phone.js';
+import { MergeTab } from './mergeView.js';
 
 const message = (err) => String(err?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
 const sideOf = (s) => s?.path ?? s?.key ?? `text:${s?.label ?? ''}`;
@@ -685,6 +686,8 @@ function SyncConfirm({ plan, record, entries, onRun, onClose }) {
 /** A comparison in its tab: two files or two folders. */
 export function CompareTab({ id, record, settings, actions }) {
   if (!record) return null;
+  // A file in conflict: the current side, the result and the incoming side (ui/mergeView.js).
+  if (record.mode === 'merge') return html`<${MergeTab} key=${`${id}:merge`} id=${id} record=${record} settings=${settings} actions=${actions} />`;
   if (record.mode === 'panes')
     return html`<${PanesTab} key=${`${id}:panes`} id=${id} record=${record} settings=${settings} actions=${actions} star=${html`<${SaveStar} id=${id} record=${record} actions=${actions} />`} />`;
   return record.mode === 'folders'

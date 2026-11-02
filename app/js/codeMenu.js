@@ -41,12 +41,25 @@ export const EDIT_KEYS = { cut: 'Mod+X', copy: 'Mod+C', paste: 'Mod+V', 'select-
  *   Revert this change, Stage this change (any kind of file);
  * - model: the model panel (Ctrl+K: it answers without a model too, from the guide and the
  *   Claude app); files: the model can change files here.
+ * - conflict: the cursor is in a Git conflict block (conflictView.js), { mergeView, model }: its
+ *   ways out first (accept current, incoming or both; compare; the merge view; the model's merge).
  */
-export function codeMenuItems({ language = '', onName = false, hasSelection = false, readOnly = false, server = {}, runs = false, debugs = false, tests = false, gitChange = false, model = true, files = false } = {}) {
+export function codeMenuItems({ language = '', onName = false, hasSelection = false, readOnly = false, server = {}, runs = false, debugs = false, tests = false, gitChange = false, model = true, files = false, conflict = null } = {}) {
   const kind = fileKind(language);
   const items = [];
   const add = (id, label, command, extra = {}) => items.push({ id, label, command, ...extra });
   const sep = () => items.push({ separator: true });
+  if (conflict) {
+    if (!readOnly) {
+      add('conflict-current', 'Accept current change', 'conflict-accept-current');
+      add('conflict-incoming', 'Accept incoming change', 'conflict-accept-incoming');
+      add('conflict-both', 'Accept both changes', 'conflict-accept-both');
+    }
+    add('conflict-compare', 'Compare the two sides', 'conflict-compare');
+    if (conflict.mergeView) add('conflict-merge', 'Open the merge view', 'conflict-merge-view');
+    if (conflict.model && !readOnly) add('conflict-model', 'Merge with the model…', 'conflict-merge-model');
+    sep();
+  }
   if (kind === 'code') {
     add('definition', 'Go to definition', 'goto-definition', { disabled: !onName });
     add('references', 'Find all references', 'find-usages', { disabled: !onName });

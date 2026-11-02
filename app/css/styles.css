@@ -6776,6 +6776,200 @@ mark {
   overflow-wrap: anywhere;
 }
 
+/* The merge view (ui/mergeView.js): current | result | incoming (the ancestor first when shown);
+   on phones one column at a time, picked by the tabs under the bar. */
+.mv-cols {
+  display: grid;
+  flex: 1;
+  grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr));
+  min-width: 0;
+  min-height: 0;
+}
+
+.mv-cols[hidden] {
+  display: none;
+}
+
+.mv-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.mv-col + .mv-col {
+  border-left: 1px solid var(--border);
+}
+
+.mv-col.off {
+  display: none;
+}
+
+.mv-head {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 2px 8px 2px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.mv-col.ours .mv-head {
+  box-shadow: inset 0 -2px 0 var(--conflict-current);
+}
+
+.mv-col.theirs .mv-head {
+  box-shadow: inset 0 -2px 0 var(--conflict-incoming);
+}
+
+.mv-col.base .mv-head {
+  box-shadow: inset 0 -2px 0 var(--conflict-base);
+}
+
+.mv-col.result .mv-head {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.mv-name {
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.mv-hint {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  text-overflow: ellipsis;
+}
+
+.mv-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.mv-body > .cm-editor {
+  height: 100%;
+  background: var(--surface);
+}
+
+.mv-none {
+  margin: 8px 12px 0;
+}
+
+.mv.phone .mv-base-toggle .label,
+.mv.phone .mv-bar .ccmp-gap {
+  display: none;
+}
+
+.mv.phone .mv-count {
+  min-width: 0;
+}
+
+.mv-base-toggle.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.mv-switch {
+  display: flex;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.mv-tab {
+  flex: 1;
+  min-height: 38px;
+  padding: 4px 6px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+}
+
+.mv-tab.on {
+  border-bottom-color: var(--accent);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.mv-tab.ours.on {
+  border-bottom-color: var(--conflict-current);
+}
+
+.mv-tab.theirs.on {
+  border-bottom-color: var(--conflict-incoming);
+}
+
+/* In the sides: the lines each changed from the ancestor, and the section of the block in hand. */
+.cm-merge-changed {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.mv-col.ours .cm-merge-changed {
+  background: color-mix(in srgb, var(--conflict-current) 9%, transparent);
+}
+
+.mv-col.theirs .cm-merge-changed {
+  background: color-mix(in srgb, var(--conflict-incoming) 9%, transparent);
+}
+
+.mv-col.ours .cm-merge-focus {
+  background: color-mix(in srgb, var(--conflict-current) 22%, transparent);
+}
+
+.mv-col.theirs .cm-merge-focus {
+  background: color-mix(in srgb, var(--conflict-incoming) 22%, transparent);
+}
+
+.mv-col.base .cm-merge-focus {
+  background: color-mix(in srgb, var(--conflict-base) 24%, transparent);
+}
+
+.cm-merge-place {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.mv-proposal {
+  flex-shrink: 0;
+  max-height: 45%;
+  margin: 6px 8px;
+  overflow: auto;
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+
+.mv-proposal-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.mv-proposal-text {
+  margin: 0;
+  padding: 4px 10px 8px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.mv-proposal-note {
+  margin: 0;
+  padding: 0 10px 8px;
+}
+
 /* Two folders: one aligned tree (left | mark | right), the picked file compared below. */
 .fcmp {
   display: flex;
@@ -10421,6 +10615,122 @@ button.help-command:focus-visible {
   font-size: 12px;
 }
 
+/* Git's conflict blocks (conflictView.js): the current change green, the incoming one blue, the
+   common ancestor grey; the marker lines muted, with what each side is after them; a bar above
+   each block. The bar's space is padding, not margins (the gutter beside a block widget). */
+:root {
+  --conflict-current: #2e9e5b;
+  --conflict-incoming: #2f6fd6;
+  --conflict-base: #8b877e;
+}
+
+.cm-conflict-ours {
+  background: color-mix(in srgb, var(--conflict-current) 11%, transparent);
+}
+
+.cm-conflict-theirs {
+  background: color-mix(in srgb, var(--conflict-incoming) 11%, transparent);
+}
+
+.cm-conflict-base {
+  background: color-mix(in srgb, var(--conflict-base) 13%, transparent);
+}
+
+.cm-line.cm-conflict-marker {
+  color: var(--text-3);
+}
+
+.cm-line.cm-conflict-marker span {
+  color: inherit !important;
+  font-style: normal;
+  font-weight: normal;
+  text-decoration: none;
+}
+
+.cm-conflict-marker.cm-conflict-start {
+  background: color-mix(in srgb, var(--conflict-current) 24%, transparent);
+}
+
+.cm-conflict-marker.cm-conflict-end {
+  background: color-mix(in srgb, var(--conflict-incoming) 24%, transparent);
+}
+
+.cm-conflict-marker.cm-conflict-basemark {
+  background: color-mix(in srgb, var(--conflict-base) 22%, transparent);
+}
+
+.cm-conflict-marker .cm-inline-blame {
+  display: none;
+}
+
+.cm-conflict-marker[data-note]::after {
+  content: attr(data-note);
+  margin-left: 2ch;
+  color: var(--text-3);
+  font-family: var(--font);
+  font-size: 0.85em;
+  user-select: none;
+}
+
+.cm-conflict-bar {
+  display: flex;
+  flex-wrap: wrap;
+  max-width: var(--conflict-bar-width, 100%);
+  align-items: center;
+  gap: 4px 6px;
+  padding: 4px 4px 3px 2px;
+  font-family: var(--font);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.cm-conflict-title {
+  margin-right: 2px;
+  color: var(--text-2);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: help;
+}
+
+.cm-conflict-btn {
+  padding: 1px 9px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text);
+  font: 12px/1.5 var(--font);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.cm-conflict-btn:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.cm-conflict-btn.cb-current {
+  box-shadow: inset 3px 0 0 var(--conflict-current);
+}
+
+.cm-conflict-btn.cb-incoming {
+  box-shadow: inset 3px 0 0 var(--conflict-incoming);
+}
+
+.cm-conflict-btn.cb-model {
+  color: var(--accent);
+}
+
+@media (pointer: coarse) {
+  .cm-conflict-btn {
+    padding: 4px 11px;
+  }
+}
+
+.status-conflicts {
+  gap: 4px;
+  color: var(--warn);
+}
+
 /* Blame (gitBlame.js): at the end of the cursor's line, and the column before the line numbers. */
 .cm-inline-blame {
   display: inline-block;
@@ -11012,6 +11322,36 @@ summary.git-section-head {
 
 .git-file .git-badge {
   margin: 0 4px;
+}
+
+/* The Git panel's files in conflict (ui/conflicts.js), each with its ways out. */
+.git-conflicts {
+  padding: 8px 8px 6px;
+  border: 1px solid color-mix(in srgb, var(--git-conflict) 35%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--git-conflict) 5%, transparent);
+}
+
+.git-conflicts-help {
+  margin: 0 0 6px;
+}
+
+.git-conflict + .git-conflict {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.git-conflict-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px 2px 24px;
+}
+
+.git-conflict-kind {
+  flex-basis: 100%;
 }
 
 .git-stash-new {
