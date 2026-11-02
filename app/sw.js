@@ -50,6 +50,7 @@ const ASSETS = [
   'js/folderCompare.js',
   'js/folderPick.js',
   'js/panes.js',
+  'js/paneLayout.js',
   'js/columnSelect.js',
   'js/tabGroups.js',
   'js/localRepo.js',

@@ -7,6 +7,7 @@ import { getSettings } from './settings.js';
 import { documentKind } from './docTypes.js';
 import { applyFilePatch, createFile, nowIso, tombstone, trackerDocs, untitledName } from './model.js';
 import { isTextAttachment, newId } from './tracker-model.js';
+import { closePane, migratePanes, moveTab, placeTab, tidyPanes } from './paneLayout.js';
 
 const META_FIELDS = ['name', 'project', 'tags', 'language', 'deleted', 'encrypted', 'snippet', 'updatedAt', 'updatedBy'];
 
@@ -41,12 +42,12 @@ let docTexts = new Map(); // blob sha → text of a tracker document (for search
 // tab is open or among the recently closed ones (Ctrl+Shift+T).
 let compares = new Map();
 let docs = { items: null, list: [] }; // trackerDocs(trackerItems), computed once per sync
-// Tab keys are "f:<id>" | "r:<path>" | "d:<path>" | "c:<compare id>". Pinned tabs come first in `open`; `side` is
-// the tab in the split view's second pane (never the active one); `collapsed`
-// lists project keys whose tab group is folded.
+// Tab keys are "f:<id>" | "r:<path>" | "d:<path>" | "c:<compare id>". Pinned tabs come first in `open`; `panes`
+// are the tabs of the panes beside the main one, in order (never the active one, three at most:
+// paneLayout.js); `collapsed` lists project keys whose tab group is folded.
 // view: the tab groups the bar shows (null: all); viewActive: each view's last tab; assigned: tabs
 // moved to a group by hand; groupFolders: folders that stay tab groups while their tabs are open.
-const EMPTY_SESSION = () => ({ open: [], active: null, closed: [], pinned: [], side: null, collapsed: [], view: null, viewActive: {}, assigned: {}, groupFolders: [], found: null });
+const EMPTY_SESSION = () => ({ open: [], active: null, closed: [], pinned: [], panes: [], collapsed: [], view: null, viewActive: {}, assigned: {}, groupFolders: [], found: null });
 let session = EMPTY_SESSION();
 let meta = { lastSyncAt: null };
 let trashed = new Set(); // deleted files whose text this device kept (kv "trash:<id>")
@@ -128,14 +129,26 @@ function forgetTrash(ids) {
   if (any) kvSet('trashIds', [...trashed]);
 }
 
-// Keeps the session's rules: pinned tabs are open and first, the side tab is open and not the active one.
+// The panes as paneLayout.js says they become ({ active, panes }; null: it cannot be, nothing changes).
+function setPanes(next) {
+  if (!next) return false;
+  session.active = next.active;
+  session.panes = next.panes;
+  tidySession();
+  persist.session();
+  emit('session');
+  return true;
+}
+
+// Keeps the session's rules: pinned tabs are open and first; the panes' tabs are open, each in
+// one pane, never the active one (tidyPanes); with no active tab, the first pane's takes its place.
 function tidySession() {
   session.pinned = session.pinned.filter((k) => session.open.includes(k));
   session.open = [...session.pinned, ...session.open.filter((k) => !session.pinned.includes(k))];
-  if (session.side && (!session.open.includes(session.side) || session.side === session.active)) session.side = null;
-  if (!session.active && session.side) {
-    session.active = session.side;
-    session.side = null;
+  session.panes = tidyPanes(session.panes, { open: session.open, active: session.active });
+  if (!session.active && session.panes.length) {
+    session.active = session.panes[0];
+    session.panes = session.panes.slice(1);
   }
   const open = new Set(session.open);
   session.assigned = Object.fromEntries(Object.entries(session.assigned ?? {}).filter(([k]) => open.has(k)));
@@ -203,7 +216,11 @@ export const store = {
     const loaded = await Promise.all([...files.values()].filter((f) => !f.deleted).map(async (f) => [f.id, (await kvGet(`text:${f.id}`)) ?? '']));
     texts = new Map(loaded.filter(([id, t]) => !(files.get(id).encrypted && isSealed(t))));
     sealed = new Map(loaded.filter(([id, t]) => files.get(id).encrypted && isSealed(t)));
-    session = { ...EMPTY_SESSION(), ...((await kvGet('session')) ?? {}) };
+    const savedSession = (await kvGet('session')) ?? {};
+    session = { ...EMPTY_SESSION(), ...savedSession };
+    // Before 0.43 one side pane (`side`): now the first of the panes.
+    session.panes = migratePanes(savedSession);
+    delete session.side;
     const savedRepo = (await kvGet('repoTabs')) ?? [];
     repoTabs = new Map(savedRepo.map(settleRepoTab).filter(Boolean).map((t) => [t.path, t]));
     if (savedRepo.some((t) => repoTabs.get(t.path) !== t)) persist.repo(0);
@@ -423,9 +440,10 @@ export const store = {
       const at = Math.max(session.open.indexOf(session.active), session.pinned.length - 1);
       session.open = at === -1 ? [...session.open, key] : [...session.open.slice(0, at + 1), key, ...session.open.slice(at + 1)];
     }
-    // The side pane's tab opened in the main one: the split ends.
-    if (session.side === key) session.side = null;
+    // A pane's tab opened in the main one: the main one's goes to that pane (they swap).
+    if (session.panes.includes(key)) Object.assign(session, placeTab(session, key, 0));
     session.active = key;
+    tidySession();
     persist.session();
     if (!silent) emit('session');
   },
@@ -436,9 +454,8 @@ export const store = {
     session.open = session.open.filter((k) => k !== key);
     session.pinned = session.pinned.filter((k) => k !== key);
     session.closed = [key, ...session.closed.filter((k) => k !== key)].slice(0, 20);
-    if (session.side === key) session.side = null;
     if (session.active === key) {
-      const rest = session.open.filter((k) => k !== session.side);
+      const rest = session.open.filter((k) => !session.panes.includes(k));
       const from = key.startsWith('c:') && compares.get(key.slice(2))?.from;
       session.active = (from && rest.includes(from) ? from : rest[Math.min(at, rest.length - 1)]) ?? null;
     }
@@ -489,30 +506,26 @@ export const store = {
     emit('session');
   },
 
+  // ---- Panes side by side (paneLayout.js) ----
+
   /**
-   * Shows a tab in the split view's second pane (null closes it). The active tab
-   * moves aside for it: the main pane shows a neighbor. False when no other tab is open.
+   * Shows a tab in pane `target`: 0 the main one, 1–3 one beside it, 'new' one more at the end
+   * (four panes at most). A tab shown in another pane swaps places with the target's; the main
+   * pane's tab moving into a new pane leaves its neighbor there. False when it cannot be.
    */
-  setSide(key) {
-    if (key && !session.open.includes(key)) return false;
-    if (key && key === session.active) {
-      const others = session.open.filter((k) => k !== key);
-      if (!others.length) return false;
-      const at = session.open.indexOf(key);
-      session.active = [...session.open.slice(0, at)].reverse().find((k) => k !== key) ?? others[0];
-    }
-    session.side = key;
-    persist.session();
-    emit('session');
-    return true;
+  placeInPane(key, target) {
+    return setPanes(placeTab(session, key, target));
   },
 
-  /** Swaps the tabs of the two panes. */
-  swapSides() {
-    if (!session.side) return;
-    [session.active, session.side] = [session.side, session.active];
-    persist.session();
-    emit('session');
+  /** The tab of pane `from` (0: the main one) moved `step` panes along, swapping; from the main pane with none beside it, a pane opens. */
+  moveInPanes(from, step) {
+    return setPanes(moveTab(session, from, step));
+  },
+
+  /** Closes pane `index` (1–3) beside the main one, or all of them (0); their tabs stay open. */
+  closePane(index = 0) {
+    if (!session.panes.length) return false;
+    return setPanes({ active: session.active, panes: index ? closePane(session.panes, index) : [] });
   },
 
   /**
@@ -522,10 +535,7 @@ export const store = {
   setTabView(view, active, viewKey) {
     if (session.active) session.viewActive = { ...session.viewActive, [viewKey(session.view)]: session.active };
     session.view = view?.length ? view : null;
-    if (active !== undefined && (active === null || session.open.includes(active))) {
-      if (session.side === active) session.side = null;
-      session.active = active;
-    }
+    if (active !== undefined && (active === null || session.open.includes(active))) session.active = active;
     tidySession();
     persist.session();
     emit('session');
@@ -650,7 +660,7 @@ export const store = {
     session.pinned = session.pinned.map(swap);
     session.closed = session.closed.map(swap);
     session.active = session.active && swap(session.active);
-    session.side = session.side && swap(session.side);
+    session.panes = session.panes.map(swap);
     session.assigned = Object.fromEntries(Object.entries(session.assigned).map(([k, g]) => [swap(k), g]));
     session.viewActive = Object.fromEntries(Object.entries(session.viewActive).map(([v, k]) => [v, swap(k)]));
     persist.disk(0);

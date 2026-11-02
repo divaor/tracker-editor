@@ -109,6 +109,7 @@ import { FileBar, StatusBar, SyncBadge, TabBar } from './ui/tabs.js';
 import { FolderGroupDialog } from './ui/tabViews.js';
 import { SideBySideDialog } from './ui/sideBySide.js';
 import { activeFor, folderGroupOf, loadRoots, rememberFolders, sectionFolders, tabViewState } from './tabViews.js';
+import { MAX_EXTRA, dragSizes, evenSizes, nextUnshown, paneSizes, panesThatFit, withSizes } from './paneLayout.js';
 import { stepView, suggestedProject, viewKey } from './tabGroups.js';
 import { isAndroidApp, isDesktopApp } from './platform.js';
 
@@ -250,8 +251,8 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
           return;
         }
         if (isNarrow()) setSidebar(false);
-        // Already in the side view: go there.
-        if (fileKey(id) === store.session.side && !isNarrow() && !line && hostRef.current?.focusSide()) return setView('editor');
+        // Already in a pane beside the main one: go there.
+        if (store.session.panes.includes(fileKey(id)) && !isNarrow() && !line && hostRef.current?.focusKey(fileKey(id))) return setView('editor');
         store.open(fileKey(id));
         setView('editor');
         if (line) setTimeout(() => hostRef.current?.reveal(line, column, length), 60);
@@ -306,18 +307,17 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         if (isNarrow()) setSidebar(false);
         if (line) setTimeout(() => hostRef.current?.reveal(line, column, length), 60);
       },
-      /** A click on a tab: the side view's tab is focused there, any other shows in the main pane. */
+      /** A click on a tab: a pane's tab is focused there, any other shows in the main pane. */
       activate(key) {
         setView('editor');
-        if (key === store.session.side && !isNarrow() && hostRef.current?.focusSide()) return;
+        if (store.session.panes.includes(key) && !isNarrow() && hostRef.current?.focusKey(key)) return;
         store.open(key);
       },
-      /** Shows a tab in the main pane (from the side view too). */
+      /** Shows a tab in the main pane (from a pane beside it too: they swap). */
       showInMain(key) {
         store.open(key);
         setView('editor');
       },
-      closeSide: () => store.setSide(null),
       closeMany(keys) {
         for (const key of keys) actions.close(key);
       },
@@ -325,7 +325,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         const k = parseKey(key);
         // The open tab closed in a view: its neighbor in the view comes next, not one from elsewhere.
         const vs = store.session.active === key && store.session.view ? tabViewState() : null;
-        const shown = vs ? [...vs.keys, ...vs.guests].filter((x) => x !== store.session.side) : [];
+        const shown = vs ? [...vs.keys, ...vs.guests].filter((x) => !store.session.panes.includes(x)) : [];
         const file = k?.kind === 'file' ? store.get(k.id) : null;
         if (k?.kind === 'compare' && store.compare(k.id)?.dirty && !discard && !confirm('Close the comparison? Your edits in it that are not saved go.')) return;
         if (k?.kind === 'disk') {
@@ -2527,6 +2527,7 @@ export function App() {
   useEffect(() => {
     const onFocus = () => {
       lookUpGit(store.session.active);
+      for (const key of store.session.panes) lookUpGit(key);
       setGitTick((n) => n + 1);
     };
     window.addEventListener('focus', onFocus);
@@ -2701,29 +2702,94 @@ export function App() {
   };
   actions.togglePreview = () => {
     hostRef.current?.flushAll();
-    // The preview takes the side view's place.
-    if (!preview.has(activeKey)) store.setSide(null);
-    else setPreviewFull(false);
+    // The panes beside the main one give way to the preview (they come back when it closes).
+    if (preview.has(activeKey)) setPreviewFull(false);
     setPreview((p) => {
       const next = new Set(p);
       next.has(activeKey) ? next.delete(activeKey) : next.add(activeKey);
       return next;
     });
   };
-  /** Splits the editor: `key` in a second pane next to the main one (Ctrl+\ toggles it). */
-  actions.openSide = (key) => {
-    hostRef.current?.flushAll();
-    const { open, active } = store.session;
-    // Ctrl+\: the tab next to the active one.
-    const target = key ?? open[open.indexOf(active) + 1] ?? open[open.indexOf(active) - 1];
-    if (!target || !store.setSide(target)) return toast('Open another file to see two side by side.');
+  // ---- Panes side by side: the main one and up to three more (paneLayout.js; the store's `panes`) ----
+  /** The main pane's preview closes, so the panes beside it show. */
+  const leavePreview = () =>
     setPreview((p) => {
+      if (!p.has(store.session.active)) return p;
       const next = new Set(p);
       next.delete(store.session.active);
       return next;
     });
+  /** Why a tab cannot go into a pane beside the main one (null: it can). */
+  const notForPane = (key) => {
+    const k = parseKey(key);
+    if (!k || k.kind === 'compare') return 'A comparison shows in the main pane only.';
+    if (k.kind === 'file' && store.isSealed(k.id)) return 'Unlock the encrypted file first.';
+    if ((k.kind === 'disk' && store.diskTab(k.path)?.doc && !store.diskTab(k.path)?.asText) || (k.kind === 'repo' && store.repoTab(k.path)?.doc)) return 'A document shows in the main pane only.';
+    return null;
   };
-  actions.toggleSplit = () => (store.session.side ? actions.closeSide() : actions.openSide());
+  /**
+   * Shows `key` in pane `target` (0: the main one; 1–3 beside it; 'new': one more, four at most).
+   * A tab shown elsewhere swaps places with the target's.
+   */
+  actions.openInPane = (key, target = 'new') => {
+    hostRef.current?.flushAll();
+    if (target !== 0) {
+      const why = notForPane(key);
+      if (why) return toast(why);
+      if (isNarrow()) return toast('Panes side by side need a wider window.');
+      if (target === 'new' && store.session.panes.length >= MAX_EXTRA) return toast('Four panes at most: close one first (× on its head).');
+    }
+    if (!store.placeInPane(key, target)) return toast('Open another file first: the main pane needs one of its own.');
+    if (target !== 0) leavePreview();
+    setView('editor');
+    const index = target === 'new' ? store.session.panes.indexOf(key) + 1 : target;
+    setTimeout(() => hostRef.current?.focusPane(Math.max(0, index)), 30);
+  };
+  /** Ctrl+\: a new pane with the tab after the open one in the bar that no pane shows yet. */
+  actions.split = () => {
+    const { open, active, panes } = store.session;
+    if (panes.length >= MAX_EXTRA) return toast('Four panes at most: close one first (× on its head).');
+    const from = hostRef.current?.focusedPane ? panes[hostRef.current.focusedPane - 1] : active;
+    const key = nextUnshown(open, from ?? active, [active, ...panes]);
+    if (!key) return toast('Open another file to see it side by side.');
+    actions.openInPane(key, 'new');
+  };
+  /** Ctrl+1–4: the cursor into that pane; one more than there are opens it (as Ctrl+\). */
+  actions.focusPane = (n) => {
+    setView('editor');
+    const index = n - 1;
+    if (index > store.session.panes.length) return;
+    if (index === store.session.panes.length && index > 0) return actions.split();
+    hostRef.current?.focusPane(index);
+  };
+  /** The tab of the pane typed in last moved to the next (+1) or previous (-1) pane, swapping with that pane's. */
+  actions.movePane = (step) => {
+    hostRef.current?.flushAll();
+    const from = hostRef.current?.focusedPane ?? 0;
+    const key = from === 0 ? store.session.active : store.session.panes[from - 1];
+    if (!key) return;
+    if (from === 0 && step > 0 && !store.session.panes.length) {
+      const why = notForPane(key);
+      if (why) return toast(why);
+    }
+    if (!store.moveInPanes(from, step)) return toast(step > 0 ? 'No pane to its right.' : 'No pane to its left.');
+    leavePreview();
+    const to = key === store.session.active ? 0 : store.session.panes.indexOf(key) + 1;
+    setTimeout(() => hostRef.current?.focusPane(Math.max(0, to)), 30);
+  };
+  /** Closes pane `index` (1–3; its tab stays open), or the one typed in last. */
+  actions.closePane = (index = null) => {
+    hostRef.current?.flushAll();
+    const at = index ?? hostRef.current?.focusedPane ?? 0;
+    if (!at) return store.session.panes.length ? actions.closePane(store.session.panes.length) : toast('The main pane stays: close its tab instead.');
+    store.closePane(at);
+    setTimeout(() => hostRef.current?.focus(), 30);
+  };
+  /** Only the main pane again (the tabs stay open). */
+  actions.closePanes = () => {
+    hostRef.current?.flushAll();
+    store.closePane(0);
+  };
 
   // The model panel (the bubble, or Ctrl+K): about the selection, or the whole file. `assistStart`
   // opens it already asking (a problem, an error from the terminal: errorHelp.js).
@@ -3526,8 +3592,8 @@ export function App() {
   // The gutter of the tabs shown, and the marks' verified state while a run goes on.
   useEffect(() => {
     if (activeKey) actions.applyBreakpoints(activeKey);
-    if (store.session.side) actions.applyBreakpoints(store.session.side);
-  }, [activeKey, store.session.side, debugTick, settings.breakpoints]);
+    for (const key of store.session.panes) actions.applyBreakpoints(key);
+  }, [activeKey, store.session.panes.join('\n'), debugTick, settings.breakpoints]);
   /** The breakpoint menu (the gutter right-clicked): change, add, turn off, remove. */
   const breakpointMenu = ({ key, line }) => {
     const path = parseKey(key).path;
@@ -3672,24 +3738,60 @@ export function App() {
     }
   };
 
-  // The split view's second pane, after the main one so a tab moving between them hands over its state.
-  const sideEl = useRef(null);
-  const sideKey = store.session.side;
-  const sideParsed = parseKey(sideKey);
-  const sideFile = sideParsed?.kind === 'file' ? store.get(sideParsed.id) : null;
-  const sideRepo = sideParsed?.kind === 'repo' ? store.repoTab(sideParsed.path) : sideParsed?.kind === 'disk' ? store.diskTab(sideParsed.path) : null;
-  const showSide = Boolean((sideFile || sideRepo) && !(sideFile && store.isSealed(sideFile.id)) && view === 'editor' && !compare && !showPreview && !isNarrow());
+  // The panes beside the main one (up to three; paneLayout.js), after the main one's effect so a
+  // tab moving between them hands over its state. They give way to a preview, a history
+  // comparison, Settings and a narrow window (kept in the session, back when there is room);
+  // a pane narrower than MIN_PANE_PX waits until the window widens.
+  const paneEls = useRef([]);
+  const paneDrag = useRef(null);
+  const [areaWidth, setAreaWidth] = useState(0);
+  const [paneDrop, setPaneDrop] = useState(null); // where a tab dragged over the editor would go: 0, 1–3 or 'new'
+  const [tabOver, setTabOver] = useState(false); // a tab is being dragged over the editor
+  const tabOverTimer = useRef(null);
+  // The main pane's width, for what covers it alone (a document, a comparison, its frame) while panes show beside it.
+  useEffect(() => {
+    const el = editorEl.current;
+    if (!el || typeof ResizeObserver !== 'function') return;
+    const watcher = new ResizeObserver(() => areaEl.current?.style.setProperty('--main-pane-w', `${el.offsetWidth}px`));
+    watcher.observe(el);
+    return () => watcher.disconnect();
+  }, []);
+  useEffect(() => {
+    const el = areaEl.current;
+    if (!el || typeof ResizeObserver !== 'function') return;
+    const watcher = new ResizeObserver(([entry]) => {
+      const width = Math.round(entry.contentRect.width / 20) * 20;
+      setAreaWidth((was) => (was === width ? was : width));
+    });
+    watcher.observe(el);
+    return () => watcher.disconnect();
+  }, []);
+  const paneTab = (key) => {
+    const k = parseKey(key);
+    const file = k?.kind === 'file' ? store.get(k.id) : null;
+    const tab = k?.kind === 'repo' ? store.repoTab(k.path) : k?.kind === 'disk' ? store.diskTab(k.path) : null;
+    if (!(file || tab) || (file && store.isSealed(file.id)) || (tab?.doc && !tab.asText)) return null;
+    const unsaved = file ? !isLocal(settings) && Boolean(file.dirty || file.pending) : Boolean(tab.dirty);
+    return { key, k, file, tab, name: file?.name ?? tab.name, language: file?.language ?? '', unsaved, text: () => (file ? store.text(file.id) : tab.text) };
+  };
+  const panesOn = view === 'editor' && !compare && !showPreview && !isNarrow();
+  const shownPanes = panesOn ? store.session.panes.map(paneTab).filter(Boolean).slice(0, panesThatFit(areaWidth) - 1) : [];
+  const paneKeys = shownPanes.map((p) => p.key).join('\n');
+  const paneShares = paneSizes(settings.paneSizes, shownPanes.length + 1, settings.splitRatio);
   useLayoutEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    if (!showSide) return host.closeSide();
-    host.openSide(sideKey, sideEl.current, {
-      text: sideFile ? store.text(sideFile.id) : sideRepo.text,
-      name: sideFile?.name ?? sideRepo.name,
-      language: sideFile?.language ?? '',
-    });
-    if (sideParsed.kind === 'disk') host.setReadOnly(sideKey, diskReadOnly(sideRepo));
-  }, [sideKey, showSide, activeKey]);
+    host.setPanes(shownPanes.map((p, i) => ({ key: p.key, el: paneEls.current[i], text: p.text(), name: p.name, language: p.language })));
+    for (const p of shownPanes) if (p.k.kind === 'disk') host.setReadOnly(p.key, diskReadOnly(p.tab));
+  }, [paneKeys, activeKey]);
+  // A tab shown in a pane gets what the main pane's gets: its language server, Git's bar of changed lines, its .editorconfig.
+  useEffect(() => {
+    for (const p of shownPanes) {
+      attachLanguageServer(p.key);
+      lookUpGit(p.key);
+      lookUpEditorConfig(p.key);
+    }
+  }, [paneKeys]);
 
   // Notes captured while the window was closed or loading.
   useEffect(() => {
@@ -3933,6 +4035,15 @@ export function App() {
 
   // Keyboard shortcuts that work in the browser too (the desktop menu adds Ctrl+N, Ctrl+W, …).
   useEffect(() => {
+    // The panes' keys (commands.js: split, pane-1…4, pane-move-next / -prev): 'split', 'next', 'prev', a pane's number, or null.
+    const paneKey = (e, mod) => {
+      if (!mod || e.shiftKey || e.target?.closest?.('.modal, .menu')) return null;
+      if (e.key === '\\' && !e.altKey) return 'split';
+      if (!e.altKey && /^Digit[1-4]$/.test(e.code)) return Number(e.code.slice(5));
+      if (e.altKey && e.key === 'ArrowRight') return 'next';
+      if (e.altKey && e.key === 'ArrowLeft') return 'prev';
+      return null;
+    };
     const onKey = (e) => {
       const mod = e.ctrlKey || e.metaKey;
       const k = e.key.toLowerCase();
@@ -4035,9 +4146,13 @@ export function App() {
       } else if (e.key === 'F5' && mod && !e.altKey && isDesktopApp()) {
         e.preventDefault();
         actions.runTests({ scope: e.shiftKey ? 'file' : 'cursor' });
-      } else if (mod && e.key === '\\') {
+      } else if (paneKey(e, mod)) {
+        // Panes side by side, all in one place: Ctrl+\\ a new pane, Ctrl+1–4 go to one, Ctrl+Alt+→/← move the tab along.
         e.preventDefault();
-        actions.toggleSplit();
+        const which = paneKey(e, mod);
+        if (which === 'split') actions.split();
+        else if (which === 'next' || which === 'prev') actions.movePane(which === 'next' ? 1 : -1);
+        else actions.focusPane(which);
       } else if (mod && k === 's') {
         e.preventDefault();
         // A file on disk is saved; otherwise what was just typed is synced.
@@ -4068,7 +4183,15 @@ export function App() {
       'tab-view-only': () => actions.onlyActiveGroup(),
       'tab-move-group': () => actions.moveActiveToGroup(),
       trash: () => setDialog({ type: 'trash' }),
-      split: () => actions.toggleSplit(),
+      split: () => actions.split(),
+      'pane-1': () => actions.focusPane(1),
+      'pane-2': () => actions.focusPane(2),
+      'pane-3': () => actions.focusPane(3),
+      'pane-4': () => actions.focusPane(4),
+      'pane-move-next': () => actions.movePane(1),
+      'pane-move-prev': () => actions.movePane(-1),
+      'pane-close': () => actions.closePane(),
+      'panes-close': () => actions.closePanes(),
       'type-out': () => actions.typeOut(),
       'disk-open': () => actions.openDiskFiles(),
       'folder-open': () => actions.openFolder(),
@@ -4251,8 +4374,64 @@ export function App() {
     [],
   );
 
+  // ---- The panes beside the main one: their handles, heads, and tabs dropped onto them ----
+  // The handle after pane `i` (0: the main one): it and the next share their width (setting paneSizes, per number of panes).
+  const paneHandle = (i) => html`<${Splitter} key=${`pane-handle-${i}`} className="pane-resize" label=${`Resize panes ${i + 1} and ${i + 2}`}
+    onStart=${() => {
+      const els = [editorEl.current, ...paneEls.current.slice(0, shownPanes.length).map((el) => el?.parentElement)];
+      paneDrag.current = { width: Math.max(1, (areaEl.current?.clientWidth ?? 1) - shownPanes.length * 6), start: [...paneShares], shares: [...paneShares], els };
+    }}
+    onMove=${(delta) => {
+      const d = paneDrag.current;
+      d.shares = dragSizes(d.start, i, delta / d.width);
+      d.els.forEach((el, j) => el?.style.setProperty('flex', `${d.shares[j]} 1 0px`));
+    }}
+    onEnd=${() => saveSettings({ paneSizes: withSizes(getSettings().paneSizes, paneShares.length, paneDrag.current.shares) })}
+    onReset=${() => saveSettings({ paneSizes: withSizes(getSettings().paneSizes, paneShares.length, evenSizes(paneShares.length)) })} />`;
+  // A tab dragged over the editor (from the tab bar; on the desktop, a file drag of our own): which pane it would go to.
+  const tabDragged = (e) => Boolean(e.dataTransfer?.types?.includes('text/x-tab') || draggedTab());
+  const overArea = (e) => {
+    if (!tabDragged(e) || isNarrow() || view !== 'editor' || compare) return;
+    setTabOver(true);
+    clearTimeout(tabOverTimer.current);
+    tabOverTimer.current = setTimeout(() => (setTabOver(false), setPaneDrop(null)), 250);
+  };
+  const paneDropProps = (target) => ({
+    onDragOver: (e) => {
+      if (!tabDragged(e) || isNarrow()) return;
+      e.preventDefault();
+      if (paneDrop !== target) setPaneDrop(target);
+    },
+    onDrop: (e) => {
+      const key = e.dataTransfer.getData('text/x-tab') || (isOwnDrop(e.dataTransfer) && draggedTab());
+      setPaneDrop(null);
+      setTabOver(false);
+      if (!key) return;
+      e.preventDefault();
+      e.stopPropagation();
+      dropped();
+      actions.openInPane(key, target);
+    },
+  });
+  const paneView = (p, i) => {
+    const kind = kindOfKey(p.key) ?? 'synced';
+    return html`<div key=${`pane-${i}`} class="side-pane kind-${kind} ${settings.whereFrame ? 'framed' : ''} ${paneDrop === i + 1 ? 'drop-here' : ''}" style=${{ flex: `${paneShares[i + 1]} 1 0px` }}
+        role="region" aria-label=${`Pane ${i + 2}: ${p.name}`} ...${paneDropProps(i + 1)}>
+      <div class="side-head" onMouseDown=${(e) => !e.target.closest('button') && setTimeout(() => hostRef.current?.focusPane(i + 1), 0)}>
+        <span class="side-no" title=${`Pane ${i + 2}: Ctrl+${i + 2} puts the cursor here`}>${i + 2}</span>
+        <${Icon} name=${KINDS[kind]?.icon ?? 'file'} size=${14} class="side-kind" />
+        <span class="side-name" title=${p.k.kind === 'disk' ? p.tab.path : p.name}>${p.name}</span>
+        ${p.unsaved && html`<span class="tab-dot" title=${p.file ? 'Not synced yet' : 'Not saved'} />`}
+        <span class="spacer" />
+        <button type="button" class="icon-btn sm" aria-label=${`Show ${p.name} in the main pane`} title="Swap with the main pane" onClick=${() => actions.openInPane(p.key, 0)}><${Icon} name="rotate" size=${15} /></button>
+        <button type="button" class="icon-btn sm" aria-label=${`Close pane ${i + 2}`} title="Close this pane (its tab stays open)" onClick=${() => actions.closePane(i + 1)}><${Icon} name="x" size=${15} /></button>
+      </div>
+      <div class="side-host" ref=${(el) => (paneEls.current[i] = el)} />
+    </div>`;
+  };
+
   // The editor view stays mounted (CodeMirror lives in it) and is only hidden while Settings is open.
-  // The handle between the text and the preview or side view: the editor's share of the width.
+  // The handle between the text and the preview: the editor's share of the width.
   const splitHandle = (label) => html`<${Splitter} className="pane-resize" label=${label}
     onStart=${() => {
       const area = areaEl.current;
@@ -4297,25 +4476,15 @@ export function App() {
         html`<${FilterBar} key=${activeKey} tabKey=${activeKey} actions=${actions} onClose=${actions.toggleFilter} />`}
         ${dictating && dictating === activeKey && html`<${DictationBar} lang=${settings.dictationLang} onPhrase=${actions.dictate} onStop=${actions.stopDictation} />`}
         ${typingJob && html`<${TypeOutPanel} job=${typingJob} onStop=${() => window.desktop?.typing?.stop()} />`}
-        <div class="editor-area ${showPreview ? 'split' : ''} ${showPreview && previewFull ? 'preview-full' : ''} ${showSide ? 'side-split' : ''} ${compare ? 'comparing' : ''} ${settings.whereFrame && activeKey ? 'framed' : ''}"
-          data-kind=${kindOfKey(activeKey) ?? undefined} ref=${areaEl} style=${{ '--split': `${((settings.splitRatio || 0.5) * 100).toFixed(2)}%` }}>
-          <div class="editor-host" ref=${editorEl} />
+        <div class="editor-area ${showPreview ? 'split' : ''} ${showPreview && previewFull ? 'preview-full' : ''} ${shownPanes.length ? 'panes-split' : ''} ${compare ? 'comparing' : ''} ${settings.whereFrame && activeKey ? 'framed' : ''}"
+          data-kind=${kindOfKey(activeKey) ?? undefined} ref=${areaEl} style=${{ '--split': `${((settings.splitRatio || 0.5) * 100).toFixed(2)}%` }} onDragOver=${overArea}>
+          <div class="editor-host ${paneDrop === 0 ? 'drop-here' : ''}" ref=${editorEl} style=${shownPanes.length ? { flex: `${paneShares[0]} 1 0px` } : undefined} ...${shownPanes.length || tabOver ? paneDropProps(0) : {}} />
           ${assist && !gitAssist && ((activeKey && !activeCompare) || assistStart) && view === 'editor' && !compare && !activeSealed && html`<${AssistPanel} key=${`${activeKey}:${assistStart?.id ?? 0}`} scope=${assistScope} start=${assistStart} hasFile=${Boolean(activeKey)} actions=${actions} onClose=${() => (setAssist(false), setAssistStart(null), hostRef.current?.focus())} />`}
           ${gitAssist && view === 'editor' && html`<${GitAssist} key=${gitAssist.id} dir=${gitAssist.dir} start=${gitAssist.start} actions=${actions} onClose=${() => (setGitAssist(null), hostRef.current?.focus())} />`}
           ${!assist && !gitAssist && modelReady && settings.assistBubble && activeKey && !activeCompare && !compare && !activeSealed && !docShown && !typingJob && html`<${AssistBubble} onOpen=${() => setAssist(true)} />`}
-          ${showSide && splitHandle('Resize the side view')}
-          ${showSide &&
-          html`<div class="side-pane" aria-label=${`Side view: ${sideFile?.name ?? sideRepo.name}`}>
-            <div class="side-head">
-              <${Icon} name=${sideRepo ? 'paperclip' : 'file'} size=${14} />
-              <span class="side-name">${sideFile?.name ?? sideRepo.name}</span>
-              ${(sideFile?.dirty || sideFile?.pending || sideRepo?.dirty) && html`<span class="tab-dot" title="Not synced yet" />`}
-              <span class="spacer" />
-              <button type="button" class="icon-btn sm" aria-label="Swap the panes" title="Swap the panes" onClick=${() => store.swapSides()}><${Icon} name="rotate" size=${15} /></button>
-              <button type="button" class="icon-btn sm" aria-label="Close the side view" title="Close the side view (Ctrl+\\)" onClick=${actions.closeSide}><${Icon} name="x" size=${15} /></button>
-            </div>
-            <div class="side-host" ref=${sideEl} />
-          </div>`}
+          ${shownPanes.flatMap((p, i) => [paneHandle(i), paneView(p, i)])}
+          ${tabOver && panesOn && store.session.panes.length < MAX_EXTRA &&
+          html`<div class="pane-drop-new ${paneDrop === 'new' ? 'on' : ''}" ...${paneDropProps('new')}><${Icon} name="columns" size=${16} /><span>New pane</span></div>`}
           ${compare && html`<${CompareView} key=${compare.sha ?? compare.left.label} compare=${compare} settings=${settings} onClose=${() => setCompare(null)} />`}
           ${showPreview && !previewFull && splitHandle('Resize the preview')}
           ${showPreview && html`<${Preview} key=${activeKey} kind=${previewType} name=${activeName} text=${activeText()}

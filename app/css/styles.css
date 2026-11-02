@@ -6753,6 +6753,116 @@ svg.up {
   display: none;
 }
 
+/* ---- Panes side by side (up to four: the main one and the session's `panes`) ----------------
+   Each takes its share of the width (inline flex, setting paneSizes), with a handle between
+   each pair. A pane's head: its number, its kind's color and icon, the name, swap and close. */
+.side-pane {
+  position: relative;
+}
+
+.side-head {
+  box-shadow: inset 0 2px 0 color-mix(in srgb, var(--kc, var(--accent)) 70%, transparent);
+  cursor: default;
+}
+
+.side-no {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--kc, var(--accent)) 16%, transparent);
+  color: color-mix(in srgb, var(--kc, var(--accent)) 80%, var(--text));
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.side-kind {
+  flex: none;
+  color: var(--kc, var(--text-2));
+}
+
+/* The frame in the pane's kind color (Settings → Editor; whereFrame), as the main pane has. */
+.side-pane.framed::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  border: 2px solid color-mix(in srgb, var(--kc) 75%, transparent);
+  pointer-events: none;
+}
+
+/* With panes beside it, what covers the main pane covers only it: a document, a comparison, its frame. */
+.editor-area.panes-split > .doc-view,
+.editor-area.panes-split > .ccmp,
+.editor-area.panes-split > .fcmp,
+.editor-area.panes-split > .panes-tab,
+.editor-area.panes-split.framed[data-kind]::after {
+  right: auto;
+  width: var(--main-pane-w, 50%);
+}
+
+.editor-host,
+.side-pane {
+  transition: box-shadow 0.1s;
+}
+
+/* A tab dragged over a pane: it goes there when dropped; at the right edge, into a new pane. */
+.editor-host.drop-here,
+.side-pane.drop-here {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.pane-drop-new {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 72px;
+  border-left: 2px dashed color-mix(in srgb, var(--accent) 60%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.pane-drop-new.on {
+  border-left-style: solid;
+  background: color-mix(in srgb, var(--accent) 20%, var(--surface));
+}
+
+/* A tab shown in a pane beside the main one: the pane's number on it (not on a narrow screen,
+   where only the main pane shows). */
+@media (max-width: 860px) {
+  .tab .tab-pane-no {
+    display: none;
+  }
+}
+
+.tab .tab-pane-no {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
 .passphrase-form {
   display: flex;
   flex-wrap: wrap;

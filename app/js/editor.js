@@ -999,8 +999,8 @@ function fileRefAt(state, pos) {
  * `onProblemAction(kind, key, problem)` ('explain' or 'fix') comes from a problem's tooltip.
  * `onOpenRef(ref, key)` opens a Ctrl+clicked "file:line"; `onSuggest(request)` asks the
  * model for the text at the cursor (suggestions as you type, setting `inlineSuggest`).
- * `openSide(key, el, …)` shows a second tab next to it (the split view); a tab's
- * state, with its undo history, moves between the panes.
+ * `setPanes(slots)` shows other tabs in panes beside it (up to three more, paneLayout.js); a
+ * tab's state, with its undo history, moves between the panes.
  */
 export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpenLink, onOpenRef, onSuggest, onImage, onPasteFiles, onPastePath, onProblems, onProblemAction, onDrop, onLineMenu, onGitMark, onTestMark, onBreakpointClick, onBreakpointsMoved, linkTargets, settings }) {
   const states = new Map(); // key → EditorState
@@ -1022,7 +1022,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
   const indents = new Map(); // key → { tabs, size, source: 'detected' | 'editorconfig' | 'chosen' }
   let options = settings;
   let active = null;
-  let side = null; // { key, view } of the split view's second pane
+  const extra = []; // { key, el, view }: the panes beside the main one, in order
   const bigKeys = new Set(); // tabs in the lighter editor for very large files
   // Macro being recorded: keys the keymaps handle, and typed or pasted text, in order.
   let recording = null;
@@ -1059,11 +1059,14 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
     if (!handlers.some((h) => h(v, from, to, step.text, fallback))) v.dispatch(v.state.replaceSelection(step.text), { userEvent: 'input.type', scrollIntoView: true });
     return true;
   }
-  let focused = 'main'; // the pane typed in last: commands and reading aloud use it
+  let focusedView = null; // the pane typed in last (null: the main one): commands and reading aloud use it
   // The view showing a tab, if one does.
-  const viewOf = (key) => (key && key === active ? view : key && key === side?.key ? side.view : null);
-  const keyOfView = (v) => (v === view ? active : v === side?.view ? side.key : null);
-  const current = () => (focused === 'side' && side ? side : { key: active, view });
+  const viewOf = (key) => (!key ? null : key === active ? view : (extra.find((p) => p.key === key)?.view ?? null));
+  const keyOfView = (v) => (v === view ? active : (extra.find((p) => p.view === v)?.key ?? null));
+  const current = () => {
+    const p = focusedView && extra.find((x) => x.view === focusedView);
+    return p ? { key: p.key, view: p.view } : { key: active, view };
+  };
 
   // A key in a view as the keyboard would press it (the edit bar's keys, Ctrl+letter): the
   // editor's keymaps take it, and the window's shortcuts see it bubble up.
@@ -1091,7 +1094,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
   // menu by it (`onLineMenu`); a right-click or a long press opens it for the selection.
   const coarse = () => typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
   const lineMenuAt = (v, e) => {
-    focused = v === side?.view ? 'side' : 'main';
+    focusedView = v === view ? null : v;
     const r = (e.target.closest?.('.cm-gutterElement') ?? e.target).getBoundingClientRect();
     onLineMenu?.({ key: keyOfView(v), x: r.right, top: r.top, bottom: r.bottom });
   };
@@ -1346,11 +1349,29 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
   }
 
   const view = new EditorView({ parent, state: EditorState.create({ doc: '' }) });
-  view.dom.addEventListener('focusin', () => (focused = 'main'));
+  view.dom.addEventListener('focusin', () => (focusedView = null));
   // CodeMirror's own style sets `display: flex !important`, which beats the
   // hidden attribute, so hiding needs an inline !important rule.
   const setVisible = (on) => (on ? view.dom.style.removeProperty('display') : view.dom.style.setProperty('display', 'none', 'important'));
   setVisible(false);
+
+  // A pane beside the main one goes: its tab's state (with its undo history) is kept for where it shows next.
+  const release = (p, { keep = true } = {}) => {
+    if (keep) {
+      states.set(p.key, p.view.state);
+      flush(p.key);
+      scroll.set(p.key, p.view.scrollDOM.scrollTop);
+    }
+    if (focusedView === p.view) focusedView = null;
+    p.view.destroy();
+  };
+  // The pane showing `key` beside the main one, if one does, goes (the main pane takes it, or it closed).
+  const takeOut = (key, opts) => {
+    const at = extra.findIndex((p) => p.key === key);
+    if (at === -1) return;
+    const [p] = extra.splice(at, 1);
+    release(p, opts);
+  };
 
   async function loadLanguage(key, name, chosen) {
     if (bigKeys.has(key)) return PLAIN_TEXT;
@@ -1369,9 +1390,9 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
 
     /** Shows a tab (creating its editor state the first time). */
     show(key, { text, name, language }) {
-      // From the second pane to the main one.
-      if (side?.key === key) this.closeSide();
-      focused = 'main';
+      // From a pane beside it to the main one.
+      takeOut(key);
+      focusedView = null;
       if (active && active !== key) {
         flush(active);
         states.set(active, view.state);
@@ -1562,41 +1583,80 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       return v.state.sliceDoc(Math.max(0, at - n), at);
     },
 
-    /** Shows `key` in the second pane, inside `el` (never the main pane's tab). */
-    openSide(key, el, { text, name, language }) {
-      if (key === active) return Promise.resolve(null);
-      if (side?.key === key && el.contains(side.view.dom)) return Promise.resolve(null);
-      this.closeSide();
-      let created = false;
-      if (!states.has(key)) {
-        states.set(key, EditorState.create({ doc: text, extensions: extensions(key, text) }));
-        created = true;
+    /**
+     * Shows the panes beside the main one: `slots` ([{ key, el, text, name, language }], in
+     * order), each tab in its element (never the main pane's tab). A view stays with its element:
+     * one whose element goes is let go, one whose tab changes takes the new tab's state. Every
+     * state leaving a view is kept first, so a tab moving between panes keeps its undo history.
+     * Resolves when the new tabs' languages are loaded.
+     */
+    setPanes(slots) {
+      const wanted = slots.filter((s) => s?.key && s.el && s.key !== active);
+      for (const p of [...extra]) {
+        const slot = wanted.find((s) => s.el === p.el);
+        if (slot?.key === p.key) continue;
+        if (slot) {
+          // Its element shows another tab now: this one's state is kept, the view taken over below.
+          states.set(p.key, p.view.state);
+          flush(p.key);
+          scroll.set(p.key, p.view.scrollDOM.scrollTop);
+          p.key = null;
+        } else {
+          extra.splice(extra.indexOf(p), 1);
+          release(p);
+        }
       }
-      const sideView = new EditorView({ parent: el, state: states.get(key) });
-      sideView.dom.addEventListener('focusin', () => (focused = 'side'));
-      side = { key, view: sideView };
-      const top = scroll.get(key);
-      if (top) requestAnimationFrame(() => sideView.scrollDOM.scrollTo({ top }));
-      return created ? loadLanguage(key, name, language) : Promise.resolve(null);
+      const next = [];
+      const loads = [];
+      for (const s of wanted) {
+        let p = extra.find((x) => x.el === s.el);
+        if (!p || p.key !== s.key) {
+          if (!states.has(s.key)) {
+            states.set(s.key, EditorState.create({ doc: s.text ?? '', extensions: extensions(s.key, s.text ?? '') }));
+            loads.push(() => loadLanguage(s.key, s.name, s.language));
+          }
+          if (p) {
+            p.key = s.key;
+            p.view.setState(states.get(s.key));
+          } else {
+            const v = new EditorView({ parent: s.el, state: states.get(s.key) });
+            v.dom.addEventListener('focusin', () => (focusedView = v));
+            p = { key: s.key, el: s.el, view: v };
+          }
+          const top = scroll.get(s.key);
+          const pane = p;
+          requestAnimationFrame(() => pane.view.scrollDOM.scrollTo({ top: top ?? 0 }));
+        }
+        next.push(p);
+      }
+      extra.splice(0, extra.length, ...next);
+      // After the panes are known: a language loads into the view showing its tab.
+      return Promise.all(loads.map((load) => load()));
     },
 
-    closeSide() {
-      if (!side) return;
-      const { key, view: sideView } = side;
-      flush(key);
-      states.set(key, sideView.state);
-      scroll.set(key, sideView.scrollDOM.scrollTop);
-      side = null;
-      focused = 'main';
-      sideView.destroy();
+    /** Puts the cursor in pane `index` (0: the main one; 1–3: beside it). False when there is none. */
+    focusPane(index) {
+      const v = index === 0 ? (active ? view : null) : extra[index - 1]?.view;
+      if (!v) return false;
+      v.focus();
+      focusedView = index === 0 ? null : v;
+      return true;
     },
-
-    focusSide() {
-      side?.view.focus();
-      return Boolean(side);
+    /** Puts the cursor in the pane showing `key`. False when none does. */
+    focusKey(key) {
+      const v = viewOf(key);
+      if (!v) return false;
+      v.focus();
+      focusedView = v === view ? null : v;
+      return true;
     },
-    get side() {
-      return side?.key ?? null;
+    /** The tabs of the panes beside the main one, in order. */
+    get panes() {
+      return extra.map((p) => p.key);
+    },
+    /** The pane typed in last: 0 the main one, 1–3 beside it. */
+    get focusedPane() {
+      return focusedView ? extra.findIndex((p) => p.view === focusedView) + 1 : 0;
     },
 
     setLanguage: loadLanguage,
@@ -1623,7 +1683,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       };
       for (const [key, state] of states) if (!viewOf(key)) states.set(key, state.update({ effects: effectsFor(key) }).state);
       if (active) view.dispatch({ effects: effectsFor(active) });
-      if (side) side.view.dispatch({ effects: effectsFor(side.key) });
+      for (const p of extra) p.view.dispatch({ effects: effectsFor(p.key) });
       if (active) report(view.state, active);
     },
 
@@ -1774,7 +1834,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       indents.delete(key);
       // hide() keeps the active tab's state, so hide first, then forget it.
       if (key === active) this.hide();
-      if (key === side?.key) this.closeSide();
+      takeOut(key, { keep: false });
       states.delete(key);
       scroll.delete(key);
       onDrop?.(key);

@@ -113,7 +113,7 @@ When you don't remember a file's name or where you left it, ask in your own word
 
 - **Text size**: smaller to fit more on a small screen, larger to read easily. On a phone, **pinch** the text with two fingers (the page itself stays as it is). On a computer, `Ctrl+=` / `Ctrl+-` (Mac `Cmd`), or `Ctrl` and the mouse wheel over the text; `Ctrl+0` goes back to the usual 14 px. Or tap **Aa** in the status bar for **A−** / **A+** and **Usual size**. Each device keeps its own size (also in **Settings → Editor → Text size**). The desktop's **View** menu has them too; zooming the whole window (menus and lists too) is there as well, without keys. On a phone the line numbers take less room too (smaller numbers, problems as a thin colored bar next to them); turning off **Settings → Editor → Line numbers and folding** hides the numbers altogether.
 - **The sidebar's width**: drag its right edge, for example to see long names in folders. Double-click the edge to go back to the default width.
-- **Text and preview (or the side view)**: drag the line between them to give either side more room; double-click it for half and half.
+- **Text and preview**: drag the line between them to give either side more room; double-click it for half and half. Panes side by side: drag the line between two; double-click for even widths.
 - **Clearing a filter**: the × at the end of a search or filter field empties it (`Escape` too in the sidebar's filters).
 
 ### Editing tools
@@ -284,7 +284,7 @@ The **switcher at the left end of the tab bar** (it appears once there are two g
 | Item | What it does |
 | --- | --- |
 | Pin / Unpin | Pinned tabs go first, have no close button and stay when you close others. |
-| Open to the side | Shows the tab in a second pane next to the current one (wide screens). |
+| Open in a new pane / Move to pane N | Shows the tab in a pane of its own beside the others (up to four, wide screens), or in one that is there; on a pane's tab, **Close its pane**. |
 | History, Compare with… | See section 5. |
 | Save this comparison… | On a comparison tab: keep it, to open it again later (see [Saved comparisons](#saved-comparisons)). |
 | Copy for Claude | A file on disk: its path, which Claude Code reads where it is. Other files: the name and the text in a code block, to paste into a chat. |
@@ -303,7 +303,13 @@ The **switcher at the left end of the tab bar** (it appears once there are two g
   - A drop can't make Explorer open the folder where a file lives: use **Show in the file explorer** instead.
   - Encrypted files are never written out; their tabs only move within the bar. Copies of synced files go to a temporary folder and are removed after a week.
   - In the web app, a dragged tab carries its text: drop it into a chat box to paste it.
-- **Split view** (`Ctrl+\`, or *View → Split View*): two files side by side, both editable. The side pane's header can **swap** the panes or close the split. A tab moves between panes with its undo history. Clicking the side tab in the tab bar takes you to the side pane.
+- **Split view** (`Ctrl+\`, or *View → Panes*): up to four panes side by side (wide screens), each file editable in its own:
+  - **A new pane**: `Ctrl+\` opens the tab after the open one in a pane of its own; again for a third and a fourth. Or right-click a tab → **Open in a new pane**, or drag a tab onto the right edge of the editor (**New pane** shows there).
+  - **Moving tabs**: drag a tab onto a pane, right-click it → **Move to pane N** (or **the main pane**), or `Ctrl+Alt+→` / `Ctrl+Alt+←` to send the tab of the pane you are in one pane along. A tab moving into a pane swaps places with the one there; it keeps its undo history.
+  - **Which pane**: the one you click or type in; commands, reading aloud and the model work there. `Ctrl+1` … `Ctrl+4` put the cursor in pane 1 (the main one) … 4; `Ctrl+2` with no pane 2 opens one. Clicking a pane's tab in the tab bar goes to its pane. Tabs shown in a pane carry its number in the tab bar.
+  - **Each pane's head**: its number, the file's name in the color of where it lives, ↻ to swap it with the main pane, × to close the pane (the tab stays open). **View → Panes → Only the Main Pane** closes them all.
+  - **Widths**: drag the line between two panes; double-click it to make them all even. Each number of panes keeps its own widths.
+  - The panes give way to a preview, a comparison from History and a narrow window (a phone shows the main pane only); they come back afterwards. Comparisons and documents show in the main pane only.
 - Group headers, pinned tabs in every view and the tab colors are also in **Settings → Editor**.
 
 ---
@@ -866,7 +872,9 @@ Turn them on in **Settings → Desktop**.
 | `Ctrl+Shift+R` / `Alt+Shift+P` | Record a macro / play it |
 | `Ctrl+Shift+V` | Clipboard history (desktop) |
 | `Ctrl+Alt+N` / `Ctrl+Alt+O` | Quick capture / text from a screenshot, anywhere (desktop, when turned on) |
-| `Ctrl+\` | Split view on or off |
+| `Ctrl+\` | Split view: the next tab in a new pane (up to four) |
+| `Ctrl+1` … `Ctrl+4` | Go to pane 1 (the main one) … 4 |
+| `Ctrl+Alt+→` / `Ctrl+Alt+←` | Move the tab to the next / previous pane |
 | `Ctrl+B` | Show or hide the file list |
 | `Ctrl+Shift+A` | The model |
 | `Ctrl+S` | Sync now (with what you just typed), or save a file opened from disk or a server |

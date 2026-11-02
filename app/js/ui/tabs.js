@@ -207,6 +207,19 @@ export function TabBar({ session, projects, settings, actions }) {
   const showColors = colorMode === 'always' ? colored.size > 0 : colorMode === 'auto' && colored.size >= 2;
   const showSwitcher = vs.groups.length > 1 || Boolean(vs.view);
 
+  // Panes side by side (up to four): open the tab in a new one, move it to another, close its pane.
+  const paneItems = (key) => {
+    const panes = session.panes ?? [];
+    const own = key === session.active ? 0 : panes.indexOf(key) + 1;
+    const places = [0, ...panes.map((_, i) => i + 1)].filter((n) => n !== own);
+    return [
+      own > 0
+        ? { label: 'Close its pane', icon: 'columns', hint: 'The tab stays open', run: () => actions.closePane(own) }
+        : { label: 'Open in a new pane', icon: 'columns', disabled: panes.length >= 3 || session.open.length < 2, hint: panes.length >= 3 ? 'Four panes at most' : 'Beside the others', run: () => actions.openInPane(key, 'new') },
+      ...(panes.length ? places.map((n) => ({ label: n === 0 ? 'Move to the main pane' : `Move to pane ${n + 1}`, icon: 'arrowRight', run: () => actions.openInPane(key, n) })) : []),
+    ];
+  };
+
   const menuItems = (key) => {
     const isPinned = session.pinned.includes(key);
     const at = inBar.indexOf(key);
@@ -221,11 +234,7 @@ export function TabBar({ session, projects, settings, actions }) {
     return [
       { label: isPinned ? 'Unpin' : 'Pin', icon: 'pin', run: () => store.pin(key, !isPinned) },
       isCompare && { label: 'Save this comparison…', icon: 'star', disabled: !actions.canSaveCompare(key), run: () => actions.saveCompare(key) },
-      !isCompare &&
-        !narrowScreen() &&
-        (key === session.side
-          ? { label: 'Close the side view', icon: 'columns', run: actions.closeSide }
-          : { label: 'Open to the side', icon: 'columns', disabled: session.open.length < 2, run: () => actions.openSide(key) }),
+      ...(!isCompare && !narrowScreen() ? paneItems(key) : []),
       !isCompare && { label: 'History', icon: 'history', run: () => (actions.showInMain(key), actions.showHistory()) },
       !isCompare && { label: 'Compare with…', icon: 'columns', run: () => (actions.showInMain(key), actions.compareWith()) },
       !isCompare && { label: 'Compare with clipboard', icon: 'copy', run: () => (actions.showInMain(key), actions.compareWithClipboard()) },
@@ -256,7 +265,9 @@ export function TabBar({ session, projects, settings, actions }) {
     const info = tabInfo(key);
     if (!info) return null;
     const isActive = key === session.active;
-    const isSide = key === session.side;
+    // Shown in a pane beside the main one: its number there (2–4).
+    const paneNo = (session.panes ?? []).indexOf(key) + 2;
+    const isSide = paneNo > 1;
     const isPinned = session.pinned.includes(key);
     const isGuest = vs.guests.includes(key);
     const group = groupById.get(vs.groupOfKey(key));
@@ -265,7 +276,7 @@ export function TabBar({ session, projects, settings, actions }) {
     return html`<div key=${key} role="tab" aria-selected=${isActive} tabindex=${isActive ? 0 : -1}
         class="tab kind-${info.kind} ${isActive ? 'active' : ''} ${isSide ? 'side' : ''} ${isPinned ? 'pinned' : ''} ${info.unsynced ? 'unsynced' : ''} ${info.offline ? 'offline' : ''} ${dragging === key ? 'dragging' : ''} ${isGuest ? 'guest' : ''} ${gc ? 'grouped' : ''}"
         style=${gc ? { '--gc': gc } : undefined}
-        title=${`${isSide ? `${info.title} · in the side view` : info.title}${groupLine}${touch ? '' : `\n${isPinned ? 'Double-click to unpin' : 'Double-click to pin'} · middle-click to close`}`}
+        title=${`${isSide ? `${info.title} · in pane ${paneNo}` : info.title}${groupLine}${touch ? '' : `\n${isPinned ? 'Double-click to unpin' : 'Double-click to pin'} · middle-click to close`}`}
         draggable=${!touch}
         onDragStart=${(e) => {
           setDragging(key);
@@ -331,7 +342,7 @@ export function TabBar({ session, projects, settings, actions }) {
         }}
         onKeyDown=${(e) => (e.key === 'Enter' || e.key === ' ') && actions.activate(key)}>
       ${isPinned && html`<${Icon} name="pin" size=${12} class="tab-pin" />`}
-      ${isSide && html`<${Icon} name="columns" size=${13} class="tab-side" />`}
+      ${isSide && html`<span class="tab-pane-no" aria-label=${`In pane ${paneNo}`}>${paneNo}</span>`}
       <${Icon} name=${info.follow ? 'follow' : (info.icon ?? KINDS[info.kind].icon)} size=${13} class="tab-kind" />
       ${info.encrypted && html`<${Icon} name="lock" size=${12} class="tab-lock" />`}
       ${info.snippet && html`<${Icon} name="snippet" size=${12} class="tab-lock" />`}
@@ -410,7 +421,7 @@ export function TabBar({ session, projects, settings, actions }) {
     ${pinned.map(tab)}
     ${groups.map((g) => {
       const collapsed = showHeaders && session.collapsed?.includes(g.id);
-      const shown = collapsed ? g.keys.filter((k) => k === session.active || k === session.side) : g.keys;
+      const shown = collapsed ? g.keys.filter((k) => k === session.active || (session.panes ?? []).includes(k)) : g.keys;
       return html`
         ${showHeaders &&
         html`<button type="button" key=${`group:${g.id}`} class="tab-group ${collapsed ? 'collapsed' : ''}" style=${g.color ? { '--pc': g.color } : undefined}

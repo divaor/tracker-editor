@@ -93,13 +93,13 @@ export const viewKey = (view) => (view?.length ? [...view].sort().join('|') : ''
 /**
  * The tabs a view shows, in the bar's order: those of its groups, the pinned
  * ones (with `pinnedEverywhere`, or when the view has Pinned), and the open tab
- * (and the side view's) when it is from elsewhere: `guests`.
+ * (and the tabs of the panes beside it, `panes`; `side`: one) when it is from elsewhere: `guests`.
  */
-export function viewTabs(open, view, groupOfKey, { pinned = [], pinnedEverywhere = true, active = null, side = null, found = [] } = {}) {
+export function viewTabs(open, view, groupOfKey, { pinned = [], pinnedEverywhere = true, active = null, side = null, panes = [], found = [] } = {}) {
   if (!view?.length) return { keys: open, guests: [] };
   const shows = (key) => view.includes(groupOfKey(key)) || (view.includes(FOUND) && found.includes(key)) || (pinned.includes(key) && (pinnedEverywhere || view.includes(PINNED)));
   const keys = open.filter(shows);
-  const guests = [active, side].filter((k, i, all) => k && open.includes(k) && !shows(k) && all.indexOf(k) === i);
+  const guests = [active, side, ...panes].filter((k, i, all) => k && open.includes(k) && !shows(k) && all.indexOf(k) === i);
   return { keys, guests };
 }
 

@@ -65,7 +65,7 @@ export function tabViewState(settings = getSettings()) {
   const groups = tabGroups(facts, ctx, { projects, colors: settings.folderColors ?? {}, folderName });
   const view = session.view;
   const found = session.found?.keys ?? [];
-  const shown = viewTabs(session.open, view, groupOfKey, { pinned: session.pinned, pinnedEverywhere: settings.pinnedEverywhere !== false, active: session.active, side: session.side, found });
+  const shown = viewTabs(session.open, view, groupOfKey, { pinned: session.pinned, pinnedEverywhere: settings.pinnedEverywhere !== false, active: session.active, panes: session.panes, found });
   // A group of the view with none of its tabs open still has a name (the tabs found: what was asked).
   const nameOf = (id) => (id === FOUND ? (session.found ? `Found: ${session.found.label}` : 'Found') : groupName(id, { projects, folderName }));
   return { ctx, groups, groupOfKey, view, nameOf, label: viewLabel(view, groups, nameOf), ...shown };
@@ -78,7 +78,7 @@ export function activeFor(view, state, settings = getSettings()) {
   if (session.active && next.keys.includes(session.active)) return session.active;
   const last = session.viewActive[viewKey(view)];
   if (last && next.keys.includes(last)) return last;
-  return next.keys.find((k) => k !== session.side && !session.pinned.includes(k)) ?? next.keys.find((k) => k !== session.side) ?? null;
+  return next.keys.find((k) => !session.panes.includes(k) && !session.pinned.includes(k)) ?? next.keys.find((k) => !session.panes.includes(k)) ?? null;
 }
 
 /** The tab group a folder shown in Folders makes: { id, folder, name, color, kind }. */

@@ -69,6 +69,8 @@ test('what a view shows: its groups, the pinned tabs, and the open tab from else
   assert.deepEqual(viewTabs(open, ['f:/x'], of, { pinned: ['f:pin'], pinnedEverywhere: false }).keys, ['d:/x/a', 'd:/x/b']);
   assert.deepEqual(viewTabs(open, [PINNED, 'p:a'], of, { pinned: ['f:pin'], pinnedEverywhere: false }).keys, ['f:pin', 'f:1']);
   assert.deepEqual(viewTabs(open, ['f:/x'], of, { active: 'f:2', side: 'f:1' }).guests, ['f:2', 'f:1']);
+  // The tabs of the panes beside the main one, each once.
+  assert.deepEqual(viewTabs(open, ['f:/x'], of, { active: 'f:2', panes: ['f:1', 'f:2'] }).guests, ['f:2', 'f:1']);
   assert.deepEqual(viewTabs(open, ['f:/x'], of, { active: 'd:/x/a' }).guests, []);
   // The tabs found by asking (0.40): a view of their own, whatever their groups.
   assert.deepEqual(viewTabs(open, [FOUND], of, { found: ['f:2', 'd:/x/b', 'f:gone'] }).keys, ['f:2', 'd:/x/b']);
