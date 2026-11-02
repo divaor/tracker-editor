@@ -12940,6 +12940,261 @@ html[data-native='android'] body:has(.edit-bar) .toasts {
   margin-right: 2px;
 }
 
+/* ---- Dockerize (ui/dockerize.js) ---- */
+.modal.dockerize-dialog {
+  width: min(780px, 100%);
+}
+
+.dockerize-dialog .modal-body {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
+/* The dialog's grid spaces them (.notice's own margin is !important). */
+.dockerize-dialog .notice {
+  margin: 0 !important;
+}
+
+.dockerize-form {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.dkz-kind {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.dkz-kind > .icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--accent);
+}
+
+.dkz-kind > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.dkz-docker {
+  margin: 0;
+}
+
+.dkz-again {
+  min-height: 26px;
+  margin-left: 4px;
+  padding: 2px 10px;
+}
+
+.dkz-grid {
+  margin: 0;
+}
+
+.dkz-mono {
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.dkz-checks {
+  display: grid;
+  gap: 6px;
+}
+
+.dkz-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13.5px;
+}
+
+.dkz-check input {
+  margin-top: 3px;
+}
+
+.dkz-check small {
+  display: block;
+}
+
+.dkz-options {
+  display: grid;
+  gap: 10px;
+}
+
+.dkz-option {
+  display: grid;
+  justify-items: start;
+  gap: 5px;
+  min-width: 0;
+}
+
+.dkz-option .field-label {
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.dkz-options .field.checkbox {
+  padding-top: 0;
+}
+
+.dkz-head {
+  margin: 4px 0 0;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.dkz-files {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dkz-file {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.dkz-file-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+  padding: 5px 8px;
+}
+
+.dkz-file-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.dkz-file-name:hover {
+  background: var(--hover);
+}
+
+.dkz-file-name code {
+  font-size: 13px;
+}
+
+.dkz-about {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.dkz-state {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.dkz-state.new {
+  background: color-mix(in srgb, var(--done) 16%, transparent);
+  color: var(--done);
+}
+
+.dkz-state.differs {
+  background: color-mix(in srgb, var(--warn) 20%, transparent);
+  color: var(--text);
+}
+
+.dkz-preview {
+  min-width: 0;
+  padding: 0 8px 8px;
+}
+
+.dkz-pre,
+.dkz-diff pre {
+  max-height: 320px;
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--surface-2);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.dkz-diff {
+  display: grid;
+  gap: 6px;
+}
+
+.dkz-hunk {
+  display: grid;
+  gap: 2px;
+}
+
+.dkz-diff pre.del {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.dkz-diff pre.add {
+  background: color-mix(in srgb, var(--done) 12%, transparent);
+}
+
+.dkz-notes {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-2);
+}
+
+.dkz-next {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.dkz-next .btn {
+  justify-self: start;
+}
+
+.dkz-where {
+  max-width: 45%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .dkz-next {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dkz-where {
+    display: none;
+  }
+}
+
 /* Git with the model (ui/gitAssist.js) */
 .git-assist {
   width: min(520px, calc(100% - 28px));

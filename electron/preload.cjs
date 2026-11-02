@@ -200,6 +200,10 @@ contextBridge.exposeInMainWorld('desktop', {
     declarations: (dirs, word) => ipcRenderer.invoke('code:declarations', dirs, word),
     symbols: (dirs, query) => ipcRenderer.invoke('code:symbols', dirs, query),
   },
+  // Docker here (Dockerize): { installed, running, client, arch, server, compose, buildx, problem, message }.
+  docker: {
+    info: () => ipcRenderer.invoke('docker:info'),
+  },
   // Git for folders on this computer: status, a file at the last commit.
   git: {
     status: (dir) => ipcRenderer.invoke('git:status', dir),

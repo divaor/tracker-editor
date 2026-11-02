@@ -143,6 +143,7 @@ export const COMMAND_LIST = [
   { id: 'test-file', group: 'Tools', label: 'Run this file’s tests', keys: 'Mod+Shift+F5', only: 'desktop', hint: 'Failures show at their lines and in the Tests panel' },
   { id: 'test-again', group: 'Tools', label: 'Run the tests again (the last ones run)', only: 'desktop' },
   { id: 'tests-panel', group: 'Tools', label: 'Tests panel: the last run’s results', only: 'desktop' },
+  { id: 'dockerize', group: 'Tools', label: 'Dockerize this project: a Dockerfile, docker-compose.yml, and how to run it anywhere…', only: 'desktop', hint: 'The open file’s project, or the folder in Folders; also in Folders’ menus and the Run group’s ▾. Offline installs too' },
   { id: 'run-file', group: 'Tools', label: 'Run this file in the terminal (Python, Node, shell, Go…)', keys: 'F5', only: 'desktop', hint: 'The command per type is in Settings → Editor → Run commands' },
   { id: 'debug-file', group: 'Debug', label: 'Debug this file (Python, JavaScript, TypeScript)', keys: 'Alt+F5', only: 'desktop', hint: 'Python through debugpy, JavaScript and TypeScript through js-debug: it stops at the breakpoints' },
   { id: 'debug-test', group: 'Debug', label: 'Debug the test at the cursor', keys: 'Mod+Alt+F5', only: 'desktop', hint: 'pytest, unittest, node:test, Vitest and Jest; or right-click the ▶ next to a test' },

@@ -505,6 +505,7 @@ export function RunGroup({ run, actions }) {
     tests && debugs && { label: 'Debug the test at the cursor', icon: 'bug', hint: keysOfCommand('debug-test'), run: () => actions.debugTest() },
     { separator: true },
     { label: 'The project’s tasks…', icon: 'list', hint: keysOfCommand('tasks') || 'npm scripts, make targets…', run: actions.showTasks },
+    run.docker && { label: 'Dockerize this project…', icon: 'container', hint: 'Run it anywhere, offline too', run: () => actions.dockerize() },
     tests && { label: 'The Tests panel', icon: 'panelRight', run: () => actions.command('tests-panel') },
     debugs && { label: 'The Debug panel', icon: 'panelRight', run: actions.toggleDebugPanel },
     runs && !web?.opens && { label: 'How files of this type run…', icon: 'settings', hint: 'Settings → Editor → Run commands', run: actions.showSettings },

@@ -2335,6 +2335,10 @@ ipcMain.handle('git:init', guard(async (_e, dir, opts = {}) => {
   checkDir(dir);
   return (await git()).init(dir, { branch: typeof opts?.branch === 'string' ? opts.branch.trim() : '' });
 }));
+// Docker here, for Dockerize: installed, its engine running (or why not), Compose and Buildx.
+// docker.cjs runs `docker` with fixed arguments only; building and running are typed in a terminal.
+const dockerTool = require('./docker.cjs');
+ipcMain.handle('docker:info', guard(async () => dockerTool.dockerInfo({ env: dockerTool.dockerEnv(lsp.searchEnv(lsp.serverEnv(process.env), await lsp.shellPath())) })));
 ipcMain.handle('git:status', guard(async (_e, dir) => {
   if (typeof dir !== 'string' || isRemote(dir)) return null;
   checkDir(dir);

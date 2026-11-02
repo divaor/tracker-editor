@@ -30,6 +30,8 @@ import { BreakpointDialog, DebugPanel, debugStatus, SetupDebuggerDialog } from '
 import { taskLine } from './tasks.js';
 import { createProjects, heldFor, PROJECT_FILE, PROJECT_TEMPLATE, typeOf, withProjectRun } from './project.js';
 import { TasksDialog } from './ui/tasks.js';
+import { DockerizeDialog } from './ui/dockerize.js';
+import { offlineBuildLine, reviewQuestion } from './dockerize.js';
 import { findFileRefs, pastedPath, resolveRef } from './fileRefs.js';
 import { claudeAppPrompt, claudeAppUrl, codeAround, errorContextText, EXPLAIN_ERROR, explainProblemAction, fixForErrorAction, fixProblemsAction } from './errorHelp.js';
 import { TerminalPanel } from './ui/terminal.js';
@@ -2805,6 +2807,33 @@ export function App() {
     lookUpGit(store.session.active);
     setGitTick((n) => n + 1);
   };
+  // ---- Dockerize (0.47; dockerize.js, ui/dockerize.js): a project here made to run in Docker ----
+  /** The dialog for `dir`, else the open file's project (looked for from its folder up), else the folder in Folders. */
+  actions.dockerize = (dir = null) => {
+    if (!window.desktop?.docker) return toast('Dockerize works in the desktop app, for folders on this computer.');
+    if (dir) return isRemotePath(dir) ? toast('Dockerize works for folders on this computer.') : setDialog({ type: 'dockerize', dir });
+    const k = parseKey(store.session.active);
+    if (k?.kind === 'disk' && !isRemotePath(k.path) && !isContentPath(k.path)) return setDialog({ type: 'dockerize', dir: parentDir(k.path), fromFile: true });
+    const f = getSettings().folder;
+    if (f && !isRemotePath(f)) return setDialog({ type: 'dockerize', dir: f });
+    toast('Open a project’s folder from this computer in Folders first, or one of its files.');
+  };
+  /** Docker's commands for a project, typed and run in its own terminal (one per project). */
+  const dockerTerminal = async (root, line, then) => {
+    if (!terminalsAvailable()) return toast('Terminals work in the desktop app.', { kind: 'error' });
+    setTerminalShown(true);
+    try {
+      await runInTerminal('local', { cwd: root, label: 'Docker', task: `docker:${root}`, line: (kind) => runLine({ command: line(kind), dir: root, kind }) });
+      then?.();
+    } catch (err) {
+      toast(ipcMessage(err), { kind: 'error', timeout: 8000 });
+    }
+  };
+  actions.dockerRun = (root, plan) =>
+    dockerTerminal(root, () => plan.up, () => plan.url && toast(`Building and starting it: once the terminal says it started, it is at ${plan.url}.`, { timeout: 15000, action: { label: 'Open', run: () => window.open(plan.url, '_blank', 'noopener') } }));
+  actions.dockerOffline = (root, plan) =>
+    dockerTerminal(root, (kind) => offlineBuildLine(plan, kind), () => toast('Building the offline package: once the terminal says it is ready, copy the docker/offline folder to the server and run its install script.', { timeout: 15000 }));
+  actions.dockerReview = (root, plan) => actions.assistFiles({ folder: root, question: reviewQuestion(plan) });
   /**
    * Making a folder on this computer a Git repository (git init): `dir`, else the folder in
    * Folders, else the open file's folder. The dialog asks the first branch's name.
@@ -3912,7 +3941,7 @@ export function App() {
     const tests = looksLikeTestFile(name) || Boolean(hostRef.current?.hasTests(key));
     if (!runs && !debugs && !tests && !web) return null;
     const live = debugRef.current?.active() ? debugRef.current.run : null;
-    return { runs, debugs, tests, web, debug: live && { status: live.status } };
+    return { runs, debugs, tests, web, debug: live && { status: live.status }, docker: !remote && Boolean(window.desktop?.docker) };
   };
   actions.debugContinue = () => debugRef.current?.continue();
   actions.debugPause = () => debugRef.current?.pause();
@@ -4622,6 +4651,7 @@ export function App() {
       'git-compare': () => actions.compareWithHead(),
       'git-panel': () => actions.toggleGit(),
       'git-init': () => actions.gitInit(),
+      dockerize: () => actions.dockerize(),
       tasks: () => actions.showTasks(),
       'project-settings': () => actions.projectSettings(),
       'git-branch': () => actions.chooseBranch(),
@@ -4935,6 +4965,7 @@ export function App() {
       roots=${folderRoots(settings)} hidden=${Boolean(settings.showHidden)} projects=${projects} plainIcons=${settings.fileIcons === false}
       onSymbol=${(entry) => actions.revealSymbol(entry)} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'gitInit' && html`<${GitInitDialog} dir=${dialog.dir} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'dockerize' && html`<${DockerizeDialog} dir=${dialog.dir} fromFile=${Boolean(dialog.fromFile)} canAsk=${askReady()} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'compareFolder' && html`<${CompareFolderDialog} other=${dialog.other} side=${dialog.side} panes=${dialog.panes} openServer=${dialog.openServer} onPick=${dialog.onPick} actions=${actions} onClose=${() => setDialog(null)}
       onNewServer=${() => actions.editServer({}, { back: { ...dialog, openServer: '' }, onSaved: (conn) => setDialog({ ...dialog, openServer: conn.id }) })} />`}
     ${dialog?.type === 'saveCompare' && html`<${SaveCompareDialog} id=${dialog.id} actions=${actions} onClose=${() => setDialog(null)} />`}
