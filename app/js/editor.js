@@ -390,11 +390,13 @@ const problemsLinter = (key, onProblems, onProblemAction) =>
               { name: 'Fix with the model', apply: () => onProblemAction('fix', key, p) },
             ]
           : undefined;
-      return found.map((p) => ({ from: p.from, to: p.to, severity: p.severity, message: p.message, actions: (p.source === 'Git' && conflictLintActions(state, p.from)) || actions(p) }));
+      return found.map((p) => ({ from: p.from, to: p.to, severity: p.severity, message: p.message, actions: (p.source === 'Git' && conflictLintActions(state, p.from)) || actions(p), ...(p.source === 'Git' ? { source: 'Git' } : {}) }));
     },
     // Again when the language has loaded (the first look was before), a server came or went, or it reported.
     {
       delay: 600,
+      // A conflict block's bar is right above it: its warning shows no tooltip over the bar.
+      tooltipFilter: (diagnostics) => diagnostics.filter((d) => d.source !== 'Git'),
       needsRefresh: (update) =>
         update.startState.facet(languageName) !== update.state.facet(languageName) ||
         update.startState.facet(serverProblems) !== update.state.facet(serverProblems) ||

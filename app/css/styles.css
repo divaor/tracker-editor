@@ -10663,7 +10663,7 @@ button.help-command:focus-visible {
   display: none;
 }
 
-.cm-conflict-marker[data-note]::after {
+.cm-conflict-label[data-note]::after {
   content: attr(data-note);
   margin-left: 2ch;
   color: var(--text-3);
@@ -10729,6 +10729,12 @@ button.help-command:focus-visible {
 .status-conflicts {
   gap: 4px;
   color: var(--warn);
+}
+
+/* A hover with nothing left to say (a conflict's warning, filtered out under its bar: editor.js
+   tooltipFilter) shows no empty box. */
+.cm-tooltip-hover:not(:has(.cm-tooltip-section:not(:empty))) {
+  display: none;
 }
 
 /* Blame (gitBlame.js): at the end of the cursor's line, and the column before the line numbers. */
