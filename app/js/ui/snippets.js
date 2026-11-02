@@ -4,6 +4,7 @@ import { fillSnippet, snippetFields, usesBuiltin } from '../snippets.js';
 import { store } from '../store.js';
 import { toast } from './components.js';
 import { Icon } from './icons.js';
+import { useListNav } from './listNav.js';
 
 /**
  * Pick a snippet (files marked as snippets), fill its fields, then insert it at
@@ -22,7 +23,8 @@ export function SnippetPicker({ selection = '', actions, onClose }) {
   const [chosen, setChosen] = useState(null);
   const list = quickOpen(snippets, query, 60);
   const input = useRef(null);
-  useEffect(() => setIndex(0), [query]);
+  const listRef = useRef(null);
+  const nav = useListNav(listRef, index, setIndex, list.length);
   useLayoutEffect(() => {
     const onKey = (e) => {
       if (e.key !== 'Escape') return;
@@ -39,23 +41,22 @@ export function SnippetPicker({ selection = '', actions, onClose }) {
         ? html`<${SnippetForm} file=${chosen} selection=${selection} actions=${actions} onBack=${() => setChosen(null)} onClose=${onClose} />`
         : html`<div class="quick-title">Insert a snippet</div>
           <input value=${query} ref=${input} placeholder="Type part of a snippet's name…" aria-label="Snippet name"
-            onInput=${(e) => setQuery(e.currentTarget.value)}
+            onInput=${(e) => {
+              setQuery(e.currentTarget.value);
+              setIndex(0);
+              nav.reset();
+            }}
             onKeyDown=${(e) => {
-              if (e.key === 'ArrowDown') {
-                e.preventDefault();
-                setIndex(Math.min(index + 1, list.length - 1));
-              } else if (e.key === 'ArrowUp') {
-                e.preventDefault();
-                setIndex(Math.max(index - 1, 0));
-              } else if (e.key === 'Enter' && list[index]) {
+              if (nav.key(e, { empty: !query })) return;
+              if (e.key === 'Enter' && list[index]) {
                 e.preventDefault();
                 setChosen(list[index]);
               }
             }} />
-          <div class="quick-list" role="listbox">
+          <div class="quick-list" role="listbox" ref=${listRef}>
             ${list.map(
               (f, i) => html`<button type="button" key=${f.id} role="option" aria-selected=${i === index} class="quick-row ${i === index ? 'active' : ''}"
-                onMouseEnter=${() => setIndex(i)} onClick=${() => setChosen(f)}>
+                onPointerMove=${nav.hover(i)} onClick=${() => setChosen(f)}>
                 <${Icon} name="snippet" size=${15} /><span class="quick-name">${f.name}</span>
                 <span class="muted small quick-item">${f.item}</span>
               </button>`,

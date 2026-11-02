@@ -128,6 +128,30 @@ export function fuzzyScore(target, query) {
 }
 
 /**
+ * Where `query` matches `text` the way fuzzyScore finds it, for marking: [[from, to], …] (one
+ * range when the query is in the text as it is, else the letters found one by one, runs joined);
+ * [] when it does not match or the query is empty.
+ */
+export function matchRanges(text, query) {
+  const t = String(text ?? '').toLowerCase();
+  const q = String(query ?? '').toLowerCase().replace(/\s+/g, '');
+  if (!q || !t || t.length !== String(text).length) return [];
+  const exact = t.indexOf(q);
+  if (exact !== -1) return [[exact, exact + q.length]];
+  const out = [];
+  let ti = 0;
+  for (const ch of q) {
+    const found = t.indexOf(ch, ti);
+    if (found === -1) return [];
+    const last = out[out.length - 1];
+    if (last && last[1] === found) last[1] = found + 1;
+    else out.push([found, found + 1]);
+    ti = found + 1;
+  }
+  return out;
+}
+
+/**
  * Files ranked for quick open; ties keep the given order (most recent first). Files in
  * folders (with `rel`, their path inside the folder) also match by that path ("lib/util").
  */

@@ -5061,11 +5061,14 @@ mark {
   padding-top: 10vh;
 }
 
+/* The pick lists' frame (quick open, the command palette, symbols, snippets, the clipboard history). */
 .quick-open {
-  width: min(640px, 100%);
+  display: flex;
+  flex-direction: column;
+  width: min(680px, 100%);
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 16px;
   background: var(--surface);
   box-shadow: var(--shadow-lg);
   animation: rise 0.12s ease-out;
@@ -5081,25 +5084,46 @@ mark {
 }
 
 .quick-list {
-  max-height: min(420px, 60vh);
+  max-height: min(440px, 62vh);
   overflow-y: auto;
-  padding: 6px;
+  overscroll-behavior: contain;
+  padding: 6px 8px 8px;
 }
 
 .quick-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
   padding: 8px 10px;
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: 9px;
   background: transparent;
+  color: var(--text);
   text-align: left;
+  white-space: nowrap;
 }
 
 .quick-row.active {
-  background: var(--accent-soft);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+/* The chosen row: a bar in the accent's color at its left. */
+.quick-row::before {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 0;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--accent);
+  content: '';
+  opacity: 0;
+}
+
+.quick-row.active::before {
+  opacity: 1;
 }
 
 .quick-name {
@@ -5120,34 +5144,432 @@ mark {
   padding: 10px;
 }
 
-/* Files in the folders open in Folders: the kind's color, the folder inside, and which folder. */
-.quick-disk .quick-kind {
+/* Quick open and the lists made like it (ui/listNav.js): a field with its icon, sections, rows of
+   one line (icon, name, where, a chip, the time), the keys below. */
+.qo-field {
+  display: flex;
   flex: none;
-  color: var(--kc);
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px 0 16px;
+  border-bottom: 1px solid var(--border);
 }
 
-.quick-rel {
+.qo-field-icon {
+  flex: none;
+  color: var(--accent);
+}
+
+.qo-field input {
+  flex: 1;
+  min-width: 0;
+  min-height: 54px !important;
+  padding-inline: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  font-size: 16px;
+}
+
+.qo .quick-title + .qo-field {
+  margin-top: 4px;
+}
+
+.qo-section + .qo-section {
+  margin-top: 6px;
+}
+
+/* A section's header stays at the top of the list while its rows go by under it. */
+.qo-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 10px;
+  background: var(--surface);
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.qo-head .icon {
+  flex: none;
+  color: var(--kc, var(--text-3));
+}
+
+.qo-head-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.qo-count {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-size: 10.5px;
+  letter-spacing: 0;
+  line-height: 16px;
+}
+
+.qo-tone-accent {
+  --kc: var(--accent);
+}
+
+.qo .quick-row {
+  gap: 10px;
+  height: 38px;
+  padding: 0 10px 0 12px;
+  font-size: 13.5px;
+  /* Brought into view below the header stuck at the top (its 30 px and the list's padding). */
+  scroll-margin-top: 36px;
+  scroll-margin-bottom: 6px;
+}
+
+.qo-icon {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+}
+
+.qo-icon-ask {
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+
+.qo-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 62%;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+
+/* The letters that matched what was typed. */
+.qo mark {
+  border-radius: 0;
+  background: transparent;
+  color: var(--accent);
+  font-weight: 750;
+}
+
+.qo-ask-label {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.qo-lock {
+  flex: none;
+  margin-left: -4px;
+  color: var(--text-3);
+}
+
+/* Where the file is: a small icon in its kind's color, then the folder, cut short when long. */
+.qo-place {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+
+.qo-kind {
+  flex: none;
+  color: var(--kc, var(--text-3));
+}
+
+.qo-place-text {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.quick-where {
-  flex: none;
-  max-width: 40%;
+/* Squeezed by a long name to a letter or two, the place says nothing rather than "T…". */
+.qo-row > .qo-place {
+  container-type: inline-size;
+}
+
+.qo-row > .qo-code + .qo-place {
+  container-type: normal;
+}
+
+@container (max-width: 56px) {
+  .qo-place > * {
+    display: none;
+  }
+}
+
+/* A project, a folder group or a kind of symbol: a dot in its color on a tint of it. */
+.qo-chip {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 34%;
   overflow: hidden;
-  padding: 1px 7px;
+  padding: 0 9px 0 7px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--kc) 14%, transparent);
+  background: color-mix(in srgb, var(--pc, var(--kc, var(--text-3))) 14%, transparent);
   color: var(--text-2);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 21px;
+  text-overflow: ellipsis;
+}
+
+.qo-where {
+  --pc: var(--kc);
+}
+
+.qo-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--pc, var(--kc, var(--text-3)));
+  vertical-align: 0.5px;
+}
+
+.qo-time,
+.qo-line,
+.qo-hint {
+  flex: none;
+  color: var(--text-3);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.qo-time {
+  min-width: 44px;
+  text-align: right;
+}
+
+.qo-line {
+  min-width: 52px;
+  text-align: right;
+}
+
+.qo .quick-row.active .qo-time,
+.qo .quick-row.active .qo-line,
+.qo .quick-row.active .qo-place {
+  color: var(--text-2);
+}
+
+/* Symbols: classes and functions in purple, what is inside them muted; the declaration's line in mono. */
+.symbol-row .qo-icon {
+  color: var(--ft-purple);
+}
+
+.symbol-row .qo-icon.qo-sub,
+.qo-sub .qo-icon {
+  color: var(--text-3);
+}
+
+.qo-container {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 26%;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+}
+
+.qo-code {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-2);
+  font-family: var(--mono);
   font-size: 12px;
   text-overflow: ellipsis;
+}
+
+.qo-code + .qo-place {
+  flex: 0 1 auto;
+  max-width: 36%;
+}
+
+.qo-kind-chip {
+  --pc: var(--accent);
+}
+
+/* The command palette: the group in its own color, then the keys. */
+.qo-chip.palette-group {
+  flex: none;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  font-weight: 650;
+}
+
+.qo .help-keys {
+  margin-left: 2px;
+}
+
+.qo-empty {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 26px 16px 24px;
+  text-align: center;
+}
+
+.qo-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.qo-empty-title {
+  max-width: 100%;
+  margin: 4px 0 0;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.qo-empty-text {
+  margin: 0;
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+
+.qo-note {
+  margin: 6px 10px 2px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+/* The keys a list takes, and quick open's prefixes (a click switches to what they list). */
+.qo-foot {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  min-height: 38px;
+  padding: 5px 10px 5px 14px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-2) 55%, var(--surface));
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+
+.qo-keys {
+  display: flex;
+  gap: 12px;
+}
+
+.qo-keys > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   white-space: nowrap;
 }
 
-.quick-note {
-  padding: 4px 10px 8px;
+.qo-foot kbd {
+  min-width: 18px;
+  padding: 0 4px;
+  border-bottom-width: 1px;
+  font-family: var(--font);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.qo-prefixes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.qo-prefix {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 8px 0 4px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.qo-prefix:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.qo-prefix kbd {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+/* Phones and touch screens: rows a finger can hit, the dialog the screen's width at its top. */
+@media (pointer: coarse) {
+  .qo .quick-row {
+    height: 46px;
+  }
+}
+
+@media (max-width: 640px) {
+  .modal-backdrop.top:has(> .qo) {
+    padding: var(--safe-top) var(--safe-right) 0 var(--safe-left);
+  }
+
+  .qo {
+    width: 100%;
+    border-width: 0 0 1px;
+    border-radius: 0 0 16px 16px;
+  }
+
+  .qo .quick-list {
+    max-height: 52dvh;
+  }
+
+  .qo .quick-row {
+    height: 46px;
+    font-size: 14.5px;
+  }
+
+  .qo-name {
+    max-width: 68%;
+  }
+
+  .qo-chip {
+    max-width: 30%;
+  }
+
+  .qo-keys {
+    display: none;
+  }
+
+  .qo-prefixes {
+    margin-left: 0;
+  }
+
+  .qo-prefix {
+    height: 32px;
+    padding: 0 10px 0 6px;
+  }
 }
 
 /* ---- Compare with… --------------------------------------------------------------- */

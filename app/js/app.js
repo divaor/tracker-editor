@@ -1971,7 +1971,7 @@ export function App() {
       .map((key) => {
         const d = store.diskTab(key.slice(2));
         const g = viewNow.groups.find((x) => x.id === viewNow.groupOfKey(key));
-        return d && { id: key, name: d.name, path: d.path, rel: d.name, kind: kindOfKey(key), where: g?.name ?? '' };
+        return d && { id: key, name: d.name, path: d.path, rel: d.name, kind: kindOfKey(key), where: g?.name ?? '', color: g?.color ?? '' };
       })
       .filter(Boolean);
   // Compare with…: the open tabs nearest the open one first, my files and tracker documents,
@@ -4705,7 +4705,8 @@ export function App() {
     ${dialog?.type === 'quickOpen' &&
     html`<${QuickOpen} files=${store.live()} docs=${docs} openTabs=${openDiskTabs()} actions=${actions} initial=${dialog.query ?? ''} symbols=${() => (activeKey ? (hostRef.current?.codeContext()?.symbols ?? []) : [])}
       onAsk=${askReady() ? (q) => actions.askFind(q) : null}
-      roots=${folderRoots(settings)} hidden=${Boolean(settings.showHidden)} onSymbol=${(entry) => actions.revealSymbol(entry)} onClose=${() => setDialog(null)} />`}
+      roots=${folderRoots(settings)} hidden=${Boolean(settings.showHidden)} projects=${projects} plainIcons=${settings.fileIcons === false}
+      onSymbol=${(entry) => actions.revealSymbol(entry)} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'gitInit' && html`<${GitInitDialog} dir=${dialog.dir} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'compareFolder' && html`<${CompareFolderDialog} other=${dialog.other} side=${dialog.side} panes=${dialog.panes} openServer=${dialog.openServer} onPick=${dialog.onPick} actions=${actions} onClose=${() => setDialog(null)}
       onNewServer=${() => actions.editServer({}, { back: { ...dialog, openServer: '' }, onSaved: (conn) => setDialog({ ...dialog, openServer: conn.id }) })} />`}

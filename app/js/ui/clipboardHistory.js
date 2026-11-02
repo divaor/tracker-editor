@@ -2,6 +2,7 @@ import { html, useEffect, useLayoutEffect, useRef, useState } from '../../vendor
 import { timeAgo } from '../format.js';
 import { toast } from './components.js';
 import { Icon } from './icons.js';
+import { useListNav } from './listNav.js';
 
 const history = () => window.desktop?.clipboardHistory;
 const firstLine = (text) => text.trim().split('\n')[0].slice(0, 120);
@@ -36,10 +37,11 @@ export function ClipboardHistory({ actions, onClose }) {
     input.current?.focus();
     return () => document.removeEventListener('keydown', onKey);
   }, []);
-  useEffect(() => setIndex(0), [query]);
 
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   const list = (entries ?? []).filter((e) => words.every((w) => e.text.toLowerCase().includes(w)));
+  const listRef = useRef(null);
+  const nav = useListNav(listRef, Math.min(index, list.length - 1), setIndex, list.length);
   const chosen = list[Math.min(index, list.length - 1)];
   const run = (fn) => {
     onClose();
@@ -69,23 +71,22 @@ export function ClipboardHistory({ actions, onClose }) {
     <div class="quick-open clip-history" role="dialog" aria-label="Clipboard history">
       <div class="quick-title">Clipboard history <span class="muted small">Enter inserts · newest first</span></div>
       <input value=${query} ref=${input} placeholder="Search what you copied…" aria-label="Search the clipboard history"
-        onInput=${(e) => setQuery(e.currentTarget.value)}
+        onInput=${(e) => {
+          setQuery(e.currentTarget.value);
+          setIndex(0);
+          nav.reset();
+        }}
         onKeyDown=${(e) => {
-          if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            setIndex(Math.min(index + 1, list.length - 1));
-          } else if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            setIndex(Math.max(index - 1, 0));
-          } else if (e.key === 'Enter' && chosen) {
+          if (nav.key(e, { empty: !query })) return;
+          if (e.key === 'Enter' && chosen) {
             e.preventDefault();
             insert(chosen);
           }
         }} />
-      <div class="quick-list" role="listbox" aria-label="Copied texts">
+      <div class="quick-list" role="listbox" aria-label="Copied texts" ref=${listRef}>
         ${list.map(
           (e, i) => html`<button type="button" key=${e.id} role="option" aria-selected=${e === chosen} class="quick-row clip-row ${e === chosen ? 'active' : ''}"
-            onMouseEnter=${() => setIndex(i)} onClick=${() => insert(e)} title="Insert at the cursor">
+            onPointerMove=${nav.hover(i)} onClick=${() => insert(e)} title="Insert at the cursor">
             ${e.pinned ? html`<${Icon} name="pin" size=${14} />` : html`<${Icon} name="copy" size=${14} />`}
             <span class="quick-name clip-text">${firstLine(e.text) || '(spaces)'}</span>
             <span class="muted small clip-meta">${e.text.includes('\n') ? `${e.text.split('\n').length} lines · ` : ''}${timeAgo(new Date(e.at).toISOString())}</span>

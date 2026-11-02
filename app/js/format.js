@@ -29,6 +29,21 @@ export function formatBytes(bytes) {
 const timeFormat = new Intl.DateTimeFormat(undefined, { timeStyle: 'short' });
 const dayFormat = new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' });
 
+/** A compact age for lists that line up (quick open): "now", "5m", "2h", "3d", then "Oct 3", or with the year. */
+export function shortAgo(iso, now = Date.now()) {
+  const at = iso ? Date.parse(iso) : NaN;
+  if (Number.isNaN(at)) return '';
+  const minutes = Math.round((now - at) / 60000);
+  if (minutes < 1) return 'now';
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.round(hours / 24);
+  if (days < 7) return `${days}d`;
+  const when = new Date(at);
+  return when.getFullYear() === new Date(now).getFullYear() ? dayFormat.format(when) : dayYearFormat.format(when);
+}
+
 /** A date in few characters (a phone's lists): the time today, the day this year, else with the year. */
 export function shortDate(ms, now = Date.now()) {
   if (!ms) return '';

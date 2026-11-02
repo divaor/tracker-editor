@@ -1,14 +1,18 @@
 import { html, useEffect, useLayoutEffect, useMemo, useRef, useState } from '../../vendor/preact-htm.js';
 import { findInFiles, quickOpen } from '../search.js';
 import { matchSymbols } from '../codeNav.js';
-import { timeAgo } from '../format.js';
+import { shortAgo } from '../format.js';
 import { fileKey, repoKey, store } from '../store.js';
 import { folderFiles, onFolderIndex } from '../folderIndex.js';
 import { pastedPath } from '../fileRefs.js';
 import { looksLikeQuestion, questionOf } from '../askFind.js';
 import { baseName } from '../folders.js';
 import { KINDS } from '../where.js';
+import { projectKey } from '../tracker-model.js';
+import { groupQuick, quickKind, quickMarks, quickPlace, wordRanges } from '../quickRows.js';
 import { Icon } from './icons.js';
+import { FileIcon } from './fileIcon.js';
+import { ListEmpty, ListFoot, ListSection, Marked, useListNav } from './listNav.js';
 import { ClearButton, Segmented } from './components.js';
 
 const SCOPES = [
@@ -132,11 +136,30 @@ export function SearchPanel({ files, docs, allFiles, allDocs, openKeys, actions,
   </aside>`;
 }
 
+// Quick open's sections: the icon by their header and the color it takes.
+const SECTION_LOOKS = {
+  tabs: { icon: 'panes', tone: 'qo-tone-accent' },
+  recent: { icon: 'clock', tone: '' },
+  files: { icon: 'cloud', tone: 'kind-synced' },
+  docs: { icon: 'paperclip', tone: 'kind-doc' },
+  folders: { icon: 'folder', tone: 'kind-disk' },
+  symbols: { icon: 'code', tone: 'qo-tone-accent' },
+};
+
+const fullTime = (iso) => {
+  const at = iso ? Date.parse(iso) : NaN;
+  return Number.isNaN(at) ? '' : new Date(at).toLocaleString();
+};
+
 /**
- * Ctrl+P: open a file by (fuzzy) name; also matches the project, and the files in the
- * folders open in Folders (`roots`: [{ dir, label, kind }]) by their path.
+ * Ctrl+P: open a file by (fuzzy) name; also matches the project, and the files in the folders
+ * open in Folders (`roots`: [{ dir, label, kind }]) by their path. The tabs open on disk or a
+ * server first, then the newest of my files and the tracker's documents; while typing, the
+ * matches under where they are (the section with the best one first), a path typed or pasted,
+ * and the Ask row. "@" lists the open file's functions and sections, "#" any file's (Ctrl+T),
+ * ">" the commands.
  */
-export function QuickOpen({ files, docs, actions, onClose, initial = '', symbols = null, onSymbol, roots = [], hidden = false, openTabs = [], onAsk = null }) {
+export function QuickOpen({ files, docs, actions, onClose, initial = '', symbols = null, onSymbol, roots = [], hidden = false, openTabs = [], onAsk = null, projects = [], plainIcons = false }) {
   const [query, setQuery] = useState(initial);
   const [index, setIndex] = useState(0);
   // Files in the folders: listed in the background, the list grows when they come.
@@ -153,11 +176,13 @@ export function QuickOpen({ files, docs, actions, onClose, initial = '', symbols
     [files, docs],
   );
   // Tabs open on disk or a server come first (the tab bar's view may hide them); folder files once each.
-  const tabPaths = new Set(openTabs.map((t) => t.path));
-  const all = [...openTabs, ...recent];
+  const tabs = openTabs.map((t) => ({ ...t, tab: true }));
+  const tabPaths = new Set(tabs.map((t) => t.path));
+  const all = [...tabs, ...recent];
   // A whole path typed or pasted (desktop): opening it comes first.
   const typed = !symbolMode && window.desktop?.disk?.openTyped ? pastedPath(query) : null;
-  const found = quickOpen(query.trim() ? [...all, ...inFolders.files.filter((f) => !tabPaths.has(f.path))] : all, query, 60);
+  const searching = Boolean(query.trim());
+  const found = quickOpen(searching ? [...all, ...inFolders.files.filter((f) => !tabPaths.has(f.path))] : all, query, 60);
   // Find by asking (with a model on): a question, or anything after "?", is asked of the model; first
   // when it reads as a question (Enter asks), else after the names that match.
   const words = query.trim().split(/\s+/).filter(Boolean);
@@ -165,7 +190,20 @@ export function QuickOpen({ files, docs, actions, onClose, initial = '', symbols
   const askRow = asking ? { id: 'ask', ask: true, name: questionOf(query) } : null;
   const named = typed ? [{ id: `typed:${typed}`, typed, name: baseName(typed) }, ...found] : found;
   const list = askRow ? (looksLikeQuestion(query) ? [askRow, ...named] : [...named, askRow]) : named;
+  // Under their sections (the one with the best match first), and the keys go through them in that order.
+  const groups = symbolMode ? [{ id: 'symbols', label: 'In this file', rows: symbolList }] : groupQuick(list, { searching });
+  const rows = groups.flatMap((g) => g.rows);
+  const at = new Map(rows.map((r, i) => [r, i]));
+  // The chosen row, kept inside the list when it gets shorter (the folders' files come and go).
+  const sel = Math.min(index, rows.length - 1);
   const input = useRef(null);
+  const listRef = useRef(null);
+  const nav = useListNav(listRef, sel, setIndex, rows.length);
+  const search = (value) => {
+    setQuery(value);
+    setIndex(0);
+    nav.reset();
+  };
   const choose = (file) => {
     onClose();
     if (symbolMode) onSymbol?.(file);
@@ -174,8 +212,6 @@ export function QuickOpen({ files, docs, actions, onClose, initial = '', symbols
     else if (file.path) actions.openDiskPath(file.path);
     else actions.openFile(file.id);
   };
-  const rows = symbolMode ? symbolList : list;
-  useEffect(() => setIndex(0), [query]);
   // Escape closes it wherever the focus is (a menu command can open it while
   // the window is still focusing), from the moment it shows.
   useLayoutEffect(() => {
@@ -189,81 +225,135 @@ export function QuickOpen({ files, docs, actions, onClose, initial = '', symbols
     input.current?.focus();
     return () => document.removeEventListener('keydown', onKey);
   }, []);
+  const projectOf = (name) => projects.find((p) => p.key === projectKey(name)) ?? { name, color: '' };
+  const symbolWords = query.slice(1).trim().split(/\s+/).filter(Boolean);
+
+  const option = (row, cls, body, title = '') => {
+    const i = at.get(row);
+    return html`<button type="button" key=${row.id ?? `${row.line}-${i}`} id=${`qo-row-${i}`} role="option" aria-selected=${i === sel}
+      class="quick-row qo-row ${cls} ${i === sel ? 'active' : ''}" title=${title || undefined} onPointerMove=${nav.hover(i)} onClick=${() => choose(row)}>${body}</button>`;
+  };
+  const place = (kind, text, ranges = []) =>
+    html`<span class="qo-place">${text && html`<${Icon} name=${KINDS[kind]?.icon ?? 'file'} size=${12} class="qo-kind" /><span class="qo-place-text"><${Marked} text=${text} ranges=${ranges} /></span>`}</span>`;
+  const fileRow = (f) => {
+    if (f.ask)
+      return option(
+        f,
+        'quick-ask',
+        html`<span class="qo-icon qo-icon-ask"><${Icon} name="sparkle" size=${15} /></span>
+          <span class="qo-name"><span class="qo-ask-label">Ask:</span> ${f.name}</span><span class="qo-place" /><span class="qo-hint">Find by asking</span>`,
+        'Find by asking: the model works out what to look for, the editor searches your files, documents, tracker items and folders, and the model picks the best',
+      );
+    if (f.typed)
+      return option(
+        f,
+        'kind-disk qo-typed',
+        html`<span class="qo-icon"><${FileIcon} name=${f.name} size=${16} plain=${plainIcons} /></span>
+          <span class="qo-name">Open ${f.name}</span>${place('disk', f.typed)}<span class="qo-hint">Path</span>`,
+        f.typed,
+      );
+    const kind = quickKind(f);
+    const marks = quickMarks(f, query);
+    const project = !f.path && f.project ? projectOf(f.project) : null;
+    return option(
+      f,
+      `kind-${kind}`,
+      html`<span class="qo-icon"><${FileIcon} name=${f.name} size=${16} plain=${plainIcons} /></span>
+        <span class="qo-name"><${Marked} text=${f.name} ranges=${marks.name} /></span>
+        ${f.encrypted && html`<${Icon} name="lock" size=${12} class="qo-lock" />`}
+        ${place(kind, quickPlace(f), marks.place)}
+        ${f.path
+          ? f.where && html`<span class="qo-chip qo-where" style=${f.color ? { '--pc': f.color } : null}><span class="qo-dot" />${f.where}</span>`
+          : project &&
+            html`<span class="qo-chip" style=${{ '--pc': project.color || 'var(--text-3)' }} title=${`Project: ${project.name}`}
+              ><span class="qo-dot" /><${Marked} text=${project.name} ranges=${project.name.length === f.project.length ? marks.project : []}
+            /></span>`}
+        <span class="qo-time" title=${fullTime(f.modifiedAt) || undefined}>${shortAgo(f.modifiedAt)}</span>`,
+      f.path ?? '',
+    );
+  };
+  const symbolRow = (e) =>
+    option(
+      e,
+      `symbol-row qo-symbol ${e.level > 1 ? 'qo-sub' : ''}`,
+      html`<span class="qo-icon" style=${{ marginLeft: `${Math.min(e.level - 1, 5) * 14}px` }}><${Icon} name=${e.level > 1 ? 'chevronRight' : 'code'} size=${14} /></span>
+        <span class="qo-name"><${Marked} text=${e.title} ranges=${wordRanges(e.title, symbolWords)} /></span><span class="qo-place" />
+        <span class="qo-line">line ${e.line}</span>`,
+    );
+
+  // The prefixes that list other things, for the footer (a click switches; the field keeps the focus).
+  const prefixes = [
+    actions.commandPalette && { key: '>', label: 'commands', hint: 'Run a command by name', run: () => (onClose(), actions.commandPalette('')) },
+    symbols && { key: '@', label: 'symbols', hint: 'A function, class or section of this file', run: () => search('@') },
+    actions.gotoSymbolAll && { key: '#', label: 'all symbols', hint: 'A function, class or section in any file', run: () => (onClose(), actions.gotoSymbolAll('')) },
+    onAsk && { key: '?', label: 'ask', hint: 'Find by asking: describe the file in your own words', run: () => search('? ') },
+  ].filter(Boolean);
+  const chosen = rows[sel];
+  const action = symbolMode ? 'go to' : chosen?.ask ? 'ask' : chosen ? 'open' : searching ? 'create' : 'open';
+
   return html`<div class="modal-backdrop top" onPointerDown=${(e) => e.target === e.currentTarget && onClose()}>
-    <div class="quick-open" role="dialog" aria-label="Open a file">
-      <input value=${query} placeholder=${symbols ? `Type part of a file${roots.length ? ', folder' : ''} or project name; @ for this file’s functions and sections, # for any file’s…` : 'Type part of a file or project name…'} aria-label="File name" ref=${input}
-        onInput=${(e) => {
-          const value = e.currentTarget.value;
-          // "#…": a symbol in any file (Ctrl+T); ">…": a command (Ctrl+Shift+P).
-          if (value.startsWith('#') && actions.gotoSymbolAll) {
-            onClose();
-            return actions.gotoSymbolAll(value.slice(1));
-          }
-          if (value.startsWith('>') && actions.commandPalette) {
-            onClose();
-            return actions.commandPalette(value.slice(1).trimStart());
-          }
-          setQuery(value);
-        }}
-        onKeyDown=${(e) => {
-          if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            setIndex(Math.min(index + 1, rows.length - 1));
-          } else if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            setIndex(Math.max(index - 1, 0));
-          } else if (e.key === 'Enter' && rows[index]) {
-            e.preventDefault();
-            choose(rows[index]);
-          } else if (e.key === 'Enter' && query.trim() && !symbolMode) {
-            e.preventDefault();
-            onClose();
-            actions.newFile({ name: query.trim() });
-          }
-        }} />
-      <div class="quick-list" role="listbox">
-        ${symbolMode &&
-        symbolList.map(
-          (e, i) => html`<button type="button" key=${`${e.line}-${i}`} role="option" aria-selected=${i === index} class="quick-row symbol-row ${i === index ? 'active' : ''}"
-            style=${{ paddingLeft: `${10 + (e.level - 1) * 14}px` }} onMouseEnter=${() => setIndex(i)} onClick=${() => choose(e)}>
-            <${Icon} name=${e.level > 1 ? 'chevronRight' : 'code'} size=${14} /><span class="quick-name">${e.title}</span>
-            <span class="spacer" /><span class="muted small">line ${e.line}</span>
-          </button>`,
-        )}
-        ${symbolMode && !symbolList.length && html`<p class="muted small quick-empty">${symbols().length ? 'No function or section matches.' : 'No functions or sections found in this file (classes, functions and headings show here).'}</p>`}
-        ${!symbolMode &&
-        list.map((f, i) =>
-          f.ask
-            ? html`<button type="button" key="ask" role="option" aria-selected=${i === index} class="quick-row quick-ask ${i === index ? 'active' : ''}"
-                title="Find by asking: the model works out what to look for, the editor searches your files, documents, tracker items and folders, and the model picks the best"
-                onMouseEnter=${() => setIndex(i)} onClick=${() => choose(f)}>
-                <${Icon} name="sparkle" size=${15} /><span class="quick-name">Ask: ${f.name}</span><span class="spacer" /><span class="muted small">Find by asking</span>
-              </button>`
-            : f.typed
-            ? html`<button type="button" key=${f.id} role="option" aria-selected=${i === index} class="quick-row quick-disk kind-disk ${i === index ? 'active' : ''}"
-                title=${f.typed} onMouseEnter=${() => setIndex(i)} onClick=${() => choose(f)}>
-                <${Icon} name="disk" size=${15} class="quick-kind" /><span class="quick-name">Open ${f.name}</span>
-                <span class="muted small quick-rel">${f.typed}</span>
-              </button>`
-            : f.path
-            ? html`<button type="button" key=${f.id} role="option" aria-selected=${i === index} class="quick-row quick-disk kind-${f.kind} ${i === index ? 'active' : ''}"
-                title=${f.path} onMouseEnter=${() => setIndex(i)} onClick=${() => choose(f)}>
-                <${Icon} name=${KINDS[f.kind].icon} size=${15} class="quick-kind" /><span class="quick-name">${f.name}</span>
-                ${f.rel.includes('/') && html`<span class="muted small quick-rel">${f.rel.slice(0, f.rel.lastIndexOf('/'))}</span>`}
-                <span class="spacer" /><span class="quick-where">${f.where}</span>
-              </button>`
-            : html`<button type="button" key=${f.id} role="option" aria-selected=${i === index} class="quick-row ${i === index ? 'active' : ''}"
-                onMouseEnter=${() => setIndex(i)} onClick=${() => choose(f)}>
-                <${Icon} name=${f.item ? 'doc' : 'file'} size=${15} /><span class="quick-name">${f.name}</span>
-                ${f.item && html`<span class="muted small quick-item">${f.item}</span>`}
-                ${f.project && html`<span class="muted small">${f.project}</span>`}
-                <span class="spacer" /><span class="muted small">${timeAgo(f.modifiedAt)}</span>
-              </button>`,
-        )}
-        ${!symbolMode && !list.length && html`<p class="muted small quick-empty">${query.trim() ? html`No file matches${inFolders.loading ? ' yet (still looking in your folders)' : ''}. Press <kbd>Enter</kbd> to create “${query.trim()}”.` : 'No files yet.'}</p>`}
-        ${!symbolMode && query.trim() && roots.length > 0 && (inFolders.loading || inFolders.truncated) &&
-        html`<p class="muted small quick-note">${inFolders.loading ? 'Looking in your folders…' : 'Some folders have too many files: only the nearest ones are searched by name.'}</p>`}
+    <div class="quick-open qo" role="dialog" aria-label="Open a file">
+      <div class="qo-field">
+        <${Icon} name=${symbolMode ? 'code' : 'search'} size=${17} class="qo-field-icon" />
+        <input value=${query} placeholder=${`Search files by name${roots.length ? ', folder' : ''} or project…`} aria-label="File name" ref=${input}
+          role="combobox" aria-expanded="true" aria-controls="qo-list" aria-autocomplete="list" aria-activedescendant=${chosen ? `qo-row-${sel}` : undefined}
+          autocomplete="off" spellcheck=${false}
+          onInput=${(e) => {
+            const value = e.currentTarget.value;
+            // "#…": a symbol in any file (Ctrl+T); ">…": a command (Ctrl+Shift+P).
+            if (value.startsWith('#') && actions.gotoSymbolAll) {
+              onClose();
+              return actions.gotoSymbolAll(value.slice(1));
+            }
+            if (value.startsWith('>') && actions.commandPalette) {
+              onClose();
+              return actions.commandPalette(value.slice(1).trimStart());
+            }
+            search(value);
+          }}
+          onKeyDown=${(e) => {
+            if (nav.key(e, { empty: !query })) return;
+            if (e.key === 'Enter' && chosen) {
+              e.preventDefault();
+              choose(chosen);
+            } else if (e.key === 'Enter' && searching && !symbolMode) {
+              e.preventDefault();
+              onClose();
+              actions.newFile({ name: query.trim() });
+            }
+          }} />
+        <${ClearButton} value=${query} onClear=${() => search('')} label="Clear" />
       </div>
+      <div class="quick-list qo-list" id="qo-list" role="listbox" aria-label=${symbolMode ? 'Functions and sections' : 'Files'} ref=${listRef}>
+        ${rows.length > 0 &&
+        groups.map(
+          (g) => html`<${ListSection} key=${g.id} label=${g.label} count=${g.rows.length} icon=${SECTION_LOOKS[g.id]?.icon} tone=${SECTION_LOOKS[g.id]?.tone}>
+            ${g.rows.map((r) => (symbolMode ? symbolRow(r) : fileRow(r)))}
+          </${ListSection}>`,
+        )}
+        ${symbolMode &&
+        !rows.length &&
+        html`<${ListEmpty} icon="code" title=${symbols().length ? 'No function or section matches' : 'No functions or sections in this file'}>
+          ${symbols().length ? 'Try fewer letters, or part of another word of its name.' : 'Classes, functions and headings show here.'}
+        </${ListEmpty}>`}
+        ${!symbolMode &&
+        !rows.length &&
+        (searching
+          ? html`<${ListEmpty} title=${`No file matches “${query.trim()}”${inFolders.loading ? ' yet' : ''}`}>
+              ${inFolders.loading ? 'Still looking in your folders. ' : ''}Press <kbd>Enter</kbd> to create a file of that name.
+            </${ListEmpty}>`
+          : html`<${ListEmpty} icon="file" title="No files yet">Type a name and press <kbd>Enter</kbd> to create one.</${ListEmpty}>`)}
+        ${!symbolMode && searching && roots.length > 0 && (inFolders.loading || inFolders.truncated) &&
+        html`<p class="qo-note">${inFolders.loading ? 'Looking in your folders…' : 'Some folders have too many files: only the nearest ones are searched by name.'}</p>`}
+      </div>
+      <${ListFoot} action=${action}>
+        ${prefixes.length > 0 &&
+        html`<span class="qo-prefixes">
+          ${prefixes.map(
+            (p) => html`<button type="button" key=${p.key} class="qo-prefix" title=${p.hint} onPointerDown=${(e) => e.preventDefault()} onClick=${p.run}><kbd>${p.key}</kbd>${p.label}</button>`,
+          )}
+        </span>`}
+      </${ListFoot}>
     </div>
   </div>`;
 }
