@@ -427,6 +427,25 @@ const MAX_BACKUPS = 50;
 const BLAME_MAX = 2 * 1024 * 1024;
 const safeHash = (rev) => typeof rev === 'string' && /^[0-9a-f]{4,64}$/i.test(rev);
 
+// The history view's commits (gitStatus.js parseHistory): a record per commit (\x1e), its fields
+// split by \x1f (written as %x1e/%x1f: the values a shell runner passes may not hold them).
+const HISTORY_FORMAT = '%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%at%x1f%cn%x1f%ct%x1f%D%x1f%s';
+/** What the history is searched for: one line, short, '' for nothing. */
+const historyWords = (text) => String(text ?? '').replace(/[\0-\x1f]+/g, ' ').trim().slice(0, 200);
+/** `git diff --name-status -z` → { files: [{ status (A, M, D, R…), path, from? }] (300 at most), more }. */
+function nameStatus(out, max = 300) {
+  const parts = String(out).split('\0').filter(Boolean);
+  const files = [];
+  let more = 0;
+  for (let i = 0; i < parts.length; ) {
+    const status = parts[i++];
+    const entry = /^[RC]/.test(status) ? { status: status[0], from: parts[i++], path: parts[i++] } : { status: status[0], path: parts[i++] };
+    if (files.length < max) files.push(entry);
+    else more++;
+  }
+  return { files, more };
+}
+
 // A merge, rebase, cherry-pick or revert left halfway: the file each leaves in the .git folder.
 const IN_PROGRESS = [['MERGE_HEAD', 'merge'], ['REBASE_HEAD', 'rebase'], ['rebase-merge', 'rebase'], ['rebase-apply', 'rebase'], ['CHERRY_PICK_HEAD', 'cherry-pick'], ['REVERT_HEAD', 'revert']];
 const BACKUP_FILE = 'tracker-editor-backups.json';
@@ -616,6 +635,43 @@ function createGit({ parseStatus, parse = {}, runner = null, runGit: runGitHere 
     return { restored: entry, backup: before };
   }
 
+  // ---- History (the history view, ui/gitHistory.js): commits a page at a time ----
+  /**
+   * Commits for the history view, newest first in topo order: `limit` (200, at most 1,000) after
+   * the first `skip`. `ref`: a branch, tag or commit (else every branch, remote branch and tag,
+   * and HEAD); `query`: words its message holds, in any case (all of them); `author`: part of the
+   * author's name or address; `path`: a file or folder inside the repository (the commits that
+   * changed it, their parents rewritten so the graph joins up); `follow`: that file through its
+   * renames (each commit with the file's name then: `path`, `status`, `from`). → { commits
+   * (gitStatus.js parseHistory), more, head (HEAD's commit), branch (the one checked out, or ''),
+   * empty (no commit yet) }. Our backups and the stash are never named among a commit's refs.
+   */
+  async function historyOf(root, action) {
+    const limit = Math.min(Math.max(Math.floor(Number(action.limit)) || 200, 1), 1000);
+    const skip = Math.min(Math.max(Math.floor(Number(action.skip)) || 0, 0), 100_000_000);
+    const ref = action.ref == null || action.ref === '' ? null : action.ref;
+    if (ref != null && !safeRev(ref)) throw new Error('Not a branch or commit');
+    const path = action.path == null || action.path === '' ? null : action.path;
+    if (path != null && !safeRel(path)) throw new Error('Not a file of this repository');
+    // What is searched for: one line each, short (a value for git, never an option: it follows "=").
+    const words = historyWords(action.query).split(/\s+/).filter(Boolean).slice(0, 12);
+    const author = historyWords(action.author);
+    const [head, branch] = await Promise.all([tryGit(['rev-parse', '--verify', '-q', 'HEAD'], root, { timeout: 5000 }), tryGit(['symbolic-ref', '--short', '-q', 'HEAD'], root, { timeout: 5000 })]);
+    if (!head.trim()) return { commits: [], more: false, head: '', branch: branch.trim(), empty: true };
+    const follow = Boolean(path && action.follow);
+    const args = ['log', '--topo-order', '--no-color', '--decorate=full', `--decorate-refs-exclude=${BACKUP_REFS}/*`, '--decorate-refs-exclude=refs/stash', `--format=${HISTORY_FORMAT}`, `--skip=${skip}`, '-n', String(limit + 1)];
+    if (words.length || author) args.push('--fixed-strings', '--regexp-ignore-case');
+    for (const word of words) args.push(`--grep=${word}`);
+    if (words.length > 1) args.push('--all-match');
+    if (author) args.push(`--author=${author}`);
+    if (follow) args.push('--follow', '--name-status');
+    else if (path) args.push('--parents');
+    args.push(...(ref ? [ref] : ['--branches', '--remotes', '--tags', 'HEAD']), '--', ...(path ? [path] : []));
+    const out = await runGit(args, root, { timeout: 60_000, maxBuffer: 64 * 1024 * 1024 });
+    const commits = parse.parseHistory ? parse.parseHistory(out) : [];
+    return { commits: commits.slice(0, limit), more: commits.length > limit, head: head.trim(), branch: branch.trim() };
+  }
+
   return {
     repoOf,
     /** `git status` for the repository `dir` is in: { root, branch, upstream, ahead, behind, files } or null. */
@@ -794,6 +850,26 @@ function createGit({ parseStatus, parse = {}, runner = null, runGit: runGitHere 
           } catch {
             return '(no reflog)';
           }
+        }
+        // ---- The history view (ui/gitHistory.js): commits, a commit's details, files at a commit ----
+        case 'history':
+          return historyOf(root, action);
+        case 'commit-info':
+          // A commit picked in the history: its whole message, who and when, the files it changed.
+          return this.commitInfo(root, action.hash);
+        case 'file-text':
+          // A file at a commit, as bytes (main.cjs decodes it as the editor reads files), or null when it was not there.
+          return this.fileAt(root, action.hash, action.path);
+        case 'changed-since': {
+          // The files that differ between a commit and the working tree now (tracked files).
+          if (!safeHash(action.hash)) throw new Error('Not a commit');
+          return nameStatus(await runGit(['diff', '--no-color', '--name-status', '-z', '-M', action.hash, '--'], root, { timeout: 30_000 }));
+        }
+        case 'branch-at': {
+          // A new branch at a commit, the one checked out left as it is (Create a branch here).
+          if (!safeBranch(action.name) || !safeRev(action.rev)) throw new Error('Not a branch name or commit');
+          await runGit(['check-ref-format', '--branch', action.name], root, { timeout: 5000 });
+          return w(['branch', '--no-track', action.name, action.rev]);
         }
         case 'snapshot':
           return snapshot(root, parse);
