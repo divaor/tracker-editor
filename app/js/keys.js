@@ -4,15 +4,20 @@
 // the desktop menu, which shows them and takes the ones it registers.
 import { COMMAND_LIST, keysFor } from './commands.js';
 import { combosOf, commandFor, formatKeys, keyTable, keysChanged, menuAccelerators, ownKeys } from './keybindings.js';
-import { isDesktopApp } from './platform.js';
+import { isAndroidApp, isDesktopApp } from './platform.js';
 import { getSettings, onSettings } from './settings.js';
 
 const platform = () => globalThis.window?.desktop?.platform ?? '';
+const inApp = () => isDesktopApp() || isAndroidApp();
 const navPlatform = () => globalThis.navigator?.platform ?? '';
 /** A Mac's keys (Cmd for Mod, Option for Alt). */
 export const isMacKeys = () => platform() === 'darwin' || (!platform() && /Mac|iPhone|iPad/.test(navPlatform()));
-/** This device's keys: { mac, desktop, windows }. */
-export const keyContext = () => ({ mac: isMacKeys(), desktop: isDesktopApp(), windows: platform() === 'win32' || (!platform() && /Win/.test(navPlatform())) });
+/**
+ * This device's keys: { mac, desktop, windows }. `desktop` is the app (the desktop app, or the
+ * Android app, whose WebView keeps no keys for itself and has the terminal, Folders and the
+ * rest of `only: 'desktop'`); features missing there are left to app.js's `usable`.
+ */
+export const keyContext = () => ({ mac: isMacKeys(), desktop: inApp(), windows: platform() === 'win32' || (!platform() && /Win/.test(navPlatform())) });
 
 let memo = null;
 /** The table (keybindings.js keyTable) for `settings`; the same settings give the same table. */
