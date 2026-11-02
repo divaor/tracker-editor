@@ -29,6 +29,7 @@ import { COLOR_MODES } from './tabViews.js';
 import { looksLikeVisionModel } from '../ocr.js';
 import { isAndroidApp, isDesktopApp } from '../platform.js';
 import { minimapShown } from '../minimapLayout.js';
+import { isMacKeys } from '../keys.js';
 
 const SYNC_FIELDS = ['owner', 'repo', 'branch', 'trackerPath', 'device'];
 const pick = (obj, keys) => Object.fromEntries(keys.map((k) => [k, obj[k] ?? '']));
@@ -201,6 +202,9 @@ function EditorCard({ settings }) {
       <${Check} checked=${settings.emmet !== false} label="Emmet: Tab expands abbreviations in HTML, XML and JSX" hint="ul>li*3, div.card, a[href], ! for a page"
         onChange=${(v) => saveSettings({ emmet: v })} />
       <${Check} checked=${settings.linkedTags !== false} label="Renaming a tag renames its other end" onChange=${(v) => saveSettings({ linkedTags: v })} />
+      <${Check} checked=${settings.ctrlClickDefinition !== false} label=${`${isMacKeys() ? 'Cmd' : 'Ctrl'}+click on a name goes to its definition`}
+        hint=${`In code: functions, methods, attributes, variables, classes (underlined while ${isMacKeys() ? 'Cmd' : 'Ctrl'} is held). ${isMacKeys() ? 'Cmd+Option' : 'Ctrl+Alt'}+click adds a cursor there; off, ${isMacKeys() ? 'Cmd' : 'Ctrl'}+click adds cursors everywhere`}
+        onChange=${(v) => saveSettings({ ctrlClickDefinition: v })} />
       <${Check} checked=${Boolean(settings.inlineSuggest)} label="Suggest the rest as you type (the model)"
         hint=${settings.llm.enabled && settings.llm.provider !== 'async' ? 'Grey text after the cursor: Tab takes it, Ctrl+→ one word, Esc drops it. A code model (Settings → Model → Model for suggestions) works best.' : 'Needs a model on this computer or a server that answers at once: set it up under Model.'}
         onChange=${(v) => saveSettings({ inlineSuggest: v })} />

@@ -2,7 +2,7 @@
 // symbols to jump to.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { declarationKind, findDefinition, lineStart, matchSymbols, occurrences, usages, wordAt } from '../app/js/codeNav.js';
+import { declarationKind, findDefinition, isMemberAt, lineStart, matchSymbols, occurrences, usages, wordAt } from '../app/js/codeNav.js';
 import { outline } from '../app/js/outline.js';
 
 test('the name at the cursor', () => {
@@ -118,4 +118,43 @@ test('outline: more languages and methods in classes', () => {
   assert.deepEqual(titles('<?php\nclass Repo {\n  public function find($id) {\n  }\n}\n', 'PHP'), ['1:Repo', '2:find']);
   assert.deepEqual(titles('module Shop\n  class Cart\n    def total\n    end\n  end\nend\n', 'Ruby'), ['1:Shop', '2:Cart', '2:total']);
   assert.deepEqual(titles('class Repo {\n    suspend fun load(): Int {\n    }\n}\nfun main() {}\n', 'Kotlin'), ['1:Repo', '2:load', '1:main']);
+});
+
+test('attributes set on the object: Ctrl+click on self.total or this.items finds where it is set', () => {
+  // Python: set in __init__, changed and read in methods; a local of the same name elsewhere.
+  const py = ['class Cart:', '    def __init__(self):', '        self.total = 0', '        self.items: list = []', '', '    def add(self, n):', '        total = n * 2', '        self.total += total', '        return self.total == 0', ''].join('\n');
+  assert.equal(declarationKind('        self.total = 0', 14, 'total'), 'member');
+  assert.equal(declarationKind('        self.items: list = []', 14, 'items'), 'member');
+  assert.equal(declarationKind('        self.total += total', 14, 'total'), null, 'a change is not a declaration');
+  assert.equal(declarationKind('        return self.total == 0', 21, 'total'), null);
+  const used = py.lastIndexOf('self.total') + 5;
+  assert.equal(isMemberAt(py, used), true);
+  // Reached through self: the attribute in __init__, not the local below it.
+  assert.equal(findDefinition(py, 'total', used, undefined, { member: true }).line, 3);
+  // The bare name: the local assignment.
+  const bare = py.indexOf('self.total += total') + 'self.total += '.length;
+  assert.equal(isMemberAt(py, bare), false);
+  assert.equal(findDefinition(py, 'total', bare).line, 7);
+  // JavaScript and PHP, Ruby.
+  const js = ['class Store {', '  constructor() {', '    this.items = [];', '  }', '  add(x) {', '    this.items.push(x);', '  }', '}'].join('\n');
+  const at = js.indexOf('this.items.push') + 5;
+  assert.equal(isMemberAt(js, at), true);
+  assert.equal(findDefinition(js, 'items', at, undefined, { member: true }).line, 3);
+  assert.equal(declarationKind('        $this->name = $name;', 16, 'name'), 'member');
+  assert.equal(declarationKind('    @count = 0', 6, 'count'), 'member');
+  assert.equal(isMemberAt('Foo::bar()', 5), true);
+  assert.equal(isMemberAt('$this->name', 7), true);
+  // The attribute comes before a function of that name, and the bare name still finds the function.
+  const withFunction = `${js}\nfunction items() {}\n`;
+  assert.equal(findDefinition(withFunction, 'items', at, undefined, { member: true }).line, 3);
+  assert.equal(findDefinition(withFunction, 'items', withFunction.length - 2).line, 9);
+  // A parameter of the same name (set from it in the constructor) is not where the attribute is.
+  const param = ['class Cart:', '    def __init__(self, total, items):', '        self.total = total', '', '    def show(self):', '        return self.total', ''].join('\n');
+  const shown = param.lastIndexOf('self.total') + 5;
+  assert.equal(findDefinition(param, 'total', shown, undefined, { member: true }).line, 3);
+  // A method reached through an object: the method, not a parameter or a local of that name.
+  const method = ['def report(save):', '    return save', '', 'class Doc:', '    def save(self):', '        pass', '', 'def main(doc):', '    save = 1', '    doc.save()', ''].join('\n');
+  const call = method.indexOf('doc.save') + 4;
+  assert.equal(findDefinition(method, 'save', call, undefined, { member: true }).line, 5);
+  assert.equal(findDefinition(method, 'save', method.indexOf('return save') + 7).line, 1, 'the bare name: the nearest declaration before it, as before');
 });

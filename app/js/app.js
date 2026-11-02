@@ -90,7 +90,9 @@ import { ProblemsPanel } from './ui/problems.js';
 import { DeclarationPicker, SymbolSearch } from './ui/symbols.js';
 import { CommandPalette } from './ui/palette.js';
 import { SYNTAX_LANGUAGES } from './problems.js';
-import { DASHED_LANGUAGES, declarationKind, findDefinition, lineStart, occurrences, wordAt } from './codeNav.js';
+import { DASHED_LANGUAGES, declarationKind, findDefinition, isMemberAt, lineStart, occurrences, wordAt } from './codeNav.js';
+import { codeMenuItems, EDIT_KEYS } from './codeMenu.js';
+import { COMMAND_LIST } from './commands.js';
 import { FilterBar } from './ui/filterBar.js';
 import { MacroDialog } from './ui/macro.js';
 import { CloseDiskDialog, ReloadDiskDialog } from './ui/diskDialogs.js';
@@ -117,8 +119,8 @@ import { activeFor, folderGroupOf, loadRoots, rememberFolders, sectionFolders, t
 import { MAX_EXTRA, dragSizes, evenSizes, nextUnshown, paneSizes, panesThatFit, withSizes } from './paneLayout.js';
 import { stepView, suggestedProject, viewKey } from './tabGroups.js';
 import { isAndroidApp, isDesktopApp } from './platform.js';
-import { EDITOR_COMMANDS, combosOf, typesText } from './keybindings.js';
-import { commandOfEvent, keyContext, startKeys } from './keys.js';
+import { EDITOR_COMMANDS, combosOf, formatCombo, typesText } from './keybindings.js';
+import { commandOfEvent, isMacKeys, keyContext, shownKeys, startKeys } from './keys.js';
 
 const isNarrow = () => matchMedia('(max-width: 860px)').matches;
 
@@ -216,8 +218,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       return key?.kind === 'file' ? store.get(key.id) : null;
     };
     // The open tab with its latest text: an editor file or a tracker document.
-    const activeInfo = () => {
-      const key = store.session.active;
+    const activeInfo = (key = store.session.active) => {
       const k = parseKey(key);
       if (!k) return null;
       hostRef.current?.flushAll();
@@ -429,7 +430,8 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       goToDefinition() {
         const w = actions.codeWord();
         if (!w) return;
-        const found = findDefinition(w.ctx.text, w.word, w.from);
+        // obj.name, self.name: where the object gets it (self.name = …) before a local of that name.
+        const found = findDefinition(w.ctx.text, w.word, w.from, undefined, { member: isMemberAt(w.ctx.text, w.from) });
         if (!found) return actions.declarationElsewhere(w.word, w.ctx.key);
         if (found.from === w.from) return actions.findUsages();
         hostRef.current.selectRanges([found]);
@@ -515,8 +517,9 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         setPanel('search');
       },
 
-      async formatDocument() {
-        const now = activeInfo();
+      /** `key`: a tab shown in a pane (the text right-clicked), else the open one. */
+      async formatDocument({ key } = {}) {
+        const now = activeInfo(typeof key === 'string' ? key : undefined);
         if (!now) return;
         const disk = now.kind === 'disk' ? store.diskTab(now.path) : null;
         if (diskReadOnly(disk)) return toast(disk.readOnly ? 'This file is read-only here: the app it came from does not let it be saved.' : 'This tab is read-only (followed, or the end of a large file).');
@@ -528,7 +531,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         const formatter = formatterFor(now.name, findLanguage(now.name, now.language)?.name ?? '') ?? guessFormatter(source);
         // A language server that formats: first, unless the editor's own are chosen (Settings), or alone.
         // Per language when Settings says so (the tab's server's language).
-        if ((formatFirst(getSettings(), lspRef.current?.entryOf(now.key)) !== 'builtin' || !formatter) && (await actions.formatWithServer?.(now.key, part))) return;
+        if ((formatFirst(getSettings(), actions.lspEntryOf?.(now.key)) !== 'builtin' || !formatter) && (await actions.formatWithServer?.(now.key, part))) return;
         if (!formatter) return toast(`No formatter for this kind of file. Pick its language in the status bar; these can be formatted: ${FORMATTABLE}.`, { timeout: 8000 });
         if (source.length > 5 * 1024 * 1024 && !['json', 'xml'].includes(formatter.kind)) return toast('This is too large to format here.');
         const { tabSize = 4 } = getSettings();
@@ -1610,6 +1613,8 @@ export function App() {
   // menu a tap on a line number opens ({ key, x, top, bottom }).
   const [editing, setEditing] = useState(false);
   const [lineMenu, setLineMenu] = useState(null);
+  // The text's right-click menu: { key, x, y, onName, hasSelection, readOnly, language } (editor.js onTextMenu).
+  const [textMenu, setTextMenu] = useState(null);
   // The open tab is in the lighter editor for very large files.
   const [big, setBig] = useState(false);
   const [preview, setPreview] = useState(() => new Set());
@@ -1643,6 +1648,8 @@ export function App() {
     breadcrumbs: s.breadcrumbs !== false,
     breadcrumbsAuto: s.breadcrumbs !== true && s.breadcrumbs !== false,
     minimap: minimapShown(s.minimap, { desktop: isDesktopApp() }),
+    // The desktop app has no menu of the system's in the text: the editor's own for a long press and Shift+right-click too.
+    noSystemMenu: isDesktopApp(),
   });
 
   /**
@@ -1837,6 +1844,10 @@ export function App() {
         const base = k?.kind === 'disk' ? parentDir(k.path) : '';
         actions.openRef(ref, base);
       },
+      // Ctrl+click on a name in a program (the cursor is on it): its definition, as F12.
+      onDefinition: () => actions.goToDefinition(),
+      // The text right-clicked: its menu (codeMenu.js), for that pane.
+      onTextMenu: (at) => setTextMenu(at),
       onSuggest: (request) => actions.suggestText(request),
       // A problem's tooltip: the model explains it, or fixes the file's problems.
       onProblemAction: (kind, key, problem) => (kind === 'quickfix' ? actions.quickFix({ key, from: problem.from, to: problem.to }) : kind === 'fix' ? actions.fixProblems(key) : actions.explainProblem(problem, key)),
@@ -1940,7 +1951,7 @@ export function App() {
   }, []);
   useEffect(
     () => hostRef.current?.applySettings(editorOptions(settings)),
-    [settings.theme, settings.wordWrap, settings.showWhitespace, settings.tabSize, settings.lineNumbers, settings.problems, settings.indentGuides, settings.bracketColors, settings.stickyScroll, settings.detectIndent, settings.indentChosen, settings.emmet, settings.linkedTags, settings.inlineSuggest, settings.llm],
+    [settings.theme, settings.wordWrap, settings.showWhitespace, settings.tabSize, settings.lineNumbers, settings.problems, settings.indentGuides, settings.bracketColors, settings.stickyScroll, settings.detectIndent, settings.indentChosen, settings.emmet, settings.linkedTags, settings.ctrlClickDefinition, settings.inlineSuggest, settings.llm],
   );
   useEffect(() => {
     const media = matchMedia('(prefers-color-scheme: dark)');
@@ -2132,6 +2143,13 @@ export function App() {
     return out;
   };
   actions.openPlace = (p) => (p.id ? actions.openFile(p.id, { line: p.line, column: p.column, length: p.length }) : actions.openDiskPath(p.path, { line: p.line, column: p.column, length: p.length }));
+  // Whether a place a server answered is the name `w` (codeWord) itself.
+  const atPlace = (p, w) => {
+    const sameFile = p.id ? p.id === w.ctx.key || fileKey(p.id) === w.ctx.key : diskKey(p.path) === w.ctx.key;
+    const before = w.ctx.text.slice(0, w.from);
+    const column = w.from - before.lastIndexOf('\n');
+    return sameFile && p.line === before.split('\n').length && column >= p.column && column <= p.column + Math.max(p.length, 1);
+  };
   actions.goToDefinition = async () => {
     const w = actions.codeWord();
     if (!w) return;
@@ -2139,6 +2157,8 @@ export function App() {
     if (lsp) {
       try {
         const places = await actions.serverPlaces(lsp.locations(await lsp.request(w.ctx.key, 'textDocument/definition', w.from, {}, 'definitionProvider')), w.ctx.key);
+        // Already on the declaration: where it is used instead (as IDEs do).
+        if (places.length === 1 && atPlace(places[0], w)) return actions.findUsages();
         if (places.length === 1) return actions.openPlace(places[0]);
         if (places.length > 1) return setDialog({ type: 'declarations', word: w.word, places: places.map((p) => ({ ...p, text: p.text?.trim() ?? '' })) });
       } catch {
@@ -2367,6 +2387,8 @@ export function App() {
     return { ...result, done: undo.length, ...(skipped.length ? { skippedReason: failureReason } : {}), undo: undoAll };
   };
 
+  // The catalog entry of the tab's language server (Format document's formatter per language).
+  actions.lspEntryOf = (key) => lspRef.current?.entryOf(key) ?? null;
   /**
    * Format document with the tab's language server (the selection, or all): true when it did (or
    * found nothing to change); false when it has none that formats, or it failed.
@@ -2448,8 +2470,8 @@ export function App() {
     }
   };
   /** Shift+Alt+O: the server sorts the file's imports and drops the unused ones. */
-  actions.organizeImports = async () => {
-    const key = store.session.active;
+  actions.organizeImports = async ({ key } = {}) => {
+    key = typeof key === 'string' ? key : store.session.active;
     const lsp = lspRef.current;
     if (!key || !lsp?.has(key)) return toast('Organize imports comes from a language server: open a code file from Folders (desktop app).', { timeout: 7000 });
     const state = hostRef.current.stateOf(key);
@@ -2936,7 +2958,8 @@ export function App() {
       try {
         text = await navigator.clipboard.readText();
       } catch {
-        return toast('The browser did not let the editor read the clipboard. Long-press in the text and choose Paste.', { kind: 'error', key: 'clip', timeout: 6000 });
+        const how = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches ? 'Long-press in the text and choose Paste' : `Press ${isMacKeys() ? 'Cmd' : 'Ctrl'}+V instead`;
+        return toast(`The browser did not let the editor read the clipboard. ${how}.`, { kind: 'error', key: 'clip', timeout: 6000 });
       }
       if (!host.paste(text)) toast('There is no text on the clipboard.', { key: 'clip', timeout: 2500 });
       return;
@@ -3331,9 +3354,9 @@ export function App() {
    * F5: runs the open file in a terminal, in its folder (on this computer, or on its server
    * over SSH), saved first. The command comes from its type (runFile.js), or Settings.
    */
-  actions.runFile = async () => {
+  actions.runFile = async ({ key } = {}) => {
     if (!terminalsAvailable()) return toast('Running files works in the desktop app.', { kind: 'error' });
-    const k = parseKey(store.session.active);
+    const k = parseKey(typeof key === 'string' ? key : store.session.active);
     if (k?.kind !== 'disk') return toast('Run works on files in a folder, on this computer or on a server: open one from Folders (or save this one there).');
     const remote = isRemotePath(k.path);
     const conn = remote ? server(remoteParts(k.path).id) : null;
@@ -3726,8 +3749,8 @@ export function App() {
    * What the file bar's Run group offers for the open tab (the desktop app; a file in a folder
    * here or on an SSH server): { runs, debugs, tests, debug } or null when none of it fits.
    */
-  const runInfo = () => {
-    const k = parseKey(store.session.active);
+  const runInfo = (key = store.session.active) => {
+    const k = parseKey(key);
     const disk = k?.kind === 'disk' ? store.diskTab(k.path) : null;
     if (!isDesktopApp() || !disk || disk.doc || isContentPath(k.path) || !terminalsAvailable()) return null;
     const remote = isRemotePath(k.path);
@@ -3736,7 +3759,7 @@ export function App() {
     const platform = remote ? 'linux' : (window.desktop.platform ?? 'linux');
     const runs = (!remote && /\.html?$/i.test(name)) || Boolean(runCommandFor({ path: k.path, dir: parentDir(k.path), name }, { platform, kind: platform === 'win32' ? 'powershell' : 'posix', custom: parseRunCommands(getSettings().runCommands) }));
     const debugs = !remote && debugAvailable() && Boolean(debugAdapterFor(k.path));
-    const tests = looksLikeTestFile(name) || Boolean(hostRef.current?.hasTests(store.session.active));
+    const tests = looksLikeTestFile(name) || Boolean(hostRef.current?.hasTests(key));
     if (!runs && !debugs && !tests) return null;
     const live = debugRef.current?.active() ? debugRef.current.run : null;
     return { runs, debugs, tests, debug: live && { status: live.status } };
@@ -3778,6 +3801,67 @@ export function App() {
       { key: 'panel', label: 'The Debug panel', icon: 'panelRight', run: () => setPanel('debug') },
       { key: 'all', label: 'Remove all breakpoints', icon: 'trash', danger: true, run: () => actions.removeAllBreakpoints() },
     ];
+  };
+  // ---- The text's right-click menu (0.45): what IDEs offer there, for the kind of file ----
+  const TEXT_MENU_ICONS = { definition: 'arrowRight', references: 'search', rename: 'edit', symbol: 'list', 'quick-fix': 'bulb', format: 'code', cut: 'scissors', copy: 'copy', paste: 'clipboard', find: 'search', breakpoint: 'bug', 'run-file': 'play', 'debug-file': 'bug', 'test-at-cursor': 'check', 'debug-test': 'bug', ask: 'sparkle', files: 'filePlus' };
+  /**
+   * The items of the menu for `at` (editor.js onTextMenu): codeMenu.js's for the tab's language,
+   * what its language server does, the Run group's choices and the model; each with the keys in
+   * effect, and run in the pane that was right-clicked.
+   */
+  const textMenuItems = (at) => {
+    const { key } = at;
+    const k = parseKey(key);
+    const lsp = settings.languageServers !== false && lspRef.current?.has(key) ? lspRef.current : null;
+    const fixes = lsp?.capability(key, 'codeActionProvider');
+    const kinds = Array.isArray(fixes?.codeActionKinds) ? fixes.codeActionKinds : [];
+    const run = runInfo(key);
+    const file = k?.kind === 'file' ? store.get(k.id) : null;
+    const items = codeMenuItems({
+      ...at,
+      server: { attached: Boolean(fixes), organizeImports: kinds.some((x) => x === 'source' || x.startsWith('source.organizeImports')) },
+      runs: Boolean(run?.runs),
+      debugs: Boolean(run?.debugs),
+      tests: Boolean(run?.tests),
+      // The model changes files in a tab's folder, or a note's project (not tracker documents, never encrypted notes).
+      files: askReady() && ((k?.kind === 'disk' && !isContentPath(k.path) && !store.diskTab(k.path)?.doc) || Boolean(file && !file.encrypted)),
+    });
+    const RUN = {
+      definition: () => actions.goToDefinition(),
+      references: () => actions.findUsages(),
+      rename: () => actions.renameSymbol(),
+      symbol: () => actions.gotoSymbol(),
+      'quick-fix': () => actions.quickFix(),
+      organize: () => actions.organizeImports({ key }),
+      format: () => actions.formatDocument({ key }),
+      cut: () => actions.editClip('cut'),
+      copy: () => actions.editClip('copy'),
+      paste: () => actions.editClip('paste'),
+      'select-all': () => hostRef.current?.run('selectAll'),
+      find: () => hostRef.current?.run('find'),
+      comment: () => hostRef.current?.run('toggleComment'),
+      breakpoint: () => actions.toggleBreakpoint(key),
+      'run-file': () => actions.runFile({ key }),
+      'debug-file': () => actions.debugFile({ key }),
+      'test-at-cursor': () => actions.runTests({ scope: 'cursor', key }),
+      'debug-test': () => actions.debugTest({ key }),
+      ask: () => actions.openAssist({}),
+      files: () => actions.assistFiles({ key }),
+    };
+    const keysOf = (id) => {
+      const command = COMMAND_LIST.find((c) => c.id === id);
+      return command ? shownKeys(command) : '';
+    };
+    return items.map((item) => {
+      if (item.separator) return item;
+      const hint = EDIT_KEYS[item.id] ? formatCombo(EDIT_KEYS[item.id], { mac: isMacKeys() }) : keysOf(item.command);
+      const run = () => {
+        // In the pane that was right-clicked (the menu took the focus).
+        hostRef.current?.focusKey(key);
+        RUN[item.id]?.();
+      };
+      return { key: item.id, label: item.label, icon: TEXT_MENU_ICONS[item.id], disabled: item.disabled, hint: hint || undefined, run };
+    });
   };
   // ---- Tasks (Ctrl+Shift+B): what the projects around name for themselves, run in terminals ----
   /** Where to look: the open file's folder, then the folders shown in Folders (on servers only SSH ones). */
@@ -4172,8 +4256,11 @@ export function App() {
       touch.removeEventListener('change', update);
     };
   }, [settings.editBar]);
-  // The line-number menu belongs to the tab it was opened in.
-  useEffect(() => setLineMenu(null), [store.session.active, view]);
+  // The line-number menu and the text's menu belong to the tab they were opened in.
+  useEffect(() => {
+    setLineMenu(null);
+    setTextMenu(null);
+  }, [store.session.active, view]);
 
   // Desktop: a paste outside any text (no tab open, the tab bar…) opens files copied in another
   // app, or a path; the editor and the folders view take their own pastes first.
@@ -4650,6 +4737,13 @@ export function App() {
         requestAnimationFrame(() => (document.activeElement === document.body || !document.activeElement) && owner?.isConnected && owner.focus());
       }} />`}
     ${bpMenu && html`<${Menu} label="Breakpoint" at=${{ x: bpMenu.x, y: bpMenu.y }} onClose=${() => setBpMenu(null)} items=${breakpointMenu(bpMenu)} />`}
+    ${textMenu && hostRef.current?.stateOf(textMenu.key) &&
+    html`<${Menu} key=${`${textMenu.key}:${textMenu.x}:${textMenu.y}`} className="text-menu" label="Text actions" at=${{ x: textMenu.x, y: textMenu.y }} items=${textMenuItems(textMenu)}
+      onClose=${() => {
+        const { key } = textMenu;
+        setTextMenu(null);
+        hostRef.current?.focusKey(key);
+      }} />`}
     ${codeMenu &&
     html`<${Menu} className="code-actions" label="Quick fixes and refactorings" at=${codeMenu.at} onClose=${() => (setCodeMenu(null), hostRef.current?.focus())}
       items=${codeMenu.rows.flatMap((r, i) => [

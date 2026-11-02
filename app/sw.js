@@ -51,6 +51,7 @@ const ASSETS = [
   'js/minimap.js',
   'js/minimapLayout.js',
   'js/codeNav.js',
+  'js/codeMenu.js',
   'js/comparePick.js',
   'js/compares.js',
   'js/folderCompare.js',

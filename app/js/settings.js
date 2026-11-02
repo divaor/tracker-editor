@@ -54,6 +54,8 @@ export const DEFAULT_SETTINGS = {
   // HTML, XML, JSX: Tab expands Emmet abbreviations; renaming a tag renames its other end.
   emmet: true,
   linkedTags: true,
+  // Code: Ctrl+click (Cmd on a Mac) on a name goes to its definition (off: it adds a cursor, as in plain text).
+  ctrlClickDefinition: true,
   // Suggestions as you type from the model (grey text, Tab takes it); off until turned on.
   inlineSuggest: false,
   // Find by asking (Ctrl+P, a question): send the model only the names of what was found, not the lines that matched.

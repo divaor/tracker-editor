@@ -108,12 +108,14 @@ import { breakpointClick, breakpointsIn, breakpointsMoved, debugGutter, hasDebug
 import { emmetOnTab, linkedTags } from './htmlTools.js';
 import { inlineSuggestions } from './inlineSuggest.js';
 import { breadcrumbsBar, refreshCrumbs } from './breadcrumbs.js';
-import { minimap } from './minimap.js';
+import { kindOfType, minimap } from './minimap.js';
 import { findFileRefs, pastedPath } from './fileRefs.js';
 import { addCursorAbove, addCursorBelow, columnBox, columnKeymap } from './columnSelect.js';
 import { EDITOR_COMMANDS, cmKey, keysChanged } from './keybindings.js';
-import { currentKeys, isKeyFor } from './keys.js';
+import { currentKeys, isKeyFor, isMacKeys } from './keys.js';
 import { clipRanges, codeOfKey, lineTapSelection, selectLineRanges } from './editKeys.js';
+import { DASHED_LANGUAGES, wordAt } from './codeNav.js';
+import { definesNames } from './codeMenu.js';
 
 export { languages };
 
@@ -998,17 +1000,78 @@ function fileRefAt(state, pos) {
   return findFileRefs(line.text).find((r) => pos - line.from >= r.from && pos - line.from < r.to) ?? null;
 }
 
+// ---- Ctrl+click: a name's definition (programs) ----
+
+// The name a Ctrl+click would go to, underlined while Ctrl (Cmd on a Mac) is held over it. A
+// view's own (a plugin, not the state), so it never stays in a tab's state when the tab moves.
+const setDefLink = StateEffect.define();
+const defLinkMark = Decoration.mark({ class: 'cm-def-link' });
+const defLinkPlugin = ViewPlugin.fromClass(
+  class {
+    constructor() {
+      this.range = null;
+      this.decorations = Decoration.none;
+    }
+    update(u) {
+      let range = u.docChanged ? null : this.range;
+      for (const tr of u.transactions) for (const e of tr.effects) if (e.is(setDefLink)) range = e.value;
+      if (range === this.range) return;
+      this.range = range;
+      this.decorations = range ? Decoration.set([defLinkMark.range(range.from, range.to)]) : Decoration.none;
+    }
+  },
+  { decorations: (p) => p.decorations },
+);
+// Not names: strings, comments, keywords, numbers; markup's tags and attributes (JSX's components are).
+const NOT_NAMES = new Set(['comment', 'string', 'keyword', 'number']);
+const MARKUP_NODES = /^(?:Text|TagName|AttributeName|AttributeValue|UnquotedAttributeValue|EntityReference|CharacterReference|Comment|ProcessingInst|DoctypeDecl|Cdata)$/;
+/**
+ * The name at `pos` in a program (codeMenu.js definesNames): { from, to, word }; null in prose and
+ * data files, on a keyword, a number, in a string or a comment, on a markup tag.
+ */
+function nameAt(state, pos) {
+  const language = state.facet(languageName);
+  if (!definesNames(language)) return null;
+  const line = state.doc.lineAt(pos);
+  if (line.length > 4000) return null;
+  const w = wordAt(line.text, pos - line.from, { dashes: DASHED_LANGUAGES.has(language) });
+  if (!w) return null;
+  const from = line.from + w.from;
+  const to = line.from + w.to;
+  const node = syntaxTree(state).resolveInner(from, 1);
+  if (node && node.from <= from && node.to >= to) {
+    const kind = kindOfType(node.type);
+    if (NOT_NAMES.has(kind) || (kind === 'tag' && language !== 'JSX' && language !== 'TSX') || MARKUP_NODES.test(node.name)) return null;
+  }
+  return { from, to, word: w.word };
+}
+/** The name under the pointer at (x, y) in a view: on its letters, not beside the line's end. */
+function nameAtPoint(v, x, y) {
+  const pos = v.posAtCoords({ x, y });
+  if (pos === null) return null;
+  const name = nameAt(v.state, pos);
+  if (!name) return null;
+  const start = v.coordsAtPos(name.from, 1);
+  const end = v.coordsAtPos(name.to, -1);
+  if (!start || !end || y < Math.min(start.top, end.top) || y > Math.max(start.bottom, end.bottom) || x < start.left - 1 || x > end.right + 1) return null;
+  return name;
+}
+
 /**
  * Creates the editor in `parent`. `onChange(key, text, { urgent })` gets the text of the
  * tab after you type (debounced); `onCursor(info)` the cursor position.
  * `onOpenLink(target)` opens a [[link]]; `linkTargets()` lists names to complete after [[.
  * `onProblemAction(kind, key, problem)` ('explain' or 'fix') comes from a problem's tooltip.
- * `onOpenRef(ref, key)` opens a Ctrl+clicked "file:line"; `onSuggest(request)` asks the
+ * `onOpenRef(ref, key)` opens a Ctrl+clicked "file:line"; `onDefinition({ key, pos })` goes to
+ * the definition of a Ctrl+clicked name in a program (setting `ctrlClickDefinition`, on unless
+ * false; the cursor is on it); `onTextMenu({ key, x, y, onName, hasSelection, readOnly, language })`
+ * opens the text's right-click menu (a mouse's, or the keyboard's menu key: the cursor is where
+ * it acts; a long press only with the option `noSystemMenu`). `onSuggest(request)` asks the
  * model for the text at the cursor (suggestions as you type, setting `inlineSuggest`).
  * `setPanes(slots)` shows other tabs in panes beside it (up to three more, paneLayout.js); a
  * tab's state, with its undo history, moves between the panes.
  */
-export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpenLink, onOpenRef, onSuggest, onImage, onPasteFiles, onPastePath, onProblems, onProblemAction, onDrop, onLineMenu, onGitMark, onTestMark, onBreakpointClick, onBreakpointsMoved, crumbPlace, onCrumbMenu, linkTargets, settings }) {
+export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpenLink, onOpenRef, onDefinition, onTextMenu, onSuggest, onImage, onPasteFiles, onPastePath, onProblems, onProblemAction, onDrop, onLineMenu, onGitMark, onTestMark, onBreakpointClick, onBreakpointsMoved, crumbPlace, onCrumbMenu, linkTargets, settings }) {
   const states = new Map(); // key → EditorState
   const scroll = new Map(); // key → scroll position
   const pending = new Map(); // key → timer for onChange
@@ -1139,6 +1202,65 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       if (from === to || block.to < from || block.from >= to) selectTapped(v, block, false);
       if (!coarse()) v.focus();
       lineMenuAt(v, e);
+      return true;
+    },
+  };
+
+  // Ctrl+click on a name in a program goes to its definition (Cmd on a Mac; Alt or Shift with it
+  // leave CodeMirror's own clicks: Ctrl+Alt+click adds a cursor). While the key is held, the name
+  // under the pointer is underlined: on a mouse move, or when the key goes down over it.
+  const definitionClicks = () => Boolean(onDefinition) && options.ctrlClickDefinition !== false;
+  const defKey = (e) => (isMacKeys() ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey) && !e.altKey && !e.shiftKey;
+  let hover = null; // { v, x, y }: where the pointer is over a text
+  const markName = (v, name) => {
+    const was = v.plugin(defLinkPlugin)?.range ?? null;
+    if (was === name || (was && name && was.from === name.from && was.to === name.to)) return;
+    v.dispatch({ effects: setDefLink.of(name && { from: name.from, to: name.to }) });
+  };
+  const unmarkAll = () => liveViews().forEach((v) => markName(v, null));
+  const onDefKey = (e) => {
+    if (!defKey(e) || !definitionClicks()) return unmarkAll();
+    if ((e.key === 'Control' || e.key === 'Meta') && hover?.v.dom.isConnected && !e.repeat) markName(hover.v, nameAtPoint(hover.v, hover.x, hover.y));
+  };
+  window.addEventListener('keydown', onDefKey, true);
+  window.addEventListener('keyup', onDefKey, true);
+  window.addEventListener('blur', unmarkAll);
+  const defHandlers = {
+    mousemove(e, v) {
+      hover = { v, x: e.clientX, y: e.clientY };
+      markName(v, defKey(e) && !e.buttons && definitionClicks() ? nameAtPoint(v, e.clientX, e.clientY) : null);
+      return false;
+    },
+    mouseleave(_e, v) {
+      hover = null;
+      markName(v, null);
+      return false;
+    },
+    // The text's own menu for a mouse's right-click (and the keyboard's menu key). A finger's long
+    // press keeps the system's, with its selection handles, and Shift+right-click is the browser's
+    // own; where there is no menu of the system's (the option `noSystemMenu`: the desktop app),
+    // ours for those too.
+    contextmenu(e, v) {
+      const finger = e.pointerType === 'touch' || e.pointerType === 'pen' || (!e.pointerType && coarse());
+      if (!onTextMenu || ((finger || e.shiftKey) && !options.noSystemMenu)) return false;
+      const byKeys = !e.pointerType && e.button !== 2;
+      let pos = v.state.selection.main.head;
+      let x = e.clientX;
+      let y = e.clientY;
+      if (byKeys) {
+        const at = v.coordsAtPos(pos);
+        if (at) [x, y] = [at.left, at.bottom + 2];
+      } else {
+        pos = v.posAtCoords({ x, y }, false);
+        // Outside the selection the cursor goes there first (as in IDEs); inside it, it stays.
+        if (!v.state.selection.ranges.some((r) => !r.empty && pos >= r.from && pos <= r.to)) v.dispatch({ selection: { anchor: pos }, userEvent: 'select.pointer' });
+      }
+      e.preventDefault();
+      markName(v, null);
+      if (!v.hasFocus) v.focus();
+      focusedView = v === view ? null : v;
+      const { state } = v;
+      onTextMenu({ key: keyOfView(v), x, y, onName: Boolean(nameAt(state, pos)), hasSelection: state.selection.ranges.some((r) => !r.empty), readOnly: state.readOnly, language: state.facet(languageName) });
       return true;
     },
   };
@@ -1370,12 +1492,25 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
             return true;
           }
           const ref = onOpenRef ? fileRefAt(v.state, pos) : null;
-          if (!ref) return false;
+          if (ref) {
+            e.preventDefault();
+            onOpenRef(ref, keyOfView(v));
+            return true;
+          }
+          // A name in a program: the cursor on it, then its definition.
+          const name = definitionClicks() && defKey(e) ? nameAtPoint(v, e.clientX, e.clientY) : null;
+          if (!name) return false;
           e.preventDefault();
-          onOpenRef(ref, keyOfView(v));
+          markName(v, null);
+          v.dispatch({ selection: { anchor: Math.min(Math.max(pos, name.from), name.to) }, userEvent: 'select.pointer' });
+          v.focus();
+          focusedView = v === view ? null : v;
+          onDefinition({ key: keyOfView(v), pos });
           return true;
         },
+        ...defHandlers,
       }),
+      defLinkPlugin,
       wikiLinks,
       // Renaming a tag renames its other end (HTML, XML, JSX).
       linkedTags(() => options.linkedTags !== false),

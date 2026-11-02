@@ -66,7 +66,9 @@ const COMMENT_LINE = /^\s*(?:\/\/|#(?![!{\w[])|--|\*|\/\*|;|')/;
  * after a keyword (function, class, def, const, let, type…), typed (int count =, String
  * name(), as a key (name: in YAML, JSON, objects), a method (name(…) {), an import, a
  * parameter or a loop variable; 'assign' for name = … at the start of a line (Python,
- * shell, Ruby: the first one declares it). null when it is only used there.
+ * shell, Ruby: the first one declares it); 'member' for an attribute set on the object
+ * (self.name = … in Python, this.name = … in JavaScript, Java, C#, @name = … in Ruby,
+ * $this->name = … in PHP). null when it is only used there.
  */
 export function declarationKind(line, column, word) {
   if (COMMENT_LINE.test(line)) return null;
@@ -91,7 +93,15 @@ export function declarationKind(line, column, word) {
   if (/\bcatch\s*\(\s*$/.test(before) || /\bfor\s+(?:each\s+)?\(?\s*(?:(?:const|let|var|my|local)\s+)?$/.test(before)) return 'strong';
   // name = … (with modifiers before it, or at the start of a line).
   if (MODIFIERS.test(before) && /^\s*(?::\s*[\w<>[\]|., ?]+)?\s*(?:=(?![=>~])|:=)/.test(after)) return 'assign';
+  // self.name = …, this.name = …, @name = …, $this->name = … at the start of a line.
+  if (/^\s*(?:(?:self|this|cls)\.|@|\$this->)$/.test(before) && /^\s*(?::\s*[\w<>[\]|., ?]+)?\s*=(?![=>~])/.test(after)) return 'member';
   return null;
+}
+
+/** Whether the name at `from` is reached through an object: obj.name, self.name, $this->name, Foo::name, @name. */
+export function isMemberAt(text, from) {
+  const before = text.slice(Math.max(0, from - 3), from);
+  return /(?:\.|->|::)\s*$/.test(before) || before.endsWith('@');
 }
 
 export const isDeclaration = (line, column, word) => declarationKind(line, column, word) !== null;
@@ -99,16 +109,34 @@ export const isDeclaration = (line, column, word) => declarationKind(line, colum
 /**
  * Where `word` is declared, as seen from `pos`: the nearest declaration at or before it
  * (inner scopes come later in a file), else the first after it; assignments count only
- * when there is no other kind, and then the first one. null when there is none.
+ * when there is no other kind, and then the first one. `member` (the name was reached
+ * through an object, `isMemberAt`): an attribute set on the object (self.name = …) first,
+ * then methods, properties and keys, then a plain assignment, and parameters or local
+ * variables of that name last. null when there is none.
  */
-export function findDefinition(text, word, pos = 0, found = occurrences(text, word)) {
+export function findDefinition(text, word, pos = 0, found = occurrences(text, word), { member = false } = {}) {
   const kinds = found.map((o) => [o, declarationKind(o.text, o.column, word)]);
   const strong = kinds.filter(([, k]) => k === 'strong').map(([o]) => o);
-  if (strong.length) {
-    const before = strong.filter((o) => o.from <= pos);
-    return before.length ? before[before.length - 1] : strong[0];
+  const nearest = (list) => {
+    const before = list.filter((o) => o.from <= pos);
+    return before.length ? before[before.length - 1] : list[0];
+  };
+  const first = (kind) => kinds.find(([, k]) => k === kind)?.[0] ?? null;
+  if (member) {
+    // obj.name: where the object gets it (self.name = … in the constructor), then a method,
+    // a property or a key; a parameter or a local variable of that name only when nothing else.
+    const own = strong.filter((o) => !isLocal(o.text, o.column));
+    return first('member') ?? (own.length ? nearest(own) : null) ?? first('assign') ?? (strong.length ? nearest(strong) : null);
   }
-  return kinds.find(([, k]) => k === 'assign')?.[0] ?? null;
+  if (strong.length) return nearest(strong);
+  return first('assign') ?? first('member');
+}
+
+// A parameter (inside the line's open parentheses) or a local variable (const, let, var…).
+function isLocal(line, column) {
+  const before = line.slice(0, column - 1);
+  const open = (before.match(/\(/g)?.length ?? 0) - (before.match(/\)/g)?.length ?? 0);
+  return open > 0 || /\b(?:const|let|var|local|my|our|val|auto)\s+$/.test(before);
 }
 
 /** The usages of `word` with the declarations marked: [{ ...occurrence, declaration }]. */

@@ -5754,6 +5754,33 @@ mark {
   background: var(--border);
 }
 
+/* The text's right-click menu (0.45): IDE rows, a little denser, the keys at the right. */
+.menu.text-menu {
+  min-width: 240px;
+  max-width: min(400px, calc(100vw - 16px));
+}
+
+.menu.text-menu .menu-item {
+  min-height: 30px;
+  padding: 4px 10px;
+}
+
+.menu.text-menu .menu-hint {
+  margin-left: 18px;
+}
+
+/* Ctrl+click on a name goes to its definition: the name under the pointer while Ctrl is held. */
+.cm-def-link,
+.cm-def-link * {
+  cursor: pointer;
+}
+
+.cm-def-link {
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-underline-offset: 3px;
+}
+
 /* ---- Compare and history -------------------------------------------------------------- */
 .editor-area.comparing > .editor-host,
 .editor-area.comparing > .preview-pane {

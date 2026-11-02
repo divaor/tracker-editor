@@ -45,7 +45,7 @@ const MAX_MARKS = 4000;
 // rule has `tags` and a numeric `mode`. Its tags give the minimap's color, or none.
 const kinds = new WeakMap();
 const DEFS = [tags.definition(tags.variableName), tags.definition(tags.propertyName), tags.function(tags.definition(tags.variableName))];
-function kindOfType(type) {
+export function kindOfType(type) {
   if (kinds.has(type)) return kinds.get(type);
   let kind = null;
   for (const value of Object.values(type.props ?? {})) {
