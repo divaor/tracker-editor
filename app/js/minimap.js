@@ -196,19 +196,21 @@ export function minimap({ dark = false } = {}) {
 
       write(m) {
         const { view } = this;
+        // CodeMirror sets the editor's classes again when its attributes change (another tab's
+        // state in this view, a theme), so the mark that makes room is checked every time.
+        const marked = view.dom.classList.contains('cm-has-minimap');
         if (!m.show) {
-          if (this.shown) {
-            this.shown = false;
-            this.dom.hidden = true;
+          this.shown = false;
+          this.dom.hidden = true;
+          if (marked) {
             view.dom.classList.remove('cm-has-minimap');
             view.requestMeasure();
           }
-          this.dom.hidden = true;
           return;
         }
-        if (!this.shown) {
-          this.shown = true;
-          this.dom.hidden = false;
+        this.shown = true;
+        this.dom.hidden = false;
+        if (!marked) {
           // Room for it after the text (the CSS pads .cm-content); the editor measures again.
           view.dom.classList.add('cm-has-minimap');
           view.requestMeasure();
