@@ -166,6 +166,27 @@ printf 'st/%s\\n' "$s"
 n=\${s%%/*}
 if [ "$n" -gt "$max" ]; then tail -c "$keep" -- "$p" || exit 44; else cat -- "$p" || exit 44; fi`,
 
+  // Files read one after the other (paths on stdin: a count, the largest size to read, then one
+  // per line). Per file: x/<code>, big/<size>/<mtime>/<mode hex> (larger: not read), or
+  // f/<size>/<mtime>/<mode hex>, exactly <size> bytes (a file that shrank meanwhile is padded),
+  // a line break, and t/<size>/<mtime> as it is after (a file that changed while read says so).
+  readmany: `read -r count || exit 44
+read -r max || exit 44
+i=0
+while [ "$i" -lt "$count" ] && IFS= read -r p; do
+  i=$((i + 1))
+  if [ ! -e "$p" ]; then echo x/40; continue; fi
+  if [ -d "$p" ]; then echo x/41; continue; fi
+  if [ ! -r "$p" ]; then echo x/42; continue; fi
+  s=$(stat -L -c '%s/%Y/%f' -- "$p" 2>/dev/null) || { echo x/44; continue; }
+  n=\${s%%/*}
+  if [ "$n" -gt "$max" ]; then printf 'big/%s\\n' "$s"; continue; fi
+  printf 'f/%s\\n' "$s"
+  { head -c "$n" -- "$p" 2>/dev/null; head -c "$n" /dev/zero; } | head -c "$n"
+  printf '\\nt/%s\\n' "$(stat -L -c '%s/%Y' -- "$p" 2>/dev/null)"
+done
+echo done`,
+
   // Part of a file: <count> bytes from byte <from> (counted from 1).
   range: `p=$(arg "$1") || exit 97
 from=$(arg "$2") || exit 97
@@ -386,6 +407,48 @@ function parseListing(text) {
     for (const e of v.entries ?? []) if (e.dir) e.size = 0;
   }
   return { lists: out, complete };
+}
+
+/**
+ * The readmany script's answer for `count` files: { results, complete }, each result { st, bytes,
+ * truncated } (truncated: larger than asked, not read), { error: code } or { changed: true } (it
+ * changed while it was read). Read by sizes, so any byte can be in a file.
+ */
+function parseReadMany(buf, count) {
+  const results = [];
+  let at = 0;
+  const line = () => {
+    const nl = buf.indexOf(10, at);
+    if (nl < 0) return null;
+    const text = buf.subarray(at, nl).toString('utf8');
+    at = nl + 1;
+    return text;
+  };
+  while (results.length < count) {
+    const head = line();
+    if (head === null) break;
+    if (head.startsWith('x/')) {
+      results.push({ error: Number(head.slice(2)) || CODES.FAILED });
+      continue;
+    }
+    const [kind, size, mtime, hex] = head.split('/');
+    const fields = statFields(hex, size, mtime);
+    const st = { size: Number(size) || 0, mtimeMs: fields.mtimeMs, mode: fields.mode, dir: false };
+    if (kind === 'big') {
+      results.push({ st, bytes: Buffer.alloc(0), truncated: true });
+      continue;
+    }
+    if (kind !== 'f') break; // out of step: what is left is not trusted
+    const n = Number(size) || 0;
+    if (at + n + 1 > buf.length || buf[at + n] !== 10) break;
+    const bytes = buf.subarray(at, at + n);
+    at += n + 1;
+    const after = line();
+    if (!after?.startsWith('t/')) break;
+    const [, size2, mtime2] = after.split('/');
+    results.push(size2 === size && mtime2 === mtime ? { st, bytes, truncated: false } : { changed: true });
+  }
+  return { results, complete: results.length === count && line() === 'done' };
 }
 
 /** `docker ps --format '{{json .}}'` → [{ name, id, image, state, status, ports, project, service }], running first. */
@@ -1001,6 +1064,51 @@ class ExecSession {
     return (await this.readFile(p)).bytes;
   }
 
+  /**
+   * A file of at most `max` bytes: { st, bytes, truncated } (truncated: larger, not read). Several
+   * asked at the same moment (a search reading a few files at a time) go in one command.
+   */
+  readUpTo(p, max) {
+    checkPath(p);
+    const key = String(Math.max(0, Math.floor(Number(max) || 0)));
+    this.readQueues ??= new Map();
+    let queue = this.readQueues.get(key);
+    if (!queue) {
+      queue = { paths: [], waiters: [] };
+      this.readQueues.set(key, queue);
+      setImmediate(() => {
+        if (this.readQueues.get(key) === queue) this.readQueues.delete(key);
+        this.readMany(queue.paths, Number(key)).then(
+          (results) => queue.waiters.forEach((w, i) => (results[i] instanceof Error ? w.reject(results[i]) : w.resolve(results[i]))),
+          (err) => queue.waiters.forEach((w) => w.reject(err)),
+        );
+      });
+    }
+    return new Promise((resolve, reject) => {
+      queue.paths.push(p);
+      queue.waiters.push({ resolve, reject });
+    });
+  }
+
+  /** Files of at most `max` bytes each, read in one command per 32: [{ st, bytes, truncated } | Error], in their order. */
+  async readMany(paths, max) {
+    const out = [];
+    for (let i = 0; i < paths.length; i += 32) {
+      const part = paths.slice(i, i + 32).map(checkPath);
+      const r = await this.run('readmany', [], { input: `${part.length}\n${max}\n${part.join('\n')}\n`, timeout: 60000 + part.length * 2000 });
+      const { results } = parseReadMany(r.stdout, part.length);
+      if (!results.length && !r.stdout.length) throw await this.noScripts();
+      part.forEach((p, j) => {
+        const got = results[j];
+        if (!got) out.push(placeError(`${this.name} did not read ${posix.basename(p)}.`));
+        else if (got.changed) out.push(placeError(`${posix.basename(p)} changed while it was read.`));
+        else if (got.error) out.push(this.failure({ code: got.error }, p));
+        else out.push(got);
+      });
+    }
+    return out;
+  }
+
   async readRange(p, start, length) {
     const r = await this.run('range', [checkPath(p), String(Math.max(0, start) + 1), String(Math.max(0, length))], { timeout: 120000 }, p);
     return r.stdout;
@@ -1157,6 +1265,7 @@ module.exports = {
   outputText,
   parseStat,
   parseListing,
+  parseReadMany,
   parsePs,
   findDocker,
   findWsl,

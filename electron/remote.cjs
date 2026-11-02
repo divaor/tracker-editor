@@ -1216,6 +1216,14 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
     isConnected: (id) => (checkAlive(id), live.get(id)?.state === 'connected'),
     /** Whether a path is on an FTP or FTPS server (one command at a time there). */
     isFtp: (uri) => ['ftp', 'ftps'].includes(data.connections.find((c) => c.id === parseUri(uri).id)?.protocol),
+    /**
+     * How many folders or files a walk (find, the index, the filter) asks for at once on a path's
+     * server: FTP one at a time; a place many (they go in one command); SSH a few.
+     */
+    concurrency(uri) {
+      const protocol = data.connections.find((c) => c.id === parseUri(uri).id)?.protocol;
+      return ['ftp', 'ftps'].includes(protocol) ? 1 : places.isPlace(protocol) ? 16 : 4;
+    },
     /** A readable name for a path: "name: /path". */
     label(uri) {
       const { id, path: p } = parseUri(uri);
@@ -1340,8 +1348,9 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
       }),
     readBytes: (uri, max) =>
       withPath(uri, async (s, p) => {
-        if (s.readFile) {
-          const got = await s.readFile(p, { max, keep: 0 });
+        // A place reads several files asked for at once in one command.
+        if (s.readUpTo) {
+          const got = await s.readUpTo(p, max);
           if (got.truncated) throw new Error(`${posix.basename(p)} is too large.`);
           return got.bytes;
         }

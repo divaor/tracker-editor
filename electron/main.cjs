@@ -1993,7 +1993,7 @@ ipcMain.handle('folder:find', guard(async (event, searchId, dir, query, opts = {
       files: typeof opts.files === 'string' ? opts.files : '',
       maxFiles: onServer ? 2000 : 20000,
       maxSize: onServer ? 2 * 1024 * 1024 : 5 * 1024 * 1024,
-      concurrency: onServer ? (remote.isFtp(dir) ? 1 : 4) : 8,
+      concurrency: onServer ? remote.concurrency(dir) : 8,
     });
     if (stats.error) throw new Error(stats.error);
     return stats;
@@ -2023,7 +2023,7 @@ ipcMain.handle('folder:find-names', guard(async (_e, searchId, dir, query, opts 
       signal: controller.signal,
       maxFolders: onServer ? 1500 : 20000,
       timeLimit: onServer ? 15000 : 8000,
-      concurrency: onServer ? (remote.isFtp(dir) ? 1 : 4) : 8,
+      concurrency: onServer ? remote.concurrency(dir) : 8,
     });
   } finally {
     if (folderSearches.get(searchId) === controller) folderSearches.delete(searchId);
@@ -2043,7 +2043,7 @@ ipcMain.handle('folder:index', guard(async (_e, dir, opts = {}) => {
     maxFiles: onServer ? 5000 : 20000,
     maxFolders: onServer ? 800 : 20000,
     timeLimit: onServer ? 10000 : 6000,
-    concurrency: onServer ? (remote.isFtp(dir) ? 1 : 4) : 8,
+    concurrency: onServer ? remote.concurrency(dir) : 8,
   });
 }));
 // ---- Find by asking (0.40): the folders shown, measured against the page's plan ----
@@ -2194,7 +2194,7 @@ ipcMain.handle('code:symbols', guard(async (_e, dirs, query = '') => {
         const onServer = isRemote(root);
         const entry = { at: Date.now(), promise: null, truncated: false };
         entry.promise = symbolIndex
-          .refresh(root, { concurrency: onServer ? (remote.isFtp(root) ? 1 : 4) : 8, maxFiles: onServer ? 1500 : 6000 })
+          .refresh(root, { concurrency: onServer ? remote.concurrency(root) : 8, maxFiles: onServer ? 1500 : 6000 })
           .then((r) => void (entry.truncated = r.truncated))
           .catch(() => {})
           .finally(() => {

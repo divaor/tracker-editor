@@ -211,6 +211,23 @@ test('listings, stats and the programs’ errors are read back', () => {
   assert.match(places.cliProblem(utf16, { protocol: 'wsl', distro: 'Arch' }).message, /no distribution named Arch/);
 });
 
+test('several files read in one command are told apart by their sizes; one that changed meanwhile says so', () => {
+  const buf = Buffer.concat([
+    Buffer.from('f/3/1700000000/81a4\n'),
+    Buffer.from('a\nb'),
+    Buffer.from('\nt/3/1700000000\nx/42\nbig/9999/1700000000/81a4\nf/2/1700000000/81a4\nxy\nt/5/1700000001\ndone\n'),
+  ]);
+  const { results, complete } = places.parseReadMany(buf, 4);
+  assert.equal(complete, true);
+  assert.deepEqual([results[0].bytes.toString(), results[0].st.size, results[0].st.mtimeMs, results[0].st.mode], ['a\nb', 3, 1700000000000, 0o644]);
+  assert.deepEqual(results[1], { error: 42 });
+  assert.deepEqual([results[2].truncated, results[2].st.size], [true, 9999]);
+  assert.deepEqual(results[3], { changed: true });
+  // Cut short (the command ended early): what came whole is kept, the rest is not trusted.
+  const cut = places.parseReadMany(buf.subarray(0, 25), 4);
+  assert.deepEqual([cut.results.length, cut.complete], [0, false]);
+});
+
 test('finding docker: PATH, then the login shell’s, then the usual places; on Windows docker.exe only; not on a phone', async () => {
   const has = (...files) => (p) => files.includes(p);
   const linux = await places.findDocker({ platform: 'linux', env: { PATH: '/usr/bin:/bin', ELECTRON_RUN_AS_NODE: '1' }, exists: has('/usr/bin/docker'), loginPath: async () => '' });
@@ -321,6 +338,17 @@ for (const variant of variants) {
     const bytes = Buffer.from(Array.from({ length: 256 }, (_, i) => i));
     fs.writeFileSync(path.join(w.app, 'bytes.bin'), bytes);
     assert.deepEqual(await s.read(path.join(w.app, 'bytes.bin')), bytes);
+    // Files asked for at the same moment come in one command, each whole (any byte, a line break too).
+    const lines = Buffer.from('a\nb\n\nt/9/9\n');
+    fs.writeFileSync(path.join(w.app, 'lines.txt'), lines);
+    const before = w.runs().length;
+    const [r1, r2, r3, r4, r5] = await Promise.allSettled(['bytes.bin', 'lines.txt', 'big.log', 'nothing', 'sub dir'].map((n) => s.readUpTo(path.join(w.app, n), 4096)));
+    assert.equal(w.runs().length - before, 1, 'one command for the five');
+    assert.deepEqual([r1.value.bytes, r1.value.truncated, r1.value.st.size], [bytes, false, 256]);
+    assert.deepEqual(r2.value.bytes, lines);
+    assert.deepEqual([r3.value.truncated, r3.value.bytes.length, r3.value.st.size], [true, 0, big.length]);
+    assert.ok(r4.reason.notFound);
+    assert.match(r5.reason.message, /is a folder/);
     await assert.rejects(s.read(path.join(w.app, 'nothing')), (err) => err.notFound && /Not found in web-1/.test(err.message));
     await assert.rejects(s.read(path.join(w.app, 'sub dir')), /is a folder/);
     await assert.rejects(s.list(path.join(w.app, 'a b')), /is not a folder/);
