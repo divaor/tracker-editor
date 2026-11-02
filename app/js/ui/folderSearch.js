@@ -1,5 +1,5 @@
 import { html, useEffect, useRef, useState } from '../../vendor/preact-htm.js';
-import { isRemotePath, remoteParts } from '../where.js';
+import { connIcon, isRemotePath, remoteParts } from '../where.js';
 import { server } from '../servers.js';
 import { Icon } from './icons.js';
 import { ClearButton, toast } from './components.js';
@@ -143,7 +143,7 @@ export function FolderSearchPanel({ dir, actions, onClose }) {
       <button type="button" class="icon-btn sm" aria-label="Close" onClick=${onClose}><${Icon} name="x" size=${16} /></button>
     </div>
     <div class="panel-body">
-      <p class="muted small folder-search-where ${isRemotePath(dir) ? 'kind-remote' : 'kind-disk'}" title=${where}><${Icon} name=${isRemotePath(dir) ? 'server' : 'folder'} size=${14} />${where}</p>
+      <p class="muted small folder-search-where ${isRemotePath(dir) ? 'kind-remote' : 'kind-disk'}" title=${where}><${Icon} name=${isRemotePath(dir) ? connIcon(server(remoteParts(dir).id)) : 'folder'} size=${14} />${where}</p>
       <form class="search-box ${replacing ? 'with-replace' : ''}" onSubmit=${(e) => (e.preventDefault(), start())}>
         <button type="button" class="opt replace-toggle ${replacing ? 'on' : ''}" aria-pressed=${replacing} aria-label="Replace" title="Replace in the files found"
           onClick=${() => setReplacing(!replacing)}><${Icon} name="chevronRight" size=${14} class=${replacing ? 'open' : ''} /></button>

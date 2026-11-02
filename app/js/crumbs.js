@@ -16,7 +16,7 @@ const nameOf = (p) => String(p).replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p
  * - `f:` synced files: My files › its project › its name (`file`: { name, project }).
  * - `r:` tracker documents: Tracker › its item › its name (`doc`: { name, item: { id, title } }).
  */
-export function placeCrumbs({ key = '', roots = [], serverName = () => '', file = null, doc = null, keep = 2 } = {}) {
+export function placeCrumbs({ key = '', roots = [], serverName = () => '', serverIcon = () => '', file = null, doc = null, keep = 2 } = {}) {
   if (key.startsWith('f:')) {
     if (!file) return [];
     return [{ kind: 'files', label: 'My files', title: 'My files' }, file.project && { kind: 'project', label: file.project, title: `Project ${file.project}` }, { kind: 'file', label: file.name, title: file.name }].filter(Boolean);
@@ -38,7 +38,8 @@ export function placeCrumbs({ key = '', roots = [], serverName = () => '', file 
   if (isRemotePath(path)) {
     const { id } = remoteParts(path);
     const top = toRemoteUri(id, '/');
-    out.push({ kind: 'server', label: serverName(id) || 'Server', title: `${serverName(id) || 'Server'}: /`, path: top });
+    // A Docker container or a WSL distribution has its own icon (`icon`).
+    out.push({ kind: 'server', label: serverName(id) || 'Server', title: `${serverName(id) || 'Server'}: /`, path: top, ...(serverIcon(id) && serverIcon(id) !== 'server' ? { icon: serverIcon(id) } : {}) });
     const from = root ?? top;
     const chain = dir ? breadcrumbs(dir, from) : [];
     // From the top of the server, its "/" is the server crumb itself.

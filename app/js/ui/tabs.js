@@ -11,7 +11,7 @@ import { serverLabel, whereLabel } from '../lspTools.js';
 import { dictationSupported } from './dictation.js';
 import { canDragOut, draggedTab, dropped, isOwnDrop, onDragOutEnd, startDragOut } from '../dragOut.js';
 import { Menu, MenuButton } from './menu.js';
-import { contentPlace, isContentPath, isRemotePath, kindHint, KINDS, kindOfKey, protocolName, remoteAddress, remoteParts, whereState } from '../where.js';
+import { connDetail, connIcon, connLabel, contentPlace, hasShell, isContentPath, isPlace, isRemotePath, kindHint, KINDS, kindOfKey, protocolName, remoteAddress, remoteParts, whereState } from '../where.js';
 import { diskReadOnly } from '../diskTabs.js';
 import { documentLabel } from '../docTypes.js';
 import { readsAloud } from '../docSpeech.js';
@@ -52,7 +52,9 @@ function tabInfo(key) {
     if (!d) return null;
     if (kind === 'remote') {
       const { conn } = serverOf(d.path);
-      return { kind, name: d.name, project: '', unsynced: d.dirty, follow: d.follow, offline: d.offline, dotTitle: 'Not saved to the server', title: `On ${conn?.name ?? 'a server'}: ${remoteAddress(d.path, conn)}${d.dirty ? ' · not saved to the server' : ''}` };
+      // A Docker container's or a WSL distribution's: its own icon, and said so.
+      const there = isPlace(conn) ? 'there' : 'to the server';
+      return { kind, icon: isPlace(conn) ? connIcon(conn) : undefined, name: d.name, project: '', unsynced: d.dirty, follow: d.follow, offline: d.offline, dotTitle: `Not saved ${there}`, title: `On ${conn ? connLabel(conn) : 'a server'}: ${remoteAddress(d.path, conn)}${d.dirty ? ` · not saved ${there}` : ''}` };
     }
     return { kind, name: d.name, project: '', unsynced: d.dirty, follow: d.follow, dotTitle: 'Not saved', title: `On ${KINDS.disk.label.toLowerCase()}: ${d.path}${d.dirty ? ' · not saved' : ''}` };
   }
@@ -64,16 +66,18 @@ function tabInfo(key) {
  * Where the open file lives and how it stands, colored by kind: "My files ·
  * Synced", "This computer · Not saved", "db1 · Saved on the server"…
  */
-export function WhereChip({ kind, label, state, title, onClick }) {
+export function WhereChip({ kind, label, state, title, icon = KINDS[kind].icon, onClick }) {
   const tip = [title ?? kindHint(kind, isLocal()), state.detail].filter(Boolean).join('\n');
   return html`<button type="button" class="where-chip kind-${kind} tone-${state.tone}" title=${tip} onClick=${onClick} aria-label=${`${label}: ${state.text}`}>
-    <${Icon} name=${KINDS[kind].icon} size=${14} /><span class="where-label">${label}</span><span class="where-state">${state.text}</span>
+    <${Icon} name=${icon} size=${14} /><span class="where-label">${label}</span><span class="where-state">${state.text}</span>
   </button>`;
 }
 
-// Terminals for a file on disk or a server: in its folder, here or over SSH (not FTP).
+// Terminals for a file on disk, a server or a place: in its folder, here, over SSH (not FTP) or in the container.
 const parentOfPath = (p) => p.slice(0, Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'))) || p;
-const canTerminal = (p) => terminalsAvailable() && !isContentPath(p) && (!isRemotePath(p) || server(remoteParts(p).id)?.protocol === 'sftp');
+const canTerminal = (p) => terminalsAvailable() && !isContentPath(p) && (!isRemotePath(p) || hasShell(server(remoteParts(p).id)));
+// What a file on a server or in a place is, for the bars: "web-1 (Docker)" and its icon.
+const placeHint = (conn) => (isPlace(conn) ? `A file in ${connLabel(conn)}, saved back there: not synced.` : KINDS.remote.hint);
 // A file with a folder of its own (not one another Android app gave, content://).
 const inFolders = (p) => Boolean(window.desktop?.folders) && !isContentPath(p);
 const syncInfo = (sync) => ({ configured: isSyncConfigured(), phase: sync?.phase, local: isLocal() });
@@ -528,19 +532,19 @@ function DiskBar({ disk, buttons, moreItems, actions }) {
   const remote = isRemotePath(path);
   const srv = remote ? serverOf(path) : null;
   const readOnly = diskReadOnly(disk);
-  const state = whereState({ kind: remote ? 'remote' : 'disk', disk, server: srv?.status });
+  const state = whereState({ kind: remote ? 'remote' : 'disk', disk, server: srv && { ...srv.status, place: isPlace(srv.conn) ? srv.conn.protocol : '' } });
   const location = remote ? remoteParts(path).path : path;
   // A file another Android app gave: where it is in words (its address is no path).
   const content = isContentPath(path);
   const folder = content ? contentPlace(path) : location.slice(0, location.length - disk.name.length - 1) || location;
-  const where = remote ? `${KINDS.remote.hint}\n${protocolName(srv.conn?.protocol)} · ${remoteAddress(path, srv.conn)}` : `${KINDS.disk.hint}\n${content ? folder : path}`;
+  const where = remote ? `${placeHint(srv.conn)}\n${connDetail(srv.conn)} · ${remoteAddress(path, srv.conn)}` : `${KINDS.disk.hint}\n${content ? folder : path}`;
   const encoding = `${disk.eol === 'crlf' ? 'Windows (CRLF)' : 'Unix (LF)'} line endings · ${disk.encoding === 'latin1' ? 'Windows-1252' : 'UTF-8'}${disk.bom ? ' with BOM' : ''}, kept when saving`;
-  const elsewhere = remote ? 'on the server' : 'on disk';
+  const elsewhere = !remote ? 'on disk' : srv?.conn?.protocol === 'docker' ? 'in the container' : srv?.conn?.protocol === 'wsl' ? 'in WSL' : 'on the server';
   // In a mirrored folder: also kept on the other side.
   const mirrored = mirrorOf(path);
   return html`<div class="filebar-stack">
     <div class="filebar">
-      <${WhereChip} kind=${remote ? 'remote' : 'disk'} label=${remote ? (srv.conn?.name ?? 'Server') : KINDS.disk.label} state=${state} title=${where} onClick=${() => actions.showOnDisk(path)} />
+      <${WhereChip} kind=${remote ? 'remote' : 'disk'} label=${remote ? connLabel(srv.conn) : KINDS.disk.label} icon=${remote ? connIcon(srv.conn) : KINDS.disk.icon} state=${state} title=${where} onClick=${() => actions.showOnDisk(path)} />
       ${mirrored &&
       html`<button type="button" class="mirror-badge" onClick=${() => actions.syncMirror(mirrored.mirror.id)}
         title=${`Mirrored: kept the same as ${mirrored.side === 'local' ? `${server(mirrored.mirror.conn)?.name ?? 'the server'}: ${mirrored.mirror.remote}` : mirrored.mirror.local}. ${mirrorState(mirrored.mirror).text}. Click to sync now.`}>
@@ -570,7 +574,7 @@ function DiskBar({ disk, buttons, moreItems, actions }) {
     </div>
     ${remote && offline &&
     html`<div class="filebar-notice warn" role="alert">
-      <${Icon} name="cloudOff" size=${15} /><span>${srv.conn?.name ?? 'The server'} cannot be reached${srv.status.error ? `: ${srv.status.error.replace(/\.+$/, '')}` : ''}.${dirty ? ' Your edits are kept on this device; Save sends them when it is back.' : ''}</span>
+      <${Icon} name="cloudOff" size=${15} /><span>${srv.conn ? connLabel(srv.conn) : 'The server'} cannot be reached${srv.status.error ? `: ${srv.status.error.replace(/\.+$/, '')}` : ''}.${dirty ? ' Your edits are kept on this device; Save sends them when it is back.' : ''}</span>
       <span class="spacer" />
       <button type="button" class="btn sm" onClick=${() => actions.reconnectServer(remoteParts(path).id)}>Reconnect</button>
     </div>`}
@@ -835,15 +839,15 @@ export function StatusBar({ recording, big, cursor, language, file, repo, disk, 
   else if (file) state = file.dirty ? 'Saved on this device · not synced yet' : file.sha ? `Synced · edited ${timeAgo(file.modifiedAt)}${file.modifiedBy ? ` on ${file.modifiedBy}` : ''}` : 'Saved on this device';
   if (repo) state = repo.dirty && !isLocal() ? 'Edited · goes to the tracker on the next sync' : 'Tracker file';
   if (kind === 'disk') state = disk.dirty ? 'Not saved to disk · Ctrl+S saves' : disk.follow ? 'Following the file as it grows' : isLocal() ? `File on ${KINDS.disk.label.toLowerCase()}, edited where it is` : `File on ${KINDS.disk.label.toLowerCase()} · not synced`;
-  if (kind === 'remote') state = `${protocolName(srv.conn?.protocol)} · ${remoteAddress(disk.path, srv.conn)}${disk.dirty ? ' · not saved to the server' : ''}`;
+  if (kind === 'remote') state = `${protocolName(srv.conn?.protocol)} · ${remoteAddress(disk.path, srv.conn)}${disk.dirty ? (isPlace(srv.conn) ? ' · not saved there' : ' · not saved to the server') : ''}`;
   if (disk?.doc) state = `${documentLabel(disk.name)} · ${disk.asText ? 'its text, read-only' : 'shown as it looks, read-only'}`;
-  const label = { synced: 'My files', doc: 'Tracker', disk: KINDS.disk.label, remote: srv?.conn?.name ?? 'Server' }[kind];
-  const connection = srv && { connected: 'Connected', connecting: 'Connecting…', error: `Not connected: ${srv.status.error}`, disconnected: 'Not connected' }[srv.status.state];
+  const label = { synced: 'My files', doc: 'Tracker', disk: KINDS.disk.label, remote: srv?.conn ? connLabel(srv.conn) : 'Server' }[kind];
+  const connection = srv && { connected: 'Connected', connecting: 'Connecting…', error: `Not connected: ${srv.status.error}`, disconnected: srv.status.error ? `Not connected: ${srv.status.error}` : 'Not connected' }[srv.status.state];
   const projectNow = projectStatus(project);
   return html`<footer class="statusbar">
     ${kind &&
-    html`<span class="status-where kind-${kind}" title=${connection ? `${KINDS[kind].hint}\n${connection}` : kindHint(kind, isLocal())}>
-      <${Icon} name=${KINDS[kind].icon} size=${13} /><span>${label}</span>${srv && html`<span class="conn-dot state-${srv.status.state}" aria-label=${connection} />`}
+    html`<span class="status-where kind-${kind}" title=${connection ? `${srv?.conn ? placeHint(srv.conn) : KINDS[kind].hint}\n${connection}` : kindHint(kind, isLocal())}>
+      <${Icon} name=${srv?.conn ? connIcon(srv.conn) : KINDS[kind].icon} size=${13} /><span>${label}</span>${srv && html`<span class="conn-dot state-${srv.status.state}" aria-label=${connection} />`}
     </span>`}
     ${group &&
     html`<button type="button" class="status-item status-btn-text status-group" style=${group.color ? { '--gc': group.color } : undefined}

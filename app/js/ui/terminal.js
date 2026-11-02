@@ -24,7 +24,7 @@ import {
   terminalShown,
   unsplitTerminals,
 } from '../terminals.js';
-import { KINDS } from '../where.js';
+import { connDetail, connIcon, connLabel, hasShell, KINDS } from '../where.js';
 import { Icon } from './icons.js';
 import { Menu, MenuButton } from './menu.js';
 import { Splitter } from './splitter.js';
@@ -142,7 +142,8 @@ export function TerminalPanel({ settings, actions, onHide }) {
     addEventListener('pointerup', up);
   };
 
-  const sftp = servers().filter((c) => c.protocol === 'sftp');
+  // Connections with a shell: SSH servers, Docker containers, WSL distributions.
+  const sftp = servers().filter(hasShell);
   const here = () => actions.openTerminal('local', actions.localTerminalDir());
   // This computer's shells (the one chosen in Settings first), then the servers'.
   const chosen = shells.find((sh) => sh.id === settings.terminalShell) ?? shells[0];
@@ -155,11 +156,11 @@ export function TerminalPanel({ settings, actions, onHide }) {
       : [{ label: KINDS.disk.label, icon: 'disk', hint: actions.localTerminalDir() || 'Your home folder', run: here }]),
     { separator: true },
     ...(sftp.length
-      ? sftp.map((c) => ({ label: `${c.name} (${c.user ? `${c.user}@` : ''}${c.host})`, icon: 'server', run: () => actions.openTerminal(c.id) }))
+      ? sftp.map((c) => ({ label: connLabel(c), hint: connDetail(c), icon: connIcon(c), run: () => actions.openTerminal(c.id) }))
       : [{ label: 'Connect to a server…', icon: 'server', run: () => actions.editServer() }]),
   ];
   // This computer's terminals by their shell when there is a choice of them; servers' by name.
-  const place = (s) => (s.connId === 'local' ? (shells.length > 1 && s.profileLabel ? s.profileLabel : KINDS.disk.label) : (server(s.connId)?.name ?? 'Server'));
+  const place = (s) => (s.connId === 'local' ? (shells.length > 1 && s.profileLabel ? s.profileLabel : KINDS.disk.label) : connLabel(server(s.connId)));
   // The folder it is in now (what the shell said after its last command).
   const folderOf = (s) => (terminalFolder(s) ? baseName(terminalFolder(s)) : '');
   const nameOf = (s) => (s.task && !s.name ? `${s.label} · ${folderOf(s)}` : tabName({ name: s.name, runner: s.runner, place: place(s), folder: folderOf(s) }));
@@ -322,13 +323,13 @@ export function TerminalPanel({ settings, actions, onHide }) {
       </div>`}
       ${!list.length &&
       html`<div class="terminal-empty">
-        <p>A terminal on ${KINDS.disk.label.toLowerCase()}, or on a server (signed in like its files).</p>
+        <p>A terminal on ${KINDS.disk.label.toLowerCase()}, on a server (signed in like its files), or in a Docker container or a WSL distribution.</p>
         <div class="terminal-empty-servers">
           <button type="button" class="btn sm" onClick=${here}><${Icon} name="disk" size=${15} />${KINDS.disk.label}</button>
-          ${sftp.map((c) => html`<button type="button" key=${c.id} class="btn sm" onClick=${() => actions.openTerminal(c.id)}><${Icon} name="server" size=${15} />${c.name}</button>`)}
+          ${sftp.map((c) => html`<button type="button" key=${c.id} class="btn sm" title=${connDetail(c)} onClick=${() => actions.openTerminal(c.id)}><${Icon} name=${connIcon(c)} size=${15} />${connLabel(c)}</button>`)}
           ${!sftp.length && html`<button type="button" class="btn sm" onClick=${() => actions.editServer()}><${Icon} name="server" size=${15} />Connect to a server…</button>`}
         </div>
-        <p class="muted small">Only SFTP (SSH) servers have terminals. “Open a terminal here” in Folders opens one in that folder; F5 runs the open file in one.</p>
+        <p class="muted small">SFTP (SSH) servers, Docker containers and WSL distributions have terminals (FTP servers do not). “Open a terminal here” in Folders opens one in that folder; F5 runs the open file in one.</p>
       </div>`}
     </div>
     ${menu && html`<${Menu} at=${menu.at} label=${menu.label} items=${menu.items} onClose=${() => (setMenu(null), focusTerminal())} />`}

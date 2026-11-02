@@ -11,7 +11,7 @@ import { isAndroidApp } from './platform.js';
 import { server } from './servers.js';
 import { getSettings } from './settings.js';
 import { diskKey, fileKey, parseKey, store } from './store.js';
-import { isRemotePath, remoteParts } from './where.js';
+import { hasShell, isRemotePath, remoteParts } from './where.js';
 
 const message = (err) => String(err?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
 const baseName = (p) => String(p).replace(/[\\/]+$/, '').split(/[\\/]/).pop() || String(p);
@@ -153,7 +153,7 @@ function folderWork(base, { file, host, actions }) {
     kind: 'folder',
     base: { name, where, path: base },
     label: name,
-    canTerminal: Boolean(window.desktop?.terminal) && (!remote || conn?.protocol === 'sftp'),
+    canTerminal: Boolean(window.desktop?.terminal) && (!remote || hasShell(conn)),
     async picture({ withFile = true } = {}) {
       return workspaceText({ base: { name, where }, tree: await tree(), file: withFile ? fileNow() : null, tabs: tabsHere(file) });
     },

@@ -824,7 +824,7 @@ PDFs, e-books (EPUB, FictionBook), Word and OpenDocument text (`.docx`, `.odt`),
 
 ## 11. Files on servers (desktop, Android app)
 
-Edit files on your servers as if they were here: **SFTP** (over SSH), **FTPS** (FTP over TLS) or **FTP** (not encrypted; only where nothing else is available).
+Edit files on your servers as if they were here: **SFTP** (over SSH), **FTPS** (FTP over TLS) or **FTP** (not encrypted; only where nothing else is available). Docker containers and WSL distributions open the same way: see [Docker containers and WSL distributions](#docker-containers-and-wsl-distributions-desktop).
 
 1. **File → Connect to a Server…** (or **Connect to a server…** in the Folders view). Fill in the server, port, user name and how to sign in: **Password**, **Key file** (choose it; type its passphrase if it has one) or **SSH agent**. Give it a short name: it shows on tabs. Optionally a folder to start in.
 2. **Test** tries it. The first time, SFTP shows the server's **key fingerprint**: compare it with the one the server shows (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` there, or ask its administrator), then **Trust and connect**.
@@ -876,6 +876,28 @@ For when you want the server's files in a folder here (to use other tools on the
 - **Deleted here** → you're asked first (**Review**): **Delete on the server** or **Bring them back here**. Until then they stay on the server.
 - **Changed on both sides** → yours keeps its name and the server's is kept next to it as `name (server copy 2026-10-22 15.04).ext`, on both sides.
 - If one side suddenly looks empty (a drive not plugged in, a wrong folder), nothing is changed and the bar says so.
+
+### Docker containers and WSL distributions (desktop)
+
+A running **Docker container** (the `web` service of a project started with `docker compose up -d`, say) or, on Windows, a **WSL distribution** (Ubuntu, Debian…) opens like a server: its files in Folders and in tabs, and a terminal inside it.
+
+1. **File → Open a Docker Container…** (or **Open a WSL Distribution…**; both also in the Folders view's ⋯ and the command palette, `Ctrl+Shift+P`).
+2. Pick it from the list: running containers first, with their image, compose project, state and ports; a stopped one has **Start**, and one set up already has **Open**. Optionally the **user** to work as (blank: the container's own, often root; in WSL your default user), the **folder to start in** (blank: the container's working folder, or your home folder in WSL) and a **name**.
+3. **Test** tries it; **Save and open** opens it in Folders, named like **web-1 (Docker)** or **Ubuntu (WSL)**, with its own icon (a box, a penguin).
+
+What works there, as on a server:
+- **Folders**: open, new file and folder, rename, cut, copy and paste, drag, **Delete** (for good: no Recycle Bin there, so it asks first), **Properties** with permissions, **Find in this folder**, the filter that looks inside.
+- **Tabs** save back into the container (`Ctrl+S`, or **Save automatically** in its settings), refused when the file changed there meanwhile (**Compare**, **Reload** or **Keep mine**). A file saved keeps its owner, permissions and links: it is written in place once all of it got there, never cut off halfway.
+- **Copies** between it and this computer or a server go on in the background (the **Transfers** card); **Compare two folders** and **Two panes** work across them.
+- The **terminal** (`` Ctrl+` ``, **Open a terminal here** on one of its folders) is a shell inside, in that folder; **F5**, **tests** and **tasks** run there, and `file:line` in their output opens the file in the container.
+- **Language servers** installed inside (Pyright, typescript-language-server, gopls…) run there, as on an SSH server; **Set up…** types the install command into its terminal.
+
+Good to know:
+- **The container stopped?** Its tabs say **Not connected** and the reason shows (Folders, the status bar); your edits stay here. Start it again (**Start it** in the message, or `docker compose start`), then **Reconnect** or open it again.
+- The editor uses the `docker` command you would (it must be installed and running: Docker Desktop, or Docker's engine on Linux), and only for `docker exec` into the container you picked, and `docker start` when you ask. It runs no image, mounts nothing and installs nothing in the container. An image without a shell (`sh`), like distroless or scratch, cannot be opened.
+- **Copy path** gives `web-1:/app/x.js` (the form `docker cp` takes), and in WSL `\\wsl.localhost\Ubuntu\home\you\x.js`, which Windows programs open.
+- **Git** and **debugging** work on folders on this computer only, not inside a container or a distribution (use Git in the place's terminal).
+- Not in the Android app.
 
 ## 12. Quick capture, clipboard history and screenshots (desktop)
 
@@ -1013,6 +1035,10 @@ Settings → **Keys** (also **Help → Keys…** on the desktop, or **Keys** in 
 - **Dockerize: Run it now and Build the offline package are greyed out**: Docker is not running (or not installed). Start Docker Desktop (Linux: `sudo systemctl start docker`), then **Check again**. The files were written anyway, and DOCKER.md says how to install Docker.
 - **The menu bar appears (Windows, Linux)**: it shows when `Alt` is pressed and let go on its own, as in other Windows programs; press `Alt` again to hide it. Holding `Alt` for `Alt+drag` or a shortcut does not show it.
 - **"The file changed on disk since you opened it"**: another program saved it. Use **Compare**, then reload or keep yours.
+- **No Docker in Connect to a server, or "Docker is not running on this computer"**: start Docker Desktop (or Docker's engine: `sudo systemctl start docker` on Linux), then **Look again** in the list. The editor looks for `docker` on PATH, your login shell's PATH and where Docker Desktop, OrbStack, Rancher Desktop and Colima put it.
+- **A container is not in the list**: the list is what `docker ps -a` shows for Docker's current context. Containers of another context (or `DOCKER_HOST`) show when Docker's own command line shows them.
+- **"has no shell (sh), so its files cannot be reached"**: the image has no shell (distroless, scratch). Open a container of the same project that has one, or a `-debug` variant of the image.
+- **New files made in a container belong to root**: set **Run as user** in its settings (`node`, `www-data`, `1000`…) to the user that owns the project there. (Files saved there keep their owner.)
 - **The capture shortcut "is used by another app"**: click the field and press another combination.
 - **The screenshot is black (macOS)**: allow Tracker Editor under System Settings → Privacy & Security → Screen Recording, then restart it.
 - **Paste in the edit bar or the line-number menu says the browser did not let it read the clipboard**: allow the clipboard for the site when the browser asks, or long-press in the text and choose **Paste**.

@@ -138,11 +138,24 @@ function startDir(dir, { isDir = (p) => fs.statSync(p).isDirectory() } = {}) {
  * scripts kept in `hooksDir`; `spawn` stands in for node-pty's in the tests. The stream says
  * which shell it is: `shell` (its kind), `profile` (its id), `distro` (WSL's).
  */
-function openLocalShell({ cols = 100, rows = 24, cwd = '', shell = '', hooksDir = '', distros = [], spawn = (...a) => loadPty().spawn(...a), platform, env, exists } = {}) {
+function openLocalShell({ cols = 100, rows = 24, cwd = '', shell = '', hooksDir = '', distros = [], spawn = spawnPty, platform, env, exists } = {}) {
   const list = listShells({ platform, env, exists, distros });
   const chosen = list.find((s) => s.id === shell) ?? list[0];
   const start = integrate(chosen, shellEnv(env), hooksDir);
   const proc = spawn(chosen.file, start.args, { name: 'xterm-256color', cols, rows, cwd: startDir(cwd), env: start.env, useConpty: true });
+  return ptyStream(proc, { shell: chosen.kind, profile: chosen.id, label: chosen.label, distro: chosen.distro ?? '', integrated: Boolean(start.integrated) });
+}
+
+/** node-pty's spawn (loaded the first time a terminal opens). */
+const spawnPty = (...args) => loadPty().spawn(...args);
+
+/**
+ * A program in a pseudo-terminal (node-pty's process) with the face of a shell on a server:
+ * 'data', 'exit' and 'close' events, write, setWindow and close; `info` says which shell it is
+ * (`shell`: its kind, `profile`, `label`, `distro`, `integrated`). Also for the terminals of
+ * Docker containers and WSL distributions (places.cjs), whose program is docker or wsl.exe.
+ */
+function ptyStream(proc, { shell = 'posix', profile = '', label = '', distro = '', integrated = false } = {}) {
   const stream = new EventEmitter();
   let closed = false;
   const end = () => {
@@ -155,12 +168,12 @@ function openLocalShell({ cols = 100, rows = 24, cwd = '', shell = '', hooksDir 
     stream.emit('exit', exitCode);
     end();
   });
-  stream.shell = chosen.kind;
-  stream.profile = chosen.id;
-  stream.label = chosen.label;
-  stream.distro = chosen.distro ?? '';
+  stream.shell = shell;
+  stream.profile = profile;
+  stream.label = label;
+  stream.distro = distro;
   // It says when a command ended (shellHooks.cjs); without, a run adds its own mark.
-  stream.integrated = Boolean(start.integrated);
+  stream.integrated = integrated;
   stream.write = (data) => {
     if (!closed) proc.write(data);
   };
@@ -185,4 +198,4 @@ function openLocalShell({ cols = 100, rows = 24, cwd = '', shell = '', hooksDir 
   return stream;
 }
 
-module.exports = { defaultShell, listShells, listWslDistros, shellEnv, startDir, openLocalShell };
+module.exports = { defaultShell, listShells, listWslDistros, shellEnv, startDir, openLocalShell, ptyStream, spawnPty };

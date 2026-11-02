@@ -15,6 +15,8 @@ const SVG = {
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
   server: '<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/>',
+  container: '<path d="M21 7.5 12 3 3 7.5v9l9 4.5 9-4.5z"/><path d="m3 7.5 9 4.5 9-4.5M12 12v9"/>',
+  linux: '<path d="M12 2.5c-2.5 0-3.8 2-3.8 4.5v2.4c0 .8-.4 1.5-1 2.1-1.3 1.3-2.4 3.2-2.4 5.2 0 1.6 1 2.8 2.4 2.8h9.6c1.4 0 2.4-1.2 2.4-2.8 0-2-1.1-3.9-2.4-5.2-.6-.6-1-1.3-1-2.1V7c0-2.5-1.3-4.5-3.8-4.5z"/><path d="M10.5 6.8h.01M13.5 6.8h.01"/>',
   cloud: '<path d="M7 18a4.5 4.5 0 1 1 .9-8.9A6 6 0 0 1 19 11a3.5 3.5 0 0 1-.5 7z"/>',
   doc: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
   symbol: '<path d="m8 8-4 4 4 4M16 8l4 4-4 4"/>',
@@ -32,7 +34,7 @@ function crumbButton(c, i) {
   b.setAttribute('aria-haspopup', 'menu');
   const icon = document.createElement('span');
   icon.className = 'cm-crumb-icon';
-  icon.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SVG[ICON_OF[c.kind]] ?? ''}</svg>`;
+  icon.innerHTML = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${SVG[c.icon] ?? SVG[ICON_OF[c.kind]] ?? ''}</svg>`;
   const label = document.createElement('span');
   label.className = 'cm-crumb-label';
   label.textContent = c.label;

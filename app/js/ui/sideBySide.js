@@ -3,7 +3,7 @@ import { addSection, baseName, folderLabel, isWithin, moveSectionTo, placeLabel,
 import { isAndroidApp } from '../platform.js';
 import { getSettings } from '../settings.js';
 import { onServers, server, servers, serverStatus } from '../servers.js';
-import { isRemotePath, KINDS, protocolName, remoteParts, toRemoteUri } from '../where.js';
+import { connDetail, connIcon, connLabel, isRemotePath, KINDS, remoteParts, toRemoteUri } from '../where.js';
 import { Modal } from './components.js';
 import { Icon } from './icons.js';
 
@@ -178,7 +178,7 @@ export function SideBySideDialog({ onClose, actions }) {
           onDrop=${(ev) => (ev.preventDefault(), dragging && over && setDraft(moveSectionTo(draft, dragging, over.path, over.after)), endDrag())}
           onDragEnd=${endDrag}>
           <span class="sbs-grip" aria-hidden="true">⠿</span>
-          <${Icon} name=${isRemotePath(p) ? 'server' : 'folder'} size=${15} class="sbs-kind" />
+          <${Icon} name=${isRemotePath(p) ? connIcon(server(remoteParts(p).id)) : 'folder'} size=${15} class="sbs-kind" />
           <span class="sbs-name">${nameOf(p)}</span><span class="sbs-where">${whereOf(p)}</span>
           ${added.includes(p) && html`<span class="sbs-new">new</span>`}
           <button type="button" class="icon-btn xs" aria-label=${`Move ${nameOf(p)} up`} title="Up" disabled=${i === 0} onClick=${() => move(p, -1)}><${Icon} name="arrowUp" size=${13} /></button>
@@ -197,7 +197,7 @@ export function SideBySideDialog({ onClose, actions }) {
     </ul>
     ${servers().map((c) => {
       const state = serverStatus(c.id).state;
-      return html`<h4 class="sbs-group" key=${`h:${c.id}`}><${Icon} name="server" size=${14} />${c.name}<span class="muted small">${protocolName(c.protocol)} · ${c.user ? `${c.user}@` : ''}${c.host}</span><span class="conn-dot state-${state}" title=${state} /></h4>
+      return html`<h4 class="sbs-group" key=${`h:${c.id}`}><${Icon} name=${connIcon(c)} size=${14} />${connLabel(c)}<span class="muted small">${connDetail(c)}</span><span class="conn-dot state-${state}" title=${state} /></h4>
       <ul class="sbs-list" key=${`l:${c.id}`}>
         <li><button type="button" class="sbs-add" disabled=${Boolean(busy)} onClick=${() => addStart(c.id)}>
           <${Icon} name="server" size=${15} /><span class="sbs-name">Its start folder</span><span class="sbs-where">${busy === c.id ? 'Connecting…' : state === 'connected' ? 'connected' : 'connects first'}</span><${Icon} name="plus" size=${15} class="sbs-plus" />

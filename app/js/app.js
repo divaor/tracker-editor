@@ -17,8 +17,8 @@ import { getReaderState, onReaderState, setReaderHighlighter, startReading, stop
 import { getSettings, isLocal, isSyncConfigured, onSettings, resolvedTheme, saveSettings } from './settings.js';
 import { diskKey, fileKey, flush, parseKey, repoKey, store } from './store.js';
 import { diskAvailable, diskReadOnly, openDiskFiles, recheckServerTabs, reloadDiskTab, saveDiskTab, unwatchDisk, watchDiskTabs } from './diskTabs.js';
-import { isContentPath, isRemotePath, KINDS, kindOfKey, remoteAddress, remoteParts, remoteRoot, toRemoteUri } from './where.js';
-import { onServers, server, watchServers } from './servers.js';
+import { connIcon, hasShell, isContentPath, isRemotePath, KINDS, kindOfKey, remoteAddress, remoteParts, remoteRoot, toRemoteUri } from './where.js';
+import { onServers, placeKinds, refreshPlaceKinds, server, watchServers } from './servers.js';
 import { HostKeyDialog, PromptDialog, ServerDialog, SshImportDialog } from './ui/servers.js';
 import { activeTerminal, focusTerminal, openTerminal, retheme, runAndWait, runInTerminal, setActiveTerminal, setRefHandler, setToggleHandler, showTerminalOn, splitTerminals, terminalFolder, terminals, terminalsAvailable, terminalText, unsplitTerminals } from './terminals.js';
 import { parseRunCommands, quoteFor, runCommandFor, runLine, wslPath } from './runFile.js';
@@ -735,7 +735,11 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
           // A test file: its tests' marks follow what was saved.
           if (result === 'saved') actions.refreshTests?.(diskKey(path));
           if (result === 'saved' && path.split(/[\\/]/).pop() === '.tracker-editor.json') actions.projectSaved?.();
-          if (result === 'conflict') toast(`The file changed ${isRemotePath(path) ? 'on the server' : 'on disk'} since you opened it, so it was not saved. Reload it, or keep yours and save over it.`, { kind: 'error', timeout: 10000 });
+          if (result === 'conflict') {
+            const conn = isRemotePath(path) ? server(remoteParts(path).id) : null;
+            const where = !conn ? 'on disk' : conn.protocol === 'docker' ? 'in the container' : conn.protocol === 'wsl' ? 'in WSL' : 'on the server';
+            toast(`The file changed ${where} since you opened it, so it was not saved. Reload it, or keep yours and save over it.`, { kind: 'error', timeout: 10000 });
+          }
           return result;
         } catch (err) {
           // A server that cannot be reached: the file bar says so, with Reconnect.
@@ -825,8 +829,46 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         try {
           await window.desktop.remote.connect(id);
         } catch (err) {
-          toast(ipcMessage(err), { kind: 'error', timeout: 8000 });
+          actions.cannotConnect(id, err, () => actions.reconnectServer(id));
         }
+      },
+      /**
+       * Why a server or a place could not be opened; a Docker container that is not running can
+       * be started from the toast (then `again`).
+       */
+      cannotConnect(id, err, again) {
+        const conn = server(id);
+        const text = ipcMessage(err);
+        if (conn?.protocol === 'docker' && /is not running|is paused/.test(text) && window.desktop?.remote?.startContainer) {
+          return toast(text, {
+            kind: 'error',
+            timeout: 12000,
+            action: {
+              label: 'Start it',
+              run: async () => {
+                try {
+                  await window.desktop.remote.startContainer(conn.container);
+                  again();
+                } catch (startErr) {
+                  toast(ipcMessage(startErr), { kind: 'error', timeout: 8000 });
+                }
+              },
+            },
+          });
+        }
+        toast(text, { kind: 'error', timeout: 8000 });
+      },
+      /**
+       * Opens a Docker container or a WSL distribution (`kind`): the dialog that lists them. Where
+       * this computer has none of that kind, says why.
+       */
+      async pickPlace(kind) {
+        if (!window.desktop?.remote?.places) return toast('Docker containers and WSL distributions open in the desktop app.');
+        const kinds = await refreshPlaceKinds({ fresh: !placeKinds()[kind] });
+        if (!kinds[kind]) {
+          return toast(kind === 'wsl' ? (window.desktop.platform === 'win32' ? 'WSL is not installed on this computer (wsl --install sets it up).' : 'WSL distributions are on Windows only.') : 'Docker is not on this computer: install Docker Desktop (or the docker command line), then try again.', { timeout: 8000 });
+        }
+        setDialog({ type: 'server', conn: { protocol: kind } });
       },
       /**
        * Adds a server ({}), or edits one. `back`: the dialog to come back to when it closes;
@@ -896,13 +938,13 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
           toast(ipcMessage(err), { kind: 'error', timeout: 8000 });
         }
       },
-      /** Opens a server in the folders view. */
+      /** Opens a server (or a place) in the folders view. */
       async openServer(id, { beside = false } = {}) {
         try {
           const { root } = await window.desktop.remote.connect(id);
           actions.showInFolders(root, { beside });
         } catch (err) {
-          toast(ipcMessage(err), { kind: 'error', timeout: 8000 });
+          actions.cannotConnect(id, err, () => actions.openServer(id, { beside }));
         }
       },
       /** A copy of a disk file as one of the editor's files (synced); the file on disk stays as it is. */
@@ -2149,7 +2191,7 @@ export function App() {
       const disk = store.diskTab(k.path);
       if (!disk || disk.doc) return;
       if (!isRemotePath(disk.path)) return lsp.attach(key, disk.path);
-      if (s.languageServersRemote === false || server(remoteParts(disk.path).id)?.protocol !== 'sftp') return;
+      if (s.languageServersRemote === false || !hasShell(server(remoteParts(disk.path).id))) return;
       return lsp.attach(key, disk.path);
     }
     if (s.languageServersNotes === false) return;
@@ -2691,7 +2733,7 @@ export function App() {
     }
     const s = getSettings();
     const roots = window.desktop?.folders ? [...withCurrent(s.folderSections, s.folder), ...sectionFolders(s)] : [];
-    return placeCrumbs({ key, roots, serverName: (id) => server(id)?.name ?? '' });
+    return placeCrumbs({ key, roots, serverName: (id) => server(id)?.name ?? '', serverIcon: (id) => connIcon(server(id)) });
   };
   /**
    * A breadcrumb's menu: a symbol's (`items` made by the bar), else what is next to the crumb: a
@@ -3354,7 +3396,7 @@ export function App() {
   actions.openTerminal = async (connId, cwd = '', opts = {}) => {
     if (!terminalsAvailable()) return toast('Terminals work in the desktop app.', { kind: 'error' });
     const conn = server(connId);
-    if (conn && conn.protocol !== 'sftp') return toast(`${conn.name} is an FTP server; terminals need SSH (SFTP).`, { kind: 'error' });
+    if (conn && !hasShell(conn)) return toast(`${conn.name} is an FTP server; terminals need SSH (SFTP).`, { kind: 'error' });
     setTerminalShown(true);
     try {
       return await openTerminal(connId, { cwd, ...opts });
@@ -3382,7 +3424,7 @@ export function App() {
       const folder = getSettings().sidebarMode === 'folders' ? getSettings().folder : '';
       const k = parseKey(store.session.active);
       const near = k?.kind === 'disk' ? (isRemotePath(k.path) ? parentDir(k.path) : '') : isRemotePath(folder) ? folder : '';
-      if (near && server(remoteParts(near).id)?.protocol === 'sftp') return actions.openTerminal(remoteParts(near).id, remoteParts(near).path);
+      if (near && hasShell(server(remoteParts(near).id))) return actions.openTerminal(remoteParts(near).id, remoteParts(near).path);
       return actions.openTerminal('local', actions.localTerminalDir());
     }
     setTerminalShown(true);
@@ -3461,7 +3503,7 @@ export function App() {
     if (k?.kind !== 'disk') return toast('Run works on files in a folder, on this computer or on a server: open one from Folders (or save this one there).');
     const remote = isRemotePath(k.path);
     const conn = remote ? server(remoteParts(k.path).id) : null;
-    if (remote && conn?.protocol !== 'sftp') return toast(`${conn?.name ?? 'That server'} has no terminal: running files needs SSH (SFTP).`, { kind: 'error' });
+    if (remote && !hasShell(conn)) return toast(`${conn?.name ?? 'That server'} has no terminal: running files needs SSH (SFTP).`, { kind: 'error' });
     const path = remote ? remoteParts(k.path).path : k.path;
     const file = { path, dir: parentDir(path), name: path.split(/[\\/]/).pop() };
     const web = remote ? null : webRun(k.path, file.name);
@@ -3570,7 +3612,7 @@ export function App() {
     const text = hostRef.current?.stateOf(key)?.doc.toString() ?? store.diskTab(k.path)?.text ?? '';
     if (!looksLikeTestFile(name, text)) return null;
     const remote = isRemotePath(k.path);
-    if (remote && server(remoteParts(k.path).id)?.protocol !== 'sftp') return null;
+    if (remote && !hasShell(server(remoteParts(k.path).id))) return null;
     let known = testDirs.current.get(k.path);
     if (fresh || !known || Date.now() - known.at > 30_000) {
       known = { dirs: await bridge.testProject(k.path).catch(() => []), at: Date.now() };
@@ -3931,7 +3973,7 @@ export function App() {
     const disk = k?.kind === 'disk' ? store.diskTab(k.path) : null;
     if (!isDesktopApp() || !disk || disk.doc || isContentPath(k.path) || !terminalsAvailable()) return null;
     const remote = isRemotePath(k.path);
-    if (remote && server(remoteParts(k.path).id)?.protocol !== 'sftp') return null;
+    if (remote && !hasShell(server(remoteParts(k.path).id))) return null;
     const name = baseName(k.path);
     const platform = remote ? 'linux' : (window.desktop.platform ?? 'linux');
     const web = remote ? null : webRun(k.path, name);
@@ -4048,7 +4090,7 @@ export function App() {
     const k = parseKey(store.session.active);
     const s = getSettings();
     const dirs = [k?.kind === 'disk' && !isContentPath(k.path) ? parentDir(k.path) : '', ...(s.folderSections?.length ? s.folderSections : [s.folder])].filter(Boolean);
-    return [...new Set(dirs)].filter((d) => !isRemotePath(d) || server(remoteParts(d).id)?.protocol === 'sftp');
+    return [...new Set(dirs)].filter((d) => !isRemotePath(d) || hasShell(server(remoteParts(d).id)));
   };
   actions.showTasks = () => {
     if (!terminalsAvailable()) return toast('Tasks run in terminals, in the desktop app.');
@@ -4594,6 +4636,8 @@ export function App() {
       'folder-beside': () => actions.sideBySide(),
       'server-add': () => actions.editServer(),
       'servers-ssh': () => actions.importSshConfig(),
+      'docker-open': () => actions.pickPlace('docker'),
+      'wsl-open': () => actions.pickPlace('wsl'),
       terminal: () => actions.toggleTerminal(),
       'terminal-split': () => actions.splitTerminal(),
       'terminal-rename': () => actions.renameTerminal(),

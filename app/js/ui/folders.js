@@ -4,8 +4,8 @@ import { baseName, breadcrumbs, folderLabel, placeLabel, FOLDER_SORTS, isImageNa
 import { formatBytes, timeAgo } from '../format.js';
 import { getSettings, isLocal, saveSettings } from '../settings.js';
 import { diskKey } from '../store.js';
-import { server, servers, serverStatus } from '../servers.js';
-import { isRemotePath, KINDS, protocolName, remoteParts, remoteRoot } from '../where.js';
+import { placeKinds, server, servers, serverStatus } from '../servers.js';
+import { connDetail, connIcon, connLabel, hasShell, isPlace, isRemotePath, KINDS, remoteParts, remoteRoot } from '../where.js';
 import { isAndroidApp } from '../platform.js';
 import { ClearButton, dismissToast, Modal, toast } from './components.js';
 import { mirrorOf } from '../mirrors.js';
@@ -191,10 +191,12 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   const remote = isRemotePath(root);
   const conn = remote ? server(remoteParts(root).id) : null;
   const connState = conn ? serverStatus(conn.id) : null;
-  const rootName = (r) => (isRemotePath(r) ? (server(remoteParts(r).id)?.name ?? 'Server') : folderLabel(r));
+  // A server by its name; a Docker container or a WSL distribution saying so ("web-1 (Docker)").
+  const rootName = (r) => (isRemotePath(r) ? connLabel(server(remoteParts(r).id)) : folderLabel(r));
+  const iconOf = (p) => (isRemotePath(p) ? connIcon(server(remoteParts(p).id)) : 'folder');
   const internalDrag = useRef(null); // paths dragged within a folder on a server
-  // Terminals: in the editor on SSH servers, the system's terminal app for folders here (none on FTP).
-  const terminalFor = (p) => (isRemotePath(p) ? server(remoteParts(p).id)?.protocol === 'sftp' : Boolean(bridge.terminal));
+  // Terminals: in the editor on SSH servers and in places, the system's terminal app for folders here (none on FTP).
+  const terminalFor = (p) => (isRemotePath(p) ? hasShell(server(remoteParts(p).id)) : Boolean(bridge.terminal));
   const hasTerminal = terminalFor(dir);
   // Mirrors: a folder on a server kept on this computer; inside one, its bar and its settings.
   const mirrored = mirrorOf(dir);
@@ -1116,12 +1118,14 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   ];
   const rootItems = () => [
     ...roots.map((r) => ({ label: placeLabel(r), hint: placeLabel(r) === r ? undefined : r, icon: 'folder', checked: r === root, run: () => go(r) })),
-    ...servers().map((c) => ({ label: `${c.name} (${protocolName(c.protocol)} · ${c.host})`, icon: 'server', checked: remoteRoot(c.id) === root, run: () => actions.openServer(c.id) })),
+    ...servers().map((c) => ({ label: connLabel(c), hint: connDetail(c), icon: connIcon(c), checked: remoteRoot(c.id) === root, run: () => actions.openServer(c.id) })),
     { separator: true },
     { label: 'Folders side by side…', icon: 'columns', hint: 'Several of these next to each other, here or on servers', run: () => actions.sideBySide() },
     { label: 'Open another folder…', icon: 'folderOpen', run: () => pick(remote ? undefined : (parentOf(dir, root) ?? root)) },
     { label: 'Connect to a server…', icon: 'server', run: () => actions.editServer() },
     !isAndroidApp() && { label: 'Servers from your SSH config…', icon: 'server', run: () => actions.importSshConfig() },
+    placeKinds().docker && { label: 'Open a Docker container…', icon: 'container', hint: 'Its files and a terminal, like a server', run: () => actions.pickPlace('docker') },
+    placeKinds().wsl && { label: 'Open a WSL distribution…', icon: 'linux', hint: 'Its files and a terminal, like a server', run: () => actions.pickPlace('wsl') },
     window.desktop?.mirrors && { label: 'Mirrors…', icon: 'sync', run: () => actions.showMirrors() },
     window.desktop?.compare && { label: 'Compare this folder with another…', icon: 'compare', run: () => actions.compareFolders(dir) },
     window.desktop?.compare && { label: 'Two panes…', icon: 'panes', hint: 'This folder and another side by side in a tab, to copy and move files between them (like WinSCP)', run: () => actions.twoPanes(dir) },
@@ -1134,11 +1138,11 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     remote && { label: settings.showPermissions ? 'Hide permissions' : 'Show permissions', icon: 'lock', run: () => saveSettings({ showPermissions: !settings.showPermissions }) },
     ...(remote
       ? [
-          conn?.protocol === 'sftp' && { label: 'Open a terminal', icon: 'terminal', run: () => actions.terminalHere(dir) },
+          hasShell(conn) && { label: 'Open a terminal', icon: 'terminal', run: () => actions.terminalHere(dir) },
           { label: `Edit ${conn?.name ?? 'this server'}…`, icon: 'edit', run: () => actions.editServer(conn) },
           connState?.state === 'connected'
             ? { label: 'Disconnect', icon: 'x', run: () => window.desktop.remote.disconnect(conn.id) }
-            : { label: 'Connect', icon: 'server', run: () => actions.openServer(conn.id) },
+            : { label: 'Connect', icon: connIcon(conn), run: () => actions.openServer(conn.id) },
         ]
       : [
           window.desktop?.disk?.show && { label: 'Show this folder in the file explorer', icon: 'external', run: () => actions.showOnDisk(dir) },
@@ -1209,8 +1213,10 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       </div>
       <div class="folders-servers">
         ${roots.map((r) => html`<button type="button" key=${r} class="btn ghost sm" title=${r} onClick=${() => go(r)}><${Icon} name="folder" size=${15} />${folderLabel(r)}</button>`)}
-        ${servers().map((c) => html`<button type="button" key=${c.id} class="btn ghost sm" title=${`${protocolName(c.protocol)} · ${c.user ? `${c.user}@` : ''}${c.host}`} onClick=${() => actions.openServer(c.id)}><${Icon} name="server" size=${15} />${c.name}</button>`)}
+        ${servers().map((c) => html`<button type="button" key=${c.id} class="btn ghost sm" title=${connDetail(c)} onClick=${() => actions.openServer(c.id)}><${Icon} name=${connIcon(c)} size=${15} />${connLabel(c)}</button>`)}
         <button type="button" class="btn sm" onClick=${() => actions.editServer()}><${Icon} name="server" size=${15} />Connect to a server…</button>
+        ${placeKinds().docker && html`<button type="button" class="btn sm" onClick=${() => actions.pickPlace('docker')}><${Icon} name="container" size=${15} />Open a Docker container…</button>`}
+        ${placeKinds().wsl && html`<button type="button" class="btn sm" onClick=${() => actions.pickPlace('wsl')}><${Icon} name="linux" size=${15} />Open a WSL distribution…</button>`}
       </div>
     </div>`;
   }
@@ -1225,7 +1231,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   const favorite = favorites.includes(dir);
   const recent = (settings.folderRecent ?? []).filter((p) => p !== dir);
   const toggleFav = (p) => saveSettings({ folderFavorites: toggleFavorite(favorites, p) });
-  const placeName = (p) => (isRemotePath(p) && !remoteParts(p).path.replace(/\/+$/, '') ? (server(remoteParts(p).id)?.name ?? 'Server') : isRemotePath(p) ? baseName(remoteParts(p).path || '/') : folderLabel(p));
+  const placeName = (p) => (isRemotePath(p) && !remoteParts(p).path.replace(/\/+$/, '') ? connLabel(server(remoteParts(p).id)) : isRemotePath(p) ? baseName(remoteParts(p).path || '/') : folderLabel(p));
   const placeHint = (p) => (isRemotePath(p) ? `${server(remoteParts(p).id)?.name ?? 'Server'}: ${remoteParts(p).path || '/'}` : p);
   const hiddenCount = live.reduce((n, d) => n + (listings.get(d)?.entries ?? []).filter((e) => e.hidden).length, 0);
   const some = targets().length > 0;
@@ -1338,7 +1344,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       ${l?.error &&
       html`<div class="empty-list folders-error">
         <p class="error-text small">${l.error}</p>
-        ${isRemotePath(x.dir) && html`<p><button type="button" class="btn sm" onClick=${(e) => (e.stopPropagation(), load(x.dir))}>Try again</button> <button type="button" class="btn ghost sm" onClick=${(e) => (e.stopPropagation(), actions.editServer(server(remoteParts(x.dir).id)))}>Edit the server…</button></p>`}
+        ${isRemotePath(x.dir) && html`<p><button type="button" class="btn sm" onClick=${(e) => (e.stopPropagation(), load(x.dir))}>Try again</button> <button type="button" class="btn ghost sm" onClick=${(e) => (e.stopPropagation(), actions.editServer(server(remoteParts(x.dir).id)))}>${isPlace(server(remoteParts(x.dir).id)) ? 'Its settings…' : 'Edit the server…'}</button></p>`}
       </div>`}
       ${!l && !makingHere && html`<p class="muted small empty-list waiting">Reading the folder…</p>`}
       ${x.rows.map(row)}
@@ -1355,9 +1361,9 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     const name = placeName(d);
     // Where it is: the folder holding it (on a server: the server's name first).
     const inside = rem ? remoteParts(d).path.replace(/\/+$/, '') : '';
-    const where = rem ? (inside ? `${c?.name ?? 'Server'} · ${inside.slice(0, inside.lastIndexOf('/')) || '/'}` : `${protocolName(c?.protocol)} · ${c?.host ?? ''}`) : dirOf(d);
+    const where = rem ? (inside ? `${connLabel(c)} · ${inside.slice(0, inside.lastIndexOf('/')) || '/'}` : connDetail(c)) : dirOf(d);
     return html`<div class="root-head kind-${rem ? 'remote' : 'disk'} ${d === dir ? 'current' : ''} ${dropTarget === d ? 'drop-target' : ''}" data-section=${d}
-      title=${`${rem ? `On ${c?.name ?? 'a server'}: ${remoteParts(d).path || '/'}` : `On this computer: ${d}`}\nClick to work here · drag to change the order · right-click for more`}
+      title=${`${rem ? `On ${c ? connLabel(c) : 'a server'}: ${remoteParts(d).path || '/'}` : `On this computer: ${d}`}\nClick to work here · drag to change the order · right-click for more`}
       draggable="true" onDragStart=${(ev) => startSectionDrag(ev, d)} onDragEnd=${endSectionDrag}
       onClick=${(ev) => {
         ev.stopPropagation();
@@ -1369,7 +1375,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       ...${sectionDropProps(d)}>
       <button type="button" class="tree-twisty ${shut_ ? '' : 'open'}" tabindex="-1" aria-expanded=${!shut_} aria-label=${shut_ ? `Expand ${name}` : `Collapse ${name}`}
         onClick=${(ev) => (ev.stopPropagation(), toggleCollapsed(d))}><${Icon} name="chevronRight" size=${13} /></button>
-      <${Icon} name=${rem ? 'server' : 'folder'} size=${15} class="root-head-icon" />
+      <${Icon} name=${iconOf(d)} size=${15} class="root-head-icon" />
       <span class="root-head-name">${name}</span>
       <span class="root-head-where">${where}</span>
       ${!rem && gitOf(d) && html`<button type="button" class="git-branch" title=${branchTitle(gitOf(d))} aria-label=${`Git panel: ${placeName(d)}, branch ${gitOf(d).branch}`}
@@ -1401,8 +1407,8 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       <div class="folders-root" style=${{ '--tools': recent.length > 0 ? 6 : 5 }}>
         <span class="folders-root-title">
           <button type="button" class="btn ghost sm folders-root-name ${remote ? 'kind-remote' : ''} ${dropTarget === root ? 'drop-target' : ''}"
-            title=${remote ? `${protocolName(conn?.protocol)} · ${conn?.user ? `${conn.user}@` : ''}${conn?.host} · ${connState?.state === 'connected' ? 'connected' : 'not connected'}` : root} onClick=${() => go(root)} ...${dropProps(root)}>
-            <${Icon} name=${remote ? 'server' : 'folder'} size=${15} /><span>${rootName(root)}</span>${remote && html`<span class="conn-dot state-${connState?.state}" />`}
+            title=${remote ? `${connDetail(conn)} · ${connState?.state === 'connected' ? 'connected' : `not connected${connState?.error ? `: ${connState.error}` : ''}`}` : root} onClick=${() => go(root)} ...${dropProps(root)}>
+            <${Icon} name=${iconOf(root)} size=${15} /><span>${rootName(root)}</span>${remote && html`<span class="conn-dot state-${connState?.state}" />`}
           </button>
           ${!multi && !remote && gitHere(dir) &&
           (gitOf(dir)
@@ -1414,7 +1420,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
         ${tool('Refresh (F5)', 'rotate', () => load())}
         <button type="button" class="icon-btn sm fav-toggle ${favorite ? 'on' : ''}" aria-pressed=${favorite} aria-label=${favorite ? 'Remove this folder from favorites' : 'Add this folder to favorites'}
           title=${favorite ? 'Remove this folder from favorites' : 'Add this folder to favorites'} onClick=${() => toggleFav(dir)}><${Icon} name="star" size=${16} /></button>
-        ${recent.length > 0 && html`<${MenuButton} label="Recent folders" icon="clock" items=${() => recent.map((p) => ({ key: p, label: placeName(p), hint: placeHint(p), icon: isRemotePath(p) ? 'server' : 'folder', run: () => go(p) }))} />`}
+        ${recent.length > 0 && html`<${MenuButton} label="Recent folders" icon="clock" items=${() => recent.map((p) => ({ key: p, label: placeName(p), hint: placeHint(p), icon: iconOf(p), run: () => go(p) }))} />`}
         ${tool('Folders side by side: add some beside this one (here or on servers), reorder, close', 'columns', () => actions.sideBySide())}
         <${MenuButton} label="Folders" items=${rootItems} />
       </div>
@@ -1505,8 +1511,8 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     <div class="sidebar-foot folders-foot">
       <span class="muted small folders-status" aria-live="polite">${selectionSummary(entries, selected, formatBytes)}</span>
       ${picking && html`<button type="button" class="btn sm" onClick=${() => (setPicking(false), select([]))}>Done</button>`}
-      <span class="folders-where ${remote ? 'kind-remote' : 'kind-disk'}" title=${remote ? `On ${conn?.name}: files are saved back to the server${isLocal() ? '' : ', not synced. Copy into my files makes a synced copy'}.` : isLocal() ? `Files on ${hereName()}: edited where they are.` : `Files on ${hereName()}: edited in place, not synced. Copy into my files makes a synced copy.`}>
-        <${Icon} name=${remote ? 'server' : 'disk'} size=${14} />
+      <span class="folders-where ${remote ? 'kind-remote' : 'kind-disk'}" title=${remote ? `On ${connLabel(conn)}: files are saved back ${isPlace(conn) ? 'there' : 'to the server'}${isLocal() ? '' : ', not synced. Copy into my files makes a synced copy'}.` : isLocal() ? `Files on ${hereName()}: edited where they are.` : `Files on ${hereName()}: edited in place, not synced. Copy into my files makes a synced copy.`}>
+        <${Icon} name=${remote ? connIcon(conn) : 'disk'} size=${14} />
       </span>
     </div>
     ${menu &&

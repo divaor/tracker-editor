@@ -208,10 +208,12 @@ ipcMain.handle('disk:open-typed', guard(async (event, typed) => {
   return { opened: item.dir ? 'folder' : 'file', path: item.path };
 }));
 
-// ---- Files on servers (SFTP, FTP, FTPS) -----------------------------------------
+// ---- Files on servers (SFTP, FTP, FTPS) and in places (Docker, WSL) ----------------
 // remote.cjs; files there are remote://<id>/<path>, and the disk:* and folder:*
 // handlers below send those to it. Passwords stay here (secrets.json, through the
-// keychain); an unknown or changed SSH host key is asked about in the window.
+// keychain); an unknown or changed SSH host key is asked about in the window. Docker
+// containers and WSL distributions (places.cjs) are reached through the docker command
+// line and wsl.exe, found here; the page picks one from remote:places by its name.
 
 const remoteFiles = require('./remote.cjs');
 const isRemote = remoteFiles.isRemote;
@@ -251,6 +253,11 @@ const remote = remoteFiles.createRemote({
 });
 
 ipcMain.handle('remote:connections', guard(() => remote.connections()));
+// What can be opened as a place (null for a kind that is not here), and starting a stopped
+// container picked from that list (nothing else is ever started or run).
+ipcMain.handle('remote:places', guard(() => remote.places()));
+ipcMain.handle('remote:place-kinds', guard(() => remote.placeKinds()));
+ipcMain.handle('remote:start-container', guard((_e, name) => remote.startContainer(typeof name === 'string' ? name : '')));
 ipcMain.handle('remote:save', guard((_e, conn, secrets) => remote.saveConnection(conn ?? {}, secrets ?? {})));
 ipcMain.handle('remote:delete', guard((_e, id) => {
   lspHost.stopRemote(id);
@@ -3209,6 +3216,8 @@ function buildMenu() {
         item('Folders Side by Side…', undefined, 'folder-beside'),
         item('Connect to a Server…', undefined, 'server-add'),
         item('Servers from the SSH Config…', undefined, 'servers-ssh'),
+        item('Open a Docker Container…', undefined, 'docker-open'),
+        ...(process.platform === 'win32' ? [item('Open a WSL Distribution…', undefined, 'wsl-open')] : []),
         item('Import Files…', undefined, 'open-disk'),
         item('Save a Copy to Disk…', 'CmdOrCtrl+Shift+S', 'save-copy'),
         item('Trash…', undefined, 'trash'),

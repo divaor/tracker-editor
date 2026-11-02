@@ -19,6 +19,8 @@ export const COMMAND_LIST = [
   { id: 'folder-open', group: 'Files and tabs', label: 'Open a folder', only: 'desktop' },
   { id: 'folder-beside', group: 'Folders view', label: 'Folders side by side: add some (here or on servers), reorder, close', only: 'desktop', hint: 'Each one under its own header: drag the headers to change the order' },
   { id: 'server-add', group: 'Files and tabs', label: 'Connect to a server', only: 'desktop' },
+  { id: 'docker-open', group: 'Files and tabs', label: 'Open a Docker container (its files and a terminal)', only: 'desktop', hint: 'A running container, like a server: Folders, tabs, find, the terminal' },
+  { id: 'wsl-open', group: 'Files and tabs', label: 'Open a WSL distribution (its files and a terminal)', only: 'desktop', hint: 'Windows: Ubuntu, Debian… like a server' },
   { id: 'open-disk', group: 'Files and tabs', label: 'Import files' },
   { id: 'save-copy', group: 'Files and tabs', label: 'Save a copy to disk', desktop: 'Mod+Shift+S' },
   { id: 'close-tab', group: 'Files and tabs', label: 'Close the tab', keys: 'Alt+W', desktop: 'Mod+W' },

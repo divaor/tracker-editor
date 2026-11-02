@@ -2,7 +2,7 @@ import { html, useEffect, useState } from '../../vendor/preact-htm.js';
 import { modeString, octalMode, parseMode, PERMISSION_WHAT, PERMISSION_WHO } from '../folders.js';
 import { formatBytes, formatDateTime } from '../format.js';
 import { server } from '../servers.js';
-import { isRemotePath, protocolName, remoteAddress, remoteParts } from '../where.js';
+import { connDetail, connIcon, connLabel, isPlace, isRemotePath, remoteAddress, remoteParts } from '../where.js';
 import { Check, Modal } from './components.js';
 import { Icon } from './icons.js';
 
@@ -72,8 +72,8 @@ export function PropertiesDialog({ path, actions, onClose }) {
     ${info && !info.error &&
     html`<dl class="properties">
       <dt>Where</dt>
-      <dd class="properties-where ${remote ? 'kind-remote' : 'kind-disk'}"><${Icon} name=${remote ? 'server' : 'disk'} size=${14} /><span>${where}</span></dd>
-      ${remote && html`<dt>Server</dt><dd>${conn?.name ?? 'Server'} · ${protocolName(conn?.protocol)}</dd>`}
+      <dd class="properties-where ${remote ? 'kind-remote' : 'kind-disk'}"><${Icon} name=${remote ? connIcon(conn) : 'disk'} size=${14} /><span>${where}</span></dd>
+      ${remote && html`<dt>${isPlace(conn) ? 'In' : 'Server'}</dt><dd>${connLabel(conn)} · ${connDetail(conn)}</dd>`}
       <dt>Kind</dt>
       <dd>${info.dir ? 'Folder' : 'File'}${info.link ? ' (a link)' : ''}</dd>
       <dt>Size</dt>

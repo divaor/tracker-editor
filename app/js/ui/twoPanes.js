@@ -7,7 +7,7 @@ import { dropOperation, inFolder, itemsName, paneCommand, paneRows, sameNamed, t
 import { getSettings, saveSettings } from '../settings.js';
 import { server, servers, serverStatus } from '../servers.js';
 import { onTransfers, running } from '../transfers.js';
-import { isRemotePath, remoteParts, remoteRoot } from '../where.js';
+import { connIcon, hasShell, isRemotePath, remoteParts, remoteRoot } from '../where.js';
 import { isAndroidApp } from '../platform.js';
 import { toast } from './components.js';
 import { FileIcon } from './fileIcon.js';
@@ -228,7 +228,7 @@ function Pane({ side, path, root, active, settings, actions, handle, sort, onSor
   const state = conn ? serverStatus(conn.id).state : null;
   const crumbs = root ? breadcrumbs(path, root) : [{ name: pathName(path), path }];
   const rootLabel = remote ? (conn?.name ?? 'Server') : null;
-  const terminalFor = (p) => (isRemotePath(p) ? server(remoteParts(p).id)?.protocol === 'sftp' : Boolean(bridge.terminal));
+  const terminalFor = (p) => (isRemotePath(p) ? hasShell(server(remoteParts(p).id)) : Boolean(bridge.terminal));
 
   const entryItems = () => {
     const items = targets();
@@ -318,7 +318,7 @@ function Pane({ side, path, root, active, settings, actions, handle, sort, onSor
   return html`<section class="pane ${side} ${active ? 'active' : ''} kind-${remote ? 'remote' : 'disk'}" aria-label=${`${side === 'left' ? 'Left' : 'Right'}: ${pathName(path)}`}
       onMouseDown=${onActivate}>
     <div class="pane-head" title=${placeOf(path)}>
-      <${Icon} name=${remote ? 'server' : 'folder'} size=${15} />
+      <${Icon} name=${remote ? connIcon(server(remoteParts(path).id)) : 'folder'} size=${15} />
       <span class="pane-head-name">${pathName(path)}</span>
       ${remote && html`<span class="conn-dot state-${state}" title=${state} />`}
       <span class="pane-head-where"><bdi>${placeOf(path)}</bdi></span>

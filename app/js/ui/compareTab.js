@@ -6,7 +6,7 @@ import { pathName, sideName, sideWhere } from '../compares.js';
 import { getSettings, resolvedTheme, saveSettings } from '../settings.js';
 import { diskKey } from '../store.js';
 import { onTransfers, running } from '../transfers.js';
-import { isRemotePath, remoteParts } from '../where.js';
+import { connIcon, isRemotePath, remoteParts } from '../where.js';
 import { server } from '../servers.js';
 import { isAndroidApp } from '../platform.js';
 import { FileIcon } from './fileIcon.js';
@@ -482,7 +482,7 @@ function FoldersTab({ id, record, settings, actions }) {
     const p = record[side].path;
     return html`<div class="fcmp-head ${side} ${isRemotePath(p) ? 'kind-remote' : 'kind-disk'}" title=${p}>
       ${phone && html`<span class="fcmp-head-mark">${side === 'left' ? '◧' : '◨'}</span>`}
-      <${Icon} name=${isRemotePath(p) ? 'server' : 'folder'} size=${15} />
+      <${Icon} name=${isRemotePath(p) ? connIcon(server(remoteParts(p).id)) : 'folder'} size=${15} />
       <span class="fcmp-head-name">${pathName(p)}</span>
       <span class="fcmp-head-where"><bdi>${rootWhere(p)}</bdi></span>
       <span class="spacer" />

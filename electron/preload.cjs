@@ -227,6 +227,11 @@ contextBridge.exposeInMainWorld('desktop', {
     save: (conn, secrets) => ipcRenderer.invoke('remote:save', conn, secrets),
     delete: (id) => ipcRenderer.invoke('remote:delete', id),
     test: (conn, secrets) => ipcRenderer.invoke('remote:test', conn, secrets),
+    // Docker containers and WSL distributions to open ({ docker, wsl, notes }), whether each
+    // kind is here at all, and starting a stopped container picked from the list.
+    places: () => ipcRenderer.invoke('remote:places'),
+    placeKinds: () => ipcRenderer.invoke('remote:place-kinds'),
+    startContainer: (name) => ipcRenderer.invoke('remote:start-container', name),
     connect: (id) => ipcRenderer.invoke('remote:connect', id),
     disconnect: (id) => ipcRenderer.invoke('remote:disconnect', id),
     forgetHostKey: (id) => ipcRenderer.invoke('remote:forget-host-key', id),

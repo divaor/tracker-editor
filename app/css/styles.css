@@ -2830,6 +2830,99 @@ button.folder-col:hover {
   color: var(--warn);
 }
 
+/* A Docker container or a WSL distribution to pick (ServerDialog's PlaceFields). */
+.place-pick-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.place-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: min(40vh, 320px);
+  margin: 4px 0 0;
+  padding: 4px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  list-style: none;
+}
+
+.place-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: var(--radius-sm);
+}
+
+.place-row.picked {
+  background: color-mix(in srgb, var(--kind-remote) 14%, transparent);
+  box-shadow: inset 3px 0 0 var(--kind-remote);
+}
+
+.place-choose {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.place-choose:hover {
+  background: var(--surface-2);
+}
+
+.place-choose svg {
+  flex: none;
+  color: var(--kind-remote);
+}
+
+.place-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.place-detail {
+  flex: 1 1 12em;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.place-row.stopped .place-name {
+  color: var(--text-2);
+}
+
+.place-state {
+  margin-left: auto;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.place-state.state-running {
+  border-color: color-mix(in srgb, var(--ft-green) 60%, transparent);
+  color: var(--ft-green);
+}
+
+.place-row > .btn {
+  flex: none;
+  margin-right: 4px;
+}
+
 .hostkey-dialog .fingerprint code {
   display: block;
   padding: 8px 10px;

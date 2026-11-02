@@ -13,11 +13,15 @@ const { Readable, Writable } = require('node:stream');
 const disk = require('./diskFiles.cjs');
 const { checkName, dirMode, fileMode } = require('./folders.cjs');
 const { parseHop } = require('./sshConfig.cjs');
+const places = require('./places.cjs');
 
 const posix = nodePath.posix;
 const SCHEME = 'remote://';
-const PROTOCOLS = ['sftp', 'ftps', 'ftp'];
+// Docker containers and WSL distributions (places.cjs) are connections too, with no host.
+const PROTOCOLS = ['sftp', 'ftps', 'ftp', ...places.PLACE_PROTOCOLS];
 const DEFAULT_PORT = { sftp: 22, ftps: 21, ftp: 21 };
+// Connections with a shell: terminals, programs run there (language servers, tests, tasks).
+const SHELL_PROTOCOLS = ['sftp', ...places.PLACE_PROTOCOLS];
 const MAX_COPY_ENTRIES = 10000;
 // Transfers with progress (putFile/getFile): requests in flight at once, and their size.
 const XFER_PARALLEL = 32;
@@ -34,7 +38,7 @@ function localUnder(root, rel) {
   if (parts.some((p) => !p || p === '.' || p === '..') || !(full + nodePath.sep).startsWith(nodePath.resolve(root) + nodePath.sep)) throw new Error(`${rel}: that name from the server cannot be a file here.`);
   return full;
 }
-const protocolLabel = (protocol) => ({ sftp: 'SFTP', ftps: 'FTPS', ftp: 'FTP' })[protocol] ?? protocol;
+const protocolLabel = (protocol) => ({ sftp: 'SFTP', ftps: 'FTPS', ftp: 'FTP', docker: 'Docker', wsl: 'WSL' })[protocol] ?? protocol;
 
 /** remote://<id>/<path> → { id, path } (the path absolute, '/' at least). */
 function parseUri(uri) {
@@ -53,7 +57,9 @@ const fingerprintOf = (key) => `SHA256:${crypto.createHash('sha256').update(key)
 
 /** Messages a person can act on, for the usual network and login errors. */
 function friendlyError(err, conn) {
-  const where = conn ? `${conn.host}:${conn.port}` : 'the server';
+  // A place's own messages say already what happened, and where.
+  if (err?.place || err?.stopped) return err;
+  const where = conn?.host ? `${conn.host}:${conn.port}` : (conn?.name ?? 'the server');
   const code = err?.code ?? '';
   const msg = String(err?.message ?? err);
   if (code === 'ECONNREFUSED') return new Error(`Nothing answers at ${where}. Check the host and the port.`);
@@ -821,9 +827,10 @@ class FtpSession {
  * The servers: `store` reads and writes remote.json ({ connections, knownHosts, keys }),
  * `secrets` gets and sets a connection's password or passphrase, `askHostKey`
  * asks the person about an unknown or changed host key, `onStatus` reports
- * connecting / connected / disconnected / error.
+ * connecting / connected / disconnected / error. `placeTools` (places.cjs) finds the
+ * programs Docker containers and WSL distributions are reached through.
  */
-function createRemote({ store, secrets, askHostKey, askPrompt = async () => undefined, onStatus = () => {} }) {
+function createRemote({ store, secrets, askHostKey, askPrompt = async () => undefined, onStatus = () => {}, placeTools = places.createPlaceTools() }) {
   let data = { connections: [], knownHosts: {}, keys: [], ...store.read() };
   const save = () => store.write(data);
   const live = new Map(); // id → { session, opening, state, error }
@@ -848,6 +855,26 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
 
   function clean(input, existing) {
     const protocol = PROTOCOLS.includes(input.protocol) ? input.protocol : 'sftp';
+    if (places.isPlace(protocol)) {
+      // A Docker container or a WSL distribution: picked from the list, no host, port or password.
+      const fields = places.cleanPlace({ ...input, protocol });
+      const start = String(input.path ?? '').trim();
+      return {
+        id: existing?.id ?? crypto.randomBytes(5).toString('hex'),
+        name: String(input.name ?? '').trim().slice(0, 60) || fields.container || fields.distro,
+        protocol,
+        host: '',
+        port: 0,
+        user: fields.user,
+        auth: 'password',
+        keyPath: '',
+        path: start ? posix.normalize(start.startsWith('/') ? start : `/${start}`) : '',
+        autoSave: Boolean(input.autoSave),
+        allowSelfSigned: false,
+        jump: '',
+        ...(protocol === 'docker' ? { container: fields.container } : { distro: fields.distro }),
+      };
+    }
     const host = String(input.host ?? '').trim();
     if (!host || /[\s/@]/.test(host)) throw new Error('Type the server name or address, without spaces, slashes or @.');
     const port = Number(input.port) || DEFAULT_PORT[protocol];
@@ -915,16 +942,21 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
       }
       return ok;
     };
-    const onClose = () => {
+    // `message`: why, when it is known (a container that stopped).
+    const onClose = (message = '') => {
       if (probe) return;
       const l = live.get(conn.id);
       // Only when this is the session in use (one given up while connecting closes on its own).
       if (l?.session && l.session === opened) {
-        live.set(conn.id, { state: 'disconnected', error: '' });
-        onStatus({ id: conn.id, state: 'disconnected', error: '' });
+        live.set(conn.id, { state: 'disconnected', error: message });
+        onStatus({ id: conn.id, state: 'disconnected', error: message });
       }
     };
-    const opened = conn.protocol === 'sftp' ? new SftpSession(conn, { secret, verifyHost, onClose, ask, remember, through }) : new FtpSession(conn, { secret, onClose, ask, remember });
+    const opened = places.isPlace(conn.protocol)
+      ? new places.ExecSession(conn, { tool: conn.protocol === 'docker' ? await placeTools.docker() : await placeTools.wsl(), onClose })
+      : conn.protocol === 'sftp'
+        ? new SftpSession(conn, { secret, verifyHost, onClose, ask, remember, through })
+        : new FtpSession(conn, { secret, onClose, ask, remember });
     try {
       return await opened.open();
     } catch (err) {
@@ -1005,6 +1037,8 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
 
   // A folder and what is in it, links left out: [{ path, dir, mode }], the folder first.
   async function walkNoLinks(s, p) {
+    // A place lists a level of folders per command.
+    if (s.walk) return s.walk(p, { links: false, max: MAX_COPY_ENTRIES });
     const st = await s.stat(p);
     if (!st) throw Object.assign(new Error('Not found on the server.'), { notFound: true });
     const out = [{ path: p, dir: st.dir, mode: st.mode }];
@@ -1032,6 +1066,7 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
 
   // Files and folders under `p` (for copying between places), at most MAX_COPY_ENTRIES.
   async function walk(s, p, out = []) {
+    if (s.walk && !out.length) return s.walk(p, { max: MAX_COPY_ENTRIES });
     const st = await s.stat(p);
     if (!st) throw Object.assign(new Error('Not found on the server.'), { notFound: true });
     out.push({ path: p, dir: st.dir, mode: st.mode, size: st.dir ? 0 : st.size });
@@ -1151,6 +1186,16 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
       }
     },
 
+    // ---- Places to open: Docker containers and WSL distributions (places.cjs) ----
+    /** { docker: [containers] | null, wsl: [names] | null, notes }: null where the kind is not available. */
+    places: () => places.listPlaces(placeTools),
+    /** Whether each kind can be offered at all (its program is here), without asking Docker anything. */
+    async placeKinds() {
+      return { docker: Boolean(await placeTools.docker()), wsl: Boolean(await placeTools.wsl()) };
+    },
+    /** Starts a stopped container picked from the list. */
+    startContainer: (name) => places.startContainer(placeTools, name),
+
     // ---- Connecting ----
     status,
     async connect(id) {
@@ -1170,7 +1215,7 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
     },
     isConnected: (id) => (checkAlive(id), live.get(id)?.state === 'connected'),
     /** Whether a path is on an FTP or FTPS server (one command at a time there). */
-    isFtp: (uri) => data.connections.find((c) => c.id === parseUri(uri).id)?.protocol !== 'sftp',
+    isFtp: (uri) => ['ftp', 'ftps'].includes(data.connections.find((c) => c.id === parseUri(uri).id)?.protocol),
     /** A readable name for a path: "name: /path". */
     label(uri) {
       const { id, path: p } = parseUri(uri);
@@ -1178,10 +1223,10 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
       return `${conn?.name ?? 'Server'}: ${p}`;
     },
 
-    /** A terminal on an SFTP (SSH) server, in `cwd`: resolves with its channel. */
+    /** A terminal on an SFTP (SSH) server or in a place, in `cwd`: resolves with its channel (a place's: a pseudo-terminal here). */
     async openShell(id, { cols, rows, cwd } = {}) {
       const conn = find(id);
-      if (conn.protocol !== 'sftp') throw new Error(`${conn.name} is an ${protocolLabel(conn.protocol)} server; a terminal needs SSH (SFTP).`);
+      if (!SHELL_PROTOCOLS.includes(conn.protocol)) throw new Error(`${conn.name} is an ${protocolLabel(conn.protocol)} server; a terminal needs SSH (SFTP).`);
       const s = await session(id);
       try {
         return await s.shell({ cols, rows, cwd });
@@ -1190,11 +1235,11 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
       }
     },
 
-    // ---- Language servers (lsp.cjs, lspRemote.cjs): only on SSH servers that are not Windows ----
-    /** The SSH session for running programs on a server (connecting when needed). */
+    // ---- Language servers (lsp.cjs, lspRemote.cjs): on SSH servers that are not Windows, and in places ----
+    /** The session for running programs on a server or in a place (connecting when needed). */
     async commandSession(id) {
       const conn = find(id);
-      if (conn.protocol !== 'sftp') throw new Error(`${conn.name} is an ${protocolLabel(conn.protocol)} server; programs run only over SSH (SFTP).`);
+      if (!SHELL_PROTOCOLS.includes(conn.protocol)) throw new Error(`${conn.name} is an ${protocolLabel(conn.protocol)} server; programs run only over SSH (SFTP).`);
       const s = await session(id);
       if (await s.windows()) throw new Error(`${conn.name} runs Windows: language servers run there only on Linux and macOS servers.`);
       return s;
@@ -1203,6 +1248,7 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
     async run(id, script, { timeout = 30000, max = 256 * 1024 } = {}) {
       const conn = find(id);
       const s = await this.commandSession(id);
+      if (s.runScript) return s.runScript(script, { timeout, max });
       let stream;
       try {
         stream = await s.exec(`sh -c ${shellQuote(script)}`);
@@ -1246,6 +1292,13 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
     // ---- Files (as diskFiles.cjs does for files on disk) ----
     read: (uri) =>
       withPath(uri, async (s, p) => {
+        // A place reads the file and its stat in one command.
+        if (s.readFile && !disk.documentKind(posix.basename(p))) {
+          const got = await s.readFile(p, { max: disk.MAX_FULL, keep: disk.TAIL });
+          const decoded = disk.decode(got.bytes);
+          if (got.truncated) decoded.text = decoded.text.slice(decoded.text.indexOf('\n') + 1);
+          return { path: uri, name: posix.basename(p), ...decoded, mtimeMs: got.st.mtimeMs, size: got.st.size, truncated: got.truncated };
+        }
         const st = await s.stat(p);
         if (!st) throw Object.assign(new Error('Not found on the server.'), { notFound: true });
         if (st.dir) throw new Error(`${posix.basename(p)} is a folder.`);
@@ -1258,6 +1311,8 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
       }, { again: true }),
     write: (uri, text, { eol, bom, encoding, expectedMtime, expectedSize, force = false } = {}) =>
       withPath(uri, async (s, p) => {
+        // A place checks and writes in one command (through a .part file there).
+        if (s.writeChecked) return s.writeChecked(p, disk.encode(text, { eol, bom, encoding }), force || expectedMtime === undefined ? {} : { expectedMtime, expectedSize });
         if (!force && expectedMtime !== undefined) {
           const now = await s.stat(p);
           // Changed on the server since it was read here (FTP servers may not give a time: the size then).
@@ -1285,6 +1340,11 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
       }),
     readBytes: (uri, max) =>
       withPath(uri, async (s, p) => {
+        if (s.readFile) {
+          const got = await s.readFile(p, { max, keep: 0 });
+          if (got.truncated) throw new Error(`${posix.basename(p)} is too large.`);
+          return got.bytes;
+        }
         const st = await s.stat(p);
         if (!st || st.dir) throw new Error('Not found on the server.');
         if (st.size > max) throw new Error(`${posix.basename(p)} is too large.`);
@@ -1378,6 +1438,7 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
     /** The size of a folder and what is in it: { size, files, folders, truncated }. */
     folderSize: (uri) =>
       withPath(uri, async (s, p) => {
+        if (s.folderSize) return s.folderSize(p);
         const out = { size: 0, files: 0, folders: 0, truncated: false };
         const pending = [p];
         const until = Date.now() + 60000;
@@ -1402,6 +1463,7 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
     /** Everything under a folder: { 'rel/path': { dir, size, mtimeMs } }, without what `skip(rel)` leaves out. */
     listTree: (uri, skip = () => false, max = 50000) =>
       withPath(uri, async (s, root) => {
+        if (s.listTree) return s.listTree(root, skip, max);
         const out = {};
         const pending = [''];
         let count = 0;

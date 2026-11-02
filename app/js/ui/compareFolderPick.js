@@ -12,7 +12,7 @@ import { getSettings } from '../settings.js';
 import { onServers, server, servers, serverStatus } from '../servers.js';
 import { folderColor } from '../tabGroups.js';
 import { folderGroupOf } from '../tabViews.js';
-import { isRemotePath, KINDS, protocolName, remoteParts, toRemoteUri } from '../where.js';
+import { connDetail, connIcon, connLabel, isRemotePath, KINDS, remoteParts, toRemoteUri } from '../where.js';
 import { ClearButton, Modal } from './components.js';
 import { Icon } from './icons.js';
 
@@ -148,7 +148,7 @@ export function CompareFolderDialog({ other = '', side = 'right', panes = false,
       if (color && b.kind !== 'next') taken.add(color);
       if (b.kind === 'server') {
         const c = server(b.server);
-        return { ...b, label: c?.name ?? 'Server', where: [`${protocolName(c?.protocol)} · ${c?.user ? `${c.user}@` : ''}${c?.host ?? ''}`, b.root && (innerPath(b.root) || '/')].filter(Boolean).join(' · '), remote: true, color };
+        return { ...b, label: connLabel(c), icon: connIcon(c), where: [connDetail(c), b.root && (innerPath(b.root) || '/')].filter(Boolean).join(' · '), remote: true, color };
       }
       const why = b.kind === 'next' ? `next to ${pathName(other)}` : b.kind === 'picked' ? 'picked before' : '';
       return { ...b, label: pathName(b.root), where: whereOf(b.root), why, remote: isRemotePath(b.root), color };
@@ -318,7 +318,7 @@ export function CompareFolderDialog({ other = '', side = 'right', panes = false,
         title=${b.root ? fullPlace(b.root) : `${b.label}: open it to connect`}
         onClick=${() => (b.kind === 'server' && !b.root ? openServerBlock(b.server) : select(r))} onDblClick=${() => b.root && choose(b.root)}>
       ${twist(r, b.label)}
-      <${Icon} name=${b.remote ? 'server' : 'folder'} size=${15} class="cfp-head-icon" />
+      <${Icon} name=${b.icon ?? (b.remote ? connIcon(server(remoteParts(b.root).id)) : 'folder')} size=${15} class="cfp-head-icon" />
       <span class="cfp-head-name">${b.label}</span>
       ${b.why && html`<span class="cfp-why">${b.why}</span>`}
       <span class="cfp-head-where">${b.where}</span>
