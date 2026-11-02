@@ -145,8 +145,10 @@ test('the model is asked for the merged lines alone, with the sides, the base an
 
 // ---- The ops on real repositories ----
 
-const GIT = spawnSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).stdout.trim();
-const skip = !GIT && 'needs git';
+// Git by its name, as the app runs it (`command -v` in Git for Windows' sh gives /ucrt64/bin/git, which
+// Node cannot start there).
+const GIT = 'git';
+const skip = spawnSync(GIT, ['--version'], { encoding: 'utf8' }).status !== 0 && 'needs git';
 const ident = { GIT_AUTHOR_NAME: 'Tester', GIT_AUTHOR_EMAIL: 't@example.org', GIT_COMMITTER_NAME: 'Tester', GIT_COMMITTER_EMAIL: 't@example.org' };
 
 function repo() {
@@ -156,6 +158,8 @@ function repo() {
   git('init', '-q', '-b', 'main');
   git('config', 'user.name', 'Tester');
   git('config', 'user.email', 't@example.org');
+  // The texts compared are the bytes written (Git for Windows turns line endings to CRLF by default).
+  git('config', 'core.autocrlf', 'false');
   const write = (rel, text) => {
     fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
     fs.writeFileSync(path.join(dir, rel), text);

@@ -368,12 +368,19 @@ try {
     await panel.getByRole('button', { name: 'Stage all' }).click();
     await panel.locator('textarea[aria-label="Commit message"]').fill('Changed from the phone');
     await panel.locator('.git-commit .btn.primary').click({ timeout: 20_000 });
-    const emptied = await panel.getByText('No changes since the last commit.').waitFor({ timeout: 30_000 }).then(() => true, () => false);
+    // Committed: nothing staged and no changes (the Changes section alone says "No changes since the last
+    // commit." as soon as the file is staged, before the commit is made), and the server's own log has it.
+    const emptied = await panel.getByText('Nothing staged', { exact: false }).waitFor({ timeout: 30_000 }).then(() => true, () => false)
+      && (await panel.getByText('No changes since the last commit.').count()) > 0;
     let onServer = '';
-    try {
-      onServer = execFileSync('docker', ['exec', '-u', 'ana', 'git-sshd', 'git', '-C', dir, 'log', '-1', '--format=%s · %an'], { encoding: 'utf8' }).trim();
-    } catch (err) {
-      onServer = String(err.message).slice(0, 200);
+    for (const end = Date.now() + 20_000; ;) {
+      try {
+        onServer = execFileSync('docker', ['exec', '-u', 'ana', 'git-sshd', 'git', '-C', dir, 'log', '-1', '--format=%s · %an'], { encoding: 'utf8' }).trim();
+      } catch (err) {
+        onServer = String(err.message).slice(0, 200);
+      }
+      if (onServer === 'Changed from the phone · Ana Silva' || Date.now() > end) break;
+      await new Promise((r) => setTimeout(r, 500));
     }
     check('…staged and committed there, with the server’s own Git identity', emptied && onServer === 'Changed from the phone · Ana Silva', { emptied, onServer });
     await page.evaluate(async (id) => {
