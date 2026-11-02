@@ -51,3 +51,14 @@ test('0.48: in a change since the last commit, revert or stage it (any kind of f
   // Not in a change: neither.
   assert.ok(!codeMenuItems({ language: 'Python' }).some((i) => i.id?.startsWith('git-')));
 });
+
+test('0.49: in a Git conflict block, its ways out first (any kind of file)', () => {
+  const both = codeMenuItems({ language: 'Python', onName: true, conflict: { mergeView: true, model: true } });
+  assert.equal(ids(both).split(' | ')[0], 'conflict-current conflict-incoming conflict-both conflict-compare conflict-merge conflict-model');
+  assert.deepEqual(both.filter((i) => i.id?.startsWith('conflict-')).map((i) => i.command), ['conflict-accept-current', 'conflict-accept-incoming', 'conflict-accept-both', 'conflict-compare', 'conflict-merge-view', 'conflict-merge-model']);
+  // A text not in Git, no model (or an encrypted note): accept and compare only.
+  assert.equal(ids(codeMenuItems({ language: 'Markdown', conflict: { mergeView: false, model: false } })), 'conflict-current conflict-incoming conflict-both conflict-compare | cut copy paste select-all | find | ask');
+  // Read-only: compare (and the merge view, which edits the file in its own tab).
+  assert.equal(ids(codeMenuItems({ language: 'YAML', readOnly: true, model: false, conflict: { mergeView: true, model: true } })), 'conflict-compare conflict-merge | copy select-all');
+  assert.ok(!codeMenuItems({ language: 'Python' }).some((i) => i.id?.startsWith('conflict-')));
+});

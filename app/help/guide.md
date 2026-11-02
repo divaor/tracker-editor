@@ -212,7 +212,7 @@ For folders in a Git repository, on this computer, on an **SSH (SFTP) server**, 
 - **Staged** and **Changes**: the files the next commit takes, and those changed since. **+** stages a file, **↶** unstages it; **Stage all** and **Unstage all** take them all. Click a file to open it; ⇄ compares it with the last commit.
 - **One change at a time**: click a change's mark in the bar next to the line numbers → **Stage this change**: only that block goes into the next commit, as it is in the editor (the rest of the file stays as a change). **Edit → Code → Stage the Change at the Cursor** does it from the keyboard. The same menu reverts the change or shows it (see *Git in the text* below).
 - **Stash**: **Stash changes…** puts your changes aside (new files too, unless unticked) and brings the files back to the last commit; each stash shows with its note: **Pop** brings it back and drops it, **Apply** brings it back and keeps it, **Drop** throws it away.
-- **A merge or rebase halfway** (files in conflict): the panel says so; fix each file (look for `<<<<<<<`), stage it, then commit, or **Abort the merge**.
+- **A merge or rebase halfway** (files in conflict): the panel says so and lists the files still in conflict under **Conflicts**, each with its ways out (see [Git: merge conflicts](#git-merge-conflicts)). Once none is left, **Finish the merge** makes the merge commit (**Continue the rebase**, the cherry-pick or the revert takes its next step); **Abort the merge** goes back to before it started.
 - In **Folders**, right-click changed files → **Stage (Git)** or **Unstage (Git)**.
 - Commands that change your files (pull, switching branches, the stash) wait while a file of the repository has edits not saved: save it first.
 - Signing in to the remote is Git's own: a credential helper (Git Credential Manager on Windows, the keychain on macOS) or an SSH key with its agent; on a server, the server's own (its key, its agent, its credential helper). The editor never asks for a password in a terminal; when Git cannot sign in, it says so, naming where Git ran.
@@ -229,6 +229,27 @@ For a file in a Git repository, on this computer, on an SSH server, or in a Dock
 - **Each change since the last commit**: click a change's mark in the bar next to the line numbers → **Stage this change**, **Revert this change** (its lines go back to what the last commit has: changed lines get theirs back, lines removed come back, lines added go) or **Show the change**. Reverting is one edit of the text: `Ctrl+Z` brings yours back, and nothing is staged or saved by it. Right-click in a changed block for **Revert this change** and **Stage this change** too.
 - **Show the change** opens a peek under the change: the last commit's lines (−) against yours (+), with **Revert**, **Stage**, **↑** / **↓** for the previous and next change, and **×** (or `Esc`) to close it.
 - **`Alt+F3`** / **`Shift+Alt+F3`** go to the next / previous change in the file (the peek follows when it is open). **Revert the Change at the Cursor**, **Show the Change at the Cursor** and **Stage the Change at the Cursor** are in **Edit → Code** and the command palette, with no keys of their own (give them some in **Settings → Keys**). All of it works in whichever pane you are typing in.
+
+### Git: merge conflicts
+
+When a merge, a rebase, a cherry-pick, a revert or a stash brought back finds the same lines changed both ways, Git stops and writes both versions into the file, between markers:
+
+```
+<<<<<<< HEAD
+the lines on your branch (the current change)
+=======
+the lines from the other branch (the incoming change)
+>>>>>>> feature
+```
+
+- **In the text**: each block's lines are tinted (the current change green, the incoming one blue, and what both changed from grey when Git writes it too: `git config merge.conflictStyle diff3`), and a bar above it offers **Accept current**, **Accept incoming**, **Accept both** (the current lines first), **Compare** (the two side by side, with the same buttons), **Merge view** and **✦ Merge**. Each accept is one edit: `Ctrl+Z` brings the block back. Nothing is saved or staged by it.
+- **Which side is which**: the marker lines say it ("Current change · HEAD · your branch", "Incoming change · feature · the branch merged in"). **During a rebase the sides swap**: the current change is the branch you are rebasing onto, and the incoming one is your own commit being put on top; the bar says so (point at its title).
+- **`Alt+]`** / **`Alt+[`** go to the next / previous block, and the status bar counts them (**2 conflicts**: click it for the next one). The blocks are warnings among the problems (`F8`, the Problems panel, the marks beside the scrollbar); while they are there, the syntax errors the markers themselves cause are left out. Right-click in a block for the same ways out. **Accept the current change of the conflict at the cursor** (incoming, both), **Compare the two sides…**, **Merge view…** and **Merge the conflict at the cursor with the model** are in the command palette, with no keys of their own (give them some in **Settings → Keys**).
+- **✦ Merge** (with a model that answers at once, Settings → Model): the model gets the two sides, what both changed from, the lines around the block and the file's name, and proposes the merged lines. Compare them with the block, then **Accept** (one edit: `Ctrl+Z` takes it back) or **Copy**. Never for an encrypted file: neither its text nor its name go to the model.
+- **The merge view** (**Merge view** on a bar, right-click → **Open the merge view**, or the Git panel): a tab with three columns: the **Current** side as Git keeps it, the **Result** (the file: you edit it, with the same bars) and the **Incoming** side. Each side marks the lines it changed, and outlines the lines of the block you are in as you go from block to block (**↑** / **↓** in its bar). **Ancestor** adds what both sides changed from. **⋯** takes the current or the incoming side for every block at once. **Save** writes the file (its encoding and line endings kept); **Mark resolved** saves it, stages it and closes the tab. On a phone one column at a time: the tabs under the bar switch them.
+- **When the last block in a file is gone**, a toast offers **Save and mark resolved**.
+- **The Git panel** lists the files still in conflict and what happened to each (changed on both sides, added on both, deleted on one side): **Use current** or **Use incoming** takes that side for the whole file and marks it resolved; a file one side deleted offers **Keep the file** or **Delete it**; **Merge view** opens it there; **Mark resolved** stages the file as it is (it asks first while conflict blocks are still in it, and saves unsaved edits first). Once none is left, **Finish the merge** makes the merge commit with Git's message (**Continue the rebase**, the cherry-pick or the revert goes on); **Abort** goes back to before it started.
+- Files on an SSH server, in a container or in WSL work the same way (Git runs there). A text with markers that is not in Git (a note, a file sent to you) gets the bars and the model's merge too, without the merge view.
 
 ### Git: history and the commit graph (desktop)
 
