@@ -701,6 +701,35 @@ Stop a program on a line and look inside it: **Python** (through **debugpy**) an
   - **JavaScript and TypeScript**: js-debug's server, downloaded from its GitHub release into the editor's own folder (`debuggers` next to its settings) with `curl` and `tar` (Windows 10 and later have both). The programs run on your own **Node.js** (nodejs.org). TypeScript files run through the project's **tsx** when it has one, else Node's own (Node 23.6 or later runs `.ts` files as they are).
 - Programs run in the debug console, not in a terminal: what they print shows there; a program that waits for typed input cannot get it there (run it with `F5` in a terminal instead).
 
+### Settings per project (desktop)
+
+A `.tracker-editor.json` file in a project's folder gives that project's files settings of their own, kept with the project (commit it, and the project brings them wherever it is opened in Tracker Editor).
+
+- **Open it, or make one**: the command **This project's settings** (`Ctrl+Shift+P`), **This project's settings…** in the Run group's **▾**, or **Settings → Editor → This project**. It opens the nearest one above the open file, or makes one where the project starts (its Git repository's top, else the folder with its `package.json`, `pyproject.toml`…) with every setting written out and commented: take out the `//` before what you need. It is JSON with comments and trailing commas.
+- **Which one counts**: the nearest from the open file's folder up to the folder you opened in Folders (or a Git repository's top, or 6 folders up). One in a folder inside the project counts for that folder's files instead; the two are not merged. On an SSH server, the project's own file there.
+- **What it can say**:
+
+  ```jsonc
+  {
+    "run": { ".py": "python -m app", ".js": "node --inspect {file}" },
+    "tasks": [{ "name": "serve", "command": "npm run dev", "cwd": "web" }],
+    "env": { "DEBUG": "1" },
+    "languages": { "python": { "server": "basedpyright" }, "yaml": { "off": true } },
+    "formatter": "builtin",
+    "tests": "vitest"
+  }
+  ```
+
+  - `run`: what `F5` runs for each type, over **Settings → Editor → Run commands** (`{file}`, `{name}` and `{dir}` as there; `""` turns a type off). The Run group's **▶** follows it.
+  - `tasks`: added to **Tasks** (`Ctrl+Shift+B`) under **This project's settings**: a name, the command as you would type it, and a folder inside the project to run it in (`cwd`, optional).
+  - `env`: variables set in the terminal before what `F5`, the tests and the tasks run there (`export` in bash and zsh, `$env:` in PowerShell, `set` in the Command Prompt), where you see them; they stay set in that terminal. Values are taken as written: no `$VARIABLES` inside.
+  - `languages`: by language server (`typescript`, `python`, `go`, `rust`, `c`, `java`, `csharp`, `json`, `css`, `html`, `yaml`, `bash`): `"off": true`, `"server"` (TypeScript's `tsc` or `tls`, Python's `pyright` or `basedpyright`) and `"formatter"`. It can turn a server off or pick one of the two; it never names a program, and never turns on one you turned off in Settings.
+  - `formatter`: `"server"` (the language server first) or `"builtin"` (Prettier and the editor's own), for **Format document**.
+  - `tests`: the test framework when the one found is not right: `vitest`, `jest`, `mocha`, `node`, `pytest`, `unittest`, `phpunit` or `pest`.
+  - Anything else is left out, and so is a value that does not check out; **Settings → Editor → This project** lists what and why.
+- **Trust**: run commands, tasks and variables change what runs, so they count only once you trust the file. The first time you run something they would change (`F5`, a task, the tests), a dialog names the project's folder and shows each command and variable: **Allow it** or **Don't allow**. The answer is kept for the file as it is: when it changes (saved here, or by a `git pull`), you are asked again. Until you allow it they are left out (a message says so, with **Trust…**), and the rest of its settings still count. **Trust…** in **Settings → Editor → This project** or in the Tasks list asks again; **Stop trusting** takes it back. Nothing in the file runs by itself: only what you run.
+- **Project** (⚙) in the status bar shows when the open file's project has one, marked while it waits for your trust; click it to open the file.
+
 ### Terminal tabs: names, order, two side by side (desktop)
 
 Each terminal is a tab in the panel. With a few open (a server, this computer, a build running), these keep them apart:

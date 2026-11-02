@@ -389,3 +389,13 @@ test('files of two projects opened together: the second waits to hear whether th
   assert.ok(Date.now() - started < 3000);
   host.stopAll();
 });
+
+test('JSON files that take comments are jsonc to the server (the project settings file too)', () => {
+  const json = lsp.CATALOG.find((e) => e.id === 'json');
+  assert.equal(lsp.languageIdOf(json, '/p/.tracker-editor.json'), 'jsonc');
+  assert.equal(lsp.languageIdOf(json, '/p/tsconfig.build.json'), 'jsonc');
+  assert.equal(lsp.languageIdOf(json, '/p/.vscode/settings.json'), 'jsonc');
+  assert.equal(lsp.languageIdOf(json, '/p/package.json'), 'json');
+  assert.equal(lsp.languageIdOf(json, '/p/a.jsonc'), 'jsonc');
+  assert.equal(lsp.languageIdOf(lsp.CATALOG.find((e) => e.id === 'python'), '/p/settings.py'), 'python');
+});

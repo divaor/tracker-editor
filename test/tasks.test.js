@@ -78,3 +78,18 @@ test('groups from the files found, and the line typed: names quoted for the shel
   assert.equal(taskLine(odd, 'C:\\w', { kind: 'powershell', quote: quoteFor, line: runLine }), "Set-Location -LiteralPath 'C:\\w'; npm run 'x; rm -rf ~'");
   assert.equal(taskLine(groups[0].tasks[1], '/w/my app', { kind: 'posix', quote: quoteFor, line: runLine }), "cd -- '/w/my app' && npm run build");
 });
+
+test('a project’s settings: its tasks (once trusted) and the names of those waiting', () => {
+  const groups = taskGroups([
+    { dir: '/w/app', name: '.tracker-editor.json', project: { path: '/w/app/.tracker-editor.json', tasks: [{ name: 'serve', command: 'npm run dev -- --port 3000', cwd: '/w/app/web', detail: '' }], held: [], trusted: true } },
+    { dir: '/w/other', name: '.tracker-editor.json', project: { path: '/w/other/.tracker-editor.json', tasks: [], held: ['build', 'deploy'], trusted: false } },
+    { dir: '/w/none', name: '.tracker-editor.json', project: { path: '/w/none/.tracker-editor.json', tasks: [], held: [], trusted: true } },
+    { dir: '/w/app', name: 'package.json', text: JSON.stringify({ scripts: { build: 'tsc' } }), siblings: [] },
+  ]);
+  assert.deepEqual(groups.map((g) => [g.dir, g.kind, g.tasks.length, g.held?.length ?? 0]), [['/w/app', 'project', 1, 0], ['/w/other', 'project', 0, 2], ['/w/app', 'npm', 1, 0]]);
+  const [serve] = groups[0].tasks;
+  assert.deepEqual(serve, { name: 'serve', command: { line: 'npm run dev -- --port 3000' }, detail: 'npm run dev -- --port 3000 · in web', cwd: '/w/app/web' });
+  // Typed as written (the person's own line), with the variables first.
+  assert.equal(taskLine(serve, '/w/app/web', { kind: 'posix', quote: quoteFor, line: runLine, env: { PORT: '3000' } }), 'export PORT=3000; cd -- /w/app/web && npm run dev -- --port 3000');
+  assert.equal(taskLine(groups[2].tasks[0], 'C:\\w', { kind: 'cmd', quote: quoteFor, line: runLine, env: { CI: '1' } }), 'set "CI=1" && cd /d "C:\\w" && npm run build');
+});

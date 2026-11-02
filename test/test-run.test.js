@@ -45,6 +45,16 @@ test('the framework: from the file’s imports, then the project files above it'
   assert.equal(detectFramework({ name: 'notes.md', dirs: [] }), null);
 });
 
+test('the framework a project’s settings name wins, for the file’s language only', () => {
+  const pkg = [dir('/p', ['package.json', 'pnpm-lock.yaml'], { 'package.json': JSON.stringify({ devDependencies: { vitest: '5' } }) })];
+  assert.deepEqual(detectFramework({ name: 'a.test.js', dirs: pkg, prefer: ['jest'] }), { framework: 'jest', root: '/p', runner: ['pnpm', 'exec'] });
+  assert.deepEqual(detectFramework({ name: 'a.test.js', text: "import { test } from 'vitest'", dirs: pkg, prefer: ['node'] }), { framework: 'node', root: '/p', runner: [] }, 'over the file’s own import too');
+  assert.equal(detectFramework({ name: 'a.test.js', dirs: pkg, prefer: ['pytest'] }).framework, 'vitest', 'a Python framework does not change a JavaScript file');
+  assert.equal(detectFramework({ name: 'test_a.py', dirs: [dir('/p', ['pyproject.toml'])], prefer: ['vitest', 'unittest'] }).framework, 'unittest');
+  assert.equal(detectFramework({ name: 'MathTest.php', dirs: [dir('/w', ['composer.json'])], prefer: ['pest'] }).framework, 'pest');
+  assert.equal(detectFramework({ name: 'a.test.js', dirs: pkg, prefer: null }).framework, 'vitest');
+});
+
 test('the tests a file declares, with their lines and suites', () => {
   const vitest = testsInFile(fixture('vitest.test.js.txt'), 'vitest');
   assert.deepEqual(vitest.map((t) => [t.kind, t.name, t.line, t.end]), [['suite', 'math', 2, 10], ['test', 'math adds', 3, 5], ['test', 'math subtracts', 6, 8], ['test', 'math later', 9, 9]]);

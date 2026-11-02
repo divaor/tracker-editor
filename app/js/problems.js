@@ -19,7 +19,7 @@ export function isJsonc(name = '') {
     /\.(jsonc|json5|code-workspace)$/.test(base) ||
     /^(ts|js)config(\..*)?\.json$/.test(base) ||
     /^\.?(eslintrc|babelrc|swcrc|jshintrc)(\.json)?$/.test(base) ||
-    ['settings.json', 'launch.json', 'tasks.json', 'keybindings.json', 'extensions.json', 'devcontainer.json', '.devcontainer.json', 'deno.json', 'biome.json'].includes(base)
+    ['settings.json', 'launch.json', 'tasks.json', 'keybindings.json', 'extensions.json', 'devcontainer.json', '.devcontainer.json', 'deno.json', 'biome.json', '.tracker-editor.json'].includes(base)
   );
 }
 

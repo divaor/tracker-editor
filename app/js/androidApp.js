@@ -608,6 +608,12 @@ function install() {
       onData: (cb) => nodeOn('term:data', cb),
       onExit: (cb) => nodeOn('term:exit', cb),
     },
+    // Settings per project: trusting one is asked by the app's Node.js through the phone's own dialog.
+    project: {
+      settings: (target, opts) => nodeInvoke('project:settings', target, opts),
+      trust: (path) => nodeInvoke('project:trust', path),
+      untrust: (path) => nodeInvoke('project:untrust', path),
+    },
     ask: {
       folders: (searchId, dirs, plan, opts) => nodeInvoke('ask:folders', searchId, dirs, plan, opts),
       stop: (searchId) => nodeInvoke('ask:stop', searchId),

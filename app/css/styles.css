@@ -1461,6 +1461,125 @@ button.project-chip:hover {
   font-size: 13px;
 }
 
+/* Settings per project (project.js): Settings → Editor's "This project", the status bar's
+   ⚙ Project and the Tasks dialog's tasks that wait for trust. The card's edge and icon take the
+   file's tone: trusted or nothing to trust, waiting for trust, unusable. */
+.project-note > p {
+  margin: 2px 0 0;
+}
+
+.project-card {
+  --tone: var(--done);
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--tone);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.project-card.tone-warn {
+  --tone: var(--warn);
+}
+
+.project-card.tone-error {
+  --tone: var(--danger);
+}
+
+.project-card p {
+  margin: 0;
+}
+
+.project-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.project-head .icon {
+  flex: none;
+  color: var(--tone);
+}
+
+.project-head strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-head code {
+  flex: none;
+  font-size: 12.5px;
+}
+
+/* The folder's path, cut at its start: its end says the most. */
+.project-where {
+  overflow: hidden;
+  margin-top: -4px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.project-where bdi {
+  direction: ltr;
+}
+
+.project-state {
+  font-size: 13.5px;
+}
+
+.project-problems {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+.project-problems li {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+
+.project-problems .icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--warn);
+}
+
+.project-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.status-project.tone-warn .icon {
+  color: var(--warn);
+}
+
+.status-project.tone-error .icon {
+  color: var(--danger);
+}
+
+.tasks-held {
+  align-items: center;
+  margin: 4px 0 6px !important;
+  font-size: 13px;
+}
+
+.tasks-held .btn {
+  flex: none;
+}
+
 /* ---- Toasts & overlays ------------------------------------------------------ */
 .toasts {
   position: fixed;

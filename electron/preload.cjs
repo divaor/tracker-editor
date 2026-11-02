@@ -296,6 +296,13 @@ contextBridge.exposeInMainWorld('desktop', {
       return () => ipcRenderer.removeListener('term:exit', listener);
     },
   },
+  // Settings per project (.tracker-editor.json): what the main process found for a file or a folder
+  // ({ folder, fresh }); trusting one is asked in a native dialog there, never answered here.
+  project: {
+    settings: (target, opts) => ipcRenderer.invoke('project:settings', target, opts),
+    trust: (path) => ipcRenderer.invoke('project:trust', path),
+    untrust: (path) => ipcRenderer.invoke('project:untrust', path),
+  },
   // Language servers (lsp.cjs) for files here, on SSH servers and synced: the page names a file, never a program.
   lsp: {
     start: (path, opts) => ipcRenderer.invoke('lsp:start', path, opts),

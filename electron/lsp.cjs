@@ -346,6 +346,12 @@ function cleanLanguages(opts) {
   return { off, prefer };
 }
 
+// JSON files that take comments (VS Code reads them as jsonc; the editor's own project settings
+// too): the JSON server is told so, and does not mark their comments.
+const JSONC_FILES = /^(\.tracker-editor|tsconfig(\..+)?|jsconfig(\..+)?|\.?devcontainer|settings|launch|tasks|keybindings|extensions)\.json$/i;
+/** The LSP languageId of a file for its catalog entry. */
+const languageIdOf = (entry, file) => (entry.id === 'json' && JSONC_FILES.test(path.basename(String(file))) ? 'jsonc' : entry.languageIds[path.extname(String(file)).toLowerCase()]);
+
 /** The commands Set up… offers for an entry on this platform. */
 const installFor = (entry, platform = process.platform) => (Array.isArray(entry.install) ? entry.install : (entry.install?.[platform] ?? entry.install?.default ?? []));
 
@@ -822,7 +828,7 @@ function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath
     const entries = catalog().filter((e) => !(connId && e.custom) && !off.includes(e.id));
     const entry = catalogFor(file, entries);
     if (!entry) return { none: true };
-    const languageId = entry.languageIds[path.extname(file).toLowerCase()];
+    const languageId = languageIdOf(entry, file);
     const prefer = (entry.choices ?? []).some((c) => c.id === chosen[entry.id]) ? chosen[entry.id] : '';
     if (connId) return startRemote(sender, file, entry, languageId, connId, stopDir, prefer);
     const where = note ? { kind: 'notes' } : { kind: 'local' };
@@ -976,4 +982,4 @@ function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath
   return { start, write, stop, restart, list, stopAll, stopEntry, stopRemote, multiRoot };
 }
 
-module.exports = { frame, createReader, CATALOG, JSON_SCHEMAS, catalogFor, catalogRows, cleanLanguages, installFor, findRoot, rootFor, searchPath, runnable, typescriptIn, searchEnv, serverEnv, shellPath, locate, createLspHost, parseArgs, cleanCustom, customEntry, MAX_SERVERS };
+module.exports = { frame, createReader, CATALOG, JSON_SCHEMAS, catalogFor, catalogRows, cleanLanguages, languageIdOf, installFor, findRoot, rootFor, searchPath, runnable, typescriptIn, searchEnv, serverEnv, shellPath, locate, createLspHost, parseArgs, cleanCustom, customEntry, MAX_SERVERS };

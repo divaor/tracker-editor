@@ -527,6 +527,108 @@ const shellsHere = async () => {
   return localShell.listShells({ distros: process.platform === 'win32' ? await wslDistros : [] });
 };
 ipcMain.handle('term:shells', guard(async () => (await shellsHere()).map(({ id, label, kind }) => ({ id, label, kind }))));
+// ---- Settings per project: the nearest .tracker-editor.json above a file (projectSettings.cjs) ----
+// Looked for up to the folder picked (only a file's own folder for a file opened alone), a Git
+// repository's top or 6 up; on servers through their connection. What changes what runs (run
+// commands, tasks, variables) reaches the page only once the person trusted the file as it is,
+// in the native dialog of project:trust; the answers are kept in prefs.json (`projectTrust`, by
+// path with the text's SHA-256), which prefs:set cannot touch. Languages are choices among the
+// catalog's ways only: a project file never names a program.
+const projectSettings = require('./projectSettings.cjs');
+const projectCache = new Map(); // folder (as the page names it) → { at, info, text }
+const projectCatalog = () => lsp.CATALOG.map((e) => ({ id: e.id, choices: (e.choices ?? []).map((c) => c.id) }));
+async function loadProject(where, { fresh = false } = {}) {
+  const remoteDir = isRemote(where) ? remoteFiles.parseUri(where) : null;
+  const known = projectCache.get(where);
+  if (!fresh && known && Date.now() - known.at < (remoteDir ? 10_000 : 2_000)) return known;
+  const p = remoteDir ? path.posix : path;
+  const uri = (d) => (remoteDir ? remoteFiles.toUri(remoteDir.id, d) : d);
+  // A server not connected is not connected for this (a run, asking afresh, connects it anyway).
+  if (remoteDir && !fresh && !remote.isConnected(remoteDir.id)) return known ?? { at: 0, info: { path: null, dir: null, root: where, settings: projectSettings.emptySettings(), held: null, trusted: false, declined: false, needsTrust: false, problems: [] }, text: null };
+  const start = remoteDir ? remoteDir.path : where;
+  const stop = remoteDir ? null : (allowedFolders.find((f) => folders.allowedBy([f], start)) ?? '');
+  const list = async (d) => (remoteDir ? (await remote.list(uri(d))).map((e) => e.name) : fs.readdirSync(d));
+  const found = await projectSettings.findProjectFile(start, { list, path: p, stop });
+  let text = null;
+  if (found.file) {
+    try {
+      const bytes = remoteDir ? await remote.readBytes(uri(found.file), projectSettings.MAX_BYTES) : fs.statSync(found.file).size <= projectSettings.MAX_BYTES ? fs.readFileSync(found.file) : null;
+      text = bytes ? bytes.toString('utf8') : null;
+    } catch {
+      text = null;
+    }
+  }
+  const join = (dir, rel) => (remoteDir ? remoteFiles.toUri(remoteDir.id, p.join(remoteFiles.parseUri(dir).path, rel)) : p.join(dir, rel));
+  const info = found.file
+    ? projectSettings.projectInfo(text, { path: uri(found.file), dir: uri(found.dir), root: uri(found.root), trust: prefs?.projectTrust, catalog: projectCatalog(), join })
+    : { path: null, dir: null, root: uri(found.root), settings: projectSettings.emptySettings(), held: null, trusted: false, declined: false, needsTrust: false, problems: [] };
+  const entry = { at: Date.now(), info, text };
+  projectCache.set(where, entry);
+  return entry;
+}
+// The project around a file (or a folder, `folder`), checked like the file itself.
+async function projectFor(target, { folder = false, fresh = false } = {}) {
+  if (isRemote(target)) {
+    const { id, path: q } = remoteFiles.parseUri(target);
+    return loadProject(remoteFiles.toUri(id, folder ? q : path.posix.dirname(q)), { fresh });
+  }
+  if (folder) checkDir(target);
+  else checkFile(target);
+  return loadProject(folder ? target : path.dirname(target), { fresh });
+}
+// A project file the page names (Trust, Stop trusting): one in a folder picked, or next to a file opened.
+async function projectFileEntry(file) {
+  const remoteFile = typeof file === 'string' && isRemote(file) ? remoteFiles.parseUri(file) : null;
+  const base = typeof file !== 'string' ? '' : remoteFile ? path.posix.basename(remoteFile.path) : path.basename(file);
+  if (base !== projectSettings.PROJECT_FILE) throw new Error('That is not a project settings file.');
+  const where = remoteFile ? remoteFiles.toUri(remoteFile.id, path.posix.dirname(remoteFile.path)) : path.dirname(file);
+  if (!remoteFile && !folders.allowedBy(allowedFolders, where) && ![...allowedFiles].some((f) => path.dirname(f) === where)) throw new Error('That folder was not opened here.');
+  const entry = await loadProject(where, { fresh: true });
+  if (entry.info.path !== file) throw new Error('That project settings file is not there any more.');
+  return entry;
+}
+// What the page is told: never what waits for trust (only its names, in `held`).
+const pageProject = ({ full, ...info }) => info;
+ipcMain.handle('project:settings', guard(async (_e, target, opts = {}) => {
+  if (typeof target !== 'string' || !target) return null;
+  return pageProject((await projectFor(target, { folder: Boolean(opts?.folder), fresh: Boolean(opts?.fresh) })).info);
+}));
+// The person trusts a project file as it is now, or not, in a native dialog that names its
+// folder and shows each command and variable it would use; a no is kept too (asked again when
+// the file changes, or from Trust… in the page).
+ipcMain.handle('project:trust', guard(async (event, file) => {
+  const { info, text } = await projectFileEntry(file);
+  if (info.broken || text === null) throw new Error(info.problems[0]?.message ?? 'The project settings file could not be read.');
+  if (!info.needsTrust) return { trusted: true, nothing: true };
+  const remoteDir = isRemote(info.dir) ? remoteFiles.parseUri(info.dir) : null;
+  const shown = remoteDir ? `${remote.connections().find((c) => c.id === remoteDir.id)?.name ?? 'A server'}: ${remoteDir.path}` : info.dir;
+  const name = (remoteDir ? remoteDir.path : info.dir).split(/[\\/]/).filter(Boolean).pop() || shown;
+  const { response } = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender) ?? mainWindow, {
+    type: 'warning',
+    buttons: ['Don’t allow', 'Allow it'],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+    title: 'Project settings',
+    message: `Let the project “${name}” change what runs?`,
+    detail: projectSettings.trustDetail(info.full, { folder: shown }),
+  });
+  const allow = response === 1;
+  prefs.projectTrust = projectSettings.rememberTrust(prefs.projectTrust, info.path, projectSettings.trustHash(text), allow);
+  writeJson('prefs.json', prefs);
+  projectCache.clear();
+  return { trusted: allow };
+}));
+// Stop trusting it: no question (trusting less needs none); kept as a no for the file as it is.
+ipcMain.handle('project:untrust', guard(async (_e, file) => {
+  const { info, text } = await projectFileEntry(file);
+  if (text !== null) {
+    prefs.projectTrust = projectSettings.rememberTrust(prefs.projectTrust, info.path, projectSettings.trustHash(text), false);
+    writeJson('prefs.json', prefs);
+  }
+  projectCache.clear();
+  return { trusted: false };
+}));
 // The tasks list: the project files (package.json, Makefile, pyproject.toml, composer.json) in
 // each folder given and the folders above it, up to the folder picked (here) or a Git
 // repository's top (both), at most 6 up; with the lock files next to each (which tool runs
@@ -536,6 +638,7 @@ const TASK_FILES = ['package.json', 'Makefile', 'makefile', 'GNUmakefile', 'pypr
 const LOCK_FILES = ['pnpm-lock.yaml', 'yarn.lock', 'bun.lockb', 'bun.lock', 'uv.lock', 'poetry.lock', 'pdm.lock'];
 ipcMain.handle('tasks:files', guard(async (_e, dirs) => {
   const out = [];
+  const projects = []; // the projects' settings (.tracker-editor.json), first
   const seen = new Set();
   for (const start of (Array.isArray(dirs) ? dirs : []).filter((d) => typeof d === 'string').slice(0, 12)) {
     const remoteDir = isRemote(start) ? remoteFiles.parseUri(start) : null;
@@ -549,6 +652,13 @@ ipcMain.handle('tasks:files', guard(async (_e, dirs) => {
         continue;
       }
       stop = allowedFolders.find((f) => folders.allowedBy([f], dir)) ?? '';
+    }
+    // The tasks of the project's settings: only once the file is trusted (else their names, to say so).
+    try {
+      const { info } = await loadProject(start);
+      if (info.path && !projects.some((x) => x.project.path === info.path)) projects.push({ dir: info.dir, name: projectSettings.PROJECT_FILE, project: { path: info.path, tasks: info.settings.tasks, held: info.held?.tasks ?? [], trusted: info.trusted } });
+    } catch {
+      // unreadable: left out
     }
     for (let up = 0; up < 6; up++) {
       const where = remoteDir ? remoteFiles.toUri(remoteDir.id, dir) : dir;
@@ -576,7 +686,7 @@ ipcMain.handle('tasks:files', guard(async (_e, dirs) => {
       dir = parent;
     }
   }
-  return out;
+  return [...projects, ...out];
 }));
 // ---- Running tests: the project around a test file, and where a run writes its report ----
 const testProject = require('./testProject.cjs');
@@ -786,17 +896,19 @@ function lspSender(sender) {
 }
 ipcMain.handle('lsp:start', guard(async (event, file, opts = {}) => {
   if (typeof file !== 'string') return { none: true };
+  // `languages`: Settings' languages turned off and servers chosen (entry ids; lsp.cjs checks
+  // them), with the project's settings over them (a language off, one of its servers).
+  const languages = projectSettings.withProjectLanguages(opts?.languages, (await projectFor(file).catch(() => null))?.info.settings.languages);
   if (isRemote(file)) {
     // On a server: the project search stops at the folder the page shows there, else at home.
     const { id, path: where } = remoteFiles.parseUri(file);
     const shown = typeof opts?.stop === 'string' && isRemote(opts.stop) ? remoteFiles.parseUri(opts.stop) : null;
-    return lspHost.start(lspSender(event.sender), where, { remote: id, stop: shown?.id === id ? shown.path : '', languages: opts?.languages });
+    return lspHost.start(lspSender(event.sender), where, { remote: id, stop: shown?.id === id ? shown.path : '', languages });
   }
   checkFile(file);
   // The project folder is looked for up to the folder the person picked, not above it.
   const stop = allowedFolders.find((f) => folders.allowedBy([f], file)) ?? '';
-  // `languages`: Settings' languages turned off and servers chosen (entry ids; lsp.cjs checks them).
-  return lspHost.start(lspSender(event.sender), file, { stop, languages: opts?.languages });
+  return lspHost.start(lspSender(event.sender), file, { stop, languages });
 }));
 // A synced file or tracker document (`key`, the tab's): a file that exists only in the editor,
 // named `name`, in a folder of its own under the notes folder (empty folders: the servers look
@@ -2482,6 +2594,8 @@ function loadPrefs() {
         return [];
       }
     }),
+    // Projects' settings files trusted or not (project:trust), by path with their text's hash.
+    projectTrust: projectSettings.cleanTrust(saved.projectTrust),
   };
 }
 const prefsState = () => ({

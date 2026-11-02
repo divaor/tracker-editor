@@ -30,6 +30,7 @@ import { looksLikeVisionModel } from '../ocr.js';
 import { isAndroidApp, isDesktopApp } from '../platform.js';
 import { minimapShown } from '../minimapLayout.js';
 import { isMacKeys } from '../keys.js';
+import { projectStatus } from '../project.js';
 
 const SYNC_FIELDS = ['owner', 'repo', 'branch', 'trackerPath', 'device'];
 const pick = (obj, keys) => Object.fromEntries(keys.map((k) => [k, obj[k] ?? '']));
@@ -179,7 +180,7 @@ function SyncCard({ sync, actions }) {
   </${Card}>`;
 }
 
-function EditorCard({ settings }) {
+function EditorCard({ settings, actions }) {
   return html`<${Card} title="Editor" icon="code">
     <div class="field-grid">
       <div class="field span-2"><span>Theme</span>
@@ -255,8 +256,53 @@ function EditorCard({ settings }) {
       html`<${Field} label="Run commands (F5)" wide hint=${`One "type: command" per line, to change or add to the built-in ones (${Object.keys(RUN_COMMANDS).filter((e) => RUN_COMMANDS[e]).slice(0, 8).join(', ')}…). {file} is the file, {dir} its folder, {name} its name; an empty command turns a type off.`}>
         <textarea class="run-commands" rows="3" spellcheck=${false} value=${settings.runCommands ?? ''} placeholder=${'py: uv run {file}\nts: bun {file}'} onInput=${(e) => saveSettings({ runCommands: e.currentTarget.value })} />
       </${Field}>`}
+      ${window.desktop?.project && actions?.projectInfo && html`<${ProjectNote} actions=${actions} />`}
     </div>
   </${Card}>`;
+}
+
+const lastName = (p) => String(p ?? '').replace(/^remote:\/\/[^/]+/, '').split(/[\\/]/).filter(Boolean).pop() || String(p ?? '');
+const listed = (names, n = 4) => `${names.slice(0, n).join(', ')}${names.length > n ? ` and ${names.length - n} more` : ''}`;
+
+/**
+ * Settings per project: the open file's project's .tracker-editor.json, how it stands (trusted
+ * or not, its problems) and Open / Trust / Stop trusting; without one, a way to make it.
+ */
+function ProjectNote({ actions }) {
+  const [info, setInfo] = useState(undefined);
+  const [reads, setReads] = useState(0);
+  useEffect(() => {
+    let live = true;
+    Promise.resolve(actions.projectInfo()).then(
+      (i) => live && setInfo(i ?? null),
+      () => live && setInfo(null),
+    );
+    return () => {
+      live = false;
+    };
+  }, [reads]);
+  const again = (p) => Promise.resolve(p).then(() => setReads((n) => n + 1));
+  const status = projectStatus(info);
+  const held = info?.held;
+  return html`<div class="field span-2 project-note">
+    <span>This project</span>
+    ${info === undefined && html`<p class="muted small">Looking for its settings…</p>`}
+    ${info === null && html`<p class="muted small">Open a file of a project from Folders: a <code>.tracker-editor.json</code> at the project’s top gives its files their own run commands, tasks, variables, language servers, formatter and test framework.</p>`}
+    ${info && !info.path && html`<p class="muted small project-none">No <code>.tracker-editor.json</code> above the open file. <button type="button" class="btn link" onClick=${() => again(actions.projectSettings())}>Make one in ${lastName(info.root)}</button>, with every setting there is written out and commented.</p>`}
+    ${info?.path &&
+    html`<div class=${`project-card tone-${status.tone}`}>
+      <div class="project-head" title=${info.path}><${Icon} name="settings" size=${15} /><strong>${lastName(info.dir)}</strong><span class="muted">›</span><code>.tracker-editor.json</code></div>
+      <div class="project-where muted small" title=${info.path}><bdi>${String(info.dir).replace(/^remote:\/\/[^/]+/, '')}</bdi></div>
+      <p class="project-state">${status.text}</p>
+      ${held && html`<p class="muted small">Waiting for your trust: ${[held.run.length && `the run command${held.run.length === 1 ? '' : 's'} for ${listed(held.run.map((t) => `.${t}`))}`, held.tasks.length && `the task${held.tasks.length === 1 ? '' : 's'} ${listed(held.tasks)}`, held.env.length && `the variable${held.env.length === 1 ? '' : 's'} ${listed(held.env)}`].filter(Boolean).join('; ')}. Trust shows each of them first.</p>`}
+      ${info.problems?.length > 0 && html`<ul class="project-problems">${info.problems.slice(0, 6).map((p, i) => html`<li key=${i}><${Icon} name="alert" size=${13} /><span>${p.message}</span></li>`)}</ul>`}
+      <div class="project-actions">
+        <button type="button" class="btn sm" onClick=${() => actions.projectSettings()}><${Icon} name="file" size=${14} />Open</button>
+        ${held && html`<button type="button" class="btn sm primary" onClick=${() => again(actions.trustProject(info.path))}><${Icon} name="unlock" size=${14} />Trust…</button>`}
+        ${!held && info.trusted && info.needsTrust && html`<button type="button" class="btn sm" onClick=${() => again(actions.untrustProject(info.path))}><${Icon} name="lock" size=${14} />Stop trusting</button>`}
+      </div>
+    </div>`}
+  </div>`;
 }
 
 /** The shell new terminals on this computer start (Run this file and the tasks too). */
@@ -1006,7 +1052,7 @@ export function SettingsView({ settings, sync, actions }) {
       <button type="button" class="btn ghost sm" onClick=${actions.showEditor}><${Icon} name="arrowRight" size=${15} class="flip" />Back to files</button>
     </div>
     <${SyncCard} sync=${sync} actions=${actions} />
-    <${EditorCard} settings=${settings} />
+    <${EditorCard} settings=${settings} actions=${actions} />
     <${KeysCard} settings=${settings} />
     ${window.desktop?.lsp && html`<${LanguageServersCard} settings=${settings} actions=${actions} />`}
     <${ModelCard} settings=${settings} actions=${actions} />

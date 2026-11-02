@@ -1,7 +1,7 @@
 // Run this file: the command for its type, quoted for the terminal's shell.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseRunCommands, quoteFor, runCommandFor, runLine, shellKind, wslPath } from '../app/js/runFile.js';
+import { envLine, parseRunCommands, quoteFor, runCommandFor, runLine, shellKind, wslPath } from '../app/js/runFile.js';
 
 const file = (p) => ({ path: p, name: p.split(/[\\/]/).pop(), dir: p.replace(/[\\/][^\\/]+$/, '') });
 
@@ -34,6 +34,21 @@ test('the line typed: into the folder first', () => {
   assert.equal(runLine({ command: "python 'C:\\w\\a.py'", dir: 'C:\\w', kind: 'powershell' }), "Set-Location -LiteralPath 'C:\\w'; python 'C:\\w\\a.py'");
   assert.equal(runLine({ command: 'cmd /c x.bat', dir: 'C:\\w', kind: 'cmd' }), 'cd /d "C:\\w" && cmd /c x.bat');
   assert.equal(runLine({ command: 'node x.js', dir: '' }), 'node x.js');
+});
+
+test('a project’s variables: set in the terminal first, quoted for its shell', () => {
+  const env = { DEBUG: '1', GREETING: "it's here", EMPTY: '', 'BAD NAME': 'x', NL: 'a\nb' };
+  assert.equal(envLine(env, 'posix'), "export DEBUG=1 GREETING='it'\\''s here' EMPTY=''; ");
+  assert.equal(envLine(env, 'wsl'), "export DEBUG=1 GREETING='it'\\''s here' EMPTY=''; ", 'values are not paths: no /mnt/c for them');
+  assert.equal(envLine({ DEBUG: '1', Q: "a'b" }, 'powershell'), "$env:DEBUG = '1'; $env:Q = 'a''b'; ");
+  assert.equal(envLine({ DEBUG: '1', Q: 'say "hi" & go' }, 'cmd'), 'set "DEBUG=1" && set "Q=say hi & go" && ');
+  assert.equal(envLine({}, 'posix'), '');
+  assert.equal(envLine(null, 'posix'), '');
+  assert.equal(runLine({ command: 'python -m app', dir: '/w/app', env: { DEBUG: '1' } }), 'export DEBUG=1; cd -- /w/app && python -m app');
+  assert.equal(runLine({ command: 'python -m app', dir: 'C:\\w', kind: 'powershell', env: { DEBUG: '1' } }), "$env:DEBUG = '1'; Set-Location -LiteralPath 'C:\\w'; python -m app");
+  assert.equal(runLine({ command: 'app.exe', dir: 'C:\\w', kind: 'cmd', env: { DEBUG: '1' } }), 'set "DEBUG=1" && cd /d "C:\\w" && app.exe');
+  assert.equal(runLine({ command: 'python3 a.py', dir: 'C:\\w', kind: 'wsl', env: { DEBUG: '1' } }), 'export DEBUG=1; cd -- /mnt/c/w && python3 a.py');
+  assert.equal(runLine({ command: 'node x.js', dir: '', env: { A: 'b' } }), 'export A=b; node x.js');
 });
 
 test('run commands from the settings', () => {

@@ -76,13 +76,26 @@ export function runCommandFor(file, { platform = 'linux', shell = '', kind: give
   return template.replace(/\{file\}/g, quoteFor(kind, file.path)).replace(/\{name\}/g, quoteFor(kind, file.name)).replace(/\{dir\}/g, quoteFor(kind, file.dir));
 }
 
-/** The line typed into the terminal: into the file's folder first, then the command. */
-export function runLine({ command, dir, kind = 'posix' }) {
-  if (!dir) return command;
-  if (kind === 'powershell') return `Set-Location -LiteralPath ${quoteFor(kind, dir)}; ${command}`;
-  if (kind === 'cmd') return `cd /d ${quoteFor(kind, dir)} && ${command}`;
-  if (kind === 'wsl') return `cd -- ${quoteFor(kind, dir)} && ${command}`;
-  return `cd -- ${quoteFor(kind, dir)} && ${command}`;
+/**
+ * Variables set in the terminal before a command ({ NAME: value }: a project's settings), the
+ * values quoted for its shell: `export` in posix shells (WSL's too), `$env:` in PowerShell, `set`
+ * in cmd. They stay set in that terminal. '' without any.
+ */
+export function envLine(env = {}, kind = 'posix') {
+  const pairs = Object.entries(env ?? {}).filter(([k, v]) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && typeof v === 'string' && !/[\x00-\x1f\x7f]/.test(v));
+  if (!pairs.length) return '';
+  if (kind === 'powershell') return pairs.map(([k, v]) => `$env:${k} = ${quoteFor(kind, v)}; `).join('');
+  if (kind === 'cmd') return pairs.map(([k, v]) => `set "${k}=${v.replace(/"/g, '')}" && `).join('');
+  return `export ${pairs.map(([k, v]) => `${k}=${quoteFor('posix', v)}`).join(' ')}; `;
+}
+
+/** The line typed into the terminal: the variables (`env`), into the file's folder, then the command. */
+export function runLine({ command, dir, kind = 'posix', env = null }) {
+  const set = envLine(env, kind);
+  if (!dir) return `${set}${command}`;
+  if (kind === 'powershell') return `${set}Set-Location -LiteralPath ${quoteFor(kind, dir)}; ${command}`;
+  if (kind === 'cmd') return `${set}cd /d ${quoteFor(kind, dir)} && ${command}`;
+  return `${set}cd -- ${quoteFor(kind, dir)} && ${command}`;
 }
 
 /**

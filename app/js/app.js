@@ -28,6 +28,7 @@ import { createDebugger } from './dap.js';
 import { allOff, cleanBreakpoints, cleanWatches, debugAdapterFor, DEBUG_FRAMEWORKS, movedBreakpoints, setAllEnabled, toggleBreakpoint, updateBreakpoint, withBreakpoints } from './debugTools.js';
 import { BreakpointDialog, DebugPanel, debugStatus, SetupDebuggerDialog } from './ui/debugPanel.js';
 import { taskLine } from './tasks.js';
+import { createProjects, heldFor, PROJECT_FILE, PROJECT_TEMPLATE, typeOf, withProjectRun } from './project.js';
 import { TasksDialog } from './ui/tasks.js';
 import { findFileRefs, pastedPath, resolveRef } from './fileRefs.js';
 import { claudeAppPrompt, claudeAppUrl, codeAround, errorContextText, EXPLAIN_ERROR, explainProblemAction, fixForErrorAction, fixProblemsAction } from './errorHelp.js';
@@ -536,7 +537,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         const formatter = formatterFor(now.name, findLanguage(now.name, now.language)?.name ?? '') ?? guessFormatter(source);
         // A language server that formats: first, unless the editor's own are chosen (Settings), or alone.
         // Per language when Settings says so (the tab's server's language).
-        if ((formatFirst(getSettings(), actions.lspEntryOf?.(now.key)) !== 'builtin' || !formatter) && (await actions.formatWithServer?.(now.key, part))) return;
+        if ((formatFirst(getSettings(), actions.lspEntryOf?.(now.key), now.kind === 'disk' ? actions.projectNow?.(now.path)?.settings : null) !== 'builtin' || !formatter) && (await actions.formatWithServer?.(now.key, part))) return;
         if (!formatter) return toast(`No formatter for this kind of file. Pick its language in the status bar; these can be formatted: ${FORMATTABLE}.`, { timeout: 8000 });
         if (source.length > 5 * 1024 * 1024 && !['json', 'xml'].includes(formatter.kind)) return toast('This is too large to format here.');
         const { tabSize = 4 } = getSettings();
@@ -731,6 +732,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
           const result = await saveDiskTab(path, { force });
           // A test file: its tests' marks follow what was saved.
           if (result === 'saved') actions.refreshTests?.(diskKey(path));
+          if (result === 'saved' && path.split(/[\\/]/).pop() === '.tracker-editor.json') actions.projectSaved?.();
           if (result === 'conflict') toast(`The file changed ${isRemotePath(path) ? 'on the server' : 'on disk'} since you opened it, so it was not saved. Reload it, or keep yours and save over it.`, { kind: 'error', timeout: 10000 });
           return result;
         } catch (err) {
@@ -1634,6 +1636,17 @@ export function App() {
   const editorEl = useRef(null);
   const lspRef = useRef(null); // language servers (lsp.js), desktop
   const [lspTick, setLspTick] = useState(0);
+  // Settings per project (.tracker-editor.json, project.js): the main process's answers per folder.
+  const [, setProjectTick] = useState(0);
+  const projectFiles = useMemo(() => createProjects({
+    bridge: window.desktop?.project,
+    onChange: (info, before) => {
+      setProjectTick((n) => n + 1);
+      // Its languages changed (one off, another server): their servers start again.
+      const ids = before ? changedLanguages(before.settings?.languages, info?.settings?.languages) : [];
+      if (ids.length) lspRef.current?.languagesChanged(ids).then(() => attachLanguageServer(store.session.active));
+    },
+  }), []);
   const [refs, setRefs] = useState(null); // { word, list, server }: the References panel
   const [codeMenu, setCodeMenu] = useState(null); // { key, rows, at }: a language server's quick fixes
   const [gitMenu, setGitMenu] = useState(null); // { key, line, x, y }: a changed line's mark clicked
@@ -3425,18 +3438,30 @@ export function App() {
     const web = remote ? null : webRun(k.path, file.name);
     if (web?.opens) return actions.openInBrowser(web.page);
     const platform = remote ? 'linux' : (window.desktop.platform ?? 'linux');
-    const custom = parseRunCommands(getSettings().runCommands);
+    // The project's settings (.tracker-editor.json): its command for this type over Settings', its variables.
+    const { info: project, left } = await projectFiles.forRun(k.path, { ext: typeOf(file.name) });
+    const custom = withProjectRun(parseRunCommands(getSettings().runCommands), project);
     // Quoted for the shell the terminal runs (PowerShell, cmd, Git Bash, WSL…), known once it does.
     const commandFor = (kind) => runCommandFor(file, { platform, kind, custom });
-    if (!commandFor(platform === 'win32' ? 'powershell' : 'posix')) return toast(`No run command for ${file.name}. Add one for its type in Settings → Editor → Run commands.`);
+    if (!commandFor(platform === 'win32' ? 'powershell' : 'posix')) return left.includes('run') ? projectLeftOut(project, left) : toast(`No run command for ${file.name}. Add one for its type in Settings → Editor → Run commands.`);
     hostRef.current?.flushAll(); // what was typed a moment ago counts
     if (store.diskTab(k.path)?.dirty && (await actions.saveDisk(k.path)) !== 'saved') return;
     setTerminalShown(true);
     try {
-      await runInTerminal(remote ? conn.id : 'local', { cwd: file.dir, line: (kind) => runLine({ command: commandFor(kind) ?? commandFor(platform === 'win32' ? 'powershell' : 'posix'), dir: file.dir, kind }) });
+      await runInTerminal(remote ? conn.id : 'local', { cwd: file.dir, line: (kind) => runLine({ command: commandFor(kind) ?? commandFor(platform === 'win32' ? 'powershell' : 'posix'), dir: file.dir, kind, env: project?.settings.env }) });
+      projectLeftOut(project, left);
     } catch (err) {
       toast(ipcMessage(err), { kind: 'error', timeout: 8000 });
     }
+  };
+  /** A run that left out what a project's settings not trusted would have changed: said once per file as it is. */
+  const toldLeftOut = useRef(new Set());
+  const projectLeftOut = (project, left) => {
+    const said = `${project?.path}|${left.join()}`;
+    if (!left?.length || toldLeftOut.current.has(said)) return;
+    toldLeftOut.current.add(said);
+    const what = [left.includes('run') && 'its run command', left.includes('task') && 'its task', left.includes('env') && 'its variables'].filter(Boolean).join(' and ');
+    toast(`This project’s settings are not trusted, so ${what} ${left.length > 1 ? 'were' : 'was'} left out.`, { timeout: 9000, action: { label: 'Trust…', run: () => actions.trustProject(project.path) } });
   };
   useEffect(() => retheme(), [settings.theme]);
 
@@ -3522,7 +3547,7 @@ export function App() {
       known = { dirs: await bridge.testProject(k.path).catch(() => []), at: Date.now() };
       testDirs.current.set(k.path, known);
     }
-    const setup = detectFramework({ name, text, dirs: known.dirs });
+    const setup = detectFramework({ name, text, dirs: known.dirs, prefer: (await projectFiles.get(k.path))?.settings.tests });
     if (!setup) return null;
     const plain = (p) => (remote && isRemotePath(p) ? remoteParts(p).path : p);
     return { key, path: k.path, name, remote, connId: remote ? remoteParts(k.path).id : 'local', file: plain(k.path), setup: { ...setup, root: plain(setup.root) }, tests: testsInFile(text, setup.framework) };
@@ -3582,12 +3607,14 @@ export function App() {
     const ext = reportExt(fw);
     const prep = ext ? await bridge.testPrepare(ctx.path, ext).catch(() => null) : null;
     const platform = ctx.remote ? 'linux' : (window.desktop.platform ?? 'linux');
+    const { info: project, left } = await projectFiles.forRun(ctx.path);
+    projectLeftOut(project, left);
     // The line for the terminal's shell (known once it runs): its names quoted for it, WSL's paths its own.
     const command = (kind) => {
       const wsl = kind === 'wsl';
       const c = testCommand(ctx.setup, { file: ctx.file, target, report: prep ? (wsl ? wslPath(prep.report) : prep.report) : '', windows: platform === 'win32' && !wsl, tests: ctx.tests });
       const word = (a) => (/^[\w.:@/+=,-]+$/.test(a) ? a : quoteFor(wsl ? 'posix' : kind, a));
-      return { line: runLine({ command: [c.program, ...c.args.map(word)].join(' '), dir: c.cwd, kind }), report: c.report, cwd: c.cwd };
+      return { line: runLine({ command: [c.program, ...c.args.map(word)].join(' '), dir: c.cwd, kind, env: project?.settings.env }), report: c.report, cwd: c.cwd };
     };
     const first = command(platform === 'win32' ? 'powershell' : 'posix');
     const ran = target ? (target.kind === 'suite' ? ctx.tests.filter((t) => t.line >= target.line && t.end <= target.end) : [target]) : ctx.tests;
@@ -3879,7 +3906,8 @@ export function App() {
     const name = baseName(k.path);
     const platform = remote ? 'linux' : (window.desktop.platform ?? 'linux');
     const web = remote ? null : webRun(k.path, name);
-    const runs = Boolean(web?.opens) || Boolean(runCommandFor({ path: k.path, dir: parentDir(k.path), name }, { platform, kind: platform === 'win32' ? 'powershell' : 'posix', custom: parseRunCommands(getSettings().runCommands) }));
+    const project = projectFiles.now(k.path);
+    const runs = Boolean(web?.opens) || Boolean(runCommandFor({ path: k.path, dir: parentDir(k.path), name }, { platform, kind: platform === 'win32' ? 'powershell' : 'posix', custom: withProjectRun(parseRunCommands(getSettings().runCommands), project) })) || (!project?.declined && heldFor(project, { ext: typeOf(name) }).includes('run'));
     const debugs = !remote && debugAvailable() && Boolean(debugAdapterFor(k.path));
     const tests = looksLikeTestFile(name) || Boolean(hostRef.current?.hasTests(key));
     if (!runs && !debugs && !tests && !web) return null;
@@ -4003,14 +4031,81 @@ export function App() {
   actions.runTask = async (group, task) => {
     const remote = isRemotePath(group.dir);
     const connId = remote ? remoteParts(group.dir).id : 'local';
-    const dir = remote ? remoteParts(group.dir).path : group.dir;
+    // The project's variables; a task of its settings as the file says now, and only once it is trusted.
+    const own = group.kind === 'project';
+    const { info: project, left } = await projectFiles.forRun(group.dir, { folder: true, task: own ? task.name : '' });
+    const now = own ? project?.settings.tasks.find((t) => t.name === task.name) : null;
+    if (own && !now) return toast(left.length ? `“${task.name}” did not run: this project’s settings are not trusted.` : `“${task.name}” is not in the project’s settings any more.`, left.length ? { timeout: 9000, action: { label: 'Trust…', run: () => actions.trustProject(project.path) } } : {});
+    if (now) task = { ...task, command: { line: now.command }, cwd: now.cwd };
+    const at = task.cwd || group.dir;
+    const dir = remote ? remoteParts(at).path : at;
+    if (!own) projectLeftOut(project, left);
     setTerminalShown(true);
     try {
-      await runInTerminal(connId, { cwd: dir, label: task.name, task: `${group.dir}/${group.file}:${task.name}`, line: (kind) => taskLine(task, dir, { kind, quote: quoteFor, line: runLine }) });
+      await runInTerminal(connId, { cwd: dir, label: task.name, task: `${group.dir}/${group.file}:${task.name}`, line: (kind) => taskLine(task, dir, { kind, quote: quoteFor, line: runLine, env: project?.settings.env }) });
     } catch (err) {
       toast(ipcMessage(err), { kind: 'error', timeout: 8000 });
     }
   };
+
+  // ---- Settings per project (.tracker-editor.json) ----
+  /** What is known of the project around a path (no asking): the main process's last answer, or null. */
+  actions.projectNow = (path) => projectFiles.now(path);
+  /** The project around the open tab (or `key`'s): asked now (Settings' note). */
+  actions.projectInfo = (key = store.session.active) => {
+    const k = parseKey(key);
+    return k?.kind === 'disk' && !isContentPath(k.path) ? projectFiles.get(k.path, { fresh: true }) : Promise.resolve(null);
+  };
+  /** A project file was saved: every folder asks again (its text, so its trust, changed). */
+  actions.projectSaved = () => {
+    projectFiles.stale();
+    const k = parseKey(store.session.active);
+    if (k?.kind === 'disk' && !isContentPath(k.path)) projectFiles.get(k.path, { fresh: true });
+  };
+  /** Trust a project's settings: the main process asks in its own dialog, showing what it would run. */
+  actions.trustProject = async (path) => {
+    try {
+      const { trusted, nothing } = await projectFiles.trust(path);
+      actions.projectSaved();
+      if (nothing) toast('Nothing in these settings needs trust: they count already.');
+      else if (trusted) toast('Trusted: this project’s run commands, tasks and variables count now.');
+      return trusted;
+    } catch (err) {
+      toast(ipcMessage(err), { kind: 'error', timeout: 8000 });
+    }
+  };
+  actions.untrustProject = async (path) => {
+    try {
+      await projectFiles.untrust(path);
+      actions.projectSaved();
+      toast('Not trusted any more: this project’s run commands, tasks and variables are left out.');
+    } catch (err) {
+      toast(ipcMessage(err), { kind: 'error', timeout: 8000 });
+    }
+  };
+  /** Command project-settings: the nearest .tracker-editor.json above the open file, or a new one where its project starts. */
+  actions.projectSettings = async () => {
+    if (!window.desktop?.project) return toast('Settings per project work in the desktop app.');
+    const k = parseKey(store.session.active);
+    if (k?.kind !== 'disk' || isContentPath(k.path)) return toast(`Open a file of the project first (from Folders): its settings go in a ${PROJECT_FILE} at the project’s top.`);
+    const info = await projectFiles.get(k.path, { fresh: true });
+    if (!info) return toast('Its folder could not be read here: open it from Folders.', { kind: 'error' });
+    if (info.path) return actions.openDiskPath(info.path);
+    try {
+      const file = await window.desktop.folders.newFile(info.root, PROJECT_FILE, { text: PROJECT_TEMPLATE });
+      projectFiles.stale();
+      await projectFiles.get(file, { fresh: true });
+      await actions.openDiskPath(file);
+      toast(`Made ${PROJECT_FILE} in ${baseName(info.root)}: take out the // before what you need.`, { timeout: 8000 });
+    } catch (err) {
+      toast(`${ipcMessage(err)} (Open the project’s folder in Folders to make one there.)`, { kind: 'error', timeout: 9000 });
+    }
+  };
+  // The open file's project: known for the Run group and the status bar.
+  useEffect(() => {
+    const k = parseKey(activeKey);
+    if (k?.kind === 'disk' && !isContentPath(k.path)) projectFiles.get(k.path);
+  }, [activeKey]);
 
   // Filtering lines (Alt+L): the tabs whose filter bar is open.
   const [filterKeys, setFilterKeys] = useState(() => new Set());
@@ -4528,6 +4623,7 @@ export function App() {
       'git-panel': () => actions.toggleGit(),
       'git-init': () => actions.gitInit(),
       tasks: () => actions.showTasks(),
+      'project-settings': () => actions.projectSettings(),
       'git-branch': () => actions.chooseBranch(),
       'git-fetch': () => actions.gitQuick('fetch'),
       'git-pull': () => actions.gitQuick('pull'),
@@ -4810,7 +4906,8 @@ export function App() {
           problems=${settings.problems !== false && activeKey ? problems[activeKey] : null} problemsOpen=${panel === 'problems'}
           lsp=${activeKey && settings.languageServers !== false ? lspRef.current?.statusOf(activeKey) : null} lspOpen=${panel === 'servers'}
           git=${activeKey && gitHeads[activeKey] ? { ...gitHeads[activeKey], changes: hostRef.current?.gitChanges(activeKey)?.changes ?? null } : null}
-          debug=${debugRef.current?.active() ? { status: debugRef.current.run.status, text: debugStatus(debugRef.current.run), label: debugRef.current.run.label, tick: debugTick } : null} debugOpen=${panel === 'debug'} />`}
+          debug=${debugRef.current?.active() ? { status: debugRef.current.run.status, text: debugStatus(debugRef.current.run), label: debugRef.current.run.label, tick: debugTick } : null} debugOpen=${panel === 'debug'}
+          project=${activeDisk && !activeDisk.doc ? projectFiles.now(activeDisk.path) : null} />`}
       </div>
     </main>
     ${lineMenu && hostRef.current && html`<${LineMenu} key=${`${lineMenu.key}:${lineMenu.top}:${lineMenu.x}`} at=${lineMenu} host=${hostRef.current} actions=${actions} onClose=${() => setLineMenu(null)} />`}
@@ -4849,7 +4946,7 @@ export function App() {
     ${dialog?.type === 'symbols' && html`<${SymbolSearch} files=${store.live()} roots=${folderRoots(settings)} servers=${settings.languageServers !== false ? lspRef.current : null} initial=${dialog.query ?? ''} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'workspaceEdit' && html`<${WorkspaceEditDialog} title=${dialog.title} entries=${dialog.entries} rel=${(p) => relInFolders(p, settings)} onDone=${dialog.onDone} />`}
     ${dialog?.type === 'tasks' &&
-    html`<${TasksDialog} dirs=${dialog.dirs} place=${(d) => (isRemotePath(d) ? (server(remoteParts(d).id)?.name ?? 'Server') : KINDS.disk.label)} onRun=${(g, t) => actions.runTask(g, t)} onClose=${() => setDialog(null)} />`}
+    html`<${TasksDialog} dirs=${dialog.dirs} place=${(d) => (isRemotePath(d) ? (server(remoteParts(d).id)?.name ?? 'Server') : KINDS.disk.label)} onRun=${(g, t) => actions.runTask(g, t)} onTrust=${(path) => actions.trustProject(path)} onClose=${() => setDialog(null)} />`}
     ${panel === 'git' && gitDir && html`<${GitPanel} key=${gitDir} dir=${gitDir} tick=${gitTick} actions=${actions} onClose=${() => setPanel(null)} />`}
     ${dialog?.type === 'branches' && html`<${BranchDialog} dir=${dialog.dir} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${gitMenu &&

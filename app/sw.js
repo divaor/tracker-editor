@@ -197,6 +197,7 @@ const ASSETS = [
   'js/debugGutter.js',
   'js/testRun.js',
   'js/tasks.js',
+  'js/project.js',
   'js/terminals.js',
   'js/ui/terminal.js',
   'js/ui/tests.js',

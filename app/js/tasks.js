@@ -125,11 +125,22 @@ const LABELS = { npm: 'npm scripts', make: 'Makefile', python: 'pyproject.toml',
 
 /**
  * The files tasks:files found ([{ dir, name, text, siblings }]) → groups of tasks, the nearest
- * folder first: [{ dir, file, kind, label, tasks }]. Groups without tasks are left out.
+ * folder first: [{ dir, file, kind, label, tasks }]. Groups without tasks are left out. A
+ * project's settings (.tracker-editor.json) come cleaned by the main process ({ dir, name,
+ * project: { path, tasks, held, trusted } }): their tasks are command lines of the person's own
+ * (`command.line`), each with the folder it runs in (`cwd`), and `held` names the tasks that
+ * wait for the file to be trusted.
  */
 export function taskGroups(files) {
   const groups = [];
   for (const f of files) {
+    if (f.name === '.tracker-editor.json' && f.project) {
+      const inside = (cwd) => (cwd.startsWith(f.dir) ? cwd.slice(f.dir.length).replace(/^[\\/]+/, '') : cwd);
+      const tasks = (f.project.tasks ?? []).filter((t) => fineName(t.name) && typeof t.command === 'string').map((t) => ({ name: t.name, command: { line: t.command }, detail: oneLine(`${t.detail || t.command}${t.cwd ? ` · in ${inside(t.cwd)}` : ''}`), cwd: t.cwd || '' }));
+      const held = (f.project.held ?? []).filter(fineName);
+      if (tasks.length || held.length) groups.push({ dir: f.dir, file: f.name, kind: 'project', label: 'This project’s settings', tasks, held, path: f.project.path, trusted: Boolean(f.project.trusted) });
+      continue;
+    }
     const kind = KIND_OF[f.name];
     if (!kind) continue;
     const locks = f.siblings ?? [];
@@ -143,12 +154,13 @@ export function taskGroups(files) {
 
 /**
  * The line typed into a terminal for a task: into its folder first, then the command, with
- * the task's own names quoted for the shell (`quote(kind, text)`, runFile.js's quoteFor).
+ * the task's own names quoted for the shell (`quote(kind, text)`, runFile.js's quoteFor); a
+ * project's task is its own command line, as written. `env`: variables set first (runLine).
  */
-export function taskLine(task, dir, { kind = 'posix', quote, line }) {
+export function taskLine(task, dir, { kind = 'posix', quote, line, env = null }) {
   // Plain words as they are (npm run test:unit); anything else quoted. Names are not paths:
   // under WSL they are quoted as a posix shell's words.
   const word = (a) => (/^[\w.:@/+=-]+$/.test(a) ? a : quote(kind === 'wsl' ? 'posix' : kind, a));
-  const command = [task.command.program, ...task.command.args.map(word)].join(' ');
-  return line({ command, dir, kind });
+  const command = typeof task.command.line === 'string' ? task.command.line : [task.command.program, ...task.command.args.map(word)].join(' ');
+  return line({ command, dir, kind, env });
 }

@@ -278,8 +278,12 @@ export function changedLanguages(before = {}, after = {}) {
   return [...ids].filter((id) => Boolean(before?.[id]?.off) !== Boolean(after?.[id]?.off) || (before?.[id]?.server ?? '') !== (after?.[id]?.server ?? ''));
 }
 
-/** Which formatter goes first for a file whose server is `entry`: its language's choice, else the general one. */
-export const formatFirst = (settings, entry) => {
-  const own = entry ? settings.lspLanguages?.[entry]?.formatter : '';
-  return own === 'server' || own === 'builtin' ? own : settings.formatter === 'builtin' ? 'builtin' : 'server';
+/**
+ * Which formatter goes first for a file whose server is `entry`: its language's choice (the
+ * project's settings, `project`, then Settings'), else the general one (the project's, then
+ * Settings').
+ */
+export const formatFirst = (settings, entry, project = null) => {
+  const pick = (v) => (v === 'server' || v === 'builtin' ? v : '');
+  return pick(entry && project?.languages?.[entry]?.formatter) || pick(entry && settings.lspLanguages?.[entry]?.formatter) || pick(project?.formatter) || (settings.formatter === 'builtin' ? 'builtin' : 'server');
 };

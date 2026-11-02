@@ -58,9 +58,12 @@ const depsOf = (pkgText) => {
  * folder and those above it, nearest first, each { dir, names (what is there), texts
  * (package.json, composer.json, pyproject.toml…) }. → { framework, root, runner } or null.
  * `runner` is what goes before the framework's own program ([] or ['npx'], ['uv', 'run']…).
+ * `prefer`: frameworks a project's settings name ("tests"): the one of the file's language wins
+ * over what is found.
  */
-export function detectFramework({ name, text = '', dirs = [] }) {
+export function detectFramework({ name, text = '', dirs = [], prefer = [] }) {
   const lang = testLanguage(name);
+  const chosen = (among) => (Array.isArray(prefer) ? prefer.find((f) => among.includes(f)) : null) ?? null;
   if (!lang) return null;
   const nearest = (pred) => dirs.find(pred) ?? null;
   const t = String(text).slice(0, 200_000);
@@ -72,8 +75,10 @@ export function detectFramework({ name, text = '', dirs = [] }) {
     const locks = dirs.slice(from).find((d) => has(d.names, /^(pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|package-lock\.json)$/))?.names ?? [];
     const names = pkgDir?.names ?? [];
     const runner = has(locks, 'pnpm-lock.yaml') ? ['pnpm', 'exec'] : has(locks, 'yarn.lock') ? ['yarn'] : has(locks, /^bun\.lockb?$/) ? ['bunx'] : ['npx'];
-    let framework = null;
-    if (/from\s+['"]node:test['"]|require\(\s*['"]node:test['"]\s*\)/.test(t)) framework = 'node';
+    let framework = chosen(['vitest', 'jest', 'mocha', 'node']);
+    if (framework) {
+      // the project's settings say
+    } else if (/from\s+['"]node:test['"]|require\(\s*['"]node:test['"]\s*\)/.test(t)) framework = 'node';
     else if (/from\s+['"]vitest['"]/.test(t)) framework = 'vitest';
     else if (/from\s+['"]@jest\/globals['"]/.test(t)) framework = 'jest';
     else {
@@ -95,7 +100,7 @@ export function detectFramework({ name, text = '', dirs = [] }) {
     const pyproject = proj?.texts?.['pyproject.toml'] ?? '';
     const pytestHere = /^\s*import\s+pytest|^\s*from\s+pytest\s+import/m.test(t) || has(proj?.names ?? [], /^(pytest\.ini|conftest\.py)$/) || dirs.some((d) => d.names.includes('conftest.py')) || /\[tool\.pytest|\bpytest\b/.test(pyproject);
     const unittestOnly = /^\s*import\s+unittest|^\s*from\s+unittest\s+import/m.test(t) && /\(\s*(unittest\.)?TestCase\s*\)/.test(t) && !pytestHere;
-    return { framework: unittestOnly ? 'unittest' : 'pytest', root, runner };
+    return { framework: chosen(['pytest', 'unittest']) ?? (unittestOnly ? 'unittest' : 'pytest'), root, runner };
   }
   if (lang === 'go') return { framework: 'go', root: dirs[0]?.dir ?? '', runner: [] };
   if (lang === 'rust') return { framework: 'cargo', root: nearest((d) => d.names.includes('Cargo.toml'))?.dir ?? dirs[0]?.dir ?? '', runner: [] };
@@ -104,7 +109,7 @@ export function detectFramework({ name, text = '', dirs = [] }) {
     const root = comp?.dir ?? dirs[0]?.dir ?? '';
     const composer = comp?.texts?.['composer.json'] ?? '';
     const pest = /pestphp\/pest/.test(composer) || (/^\s*(it|test|describe)\s*\(\s*['"]/m.test(t) && !/extends\s+\\?(PHPUnit\\Framework\\)?TestCase\b/.test(t));
-    return { framework: pest ? 'pest' : 'phpunit', root, runner: [] };
+    return { framework: chosen(['phpunit', 'pest']) ?? (pest ? 'pest' : 'phpunit'), root, runner: [] };
   }
   if (lang === 'cs') {
     const proj = nearest((d) => has(d.names, /\.csproj$/));

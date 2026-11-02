@@ -27,6 +27,7 @@ import { clampFont, DEFAULT_FONT, MAX_FONT, MIN_FONT } from '../textSize.js';
 import { compareName, compareTitle } from '../compares.js';
 import { COMMAND_LIST } from '../commands.js';
 import { shownKeys } from '../keys.js';
+import { projectStatus } from '../project.js';
 
 /** The server of a file on one ({ conn, status }), or null. */
 const serverOf = (path) => {
@@ -507,6 +508,7 @@ export function RunGroup({ run, actions }) {
     tests && { label: 'The Tests panel', icon: 'panelRight', run: () => actions.command('tests-panel') },
     debugs && { label: 'The Debug panel', icon: 'panelRight', run: actions.toggleDebugPanel },
     runs && !web?.opens && { label: 'How files of this type run…', icon: 'settings', hint: 'Settings → Editor → Run commands', run: actions.showSettings },
+    actions.projectSettings && { label: 'This project’s settings…', icon: 'settings', hint: '.tracker-editor.json: run commands, tasks, variables', run: actions.projectSettings },
   ];
   return html`<div class="run-group" role="group" aria-label="Run and debug">
     ${tests
@@ -823,7 +825,7 @@ function ServerStatus({ lsp, open, actions }) {
   </button>`;
 }
 
-export function StatusBar({ recording, big, cursor, language, file, repo, disk, settings, actions, problems, problemsOpen, git, lsp, lspOpen, group, debug, debugOpen }) {
+export function StatusBar({ recording, big, cursor, language, file, repo, disk, settings, actions, problems, problemsOpen, git, lsp, lspOpen, group, debug, debugOpen, project }) {
   const setLanguage = (value) => file && actions.patch(file.id, { language: value === 'auto' ? '' : value });
   let state = '';
   const kind = file ? 'synced' : repo ? 'doc' : disk ? (isRemotePath(disk.path) ? 'remote' : 'disk') : null;
@@ -836,6 +838,7 @@ export function StatusBar({ recording, big, cursor, language, file, repo, disk, 
   if (disk?.doc) state = `${documentLabel(disk.name)} · ${disk.asText ? 'its text, read-only' : 'shown as it looks, read-only'}`;
   const label = { synced: 'My files', doc: 'Tracker', disk: KINDS.disk.label, remote: srv?.conn?.name ?? 'Server' }[kind];
   const connection = srv && { connected: 'Connected', connecting: 'Connecting…', error: `Not connected: ${srv.status.error}`, disconnected: 'Not connected' }[srv.status.state];
+  const projectNow = projectStatus(project);
   return html`<footer class="statusbar">
     ${kind &&
     html`<span class="status-where kind-${kind}" title=${connection ? `${KINDS[kind].hint}\n${connection}` : kindHint(kind, isLocal())}>
@@ -871,6 +874,11 @@ export function StatusBar({ recording, big, cursor, language, file, repo, disk, 
       title=${`${changedLines(git.changes)} line${changedLines(git.changes) === 1 ? '' : 's'} changed since the last commit. Click to compare.`} onClick=${() => actions.compareWithHead()}>
       <span class="git-count">±${changedLines(git.changes)}</span>
     </button>`}`}
+    ${projectNow &&
+    html`<button type="button" class=${`status-item status-btn-text status-project hide-narrow tone-${projectNow.tone}`} onClick=${() => actions.projectSettings()}
+      title=${`This project’s settings: ${project.path.replace(/^remote:\/\/[^/]+/, '')}\n${projectNow.text}\nClick to open them.`}>
+      <${Icon} name="settings" size=${13} /><span>Project</span>
+    </button>`}
     <span class="spacer" />
     ${cursor?.scope && html`<button type="button" class="status-item status-btn-text status-scope hide-narrow" title=${`In ${cursor.scope} · Ctrl+P then @ goes to another`} onClick=${() => actions.gotoSymbol()}>
       <${Icon} name="code" size=${13} /><span>${cursor.scope}</span>

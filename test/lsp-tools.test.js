@@ -172,4 +172,9 @@ test('each language in Settings: what the main process is told, what restarts, w
   assert.equal(formatFirst({ formatter: 'builtin', lspLanguages: per }, 'go'), 'server');
   assert.equal(formatFirst({ formatter: 'builtin', lspLanguages: per }, 'rust'), 'builtin');
   assert.equal(formatFirst({ lspLanguages: per }, ''), 'server');
+  // A project's settings: its language's choice first, then Settings' for the language, then the project's general one.
+  assert.equal(formatFirst({ formatter: 'server', lspLanguages: per }, 'go', { formatter: 'builtin' }), 'server', 'Settings’ choice for Go beats the project’s general one');
+  assert.equal(formatFirst({ formatter: 'server', lspLanguages: per }, 'python', { formatter: 'builtin' }), 'builtin');
+  assert.equal(formatFirst({ formatter: 'server', lspLanguages: per }, 'typescript', { languages: { typescript: { formatter: 'server' } } }), 'server', 'the project’s choice for the language first');
+  assert.equal(formatFirst({ formatter: 'builtin' }, 'python', { formatter: 'nonsense' }), 'builtin');
 });
