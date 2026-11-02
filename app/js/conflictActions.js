@@ -83,13 +83,18 @@ export function createConflictActions({ host, actions, toast, setCompare, setVie
     if (r?.ok) h()?.setConflictInfo(key, { op: r.result ?? null });
   };
 
-  /** A tab reported its number of blocks: when the last one goes from a file in Git, offer to mark it resolved. */
-  const conflictsCounted = (key, n) => {
+  /**
+   * A tab reported its number of blocks: when the last one goes from a file Git has in conflict,
+   * offer to save it and mark it resolved.
+   */
+  const conflictsCounted = async (key, n) => {
     const before = counts.get(key);
     counts.set(key, n);
     if (!(before > 0) || n > 0) return;
     const k = parseKey(key);
     if (k?.kind !== 'disk' || !canMergeView(key)) return;
+    const place = await repoPlace(k.path);
+    if (!place?.status.conflicts?.[place.rel] || counts.get(key) > 0) return;
     toast(`No conflict blocks left in ${baseName(k.path)}. Save it and mark it resolved?`, { key: 'conflicts-left', timeout: 15000, action: { label: 'Save and mark resolved', run: () => markResolved(k.path) } });
   };
 

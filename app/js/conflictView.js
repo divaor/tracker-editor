@@ -212,7 +212,10 @@ const OURS = Decoration.line({ class: 'cm-conflict-ours' });
 const BASE = Decoration.line({ class: 'cm-conflict-base' });
 const THEIRS = Decoration.line({ class: 'cm-conflict-theirs' });
 const SEP = Decoration.line({ class: 'cm-conflict-marker cm-conflict-sep' });
-const marker = (kind, note) => Decoration.line({ class: `cm-conflict-marker cm-conflict-${kind}`, attributes: { 'data-note': note } });
+const MARKER = { start: Decoration.line({ class: 'cm-conflict-marker cm-conflict-start' }), basemark: Decoration.line({ class: 'cm-conflict-marker cm-conflict-basemark' }), end: Decoration.line({ class: 'cm-conflict-marker cm-conflict-end' }) };
+// The marker line with what its side is after it: the note is the mark's ::after (CSS), so it stays
+// on the line whatever widgets come after the text (CodeMirror ends such a line with a <br>).
+const marker = (kind, line, note) => [MARKER[kind].range(line.from), Decoration.mark({ class: 'cm-conflict-label', attributes: { 'data-note': note } }).range(line.from, line.to)];
 
 class ConflictBar extends WidgetType {
   constructor(spec) {
@@ -290,15 +293,15 @@ function decorations(state) {
     const start = lineAt(c.start);
     const widget = new ConflictBar({ index: c.index, count, title: words.title, tip: words.tip, acceptCurrent: words.acceptCurrent, acceptIncoming: words.acceptIncoming, readOnly: state.readOnly, compare: compare !== false, mergeView: Boolean(mergeView), model: Boolean(model) });
     ranges.push(Decoration.widget({ widget, block: true, side: -1 }).range(start.from));
-    ranges.push(marker('start', words.current).range(start.from));
+    ranges.push(...marker('start', start, words.current));
     tint(c.ours, OURS);
     if (c.base) {
-      ranges.push(marker('basemark', words.base).range(lineAt(c.ours.to).from));
+      ranges.push(...marker('basemark', lineAt(c.ours.to), words.base));
       tint(c.base, BASE);
     }
     ranges.push(SEP.range(lineAt((c.base ?? c.ours).to).from));
     tint(c.theirs, THEIRS);
-    ranges.push(marker('end', words.incoming).range(lineAt(c.theirs.to).from));
+    ranges.push(...marker('end', lineAt(c.theirs.to), words.incoming));
   }
   return Decoration.set(ranges, true);
 }
