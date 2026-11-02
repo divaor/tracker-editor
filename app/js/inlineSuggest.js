@@ -59,6 +59,16 @@ const ghostField = StateField.define({
 
 /** Whether a state shows a suggestion (for tests and the status bar). */
 export const ghostOf = (state) => state.field(ghostField, false) ?? null;
+/** Whether a transaction's effect shows a suggestion (next-edit suggestions give way to it: nextEditView.js). */
+export const isGhostEffect = (effect) => effect.is(setGhost) && effect.value != null;
+
+// The asker of each view, so others can tell whether a suggestion is on its way.
+const askers = new WeakMap();
+/** Whether a suggestion is about to be asked for, or asked for and not answered yet, in `view`. */
+export const suggesting = (view) => {
+  const a = askers.get(view);
+  return Boolean(a && (a.timer || a.controller));
+};
 
 function accept(view) {
   const g = view.state.field(ghostField, false);
@@ -94,6 +104,7 @@ export function inlineSuggestions({ ask, enabled, languageOf = () => '', nameOf 
         this.view = view;
         this.timer = null;
         this.controller = null;
+        askers.set(view, this);
       }
       update(u) {
         const typed = u.transactions.some((tr) => tr.isUserEvent('input.type') || tr.isUserEvent('delete.backward'));
@@ -102,6 +113,7 @@ export function inlineSuggestions({ ask, enabled, languageOf = () => '', nameOf 
       }
       cancel() {
         clearTimeout(this.timer);
+        this.timer = null;
         this.controller?.abort();
         this.controller = null;
       }
@@ -110,6 +122,7 @@ export function inlineSuggestions({ ask, enabled, languageOf = () => '', nameOf 
         if (enabled()) this.timer = setTimeout(() => this.ask(), WAIT_MS);
       }
       async ask() {
+        this.timer = null;
         const { state } = this.view;
         const sel = state.selection.main;
         if (!sel.empty || state.selection.ranges.length > 1 || state.field(ghostField, false)) return;
@@ -124,6 +137,8 @@ export function inlineSuggestions({ ask, enabled, languageOf = () => '', nameOf 
           answer = await ask({ prefix, suffix, language: languageOf(state), name: nameOf(state), signal: controller.signal }, this.view);
         } catch {
           return; // the model could not be reached: nothing shown
+        } finally {
+          if (this.controller === controller) this.controller = null;
         }
         // Only if nothing moved meanwhile.
         const now = this.view.state;
@@ -134,6 +149,7 @@ export function inlineSuggestions({ ask, enabled, languageOf = () => '', nameOf 
       }
       destroy() {
         this.cancel();
+        if (askers.get(this.view) === this) askers.delete(this.view);
       }
     },
   );

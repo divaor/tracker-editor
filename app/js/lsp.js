@@ -714,6 +714,27 @@ export function createLanguageServers({ host, bridge = window.desktop?.lsp, onCh
       return found.s.client.request(method, { textDocument: { uri: found.t.uri }, position: { line: line.number - 1, character: pos - line.from }, ...extra });
     },
     locations,
+    /**
+     * `request` that gives up after `wait` ms (the server is told: $/cancelRequest): undefined then.
+     * The model panel's symbols ask many at once within one budget.
+     */
+    async requestWithin(key, method, pos, { wait = 2000, capability = '', extra = {} } = {}) {
+      const found = serverOf(key);
+      const state = host.stateOf(key);
+      if (!found?.s?.ready || !state || (capability && !found.s.client.serverCapabilities?.[capability])) return null;
+      if (wait <= 0) return undefined;
+      found.s.client.sync();
+      const line = state.doc.lineAt(Math.min(pos, state.doc.length));
+      const params = { textDocument: { uri: found.t.uri }, position: { line: line.number - 1, character: Math.min(pos, state.doc.length) - line.from }, ...extra };
+      let timer;
+      const asking = found.s.client.request(method, params).catch(() => null);
+      const result = await Promise.race([asking, new Promise((resolve) => (timer = setTimeout(() => resolve(undefined), wait)))]);
+      clearTimeout(timer);
+      if (result === undefined) found.s.client.cancelRequest(params);
+      return result;
+    },
+    /** The project folder of a tab's file, as its server was told (its root), or ''. */
+    rootOf: (key) => tabs.get(key)?.root ?? '',
 
     /** A request about a whole file (formatting…): `params` go beside its textDocument. Null without a server or the capability. */
     async requestFile(key, method, params = {}, capability = '') {

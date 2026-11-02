@@ -169,6 +169,7 @@ export const COMMAND_LIST = [
   { id: 'command-palette', group: 'View', label: 'Run a command by name (command palette)', keys: 'Mod+Shift+P', hint: 'Or Ctrl+P, then >' },
 
   { id: 'ask-selection', group: 'Tools', label: 'Ask the model about the selection or the file', keys: 'Mod+K' },
+  { id: 'next-edits-toggle', group: 'Tools', label: 'Next-edit suggestions from the model (on or off)', hint: 'After you edit and pause, the next related change: Tab goes to it, Tab again makes it, Esc drops it' },
   { id: 'assist-files', group: 'Tools', label: 'Ask the model to make or change files…', hint: 'In the open file’s folder (or the folder in Folders, or a synced note’s project): each change waits for your Apply; Folders’ menus: Ask the model about this folder…' },
   { id: 'snippets', group: 'Tools', label: 'Insert a snippet', keys: 'Alt+I' },
   { id: 'macro-record', group: 'Tools', label: 'Record a macro (again to stop)', keys: 'Mod+Shift+R' },

@@ -100,7 +100,7 @@ export function AssistPanel({ scope, actions, onClose, start = null, hasFile = t
     const help = (followUp ? conv.action : action).kind === 'help';
     const file = help && !followUp ? actions.openFileInfo() : null;
     const asked = help && !followUp ? action.prompt || fileQuestion(file ?? {}) : '';
-    const context = followUp ? conv.context : (given ?? (help ? { help: true, label: 'Tracker Editor help', name: 'Tracker Editor', text: asked, whole: false, file } : actions.assistContext()));
+    let context = followUp ? conv.context : (given ?? (help ? { help: true, label: 'Tracker Editor help', name: 'Tracker Editor', text: asked, whole: false, file } : actions.assistContext()));
     if (!context) return;
     const turns = followUp ? conv.turns : [];
     const history = turns.flatMap((t, i) => [...(i > 0 ? [{ role: 'user', content: t.question }] : []), { role: 'assistant', content: t.answer }]).concat(followUp ? [{ role: 'user', content: followUp }] : []);
@@ -113,6 +113,14 @@ export function AssistPanel({ scope, actions, onClose, start = null, hasFile = t
     let out = '';
     const show = (answer) => setConv((c) => c && { ...c, turns: [...asking.slice(0, -1), { ...asking.at(-1), answer }] });
     try {
+      // What the file's language server knows about the names in the text (types, signatures,
+      // definitions): looked up once, within 2 s, and kept for the follow-ups.
+      if (!help && context.key && context.symbols === undefined) {
+        setConv((c) => c && { ...c, phase: 'asking the language server' });
+        context = { ...context, symbols: (await actions.symbolsFor?.(context).catch(() => null)) ?? null };
+        if (signal.aborted) throw Object.assign(new Error('Stopped'), { name: 'AbortError' });
+        setConv((c) => c && { ...c, context, phase: '' });
+      }
       // For the editor: the passages that fit every question asked so far.
       const messages = help
         ? helpMessages(asking[0].question, await editorHelpFor(asking.map((t) => t.question).join('\n'), { file: context.file, trouble: action.trouble || conv?.action.trouble }), history)
@@ -240,6 +248,7 @@ export function AssistPanel({ scope, actions, onClose, start = null, hasFile = t
         ${conv.turns.map(
           (t, i) => html`<div class="assist-turn" key=${i}>
             <p class="assist-question">${t.question}</p>
+            ${i === 0 && html`<${SymbolsNote} symbols=${conv.context.symbols} />`}
             ${t.answer
               ? html`<div class="answer markdown ask-answer" dangerouslySetInnerHTML=${{ __html: renderMarkdown(t.answer) }} />`
               : conv.status === 'asking' && i === conv.turns.length - 1 &&
@@ -286,6 +295,22 @@ export function AssistPanel({ scope, actions, onClose, start = null, hasFile = t
       </div>
     </form>
   </aside>`;
+}
+
+/** What the language server added to a question: "Using 7 symbols from the language server", opened to list them. */
+export function SymbolsNote({ symbols }) {
+  if (!symbols?.count) return null;
+  return html`<details class="assist-symbols">
+    <summary title="Their types, signatures and where each is defined went with the question"><${Icon} name="code" size=${13} />Using ${symbols.count} ${symbols.count === 1 ? 'symbol' : 'symbols'} from the language server${symbols.server ? ` (${symbols.server})` : ''}</summary>
+    <ul>
+      ${symbols.rows.map(
+        (r) => html`<li key=${r.name}>
+          <span class="assist-symbol-head"><code>${r.name}</code>${r.where && html`<span class="assist-symbol-where" title=${r.where}>${r.where}</span>`}</span>
+          ${r.signature && html`<span class="assist-symbol-sig">${r.signature}</span>`}
+        </li>`,
+      )}
+    </ul>
+  </details>`;
 }
 
 /** The round button at the bottom right that opens the panel. */

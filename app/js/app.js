@@ -6,6 +6,8 @@ import { cleanModelName, filingMessages, isUntitled, MIN_NAMING_TEXT, nameFromHe
 import { llmClient } from './semantic.js';
 import { connectionOf } from './providers.js';
 import { completionMessages } from './completion.js';
+import { nextEditMessages } from './nextEdits.js';
+import { hoverParts, pickIdentifiers, SYMBOLS_WAIT, symbolsBlock, whereLabel } from './symbolContext.js';
 import { fileLink, parseRoute, safeName } from './model.js';
 import { fileVersions, versionName } from './versions.js';
 import { formatDateTime } from './format.js';
@@ -31,7 +33,7 @@ import { findFileRefs, pastedPath, resolveRef } from './fileRefs.js';
 import { claudeAppPrompt, claudeAppUrl, codeAround, errorContextText, EXPLAIN_ERROR, explainProblemAction, fixForErrorAction, fixProblemsAction } from './errorHelp.js';
 import { TerminalPanel } from './ui/terminal.js';
 import { createLanguageServers } from './lsp.js';
-import { applyTextEdits, changedLanguages, changedLines, codeActionRows, editPlan, formatFirst, languageOptions, lineOf, textChanges, uriPath } from './lspTools.js';
+import { applyTextEdits, changedLanguages, changedLines, codeActionRows, editPlan, formatFirst, languageOptions, lineOf, locations, textChanges, uriPath } from './lspTools.js';
 import { Menu } from './ui/menu.js';
 import { listingRows, placeCrumbs } from './crumbs.js';
 import { minimapShown } from './minimapLayout.js';
@@ -1644,6 +1646,7 @@ export function App() {
     ...s,
     dark: resolvedTheme(s.theme) === 'dark',
     inlineSuggest: Boolean(s.inlineSuggest && s.llm.enabled && s.llm.provider !== 'async'),
+    nextEdits: Boolean(s.nextEdits && s.llm.enabled && s.llm.provider !== 'async'),
     // Breadcrumbs: on unless turned off (left as they are, the stylesheet hides them on phones).
     breadcrumbs: s.breadcrumbs !== false,
     breadcrumbsAuto: s.breadcrumbs !== true && s.breadcrumbs !== false,
@@ -1676,6 +1679,48 @@ export function App() {
       }
     }
     return client.chat({ model, messages: completionMessages({ prefix, suffix, language, name }), purpose: 'complete', signal, temperature: 0.1 });
+  };
+  /**
+   * Next-edit suggestions (nextEditView.js asks): the edits just made, the cursor and the file go to
+   * the suggestions model (else the chat model); its answer, or '' when not asked. Never for
+   * encrypted files or services that answer later.
+   */
+  actions.nextEdits = async ({ key, signal, ...request }) => {
+    const s = getSettings();
+    const model = s.llm.completeModel || s.llm.chatModel;
+    const k = parseKey(key);
+    if (!s.nextEdits || !s.llm.enabled || s.llm.provider === 'async' || !model || !k || (k.kind === 'file' && store.get(k.id)?.encrypted)) return '';
+    return llmClient(s).chat({ model, messages: nextEditMessages(request), purpose: 'complete', signal, temperature: 0 });
+  };
+  /**
+   * What the tab's language server knows about the names in the model panel's text (the selection,
+   * else around the cursor, or `context.at`): each one's type or signature (hover) and where it is
+   * defined, within SYMBOLS_WAIT in all (symbolContext.js's block), or null: no server, the setting
+   * off (`symbolContext`), an encrypted file, or nothing found.
+   */
+  actions.symbolsFor = async (context) => {
+    const s = getSettings();
+    const key = context?.key;
+    const k = key ? parseKey(key) : null;
+    const lsp = s.languageServers !== false ? lspRef.current : null;
+    const state = key ? hostRef.current?.stateOf(key) : null;
+    if (s.symbolContext === false || !k || !state || !lsp?.has(key) || (k.kind === 'file' && store.get(k.id)?.encrypted)) return null;
+    const file = k.kind === 'file' ? store.get(k.id) : null;
+    const name = context.name ?? file?.name ?? (k.kind === 'disk' ? store.diskTab(k.path) : store.repoTab(k.path))?.name ?? '';
+    const selected = context.whole === false && context.to > context.from;
+    const names = pickIdentifiers(state.doc.toString(), { from: selected ? context.from : 0, to: selected ? context.to : 0, at: context.at ?? state.selection.main.head, language: context.language ?? findLanguage(name, file?.language)?.name ?? '' });
+    const end = Date.now() + SYMBOLS_WAIT;
+    const root = lsp.rootOf(key);
+    const rows = await Promise.all(
+      names.map(async ({ name: word, pos }) => {
+        const [hover, def] = await Promise.all(['hover', 'definition'].map((m) => lsp.requestWithin(key, `textDocument/${m}`, pos, { wait: end - Date.now(), capability: `${m}Provider` }).catch(() => null)));
+        const place = locations(def)[0];
+        const at = place && lsp.placeOf(key, place.uri);
+        return { name: word, ...hoverParts(hover), where: at ? whereLabel(at.path ?? name, place.range.start.line + 1, root) : '' };
+      }),
+    );
+    const block = symbolsBlock(rows, { server: lsp.serverName(key) });
+    return block.count ? block : null;
   };
 
   // Re-render on store changes; typing only updates the unsynced markers, so throttle that.
@@ -1849,6 +1894,7 @@ export function App() {
       // The text right-clicked: its menu (codeMenu.js), for that pane.
       onTextMenu: (at) => setTextMenu(at),
       onSuggest: (request) => actions.suggestText(request),
+      onNextEdit: (request) => actions.nextEdits(request),
       // A problem's tooltip: the model explains it, or fixes the file's problems.
       onProblemAction: (kind, key, problem) => (kind === 'quickfix' ? actions.quickFix({ key, from: problem.from, to: problem.to }) : kind === 'fix' ? actions.fixProblems(key) : actions.explainProblem(problem, key)),
       // An image pasted or dropped into the text: read its text.
@@ -1951,7 +1997,7 @@ export function App() {
   }, []);
   useEffect(
     () => hostRef.current?.applySettings(editorOptions(settings)),
-    [settings.theme, settings.wordWrap, settings.showWhitespace, settings.tabSize, settings.lineNumbers, settings.problems, settings.indentGuides, settings.bracketColors, settings.stickyScroll, settings.detectIndent, settings.indentChosen, settings.emmet, settings.linkedTags, settings.ctrlClickDefinition, settings.inlineSuggest, settings.llm],
+    [settings.theme, settings.wordWrap, settings.showWhitespace, settings.tabSize, settings.lineNumbers, settings.problems, settings.indentGuides, settings.bracketColors, settings.stickyScroll, settings.detectIndent, settings.indentChosen, settings.emmet, settings.linkedTags, settings.ctrlClickDefinition, settings.inlineSuggest, settings.nextEdits, settings.llm],
   );
   useEffect(() => {
     const media = matchMedia('(prefers-color-scheme: dark)');
@@ -3017,7 +3063,7 @@ export function App() {
     if (!list.length) return toast('No problems found in this file.');
     actions.openAssist({ action: fixProblemsAction(list), context: wholeFile(key) });
   };
-  actions.explainProblem = (problem, key = activeKey) => actions.openAssist({ action: explainProblemAction(problem), context: wholeFile(key) });
+  actions.explainProblem = (problem, key = activeKey) => actions.openAssist({ action: explainProblemAction(problem), context: { ...wholeFile(key), ...(Number.isFinite(problem.from) ? { at: problem.from } : {}) } });
   /**
    * The terminal's error (its selection, or the last output) explained by the model, with the
    * code around the places it names (files open here, or readable on disk).
@@ -4425,6 +4471,11 @@ export function App() {
       'breadcrumbs-toggle': () => saveSettings({ breadcrumbs: crumbsShown(getSettings()) ? false : PHONE_QUERY() ? true : null }),
       'breadcrumbs-focus': () => hostRef.current?.focusCrumbs() || toast(getSettings().breadcrumbs === false ? 'The breadcrumbs are off: turn them on in View → Breadcrumbs or Settings → Editor.' : 'Open a file first: the breadcrumbs show where you are in it.'),
       'minimap-toggle': () => saveSettings({ minimap: minimapShown(getSettings().minimap, { desktop: isDesktopApp() }) ? false : isDesktopApp() ? null : true }),
+      'next-edits-toggle': () => {
+        const s = getSettings();
+        saveSettings({ nextEdits: !s.nextEdits });
+        toast(s.nextEdits ? 'Next-edit suggestions are off.' : s.llm.enabled && s.llm.provider !== 'async' ? 'Next-edit suggestions are on: edit, pause, then Tab goes to the next edit and Tab makes it.' : 'Next-edit suggestions are on, but they need a model that answers at once (Settings → Model).', { key: 'next-edits' });
+      },
       assistant: () => setPanel((p) => (p === 'assistant' ? null : 'assistant')),
       sync: () => {
         hostRef.current?.flushAll();

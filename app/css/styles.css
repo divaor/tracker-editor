@@ -8510,6 +8510,136 @@ svg.up {
   opacity: 0.45;
 }
 
+/* Next-edit suggestions (nextEditView.js): in place, what goes struck through and what comes as
+   ghost text; farther, a mark at its line and a hint at the cursor's. Then the language server's
+   symbols under a question in the model panel (SymbolsNote). */
+.cm-ne-del {
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--git-deleted) 13%, transparent);
+  text-decoration: line-through;
+  text-decoration-color: var(--git-deleted);
+  text-decoration-thickness: 1.5px;
+}
+
+.cm-ne-ins {
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--git-added) 14%, transparent);
+  color: var(--git-added);
+  white-space: pre;
+  pointer-events: none;
+}
+
+.cm-ne-line {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.cm-ne-mark,
+.cm-ne-hint {
+  display: inline-block;
+  margin-left: 14px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-family: var(--font);
+  font-size: 0.78em;
+  line-height: 1.55;
+  vertical-align: 1px;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}
+
+.cm-ne-mark {
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.cm-ne-hint {
+  background: color-mix(in srgb, var(--text-3) 14%, transparent);
+  color: var(--text-2);
+}
+
+.cm-ne-hint.near {
+  background: none;
+  color: var(--text-3);
+}
+
+.assist-symbols {
+  margin: 6px 2px 0;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.assist-symbols summary {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  cursor: pointer;
+}
+
+.assist-symbols summary::after {
+  color: var(--text-3);
+  content: '›';
+  transition: transform 0.15s;
+}
+
+.assist-symbols[open] summary::after {
+  transform: rotate(90deg);
+}
+
+.assist-symbols ul {
+  display: grid;
+  gap: 4px;
+  max-height: 260px;
+  margin: 6px 0 2px;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.assist-symbols li {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+
+.assist-symbol-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.assist-symbol-head code {
+  padding: 0;
+  background: none;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.assist-symbol-where {
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assist-symbol-sig {
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+
 /* Files with the model (ui/filesAssist.js): change cards, each showing what Apply does */
 .files-assist {
   width: min(560px, calc(100% - 28px));

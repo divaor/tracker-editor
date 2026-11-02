@@ -208,6 +208,9 @@ function EditorCard({ settings }) {
       <${Check} checked=${Boolean(settings.inlineSuggest)} label="Suggest the rest as you type (the model)"
         hint=${settings.llm.enabled && settings.llm.provider !== 'async' ? 'Grey text after the cursor: Tab takes it, Ctrl+→ one word, Esc drops it. A code model (Settings → Model → Model for suggestions) works best.' : 'Needs a model on this computer or a server that answers at once: set it up under Model.'}
         onChange=${(v) => saveSettings({ inlineSuggest: v })} />
+      <${Check} checked=${Boolean(settings.nextEdits)} label="Suggest the next edit (the model)"
+        hint=${settings.llm.enabled && settings.llm.provider !== 'async' ? 'After you edit and pause, the model may propose the next related change anywhere in the file: the same rename at the other uses, a parameter added at the call sites. Tab goes to it, Tab again makes it, Esc drops it.' : 'Needs a model on this computer or a server that answers at once: set it up under Model.'}
+        onChange=${(v) => saveSettings({ nextEdits: v })} />
       <${Check} checked=${Boolean(settings.askNamesOnly)} label="Find by asking: send the model only names, not the lines that matched"
         hint="A question in Ctrl+P: the model then picks from the names and places of what was found (encrypted files never go, not even their names)"
         onChange=${(v) => saveSettings({ askNamesOnly: v })} />
@@ -565,6 +568,7 @@ function ModelCard({ settings, actions }) {
     : html`<${OpenAiModelForm} settings=${settings} actions=${actions} />`}
     <div class="field-grid">
       <${Check} checked=${settings.assistBubble} label="Model button at the bottom right of the editor" hint="Help with the selection, or the whole file: fix, convert, check the syntax, translate, ask. Ctrl+K opens it too." onChange=${(v) => saveSettings({ assistBubble: v })} />
+      <${Check} checked=${settings.symbolContext !== false} label="Questions take what the language server knows" hint="When the file has a language server: the types, signatures and definitions of up to 12 names in the selection (or around the cursor) go with the question; the panel says how many. Never for encrypted files." onChange=${(v) => saveSettings({ symbolContext: v })} />
     </div>
   </${Card}>`;
 }
@@ -675,7 +679,7 @@ function ModelFields({ form, set, models, examples, embeddings = true }) {
     <${Field} label="Chat model" hint=${`For answers, fixes and summaries, e.g. ${examples.chat}`}>${pick('chatModel', 'Choose…', examples.chat.split(',')[0])}</${Field}>
     ${embeddings && html`<${Field} label="Embedding model" hint=${`For finding by meaning, e.g. ${examples.embed}. Optional.`}>${pick('embedModel', 'None (keyword search)', examples.embed.split(',')[0])}</${Field}>`}
     <${Field} label="Model for images" hint=${`Reads text from images when you choose it in Text from an image, e.g. ${examples.vision}. Blank: the chat model.`}>${pick('visionModel', 'The chat model', examples.vision.split(',')[0])}</${Field}>
-    <${Field} label="Model for suggestions" hint=${`For Suggest the rest as you type (Settings → Editor). ${examples.suggest} Blank: the chat model.`}>${pick('completeModel', 'The chat model', examples.suggestOne)}</${Field}>`;
+    <${Field} label="Model for suggestions" hint=${`For Suggest the rest as you type and Suggest the next edit (Settings → Editor). ${examples.suggest} Blank: the chat model.`}>${pick('completeModel', 'The chat model', examples.suggestOne)}</${Field}>`;
 }
 
 const checkNotice = (check) =>

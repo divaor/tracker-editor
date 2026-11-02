@@ -107,6 +107,7 @@ import { hasTestGutter, setTestInfo, testGutter, testMarkClick, testProblems } f
 import { breakpointClick, breakpointsIn, breakpointsMoved, debugGutter, hasDebugGutter, pausedLineOf, setBreakpointMarks, setPausedLine } from './debugGutter.js';
 import { emmetOnTab, linkedTags } from './htmlTools.js';
 import { inlineSuggestions } from './inlineSuggest.js';
+import { nextEdits } from './nextEditView.js';
 import { breadcrumbsBar, refreshCrumbs } from './breadcrumbs.js';
 import { kindOfType, minimap } from './minimap.js';
 import { findFileRefs, pastedPath } from './fileRefs.js';
@@ -1067,11 +1068,12 @@ function nameAtPoint(v, x, y) {
  * false; the cursor is on it); `onTextMenu({ key, x, y, onName, hasSelection, readOnly, language })`
  * opens the text's right-click menu (a mouse's, or the keyboard's menu key: the cursor is where
  * it acts; a long press only with the option `noSystemMenu`). `onSuggest(request)` asks the
- * model for the text at the cursor (suggestions as you type, setting `inlineSuggest`).
+ * model for the text at the cursor (suggestions as you type, setting `inlineSuggest`);
+ * `onNextEdit(request)` for the next edits after one (next-edit suggestions, setting `nextEdits`).
  * `setPanes(slots)` shows other tabs in panes beside it (up to three more, paneLayout.js); a
  * tab's state, with its undo history, moves between the panes.
  */
-export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpenLink, onOpenRef, onDefinition, onTextMenu, onSuggest, onImage, onPasteFiles, onPastePath, onProblems, onProblemAction, onDrop, onLineMenu, onGitMark, onTestMark, onBreakpointClick, onBreakpointsMoved, crumbPlace, onCrumbMenu, linkTargets, settings }) {
+export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpenLink, onOpenRef, onDefinition, onTextMenu, onSuggest, onNextEdit, onImage, onPasteFiles, onPastePath, onProblems, onProblemAction, onDrop, onLineMenu, onGitMark, onTestMark, onBreakpointClick, onBreakpointsMoved, crumbPlace, onCrumbMenu, linkTargets, settings }) {
   const states = new Map(); // key → EditorState
   const scroll = new Map(); // key → scroll position
   const pending = new Map(); // key → timer for onChange
@@ -1521,6 +1523,15 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
         languageOf: (state) => state.facet(languageName),
         nameOf: (state) => state.facet(fileName),
       }),
+      // The model's next edits after one (after the grey text, whose Tab and Escape come first); not in very large files.
+      big
+        ? []
+        : nextEdits({
+            ask: (request, v) => onNextEdit({ ...request, key: keyOfView(v) }),
+            enabled: () => Boolean(onNextEdit && options.nextEdits),
+            languageOf: (state) => state.facet(languageName),
+            nameOf: (state) => state.facet(fileName),
+          }),
       // The text itself is in the state's doc.
       [],
     ];

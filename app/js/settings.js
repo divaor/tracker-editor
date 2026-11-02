@@ -58,6 +58,9 @@ export const DEFAULT_SETTINGS = {
   ctrlClickDefinition: true,
   // Suggestions as you type from the model (grey text, Tab takes it); off until turned on.
   inlineSuggest: false,
+  // Next-edit suggestions: after an edit and a pause, the model's next related edits in the file
+  // (Tab goes to one, Tab again makes it); off until turned on.
+  nextEdits: false,
   // Find by asking (Ctrl+P, a question): send the model only the names of what was found, not the lines that matched.
   askNamesOnly: false,
   // Language servers for code files on this computer (desktop): types, completion, F12 across files.
@@ -185,6 +188,9 @@ export const DEFAULT_SETTINGS = {
   typing: { countdown: 5, speed: 'normal', autoIndent: false, minimize: false, unicode: false },
   // The round model button at the bottom right of the editor (when a model is connected).
   assistBubble: true,
+  // The model panel's questions take what the file's language server knows about the names in the
+  // text (types, signatures, where each is defined); never for encrypted files.
+  symbolContext: true,
   // Text from images: the languages to read (ocr.js OCR_LANGUAGES), and who reads them:
   // 'device' (on this device) or 'model' (the connected model, when it reads images).
   ocrLang: 'eng+spa',

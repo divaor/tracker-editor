@@ -84,7 +84,7 @@ const MAX_CHARS = 16000;
  * on `text`, from the file `name` (in `language`, when known). `history` holds
  * the follow-up questions and answers that came after the first reply.
  */
-export function selectionMessages({ kind, prompt }, { text, name = '', language = '', whole = false }, history = []) {
+export function selectionMessages({ kind, prompt }, { text, name = '', language = '', whole = false, symbols = null }, history = []) {
   const what = whole ? `the file ${name}` : `a part of the file ${name}`;
   const system =
     kind === 'replace'
@@ -93,7 +93,8 @@ export function selectionMessages({ kind, prompt }, { text, name = '', language 
   const body = text.length > MAX_CHARS ? `${text.slice(0, MAX_CHARS)}\n[… cut: ${text.length - MAX_CHARS} more characters]` : text;
   return [
     { role: 'system', content: system },
-    { role: 'user', content: `${prompt}\n\nThe text is ${what}${language ? ` (${language})` : ''}:\n<<<\n${body}\n>>>` },
+    // `symbols`: what the language server knows about its names (symbolContext.js), after the text.
+    { role: 'user', content: `${prompt}\n\nThe text is ${what}${language ? ` (${language})` : ''}:\n<<<\n${body}\n>>>${symbols?.text ? `\n\n${symbols.text}` : ''}` },
     ...history,
   ];
 }

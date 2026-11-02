@@ -14,6 +14,7 @@ import { getSettings } from '../settings.js';
 import { binName } from './folders.js';
 import { toast } from './components.js';
 import { Icon } from './icons.js';
+import { SymbolsNote } from './askSelection.js';
 
 // The guide's section about this, loaded once: the model says how the cards work when asked.
 let guideText = null;
@@ -244,7 +245,15 @@ export function FilesAssist({ target, start = null, actions, onClose }) {
     try {
       const opts = { explainOnly, guide: connectionOf(llm) !== 'local' ? await loadGuide() : '' };
       // The open file goes with the first question; later ones see the files as they are now.
-      let plan = await modelTurn(q, await work.picture({ withFile: first }), signal, opts);
+      let picture = await work.picture({ withFile: first });
+      // What the open file's language server knows about the names around the cursor, with the first question.
+      const symbols = first && target.key ? await actions.symbolsFor?.({ key: target.key }).catch(() => null) : null;
+      if (symbols) {
+        picture = `${picture}\n\n${symbols.text}`;
+        updateLast((t) => ({ ...t, symbols }));
+      }
+      if (signal.aborted) return;
+      let plan = await modelTurn(q, picture, signal, opts);
       for (let round = 1; round < MAX_ROUNDS && plan.steps.length && !signal.aborted; round++) {
         const looks = plan.steps.filter((s) => s.look);
         const { results, userStopped } = await runSteps(looks.length ? looks : plan.steps, { shownOnly: explainOnly });
@@ -309,6 +318,7 @@ export function FilesAssist({ target, start = null, actions, onClose }) {
         ${turns.map(
           (t, ti) => html`<div class="assist-turn" key=${ti}>
             <p class="assist-question">${t.question}</p>
+            <${SymbolsNote} symbols=${t.symbols} />
             ${t.parts.map((p, pi) =>
               p.steps
                 ? html`<div class="gai-steps fai-steps" key=${pi}>${p.steps.map((s, si) => html`<${StepCard} key=${si} s=${s} waiting=${s.status === 'waiting'} many=${s.many ?? 0} onDecide=${(c) => decide.current?.(c)} onUndo=${undo} />`)}</div>`

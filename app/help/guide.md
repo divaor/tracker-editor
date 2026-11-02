@@ -454,6 +454,7 @@ With a model connected, a round ✦ button sits at the bottom right of the edito
 - **Format and convert**: Tidy / format, **Make it Markdown** (a plain text file becomes headings, lists and tables), **Convert to…** JSON, YAML, CSV, a Markdown table, XML, HTML, a bullet list or SQL INSERTs.
 - **Code and queries**: **Check the syntax** (problems by line, then the corrected version), Find problems, **Explain an error** (a pasted message, stack trace or console output), Add comments, Optimize, **Rewrite in…** another language or SQL dialect (Python, PowerShell, T-SQL, PostgreSQL…), **Write a regex…**.
 - **Translate**: To English, To Spanish, To another language….
+- **What the language server knows**: when the file has a [language server](#language-servers-desktop-code-that-knows-its-types) (desktop), the question also takes the types, signatures and definitions of up to 12 names in the selection (or around the cursor), looked up in 2 seconds at most. The panel says so under your question (**Using 7 symbols from the language server**; click it for the list). Turn it off in **Settings → Model → Questions take what the language server knows**. Never for encrypted files. **Change files** takes them too with its first question.
 - **Or ask anything**: type in the box at the bottom. **Answer** replies in the panel; **Change the text** applies it ("make this a table", "sort by date"); **Change files** makes or changes files and folders (see [The model makes and changes files](#the-model-makes-and-changes-files)). After an answer you can **ask a follow-up**.
 
 What comes back:
@@ -512,6 +513,17 @@ Turn on **Settings → Editor → Suggest the rest as you type**: a moment after
 
 - It works best with a small code model that **fills in the middle** (it also reads what comes after the cursor): in Ollama for example `ollama pull qwen2.5-coder:1.5b`, then pick it in **Settings → Model → Model for suggestions**. Other models are asked like a chat, which is slower.
 - It needs a model that answers at once (options A and B below), not a service that answers later. Encrypted files are never sent. With an AI provider, every suggestion is a paid request: pick a fast, cheap model for it (for Claude, `claude-haiku-5-5`).
+
+### Next-edit suggestions
+
+Turn on **Settings → Editor → Suggest the next edit** (or **Next-edit suggestions from the model** in the command palette, `Ctrl+Shift+P`): a moment after you edit and pause, the model may propose the next change that follows from it, anywhere in the file: the same rename at the other uses, a parameter you added passed at the call sites, the matching change in the next block like it.
+
+- **Near the cursor** it shows in place: what goes is struck through in red, what comes is in green. `Tab` makes the change.
+- **Farther away**, its line is marked (**✦ count → total**) and a hint at the end of your line says **Tab ↓ to the next edit** (↑ when it is above). The first `Tab` goes there and shows it in place; a second `Tab` makes it.
+- One change is one step: `Ctrl+Z` takes it back. An answer can hold up to three edits; after one is made the next shows, and after the last the model is asked again.
+- `Escape` drops it. Typing on goes on as usual, and the suggestion goes away (it no longer fits the text).
+- It sends the last few edits you made (as small before-and-after lines), the cursor and the file (a long file as the lines around the cursor) to the **Model for suggestions** (else the chat model). The grey text comes first: while it is on its way or showing, no next edit is asked for or shown.
+- It needs a model that answers at once (not a service that answers later); encrypted files are never sent; not in very large files. With an AI provider each pause after an edit is a paid request.
 
 ### Option A: a model on this computer (Ollama, LM Studio)
 
@@ -987,6 +999,8 @@ Settings → **Keys** (also **Help → Keys…** on the desktop, or **Keys** in 
 - **Java says nothing, or "requires Java 25"**: current jdtls versions need Java 25 (`java -version`; `JAVA_HOME` wins over `java` on PATH). The first look at a big project takes a minute or two.
 - **C#: "csharp-ls" will not install**: the newest csharp-ls wants the newest .NET SDK. With .NET 8, install an older one: `dotnet tool install --global csharp-ls --version 0.16.0`. Problems show once it has loaded the solution.
 - **No grey suggestions**: turn on **Settings → Editor → Suggest the rest as you type**, connect a model in Settings → Model (a local one; a service that answers later can't), and type at the end of a line. Slow ones: pick a small code model as **Model for suggestions**.
+- **No next-edit suggestions**: turn on **Settings → Editor → Suggest the next edit** and connect a model that answers at once. Edit something (a rename) and pause; nothing shows when nothing follows from the edit, while grey text is showing, or in encrypted and very large files. Small models often answer badly: a larger **Model for suggestions** does better here.
+- **The panel does not say "Using … symbols from the language server"**: the file needs a running language server (the status bar shows it), and the names need to be known to it; it waits 2 seconds at most, so a server still loading the project adds nothing.
 - **A mirror says the folder is empty or missing**: one side looks wiped out (a drive not plugged in, a server folder moved), so nothing was changed. Fix it, or remove the mirror and set it up again.
 - **A mirror waits with "deleted here: delete on the server too?"**: click **Review** and choose.
 
