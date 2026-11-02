@@ -27,7 +27,7 @@ The builds are not code-signed, so the first launch warns you. On Windows, choos
 The editor as an Android app, with what a web page cannot do: **Open with** from other apps, **Folders** on the phone, **servers** and **terminals**. For Android 7 and later on 64-bit phones (nearly all from the last ten years).
 
 1. Install **Obtainium** (from https://github.com/ImranR98/Obtainium/releases or F-Droid). It installs apps from their GitHub releases and keeps them up to date.
-2. In Obtainium: **Add app**, paste `https://github.com/divaor/tracker-editor`, **Add**, then **Install** (`Tracker-Editor-0.39.0.apk`). The first time, Android asks to let Obtainium install apps: allow it.
+2. In Obtainium: **Add app**, paste `https://github.com/divaor/tracker-editor`, **Add**, then **Install** (the newest `Tracker-Editor-….apk`). The first time, Android asks to let Obtainium install apps: allow it.
 3. Obtainium tells you when there is a new version and installs it over the old one; your files and settings stay. (Or download the `.apk` from the releases page and open it; then updates are by hand.)
 
 What the app adds:
@@ -37,6 +37,7 @@ What the app adds:
 - **Compare two folders** and **two panes** (a folder's long-press menu): on the phone, on a server or one of each, laid out for a phone, and **Sideways** turns the app to landscape for them (see [Comparisons on a phone](#comparisons-on-a-phone)).
 - **Servers**: SFTP, FTP and FTPS, their terminals, find in a folder, transfers and mirrors, as on a computer (see 11). Saved passwords are encrypted with a key kept in the phone's secure hardware.
 - **A terminal on the phone**: the status bar's **Terminal** opens Android's own shell in the open file's folder, with its basic commands (`ls`, `cat`, `grep`, `cp`, `mv`…). With an SSH server set up, **+** in the panel opens a terminal there.
+- **Git on SSH servers**: a folder there in a Git repository gets its branch in Folders, the **Git panel** (stage, commit, branches, stash, pull and push), blame and the bar of changed lines, with the server's own `git` (see [Git on a server](#git-on-a-server)). The phone has no Git of its own, so folders on the phone get none.
 - **A model on your computer** (Ollama, LM Studio) answers the phone over your network, without CORS settings: see [Option A](#option-a-a-model-on-this-computer-ollama-lm-studio).
 - **Back** closes what is open (a dialog, a panel, the sidebar), then leaves the app.
 - **Something not working?** Long-press the app's icon → **Send a log** (it works even when the app is stuck), or **Settings** → **Send a log** at the bottom. It opens the share sheet with a text file: send it by email, WhatsApp, Drive… It says what the app did and what Android recorded about its crashes and freezes; it has file paths and server names, never passwords or the text of your files.
@@ -79,7 +80,7 @@ On an iPhone, apps added to the home screen each keep their own storage: the edi
   | Amber | **This computer**: a file edited where it is, not synced | Saved · Not saved · Changed on disk · Following |
   | Pink | **A server** (SFTP, FTP): saved back to the server, not synced | Saved on the server · Not saved to the server · Saving… · Changed on the server · Not connected |
 
-  Hover the chip for more. Turn the frame off in **Settings → Editor**.
+  Hover the chip for more. Turn the frame off in **Settings → Editor**. Undo your edits back to what the file holds and it says **Saved** again (nothing to save).
 - **What kind of file**: in **My files** and **Folders** each file has an icon in the color of its kind, so you see it without reading the extension: letters for code (**JS**, **PY**, **C#**…), braces for JSON, `#` for CSS, `</>` for HTML, a table for CSV, a picture, a box for archives, a key for keys and `.env` files… Untitled files take theirs from their language. Hover an icon for the kind. Turn them off in **Settings → Editor → File type icons**.
 - **Names from the content**: an untitled tab you paste or write into gets a name that says what it is: from the model when one is connected (e.g. `Deploy runbook.md`), otherwise from a heading on its first line. The message has **Undo**.
 
@@ -215,7 +216,7 @@ For folders in a Git repository, on this computer, on an **SSH (SFTP) server**, 
 - In **Folders**, right-click changed files → **Stage (Git)** or **Unstage (Git)**.
 - Commands that change your files (pull, switching branches, the stash) wait while a file of the repository has edits not saved: save it first.
 - Signing in to the remote is Git's own: a credential helper (Git Credential Manager on Windows, the keychain on macOS) or an SSH key with its agent; on a server, the server's own (its key, its agent, its credential helper). The editor never asks for a password in a terminal; when Git cannot sign in, it says so, naming where Git ran.
-- FTP and FTPS servers have no Git (no shell there to run it), and neither does the Android app.
+- FTP and FTPS servers have no Git (no shell there to run it). In the Android app, Git works in folders on SSH servers (the phone has no Git of its own).
 
 ### Git in the text: blame, and each change since the last commit (desktop)
 
@@ -884,6 +885,7 @@ A folder in a Git repository on an SFTP server (Linux or macOS), or in a Docker 
 - **The connection went away?** A command that was running says so at once (it may or may not have finished there); the panel offers **Connect**. Folders keeps the branch and changes it last read, and reads them again when the server is back. Git does not connect to a server by itself just to read its status: only when you open its folder or run a command.
 - It reads the status when the folder is read (after a command, when you save there, when the window comes back), never in a loop.
 - Not on FTP or FTPS servers (no shell there), nor on Windows servers.
+- **In the Android app** too, for folders on SSH servers: the same Git panel, branches, blame (on the cursor's line, and **Blame the whole file** from the command palette or Help), the bar of changed lines with **Stage**, **Revert** and **Show the change**, and **Git with the model**. Open the folder in **Folders** and tap its branch, or press `Ctrl+Shift+G` with a keyboard.
 
 ### Mirrors: a server folder on this computer
 
