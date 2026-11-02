@@ -173,7 +173,8 @@ export function GitHistoryTab({ id, record, actions }) {
     let last = Date.now();
     const again = () => {
       last = Date.now();
-      setNowFiles(null);
+      nowCache.current.clear();
+      setNowTick((n) => n + 1);
       load({ keep: true });
     };
     const onFocus = () => Date.now() - last > 2000 && again();
@@ -226,18 +227,25 @@ export function GitHistoryTab({ id, record, actions }) {
       clearTimeout(t);
     };
   }, [pickedHash, root]);
-  // Against the files now: what differs between the commit and the working tree.
+  // Against the files now: what differs between the commit and the working tree (kept per commit
+  // until Git or the files change: `nowTick`).
+  const nowCache = useRef(new Map());
+  const [nowTick, setNowTick] = useState(0);
   useEffect(() => {
-    if (filesMode !== 'now' || !pickedHash || nowFiles?.hash === pickedHash) return;
+    if (filesMode !== 'now' || !pickedHash) return;
+    const known = nowCache.current.get(pickedHash);
+    if (known) return setNowFiles({ hash: pickedHash, ...known });
     let stale = false;
     setNowFiles({ hash: pickedHash, loading: true });
     actions.gitLook(record.root, { op: 'changed-since', hash: pickedHash }).then((r) => {
-      if (!stale) setNowFiles(r.ok ? { hash: pickedHash, ...r.result } : { hash: pickedHash, error: r.error.message });
+      const got = r.ok ? { ...r.result } : { error: r.error.message };
+      if (r.ok) nowCache.current.set(pickedHash, got);
+      if (!stale) setNowFiles({ hash: pickedHash, ...got });
     });
     return () => {
       stale = true;
     };
-  }, [filesMode, pickedHash, nowFiles?.hash]);
+  }, [filesMode, pickedHash, nowTick]);
 
   // ---- Choosing what is shown ----
   const setRecord = (patch) => {
@@ -411,6 +419,8 @@ export function GitHistoryTab({ id, record, actions }) {
         return openFileNow(commit);
       case 'compare-now':
         select(commit.hash);
+        nowCache.current.clear();
+        setNowTick((n) => n + 1);
         return setFilesMode('now');
       case 'branch':
       case 'switch':
@@ -491,7 +501,7 @@ export function GitHistoryTab({ id, record, actions }) {
           </label>`}
       <span class="spacer" />
       <span class="muted small ghist-count" aria-live="polite">${data.loading ? 'Reading…' : data.error ? '' : commitCount(commits.length, data.more)}</span>
-      <button type="button" class="icon-btn sm" aria-label="Read again" title="Read again" disabled=${data.loading} onClick=${() => load({ keep: true })}>
+      <button type="button" class="icon-btn sm ghist-reload" aria-label="Read again" title="Read again" disabled=${data.loading} onClick=${() => load({ keep: true })}>
         <${Icon} name="rotate" size=${15} />
       </button>
     </div>
@@ -514,7 +524,12 @@ export function GitHistoryTab({ id, record, actions }) {
         onEnd=${() => saveSettings({ historySplit: Number(split.toFixed(3)) })}
         onReset=${() => (setSplit(0.58), saveSettings({ historySplit: 0 }))} />
       <${CommitDetails} commit=${current} details=${details && details.hash === selected ? details : null} record=${record} data=${data} busy=${busy}
-        filesMode=${filesMode} setFilesMode=${setFilesMode} nowFiles=${nowFiles?.hash === selected ? nowFiles : null}
+        filesMode=${filesMode} nowFiles=${nowFiles?.hash === selected ? nowFiles : null}
+        setFilesMode=${(m) => {
+          // Against the files now is read again each time it is chosen (files change without Git).
+          if (m === 'now') (nowCache.current.clear(), setNowTick((n) => n + 1));
+          setFilesMode(m);
+        }}
         onSelect=${(hash) => select(hash)} onRef=${(ref) => setRecord({ ref })} onMenu=${(at, commit) => setMenu({ at, commit })} onItem=${runItem}
         onOpen=${(commit, file) => (filesMode === 'now' ? openAgainstNow(commit, file) : openChange(commit, file))} onHistory=${(file) => actions.fileHistory(pathIn(root, file.path))}
         onOpenFile=${(file) => actions.openDiskPath(pathIn(root, file.path))} />
