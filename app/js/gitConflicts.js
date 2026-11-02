@@ -3,6 +3,7 @@
 // and the base's lines (diff3 / zdiff3 only), `=======`, the incoming lines, `>>>>>>> label`;
 // each marker is 7 characters at a line's start. Pure (no DOM): the editor's conflict bars
 // (conflictView.js), the Git panel, the merge view and the model's merge use it.
+import { codeFences } from './fences.js';
 
 const START = /^<{7}(?: (.*))?$/;
 const BASE = /^\|{7}(?: (.*))?$/;
@@ -177,4 +178,49 @@ export function mergeMessages({ name = '', op = null, labels = {}, before = '', 
     { role: 'system', content: 'You resolve Git merge conflicts in code and text. You answer with the merged lines in one fenced code block, then at most two short sentences on what you kept.' },
     { role: 'user', content: parts.filter(Boolean).join('\n\n') },
   ];
+}
+
+/**
+ * The merged lines in a model's answer to mergeMessages: { text, note } (its first fenced block,
+ * read as fences.js reads them, with a line break at the end when the block it replaces had one;
+ * `note`: what the model said after it), or null when there is no block or the block still holds
+ * a conflict (a start and an end marker).
+ */
+export function mergedFromReply(reply, { finalNewline = true } = {}) {
+  const src = String(reply ?? '');
+  const block = codeFences(src)[0];
+  if (!block) return null;
+  let text = block.body.replace(/\r\n?/g, '\n').replace(/\n+$/, '');
+  if (/^<{7}(?: |$)/m.test(text) && /^>{7}(?: |$)/m.test(text)) return null;
+  if (finalNewline && text) text += '\n';
+  return { text, note: src.slice(block.end).trim().slice(0, 400) };
+}
+
+/**
+ * Where a conflict block's section is in one side's whole file (the merge view shows it there):
+ * { from, to } of `section` in `text`, the match nearest `near` (how far through the file, 0–1)
+ * when there are several; a section not found (or empty) is placed just after the last lines
+ * `before` it; null when neither is there.
+ */
+export function sidePlace(text, section, { before = '', near = 0 } = {}) {
+  const src = String(text ?? '');
+  const target = near * src.length;
+  const nearest = (needle) => {
+    let best = null;
+    for (let at = src.indexOf(needle), n = 0; at !== -1 && n < 200; at = src.indexOf(needle, at + 1), n++) if (best === null || Math.abs(at - target) < Math.abs(best - target)) best = at;
+    return best;
+  };
+  if (section) {
+    const at = nearest(section);
+    if (at !== null) return { from: at, to: at + section.length };
+  }
+  // The last three lines before it, else two, else one.
+  const lines = String(before).replace(/\n$/, '').split('\n');
+  for (let k = Math.min(3, lines.length); k >= 1; k--) {
+    const lead = `${lines.slice(-k).join('\n')}\n`;
+    if (!lead.trim()) continue;
+    const at = nearest(lead);
+    if (at !== null) return { from: at + lead.length, to: at + lead.length };
+  }
+  return null;
 }

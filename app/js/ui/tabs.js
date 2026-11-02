@@ -865,6 +865,12 @@ export function StatusBar({ recording, big, cursor, language, file, repo, disk, 
       <${Icon} name="xCircle" size=${13} /><span>${problems.list.filter((p) => p.severity === 'error').length}</span>
       <${Icon} name="alert" size=${13} /><span>${problems.list.filter((p) => p.severity !== 'error').length}</span>
     </button>`}
+    ${cursor?.conflicts > 0 &&
+    html`<button type="button" class="status-item status-btn-text status-conflicts"
+      title=${`${cursor.conflicts} Git conflict${cursor.conflicts === 1 ? '' : 's'} in this file: keep the current change, the incoming one or both, from the bar above each. Click to go to the next${keysOfCommand('conflict-next') ? ` (${keysOfCommand('conflict-next')})` : ''}.`}
+      onClick=${() => actions.nextConflict(1)}>
+      <${Icon} name="branch" size=${13} /><span>${cursor.conflicts} conflict${cursor.conflicts === 1 ? '' : 's'}</span>
+    </button>`}
     ${debug &&
     html`<button type="button" class=${`status-item status-btn-text status-debug state-${debug.status}`} aria-pressed=${Boolean(debugOpen)} title=${`Debugging ${debug.label}: ${debug.text}. F5 continues, F10 steps over, F11 into, Shift+F5 stops. Click for the Debug panel.`} onClick=${() => actions.toggleDebugPanel()}>
       <${Icon} name="bug" size=${13} /><span>${debug.text}</span>

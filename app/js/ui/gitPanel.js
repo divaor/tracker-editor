@@ -14,6 +14,7 @@ import { connLabel, isRemotePath, remoteParts } from '../where.js';
 import { Modal } from './components.js';
 import { FileIcon } from './fileIcon.js';
 import { Icon } from './icons.js';
+import { ConflictsSection } from './conflicts.js';
 
 const baseName = (p) => String(p).split(/[\\/]/).pop();
 /** The connection a folder is on (a server or a place), or null for one on this computer. */
@@ -237,9 +238,12 @@ export function GitPanel({ dir, tick, actions, onClose }) {
           <span>A ${inProgress} is halfway${conflicts.length ? `: ${conflicts.length} file${conflicts.length === 1 ? '' : 's'} in conflict. Fix each (look for <<<<<<<), stage it, then commit` : ': commit to finish it'}, or abort it.</span>
           <span class="git-problem-actions">
             <button type="button" class="btn sm" disabled=${busy} onClick=${() => run({ op: 'abort', what: inProgress }, 'abort')}>Abort the ${inProgress}</button>
+            ${!conflicts.length && html`<button type="button" class="btn sm primary" disabled=${busy} title=${inProgress === 'merge' ? 'Make the merge commit with Git’s message (the files as staged)' : `git ${inProgress} --continue: the next step, with the files as staged`}
+              onClick=${() => run({ op: 'continue', what: inProgress }, 'continue').then((r) => r.ok && actions.toast(inProgress === 'merge' ? 'Merged: the merge commit is made.' : `The ${inProgress} went on.`))}>${inProgress === 'merge' ? 'Finish the merge' : `Continue the ${inProgress}`}</button>`}
             <button type="button" class="btn ghost sm" title="The model explains where things stand and walks you through finishing (or undoing) it" onClick=${() => askModel(`A ${inProgress} stopped halfway${conflicts.length ? ` with conflicts in ${conflicts.map(([r]) => r).join(', ')}` : ''}. Explain where things stand and help me finish it, or go back safely.`)}><${Icon} name="sparkle" size=${13} />Help me finish</button>
           </span>
         </div>`}
+        <${ConflictsSection} root=${root} status=${status} inProgress=${inProgress} busy=${busy} run=${run} actions=${actions} />
         <div class="git-commit">
           <textarea ref=${box} rows="3" placeholder=${amend ? 'The last commit’s message (Ctrl+Enter amends)' : 'Message (Ctrl+Enter commits)'} value=${message} aria-label="Commit message"
             onInput=${(e) => setMessage(e.currentTarget.value)}

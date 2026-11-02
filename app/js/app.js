@@ -50,6 +50,7 @@ import { createFilesWork } from './filesWork.js';
 import { CHANGES_FILES, cleanCommitMessage, commitMessageMessages } from './gitAssist.js';
 import { gitError, mergeRequestLink, stageBlock } from './gitStatus.js';
 import { historyName, relIn } from './gitHistory.js';
+import { createConflictActions } from './conflictActions.js';
 import { refreshAllGit, refreshGit } from './gitState.js';
 import { FolderSearchPanel } from './ui/folderSearch.js';
 import { AskPanel } from './ui/askPanel.js';
@@ -2006,7 +2007,7 @@ export function App() {
       },
       onCursor: setCursor,
       onProblems(key, list, language, { server = false } = {}) {
-        const checked = server || language === 'JSON' || SYNTAX_LANGUAGES.has(language);
+        const checked = server || language === 'JSON' || SYNTAX_LANGUAGES.has(language) || list.some((p) => p.source === 'Git');
         setProblems((all) => {
           const was = all[key];
           if (!checked) return was ? (({ [key]: _gone, ...rest }) => rest)(all) : all;
@@ -2026,6 +2027,8 @@ export function App() {
         return true;
       },
     });
+    // A conflict bar's Compare, merge view and model's merge (conflictView.js).
+    hostRef.current.setConflictHandler(({ key, action, index }) => (action === 'compare' ? actions.compareConflict(key, index) : action === 'merge-view' ? actions.openMergeView(key, index) : actions.mergeConflictWithModel(key, index)));
     lspRef.current = createLanguageServers({
       host: hostRef.current,
       onChange: () => setLspTick((n) => n + 1),
@@ -3568,6 +3571,15 @@ export function App() {
     const { llm } = getSettings();
     return Boolean(llm.enabled && llm.chatModel && connectionOf(llm) !== 'async');
   };
+  // ---- Git's conflicts (0.49; conflictActions.js): the editor's blocks, the model's merge, the merge view, Mark resolved ----
+  Object.assign(actions, createConflictActions({ host: () => hostRef.current, actions, toast, setCompare, setView, gitWorksAt, askReady, getSettings, llmClient, encryptedNotSent: ENCRYPTED_NOT_SENT }));
+  // A tab with conflict blocks shows: its bars learn what Git is doing; the last block gone offers Mark resolved.
+  useEffect(() => {
+    if (cursor?.key && cursor.conflicts > 0) actions.lookUpConflicts(cursor.key);
+  }, [cursor?.key, cursor?.conflicts > 0, settings.llm]);
+  useEffect(() => {
+    if (cursor?.key) actions.conflictsCounted(cursor.key, cursor.conflicts ?? 0);
+  }, [cursor?.key, cursor?.conflicts]);
   actions.askFind = async (asked) => {
     const question = questionOf(asked);
     if (!question) return;
@@ -4344,6 +4356,7 @@ export function App() {
   };
   // ---- The text's right-click menu (0.45): what IDEs offer there, for the kind of file ----
   const TEXT_MENU_ICONS = { definition: 'arrowRight', references: 'search', rename: 'edit', symbol: 'list', 'quick-fix': 'bulb', format: 'code', cut: 'scissors', copy: 'copy', paste: 'clipboard', find: 'search', breakpoint: 'bug', 'run-file': 'play', 'debug-file': 'bug', 'test-at-cursor': 'check', 'debug-test': 'bug', 'git-revert': 'undo', 'git-stage': 'plus', ask: 'sparkle', files: 'filePlus' };
+  Object.assign(TEXT_MENU_ICONS, { 'conflict-current': 'arrowUp', 'conflict-incoming': 'arrowDown', 'conflict-both': 'check', 'conflict-compare': 'compare', 'conflict-merge': 'columns', 'conflict-model': 'sparkle' });
   /**
    * The items of the menu for `at` (editor.js onTextMenu): codeMenu.js's for the tab's language,
    * what its language server does, the Run group's choices and the model; each with the keys in
@@ -4360,9 +4373,12 @@ export function App() {
     // In a change since the last commit (a file here in a Git repository): revert or stage it.
     const line = hostRef.current?.cursorLine(key) || 1;
     const gitChange = k?.kind === 'disk' && Boolean(window.desktop?.git) && Boolean(hostRef.current?.gitChangeAt(key, line));
+    // In a Git conflict block (any text with markers): its ways out first.
+    const conflict = actions.conflictMenuInfo(key);
     const items = codeMenuItems({
       ...at,
       gitChange,
+      conflict,
       server: { attached: Boolean(fixes), organizeImports: kinds.some((x) => x === 'source' || x.startsWith('source.organizeImports')) },
       runs: Boolean(run?.runs),
       debugs: Boolean(run?.debugs),
@@ -4391,6 +4407,12 @@ export function App() {
       'debug-test': () => actions.debugTest({ key }),
       'git-revert': () => actions.revertChangeAt(key, line),
       'git-stage': () => actions.stageChangeAt(key, line),
+      'conflict-current': () => actions.resolveConflictHere('ours', { key }),
+      'conflict-incoming': () => actions.resolveConflictHere('theirs', { key }),
+      'conflict-both': () => actions.resolveConflictHere('both', { key }),
+      'conflict-compare': () => actions.compareConflict(key),
+      'conflict-merge': () => actions.openMergeView(key),
+      'conflict-model': () => actions.mergeConflictWithModel(key),
       ask: () => actions.openAssist({}),
       files: () => actions.assistFiles({ key }),
     };
@@ -5041,6 +5063,14 @@ export function App() {
       'git-show-change': () => actions.showChangeAt(),
       'git-next-change': () => actions.gotoChange(1),
       'git-prev-change': () => actions.gotoChange(-1),
+      'conflict-next': () => actions.nextConflict(1),
+      'conflict-prev': () => actions.nextConflict(-1),
+      'conflict-accept-current': () => actions.resolveConflictHere('ours'),
+      'conflict-accept-incoming': () => actions.resolveConflictHere('theirs'),
+      'conflict-accept-both': () => actions.resolveConflictHere('both'),
+      'conflict-compare': () => actions.compareConflict(),
+      'conflict-merge-view': () => actions.openMergeView(),
+      'conflict-merge-model': () => actions.mergeConflictWithModel(),
       'git-blame-file': () => actions.toggleBlameColumn(),
       'git-blame-toggle': () => actions.toggleInlineBlame(),
       problems: () => actions.toggleProblems(),
