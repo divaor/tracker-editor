@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { decodeAppended, decodeText, encodeText, fromBase64, fromWholeLine, toBase64 } from '../app/js/textBytes.js';
-import { changedSince, routeOfLink, sortLaunch } from '../app/js/androidApp.js';
+import { changedSince, routeOfLink, sendQueue, sortLaunch } from '../app/js/androidApp.js';
 import { contentPlace, isContentPath } from '../app/js/where.js';
 
 const require = createRequire(import.meta.url);
@@ -110,4 +110,33 @@ test('where a file from another app is', () => {
   assert.equal(contentPlace('content://com.mixplorer.file/x'), 'From Mixplorer');
   assert.equal(contentPlace('content://provider.files/x'), 'From another app');
   assert.equal(contentPlace('/not/content'), '');
+});
+
+test('messages to the phone’s Node go in the order sent, keys for one terminal joined while one waits', async () => {
+  const got = [];
+  // Each request answers after its own random time, as fetches do; the queue must not care.
+  const send = sendQueue(async (m) => {
+    await new Promise((r) => setTimeout(r, Math.random() * 8));
+    got.push(structuredClone(m));
+  });
+  for (const ch of 'echo ui-$((6*7))\r') send('term:input', 't1', ch);
+  send('term:resize', 't1', 80, 24);
+  send('term:input', 't1', 'x');
+  send('term:input', 't2', 'y');
+  await new Promise((r) => setTimeout(r, 400));
+  const typed = got.filter((m) => m.channel === 'term:input' && m.args[0] === 't1').map((m) => m.args[1]).join('');
+  assert.equal(typed, 'echo ui-$((6*7))\rx', 'every key, in order');
+  assert.ok(got.length < 22, `keys waiting behind a request go as one (${got.length} requests)`);
+  assert.deepEqual(got.slice(-3).map((m) => [m.channel, m.args[0]]), [['term:resize', 't1'], ['term:input', 't1'], ['term:input', 't2']], 'other messages keep their place and are never joined');
+  // A request that fails is let go; the rest still go.
+  const after = [];
+  const flaky = sendQueue(async (m) => {
+    if (m.args[0] === 'bad') throw new Error('Node is not there');
+    after.push(m.args[0]);
+  });
+  flaky('term:input', 'a', '1');
+  flaky('llm:abort', 'bad');
+  flaky('llm:abort', 'c');
+  await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(after, ['a', 'c']);
 });

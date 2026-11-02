@@ -383,12 +383,45 @@ export async function nodeInvoke(channel, ...args) {
   }
 }
 
-/** A message with no answer (ipcRenderer.send there). */
-function nodeSend(channel, ...args) {
-  startBackend()
-    .then(({ base, token }) => fetch(`${base}/send`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-token': token }, body: JSON.stringify({ channel, args: packBytes(args) }) }))
-    .catch(() => {});
+/**
+ * Messages with no answer, one after another in the order sent (see nodeSend): `post(message)`
+ * sends one ({ channel, args }) and the next waits for it. Keys for the same terminal waiting
+ * behind a request are joined into one.
+ */
+export function sendQueue(post) {
+  const waiting = [];
+  let busy = false;
+  const drain = async () => {
+    busy = true;
+    try {
+      while (waiting.length) {
+        try {
+          await post(waiting.shift());
+        } catch {
+          // As before: a message with no answer is let go when Node cannot be reached.
+        }
+      }
+    } finally {
+      busy = false;
+    }
+  };
+  return (channel, ...args) => {
+    const last = waiting.at(-1);
+    if (channel === 'term:input' && last?.channel === channel && last.args[0] === args[0] && typeof last.args[1] === 'string' && typeof args[1] === 'string') last.args[1] += args[1];
+    else waiting.push({ channel, args });
+    if (!busy) drain();
+  };
 }
+
+/**
+ * A message with no answer (ipcRenderer.send there), in the order sent as ipcRenderer.send's
+ * are: fetches made at once can arrive in any order, and keys typed into a terminal must not
+ * ("echo" came out as "ehco" on the phone).
+ */
+const nodeSend = sendQueue(async ({ channel, args }) => {
+  const { base, token } = await startBackend();
+  await fetch(`${base}/send`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-token': token }, body: JSON.stringify({ channel, args: packBytes(args) }) });
+});
 
 /** What the main process sends the page (webContents.send there). Listening does not start it. */
 function nodeOn(channel, callback) {
