@@ -1,6 +1,6 @@
 import { html, useEffect, useLayoutEffect, useMemo, useRef, useState } from '../../vendor/preact-htm.js';
 import { createMergeEditor } from '../editor.js';
-import { childPath, compareListings, copyPlan, countStates, nextDifference, SHOW, SHOW_LABELS, STATE_LABELS, syncPlan, toCheck, treeRows } from '../folderCompare.js';
+import { childPath, choicePlan, compareListings, copyPlan, countStates, folderChoices, nextDifference, PRESET_HINTS, PRESET_LABELS, presetChoices, setChoice, SHOW, SHOW_LABELS, STATE_LABELS, SYNC_PRESETS, toCheck, treeRows, withChecks } from '../folderCompare.js';
 import { formatBytes, formatDateTime, shortDate } from '../format.js';
 import { pathName, sideName, sideWhere } from '../compares.js';
 import { getSettings, resolvedTheme, saveSettings } from '../settings.js';
@@ -12,7 +12,7 @@ import { isAndroidApp } from '../platform.js';
 import { FileIcon } from './fileIcon.js';
 import { binName } from './folders.js';
 import { Icon } from './icons.js';
-import { MenuButton } from './menu.js';
+import { Menu, MenuButton } from './menu.js';
 import { Modal } from './components.js';
 import { Splitter } from './splitter.js';
 import { PanesTab } from './twoPanes.js';
@@ -171,6 +171,12 @@ function SaveStar({ id, record, actions }) {
 const MARKS = { same: '=', changed: '≠', left: '◧', right: '◨', unsure: '…', kind: '≠' };
 const sizeOf = (s) => (s && !s.dir ? formatBytes(s.size) : '');
 const dateOf = (s) => (s?.mtimeMs ? formatDateTime(new Date(s.mtimeMs).toISOString()) : '');
+const many = (n, word) => `${n.toLocaleString()} ${word}${n === 1 ? '' : 's'}`;
+/** The side a row is only on ('left' / 'right'), or null when it is on both. */
+const onlyOn = (e) => (e.left && !e.right ? 'left' : e.right && !e.left ? 'right' : null);
+// What one call to the main process takes (it refuses more than 5,000 paths at once).
+const CHUNK = 2000;
+const chunks = (list) => Array.from({ length: Math.ceil(list.length / CHUNK) }, (_, i) => list.slice(i * CHUNK, (i + 1) * CHUNK));
 
 /** A folder's name with where it is, for the heads: on a server, the server's name. */
 const rootWhere = (p) => (isRemotePath(p) ? `${server(remoteParts(p).id)?.name ?? 'Server'}: ${remoteParts(p).path}` : p);
@@ -178,22 +184,28 @@ const rootWhere = (p) => (isRemotePath(p) ? `${server(remoteParts(p).id)?.name ?
 /**
  * Two folders compared in a tab: one aligned tree (left file | state | right file), the
  * differences by default; a file picked shows below, compared (or alone, when it is on one
- * side). Copies go either way, a side can be made like the other, and same-size files with
- * another date are compared byte for byte in the background.
+ * side). Copies go either way, and syncing picks for each difference which way it goes (or
+ * that it stays). Same-size files with another date are compared byte for byte in the
+ * background; what is found is kept while their sizes and dates stay, so reading both
+ * folders again (after a copy) checks only what changed, and the ones being checked wait
+ * behind one "Checking…" row instead of all showing for a moment.
  */
 function FoldersTab({ id, record, settings, actions }) {
   const left = record.left.path;
   const right = record.right.path;
   const [scan, setScan] = useState(null); // { left, right } | { error }
   const [scanning, setScanning] = useState(true);
-  const [checked, setChecked] = useState({});
+  const [checked, setChecked] = useState({}); // withChecks: { rel: { key, same } }
+  const [failed, setFailed] = useState(() => new Set()); // checks that could not run this time: shown as not known
   const [checking, setChecking] = useState(null); // { done, total }
   const [expanded, setExpanded] = useState(() => new Set(record.expanded ?? []));
   const [selected, setSelected] = useState(() => new Set());
   const [cursor, setCursor] = useState(null);
   const [busy, setBusy] = useState(null);
   const [note, setNote] = useState(null);
-  const [plan, setPlan] = useState(null); // making a side like the other: { to, copy, extra }
+  // Syncing: the preset and the person's own choices on top ({ preset, overrides: Map }), and the plan being confirmed.
+  const [sync, setSync] = useState(null);
+  const [confirming, setConfirming] = useState(null);
   const [tick, setTick] = useState(0);
   const [split, setSplit] = useState(() => getSettings().compareSplit || 0.45);
   // The file compared below has edits not saved: asked before another one takes its place.
@@ -206,14 +218,15 @@ function FoldersTab({ id, record, settings, actions }) {
   // A phone held upright: one tree, each name once, both sides' size and date under it.
   const phone = usePhoneLayout();
 
-  // Both folders listed (again after copies, saves, Refresh).
+  // Both folders listed (again after copies, saves, Refresh). Until the new listing comes, the
+  // rows read before stay; what the content checks found stays with it (checkKey).
   useEffect(() => {
     let stale = false;
     setScanning(true);
     actions
       .compareScan(left, right, opts)
       .then(
-        (s) => !stale && (setScan(s), setChecked({})),
+        (s) => !stale && (setScan(s), setFailed(new Set())),
         (err) => !stale && setScan({ error: message(err) }),
       )
       .finally(() => !stale && setScanning(false));
@@ -225,29 +238,48 @@ function FoldersTab({ id, record, settings, actions }) {
   useEffect(() => onTransfers((_jobs, job) => job && !running(job) && setTick((t) => t + 1)), []);
 
   const entries = useMemo(() => (scan && !scan.error ? compareListings(scan.left, scan.right, { checked }) : new Map()), [scan, checked]);
-  const rows = useMemo(() => treeRows(entries, { expanded, show }), [entries, expanded, show]);
+  // The files whose contents are being compared (or about to be): left out of the differences
+  // meanwhile (most turn out the same), behind one "Checking…" row. The one at the cursor stays.
+  const pending = useMemo(() => new Set(toCheck(entries).filter((r) => !failed.has(r))), [entries, failed]);
+  const hide = useMemo(() => {
+    if (show !== 'diff' || !pending.size) return null;
+    if (!cursor || !pending.has(cursor)) return pending;
+    const out = new Set(pending);
+    out.delete(cursor);
+    return out;
+  }, [pending, show, cursor]);
+  const rows = useMemo(() => treeRows(entries, { expanded, show, hideUnsure: hide }), [entries, expanded, show, hide]);
   const counts = useMemo(() => countStates(entries), [entries]);
+  const choices = useMemo(() => (sync ? presetChoices(entries, sync.preset, sync.overrides) : null), [entries, sync]);
+  const folderWays = useMemo(() => (choices ? folderChoices(choices) : null), [choices]);
+  const plan = useMemo(() => (choices ? choicePlan(entries, choices) : null), [entries, choices]);
 
-  // Same size, another date: compared byte for byte, a few at a time.
+  // Same size, another date: compared byte for byte, a few at a time; each answer is kept
+  // (with both sides' size and date) as it comes.
   useEffect(() => {
     if (!scan || scan.error) return;
     const list = toCheck(entries);
     if (!list.length) return setChecking(null);
+    const of = entries;
     let stale = false;
     (async () => {
       const found = {};
       for (let i = 0; i < list.length && !stale; i += 20) {
         setChecking({ done: i, total: list.length });
         try {
-          Object.assign(found, await actions.compareSame(left, right, list.slice(i, i + 20)));
+          const part = await actions.compareSame(left, right, list.slice(i, i + 20));
+          if (stale) return;
+          Object.assign(found, part);
+          // Those it could not tell stay "different" (to be looked at).
+          setChecked((c) => withChecks(c, of, part));
         } catch {
           break;
         }
       }
       if (stale) return;
       setChecking(null);
-      // Those it could not tell stay "different" (to be looked at).
-      setChecked((c) => ({ ...c, ...Object.fromEntries(Object.entries(found).map(([rel, same]) => [rel, same === true])) }));
+      const missed = list.filter((r) => !(r in found));
+      if (missed.length) setFailed(new Set(missed));
     })();
     return () => {
       stale = true;
@@ -287,7 +319,7 @@ function FoldersTab({ id, record, settings, actions }) {
   };
   const go = (step) => {
     // The next difference among everything under open or closed folders: its folders open.
-    const all = treeRows(entries, { expanded: new Set([...entries.values()].filter((e) => e.dir).map((e) => e.rel)), show });
+    const all = treeRows(entries, { expanded: new Set([...entries.values()].filter((e) => e.dir).map((e) => e.rel)), show, hideUnsure: hide });
     const rel = nextDifference(all, cursor, step);
     if (!rel || !leaveFile()) return;
     reveal(rel);
@@ -317,20 +349,37 @@ function FoldersTab({ id, record, settings, actions }) {
       setBusy(null);
     }
   };
-  const runPlan = async ({ to, copy: list, extra, remove }) => {
-    const from = to === 'right' ? 'left' : 'right';
-    setPlan(null);
+
+  // ---- Syncing: a choice per difference, then all of them at once ----
+  const startSync = (preset = 'newer') => setSync({ preset, overrides: new Map() });
+  /** A row's choice ('right', 'left', 'skip' or 'delete'): for every row picked when it is one of them. */
+  const choose = (rel, way) => {
+    const rels = selected.has(rel) && selected.size > 1 ? picked : [rel];
+    setSync((s) => s && { ...s, overrides: setChoice(s.overrides, entries, rels, way) });
+  };
+  const runSync = async (p) => {
+    setConfirming(null);
     setBusy('sync');
     setNote(null);
+    let background = false;
+    const copied = p.toRight.length + p.toLeft.length;
+    const deleted = p.deleteLeft.length + p.deleteRight.length;
     try {
-      if (remove && extra.length) await actions.compareRemove(record[to].path, extra);
-      const r = list.length ? await actions.compareCopy(record[from].path, record[to].path, list) : null;
-      setNote({ text: r?.transfer ? `Making the ${to} like the ${from} (see Transfers).` : `The ${to} is like the ${from} now.` });
-      if (!r?.transfer) setTick((t) => t + 1);
+      for (const part of chunks(p.toRight)) background = Boolean((await actions.compareCopy(left, right, part))?.transfer) || background;
+      for (const part of chunks(p.toLeft)) background = Boolean((await actions.compareCopy(right, left, part))?.transfer) || background;
+      for (const part of chunks(p.deleteLeft)) await actions.compareRemove(left, part);
+      for (const part of chunks(p.deleteRight)) await actions.compareRemove(right, part);
+      setSync(null);
+      setNote({
+        text: background
+          ? `Syncing: ${[copied && `${many(copied, 'item')} to copy`, deleted && `${many(deleted, 'item')} deleted`].filter(Boolean).join(', ')}. Copies to and from the server go on in the background (see Transfers).`
+          : `Synced: ${[copied && `${many(copied, 'item')} copied`, deleted && `${many(deleted, 'item')} deleted`].filter(Boolean).join(', ')}.`,
+      });
     } catch (err) {
       setNote({ text: message(err), error: true });
     } finally {
       setBusy(null);
+      setTick((t) => t + 1);
     }
   };
 
@@ -341,6 +390,16 @@ function FoldersTab({ id, record, settings, actions }) {
   const keyDown = (e) => {
     const at = rows.findIndex((r) => r.rel === cursor);
     const row = rows[at];
+    // Syncing: Alt+→ / Alt+← / Alt+- / Alt+Delete set what happens to the rows picked.
+    if (sync && e.altKey && !e.ctrlKey && !e.metaKey) {
+      const way = e.key === 'ArrowRight' ? 'right' : e.key === 'ArrowLeft' ? 'left' : e.code === 'Minus' || e.code === 'NumpadSubtract' ? 'skip' : e.key === 'Delete' || e.key === 'Backspace' ? 'delete' : null;
+      if (way) {
+        e.preventDefault();
+        const rels = picked.length ? picked : cursor ? [cursor] : [];
+        if (rels.length) setSync((s) => s && { ...s, overrides: setChoice(s.overrides, entries, rels, way) });
+        return;
+      }
+    }
     if (e.altKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
       e.preventDefault();
       return go(e.key === 'ArrowDown' ? 1 : -1);
@@ -398,14 +457,24 @@ function FoldersTab({ id, record, settings, actions }) {
       </span>
     </div>`;
   };
-  const row = (e) => html`<div key=${e.rel} data-rel=${e.rel} role="treeitem" aria-selected=${selected.has(e.rel)} aria-level=${e.depth + 1} aria-expanded=${e.dir ? expanded.has(e.rel) : undefined}
-      class="fcmp-row state-${e.state} ${phone ? 'one' : ''} ${selected.has(e.rel) ? 'selected' : ''} ${cursor === e.rel ? 'cursor' : ''}"
+  const row = (e) => {
+    // Syncing: the row's choice (a unit's own, or what the units inside a folder do), else its state.
+    const unit = Boolean(choices?.has(e.rel));
+    const way = !choices ? null : unit ? choices.get(e.rel) : e.dir && e.left && e.right ? (folderWays.get(e.rel) ?? null) : null;
+    const one = unit ? onlyOn(e) : null;
+    const goes = way === 'right' || way === 'left';
+    const wayClass = way == null ? '' : `way-${way} ${goes ? (one === way ? `del-${way}` : `to-${way}`) : ''}`;
+    const mid =
+      way == null
+        ? html`<div class="fcmp-mark" title=${STATE_LABELS[e.state]}>${MARKS[e.state]}</div>`
+        : html`<${ChoiceControl} rel=${e.rel} name=${e.name} value=${way} one=${one} folder=${!unit} phone=${phone} onChoose=${choose} />`;
+    return html`<div key=${e.rel} data-rel=${e.rel} role="treeitem" aria-selected=${selected.has(e.rel)} aria-level=${e.depth + 1} aria-expanded=${e.dir ? expanded.has(e.rel) : undefined}
+      class="fcmp-row state-${e.state} ${wayClass} ${phone ? 'one' : ''} ${selected.has(e.rel) ? 'selected' : ''} ${cursor === e.rel ? 'cursor' : ''}"
       onClick=${(ev) => pick(e.rel, ev)}
       onDblClick=${() => (e.dir ? toggle(e.rel) : e.left && e.right && actions.compareFiles({ key: diskKey(childPath(left, e.rel)) }, { key: diskKey(childPath(right, e.rel)) }))}>
-      ${phone
-        ? html`${both(e)}<div class="fcmp-mark" title=${STATE_LABELS[e.state]}>${MARKS[e.state]}</div>`
-        : html`${cell(e, 'left')}<div class="fcmp-mark" title=${STATE_LABELS[e.state]}>${MARKS[e.state]}</div>${cell(e, 'right')}`}
+      ${phone ? html`${both(e)}${mid}` : html`${cell(e, 'left')}${mid}${cell(e, 'right')}`}
     </div>`;
+  };
 
   const total = counts.changed + counts.left + counts.right + counts.kind + counts.unsure;
   const chip = (state, n) => n > 0 && html`<span class="fcmp-chip state-${state}" title=${STATE_LABELS[state]}>${MARKS[state]} ${n}</span>`;
@@ -422,17 +491,26 @@ function FoldersTab({ id, record, settings, actions }) {
     </div>`;
   };
   const moreItems = () => [
-    { label: 'Swap the sides', icon: 'rotate', run: () => actions.updateCompare(id, { left: record.right, right: record.left }) },
-    { label: 'Make the right like the left…', icon: 'arrowRight', disabled: !entries.size, run: () => setPlan({ to: 'right', ...syncPlan(entries, 'right') }) },
-    { label: 'Make the left like the right…', icon: 'arrowLeft', disabled: !entries.size, run: () => setPlan({ to: 'left', ...syncPlan(entries, 'left') }) },
+    { label: 'Swap the sides', icon: 'rotate', run: () => (setSync(null), actions.updateCompare(id, { left: record.right, right: record.left })) },
+    { label: 'Make the right like the left…', icon: 'arrowRight', hint: 'Syncing, with every difference going to the right and what is only on the right deleted: change any of it first', disabled: !entries.size, run: () => startSync('mirror-right') },
+    { label: 'Make the left like the right…', icon: 'arrowLeft', hint: 'Syncing, with every difference going to the left and what is only on the left deleted: change any of it first', disabled: !entries.size, run: () => startSync('mirror-left') },
     { separator: true },
     { label: 'Include .git, node_modules…', checked: Boolean(record.all), run: () => actions.updateCompare(id, { all: !record.all }) },
     { label: 'Show hidden files', checked: settings.showHidden !== false, run: () => saveSettings({ showHidden: !(getSettings().showHidden !== false) }) },
     { label: 'Open both folders in Folders', icon: 'folderOpen', run: () => actions.showSections?.([left, right], right) },
   ];
+  // What syncing does now: "→ 12 (3 replace) · ← 4 · ✕ 2 · 5 skipped".
+  const todo = plan ? plan.toRight.length + plan.toLeft.length + plan.deleteLeft.length + plan.deleteRight.length : 0;
+  const summary =
+    plan &&
+    html`${plan.toRight.length > 0 && html`<span class="fcmp-sum to" title="Copied to the right">→ ${plan.toRight.length}${plan.replaceRight ? ` (${plan.replaceRight} replace)` : ''}</span>`}
+    ${plan.toLeft.length > 0 && html`<span class="fcmp-sum to" title="Copied to the left">← ${plan.toLeft.length}${plan.replaceLeft ? ` (${plan.replaceLeft} replace)` : ''}</span>`}
+    ${plan.deleteLeft.length + plan.deleteRight.length > 0 && html`<span class="fcmp-sum del" title=${`Deleted: ${plan.deleteLeft.length} on the left, ${plan.deleteRight.length} on the right`}>✕ ${plan.deleteLeft.length + plan.deleteRight.length}</span>`}
+    ${plan.skipped > 0 && html`<span class="fcmp-sum skip">${plan.skipped} skipped</span>`}
+    ${!todo && !plan.skipped && html`<span class="muted small">Nothing differs.</span>`}`;
 
   const startSplit = useRef(split);
-  return html`<div class="fcmp ${phone ? 'phone' : ''}" role="region" aria-label="Folders compared" style=${{ '--fcmp-split': `${(split * 100).toFixed(1)}%` }} ref=${body}>
+  return html`<div class="fcmp ${phone ? 'phone' : ''} ${sync ? 'syncing' : ''}" role="region" aria-label="Folders compared" style=${{ '--fcmp-split': `${(split * 100).toFixed(1)}%` }} ref=${body}>
     <div class="ccmp-bar fcmp-bar">
       <${SaveStar} id=${id} record=${record} actions=${actions} />
       <${SidewaysButton} />
@@ -442,26 +520,46 @@ function FoldersTab({ id, record, settings, actions }) {
         ${SHOW.map((s) => html`<option value=${s}>${SHOW_LABELS[s]}</option>`)}
       </select>
       <span class="fcmp-chips" aria-live="polite">
-        ${scanning ? html`<span class="muted small">Reading both folders…</span>` : scan?.error ? '' : total === 0 && !checking ? html`<span class="muted small">The same on both sides</span>` : html`${chip('changed', counts.changed + counts.kind)}${chip('left', counts.left)}${chip('right', counts.right)}${chip('unsure', counts.unsure)}`}
-        ${checking && html`<span class="muted small">Checking contents… ${checking.done} of ${checking.total}</span>`}
+        ${scanning
+          ? html`<span class="fcmp-busy muted small"><span class="spinner" aria-hidden="true" />Reading both folders…</span>`
+          : scan?.error
+            ? ''
+            : total === 0 && !checking
+              ? html`<span class="muted small">The same on both sides</span>`
+              : html`${chip('changed', counts.changed + counts.kind)}${chip('left', counts.left)}${chip('right', counts.right)}${chip('unsure', counts.unsure)}`}
+        ${checking && html`<span class="fcmp-busy muted small"><span class="spinner" aria-hidden="true" />Checking contents… ${checking.done} of ${checking.total}</span>`}
       </span>
       <span class="fcmp-break" />
       <button type="button" class="icon-btn sm" aria-label="Previous difference" title="Previous difference (Alt+↑)" disabled=${!total} onClick=${() => go(-1)}><${Icon} name="chevronDown" size=${16} class="up" /></button>
       <button type="button" class="icon-btn sm" aria-label="Next difference" title="Next difference (Alt+↓)" disabled=${!total} onClick=${() => go(1)}><${Icon} name="chevronDown" size=${16} /></button>
       <span class="ccmp-gap" />
-      <button type="button" class="btn ghost sm" disabled=${!picked.length || Boolean(busy)} title="Copy what is picked to the right" onClick=${() => copy('left')}><span class="label">Copy</span><${Icon} name="arrowRight" size=${14} /></button>
-      <button type="button" class="btn ghost sm" disabled=${!picked.length || Boolean(busy)} title="Copy what is picked to the left" onClick=${() => copy('right')}><${Icon} name="arrowLeft" size=${14} /><span class="label">Copy</span></button>
+      ${!sync &&
+      html`<button type="button" class="btn ghost sm" disabled=${!picked.length || Boolean(busy)} title="Copy what is picked to the right" onClick=${() => copy('left')}><span class="label">Copy</span><${Icon} name="arrowRight" size=${14} /></button>
+        <button type="button" class="btn ghost sm" disabled=${!picked.length || Boolean(busy)} title="Copy what is picked to the left" onClick=${() => copy('right')}><${Icon} name="arrowLeft" size=${14} /><span class="label">Copy</span></button>`}
+      <button type="button" class="btn ${sync ? '' : 'ghost'} sm fcmp-sync-btn" aria-pressed=${Boolean(sync)} disabled=${!sync && (!entries.size || Boolean(busy))}
+        title=${sync ? 'Leave syncing (the choices are forgotten)' : 'Sync: pick for each difference which way it goes (or that it stays), then apply them all at once'}
+        onClick=${() => (sync ? setSync(null) : startSync())}><${Icon} name="replace" size=${14} /><span class="label">Sync…</span></button>
       <span class="spacer" />
       <button type="button" class="icon-btn sm" aria-label="Read both folders again" title="Read both folders again" disabled=${scanning} onClick=${() => setTick((t) => t + 1)}><${Icon} name="sync" size=${15} /></button>
       <${MenuButton} label="More" items=${moreItems} />
     </div>
+    ${sync &&
+    html`<div class="fcmp-syncbar" role="toolbar" aria-label="Sync">
+      <${PresetButton} preset=${sync.preset} changed=${sync.overrides.size > 0} onPick=${(p) => setSync({ preset: p, overrides: new Map() })} />
+      <span class="fcmp-sums" aria-live="polite" title="Click ← – → between the sides of a row (with several rows picked: all of them), or Alt+← / Alt+- / Alt+→, Alt+Delete for what is on one side only">${summary}</span>
+      <span class="spacer" />
+      <button type="button" class="btn ghost sm" onClick=${() => setSync(null)}>Cancel</button>
+      <button type="button" class="btn primary sm" disabled=${!todo || Boolean(busy)} onClick=${() => setConfirming(plan)}>${busy === 'sync' ? 'Syncing…' : 'Apply…'}</button>
+    </div>`}
     <div class="fcmp-heads">${head('left')}${!phone && html`<div class="fcmp-mark" />`}${head('right')}</div>
     ${note && html`<p class="notice ${note.error ? 'error' : ''} fcmp-note" role="status"><${Icon} name=${note.error ? 'alert' : 'info'} size=${15} /><span>${note.text}</span>
       <button type="button" class="icon-btn xs" aria-label="Close" onClick=${() => setNote(null)}><${Icon} name="x" size=${13} /></button></p>`}
     ${scan?.error && html`<p class="notice error fcmp-note" role="alert"><${Icon} name="alert" size=${15} /><span>${scan.error}</span></p>`}
-    <div class="fcmp-tree" role="tree" aria-label="Both folders" aria-multiselectable="true" tabindex="0" ref=${tree} onKeyDown=${keyDown}>
+    <div class="fcmp-tree" role="tree" aria-label="Both folders" aria-multiselectable="true" tabindex="0" ref=${tree} onKeyDown=${keyDown} aria-busy=${scanning || Boolean(checking)}>
+      ${!scan && scanning && html`<p class="fcmp-loading" role="status"><span class="spinner" aria-hidden="true" />Reading both folders…</p>`}
+      ${hide && html`<p class="fcmp-loading" role="status"><span class="spinner" aria-hidden="true" />Checking ${many(hide.size, 'file')} with the same size and another date…</p>`}
       ${rows.map(row)}
-      ${!scanning && scan && !scan.error && !rows.length && html`<p class="muted small fcmp-empty">${show === 'diff' ? 'No differences: everything is the same on both sides.' : 'Nothing to show here.'}</p>`}
+      ${!scanning && scan && !scan.error && !rows.length && !hide && html`<p class="muted small fcmp-empty">${show === 'diff' ? 'No differences: everything is the same on both sides.' : 'Nothing to show here.'}</p>`}
     </div>
     <${Splitter} orientation="horizontal" label="Resize the file comparison" className="fcmp-splitter"
       onStart=${() => (startSplit.current = split)}
@@ -479,8 +577,65 @@ function FoldersTab({ id, record, settings, actions }) {
             : html`<${OneSide} key=${current.rel} side=${current.left ? 'left' : 'right'} file=${fileSide(current.left ? 'left' : 'right')} name=${current.name} actions=${actions} settings=${settings}
                 onCopy=${() => (setSelected(new Set([current.rel])), copy(current.left ? 'left' : 'right'))} />`}
     </div>
-    ${plan && html`<${SyncDialog} plan=${plan} record=${record} entries=${entries} onRun=${runPlan} onClose=${() => setPlan(null)} />`}
+    ${confirming && html`<${SyncConfirm} plan=${confirming} record=${record} entries=${entries} onRun=${runSync} onClose=${() => setConfirming(null)} />`}
   </div>`;
+}
+
+/**
+ * A row's choice while syncing: ← · – · → (on one side only: copy it to the other side, or
+ * ✕ delete it where it is). `value` is 'right', 'left', 'skip' or 'mixed' (a folder whose
+ * insides go both ways); `one` the side the row is only on; `folder` a folder on both sides
+ * (its choice goes to everything inside it). On a phone: one button with the choice, a tap
+ * opens the three.
+ */
+function ChoiceControl({ rel, name, value, one, folder, phone, onChoose }) {
+  const [at, setAt] = useState(null);
+  const owner = useRef(null);
+  // [what it sets, the value it shows as pressed, its mark, its words]
+  const ways = [
+    one === 'left'
+      ? ['delete', 'left', '✕', `Delete ${name} on the left`]
+      : ['left', 'left', '←', folder ? `What differs in ${name}: to the left` : one ? `Copy ${name} to the left` : `Copy the right ${name} to the left (it replaces the left one)`],
+    ['skip', 'skip', '–', folder ? `Skip what differs in ${name}` : `Skip ${name}: leave it as it is`],
+    one === 'right'
+      ? ['delete', 'right', '✕', `Delete ${name} on the right`]
+      : ['right', 'right', '→', folder ? `What differs in ${name}: to the right` : one ? `Copy ${name} to the right` : `Copy the left ${name} to the right (it replaces the right one)`],
+  ];
+  const stop = (ev) => ev.stopPropagation();
+  if (phone) {
+    const now = ways.find((w) => w[1] === value);
+    return html`<div class="fcmp-mark fcmp-choice one" onClick=${stop} onDblClick=${stop}>
+      <button type="button" ref=${owner} class="fcmp-choice-btn way-${value} ${now?.[0] === 'delete' ? 'del' : ''}" aria-haspopup="menu" aria-expanded=${Boolean(at)}
+        title=${now ? now[3] : 'Mixed: some to the left, some to the right'} aria-label=${`What happens to ${name}: ${now ? now[3] : 'mixed'}`}
+        onClick=${(ev) => {
+          const r = ev.currentTarget.getBoundingClientRect();
+          setAt(at ? null : { x: r.right, y: r.bottom + 4, right: true });
+        }}>${now ? now[2] : '⋯'}</button>
+      ${at && html`<${Menu} at=${at} owner=${owner} label=${`What happens to ${name}`} onClose=${() => setAt(null)}
+        items=${ways.map((w) => ({ key: `${w[0]}:${w[1]}`, label: w[3], checked: value === w[1], danger: w[0] === 'delete', run: () => onChoose(rel, w[0]) }))} />`}
+    </div>`;
+  }
+  return html`<div class="fcmp-mark fcmp-choice ${value === 'mixed' ? 'mixed' : ''}" role="group" aria-label=${`What happens to ${name}`} title=${value === 'mixed' ? 'Mixed: some go to the left, some to the right' : undefined} onDblClick=${stop}>
+    ${ways.map(
+      (w) => html`<button type="button" key=${`${w[0]}:${w[1]}`} class="fcmp-way ${w[0] === 'delete' ? 'del' : w[0] === 'skip' ? 'skip' : 'go'} ${value === w[1] ? 'on' : ''}" tabindex="-1" aria-pressed=${value === w[1]} title=${w[3]} aria-label=${w[3]}
+        onClick=${(ev) => (stop(ev), onChoose(rel, w[0]))}>${w[2]}</button>`,
+    )}
+  </div>`;
+}
+
+/** The preset menu of the sync bar: fills in every choice at once (the person's own go). */
+function PresetButton({ preset, changed, onPick }) {
+  const [at, setAt] = useState(null);
+  const owner = useRef(null);
+  return html`<button type="button" ref=${owner} class="btn sm fcmp-preset" aria-haspopup="menu" aria-expanded=${Boolean(at)} title=${`${PRESET_HINTS[preset]}${changed ? ' (then changed by you)' : ''}. Click to fill in every choice another way.`}
+      onClick=${(ev) => {
+        const r = ev.currentTarget.getBoundingClientRect();
+        setAt(at ? null : { x: r.left, y: r.bottom + 4 });
+      }}>
+      <span class="label">${PRESET_LABELS[preset]}</span>${changed && html`<span class="fcmp-preset-own">· your choices</span>`}<${Icon} name="chevronDown" size=${12} />
+    </button>
+    ${at && html`<${Menu} at=${at} owner=${owner} label="Fill in every choice" onClose=${() => setAt(null)}
+      items=${SYNC_PRESETS.map((p) => ({ key: p, label: PRESET_LABELS[p], checked: p === preset && !changed, danger: p.startsWith('mirror-'), run: () => onPick(p) }))} />`}`;
 }
 
 /** A file only on one side: its text, with a copy to the other side. */
@@ -505,21 +660,25 @@ function OneSide({ side, file, name, actions, settings, onCopy }) {
 // Android app has no Recycle Bin); here it goes to the Recycle Bin (the Trash).
 const forGoodOn = (path) => (isRemotePath(path) ? 'a server' : isAndroidApp() ? 'the phone' : '');
 
-/** Making one side like the other: what is copied, and what is only there (deleted only when ticked). */
-function SyncDialog({ plan, record, entries, onRun, onClose }) {
-  const [remove, setRemove] = useState(false);
-  const { to, copy, extra } = plan;
-  const from = to === 'right' ? 'left' : 'right';
-  const gone = forGoodOn(record[to].path);
+/** Before a sync runs: what is copied each way (and what that replaces), what is deleted where. */
+function SyncConfirm({ plan, record, entries, onRun, onClose }) {
   const list = (rels) => html`<ul class="fcmp-plan">${rels.slice(0, 200).map((r) => html`<li key=${r}><${Icon} name=${entries.get(r)?.dir ? 'folder' : 'file'} size=${13} /><span>${r}</span></li>`)}${rels.length > 200 && html`<li class="muted">…and ${rels.length - 200} more</li>`}</ul>`;
-  return html`<${Modal} title=${`Make the ${to} like the ${from}`} onClose=${onClose}
+  const old = (side) => (forGoodOn(record[side].path) ? `deleted for good (on ${forGoodOn(record[side].path)})` : `moved to ${binName()}`);
+  const copies = plan.toRight.length + plan.toLeft.length;
+  const deletes = plan.deleteLeft.length + plan.deleteRight.length;
+  const label = [copies && `Copy ${copies}`, deletes && `${copies ? 'delete' : 'Delete'} ${deletes}`].filter(Boolean).join(' and ');
+  const copied = (to, rels, replaced) =>
+    rels.length > 0 &&
+    html`<p><strong>${to === 'right' ? '→' : '←'} ${many(rels.length, 'item')} copied to the ${to}</strong>${replaced ? `: ${replaced} of them replace${replaced === 1 ? 's' : ''} what is there (the old ${replaced === 1 ? 'one is' : 'ones are'} ${old(to)})` : ''}.</p>${list(rels)}`;
+  const removed = (side, rels) => rels.length > 0 && html`<p class="fcmp-del-note"><strong>✕ ${many(rels.length, 'item')} deleted on the ${side}</strong> (${old(side)}).</p>${list(rels)}`;
+  return html`<${Modal} title="Sync the two folders" onClose=${onClose}
     footer=${html`<span class="spacer" /><button type="button" class="btn" onClick=${onClose}>Cancel</button>
-      <button type="button" class="btn primary" disabled=${!copy.length && !(remove && extra.length)} onClick=${() => onRun({ ...plan, remove })}>${remove && extra.length ? `Copy ${copy.length} and delete ${extra.length}` : `Copy ${copy.length}`}</button>`}>
-    ${copy.length ? html`<p>${copy.length} item${copy.length === 1 ? '' : 's'} copied to the ${to} (different or missing there; the ones replaced ${gone ? `are deleted for good (on ${gone})` : `go to ${binName()}`}):</p>${list(copy)}` : html`<p class="muted">Nothing to copy: the ${to} has everything the ${from} has.</p>`}
-    ${extra.length > 0 &&
-    html`<p>${extra.length} item${extra.length === 1 ? ' is' : 's are'} only on the ${to}:</p>${list(extra)}
-      <label class="check"><input type="checkbox" checked=${remove} onChange=${(e) => setRemove(e.currentTarget.checked)} />
-        <span>Delete ${extra.length === 1 ? 'it' : 'them'} too (${gone ? `on ${gone}: for good` : `to ${binName()}`})</span></label>`}
+      <button type="button" class="btn ${deletes ? 'danger-solid' : 'primary'}" onClick=${() => onRun(plan)}>${label}</button>`}>
+    ${copied('right', plan.toRight, plan.replaceRight)}
+    ${copied('left', plan.toLeft, plan.replaceLeft)}
+    ${removed('left', plan.deleteLeft)}
+    ${removed('right', plan.deleteRight)}
+    ${plan.skipped > 0 && html`<p class="muted small">${many(plan.skipped, 'difference')} left as ${plan.skipped === 1 ? 'it is' : 'they are'}.</p>`}
   </${Modal}>`;
 }
 

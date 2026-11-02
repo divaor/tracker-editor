@@ -28,8 +28,38 @@ const parentOf = (rel) => (rel.includes('/') ? rel.slice(0, rel.lastIndexOf('/')
 const nameOf = (rel) => rel.slice(rel.lastIndexOf('/') + 1);
 
 /**
+ * What a content check is good for: both sides' size and date. A file changed since (another
+ * size or date on either side) is checked again; the others keep what was found, so reading
+ * both folders again after a copy does not make every same-size file "not known yet".
+ */
+export const checkKey = (l, r) => `${l?.size ?? '-'}:${l?.mtimeMs ?? '-'}|${r?.size ?? '-'}:${r?.mtimeMs ?? '-'}`;
+
+/** What the content check found for `e`: true (same), false (different), undefined (not checked, or checked before it changed). */
+function checkedOf(checked, e) {
+  const c = checked[e.rel];
+  if (typeof c === 'boolean') return c;
+  return c && c.key === checkKey(e.left, e.right) ? c.same : undefined;
+}
+
+/**
+ * `checked` with what a content check `found` ({ rel: true | false | null }) for `entries`,
+ * each kept with the sizes and dates it was for (null, could not tell: different, to be
+ * looked at). Only what is still listed in `entries` is kept.
+ */
+export function withChecks(checked = {}, entries, found = {}) {
+  const out = {};
+  for (const [rel, c] of Object.entries(checked)) if (entries.has(rel)) out[rel] = c;
+  for (const [rel, same] of Object.entries(found)) {
+    const e = entries.get(rel);
+    if (e?.left && e.right) out[rel] = { key: checkKey(e.left, e.right), same: same === true };
+  }
+  return out;
+}
+
+/**
  * The entries of both listings, by relative path: { rel, name, parent, depth, dir, left, right,
- * state }. `checked` holds what the content checks found ({ rel: true (same) | false }).
+ * state }. `checked` holds what the content checks found: { rel: { key, same } } (withChecks;
+ * used while both sides' size and date are still `key`), or { rel: true (same) | false }.
  */
 export function compareListings(left = {}, right = {}, { checked = {}, slack = TIME_SLACK } = {}) {
   const entries = new Map();
@@ -57,9 +87,10 @@ export function compareListings(left = {}, right = {}, { checked = {}, slack = T
     else if (e.dir) e.state = 'same';
     else if (e.left.size !== e.right.size) e.state = 'changed';
     else if (Math.abs((e.left.mtimeMs ?? 0) - (e.right.mtimeMs ?? 0)) <= slack) e.state = 'same';
-    else if (checked[e.rel] === true) e.state = 'same';
-    else if (checked[e.rel] === false) e.state = 'changed';
-    else e.state = 'unsure';
+    else {
+      const same = checkedOf(checked, e);
+      e.state = same === true ? 'same' : same === false ? 'changed' : 'unsure';
+    }
   }
   const folders = [...entries.values()].filter((e) => e.dir && e.state !== 'kind').sort((a, b) => b.depth - a.depth);
   const kids = childrenOf(entries);
@@ -88,17 +119,30 @@ export function childrenOf(entries) {
 }
 const byName = (a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
 
-/** Whether an entry is shown for `show` (a folder: when something inside is). */
-const keeps = (show) => (e) => (show === 'all' ? true : show === 'diff' ? e.state !== 'same' : e.state === show);
+/**
+ * Whether an entry is shown for `show` (a folder: when something inside is). With `hidden`
+ * (rel → true), the differences leave out those unsure files (their contents are being
+ * checked: most turn out the same), and unsure folders show only for something else inside.
+ */
+const keeps = (show, hidden = null) => (e) => {
+  if (show === 'all') return true;
+  if (show !== 'diff') return e.state === show;
+  if (e.state === 'same') return false;
+  if (e.state === 'unsure' && hidden) return !e.dir && !hidden(e.rel);
+  return true;
+};
 
 /**
  * The rows the tree shows, in order: the entries under open folders (`expanded`, a Set of
  * rels) that `show` keeps, each with its `depth`. A folder that differs but holds nothing
  * shown (only another kind of difference) is still listed, so its own state shows.
+ * `hideUnsure` (true, or a Set of rels) leaves those unsure files out of the differences
+ * while their contents are checked, so they never show all at once for a moment.
  */
-export function treeRows(entries, { expanded = new Set(), show = 'diff' } = {}) {
+export function treeRows(entries, { expanded = new Set(), show = 'diff', hideUnsure = null } = {}) {
   const kids = childrenOf(entries);
-  const keep = keeps(show);
+  const hidden = hideUnsure === true ? () => true : hideUnsure instanceof Set ? (rel) => hideUnsure.has(rel) : null;
+  const keep = keeps(show, hidden);
   // Folders with something kept inside (at any depth).
   const holds = new Map();
   const holdsKept = (e) => {
@@ -203,6 +247,165 @@ export function syncPlan(entries, to) {
   const extra = onlyThere.filter((r) => !within(r, onlyThere.filter((o) => o !== r)));
   // A file there where a folder is here (or the other way): replaced, so not "extra" too.
   return { copy, extra: extra.filter((r) => !copy.includes(r)).sort() };
+}
+
+// ---- Syncing: what goes which way -------------------------------------------------
+// A sync works on units: each file that differs on both sides (or is not known yet, or is a
+// folder on one side and a file on the other), and each file or folder on one side only (the
+// top-most: a folder there goes whole). Folders on both sides are gone through, as copyPlan
+// does. A unit's choice names the side made like the other: 'right' (→: the left's copy goes
+// there, or what is only on the right is deleted there), 'left' (←), or 'skip'.
+
+/** The ways to fill in every choice at once, in the order the menu lists them. */
+export const SYNC_PRESETS = ['newer', 'right', 'left', 'mirror-right', 'mirror-left', 'skip'];
+export const PRESET_LABELS = {
+  newer: 'Newer replaces older',
+  right: 'Everything to the right',
+  left: 'Everything to the left',
+  'mirror-right': 'Make the right exactly like the left',
+  'mirror-left': 'Make the left exactly like the right',
+  skip: 'Skip all',
+};
+export const PRESET_HINTS = {
+  newer: 'Each different file goes from the newer side to the older one; what is on one side only is copied to the other',
+  right: 'Copy every difference to the right; nothing is deleted',
+  left: 'Copy every difference to the left; nothing is deleted',
+  'mirror-right': 'Copy every difference to the right, and delete what is only on the right',
+  'mirror-left': 'Copy every difference to the left, and delete what is only on the left',
+  skip: 'Leave everything as it is, then pick what goes',
+};
+
+/** 'left' or 'right' for an entry on that side only, else null. */
+const oneSide = (e) => (e?.left && !e.right ? 'left' : e?.right && !e.left ? 'right' : null);
+
+/** The relative paths of the units (see above), in tree order. */
+export function syncUnits(entries) {
+  const out = [];
+  for (const e of entries.values()) {
+    if (e.state === 'same' || (!e.left && !e.right)) continue;
+    // Inside a folder on one side, or a folder against a file: that one goes whole.
+    const parent = e.parent ? entries.get(e.parent) : null;
+    if (parent && (oneSide(parent) || parent.state === 'kind')) continue;
+    if (e.left && e.right && e.dir && e.state !== 'kind') continue;
+    out.push(e.rel);
+  }
+  return out.sort(byTreeOrder(entries));
+}
+// Folders first at each level, names in order (as the tree shows them).
+const byTreeOrder = (entries) => (a, b) => {
+  const pa = a.split('/');
+  const pb = b.split('/');
+  for (let i = 0; i < Math.min(pa.length, pb.length); i += 1) {
+    if (pa[i] === pb[i]) continue;
+    const ea = entries.get(pa.slice(0, i + 1).join('/'));
+    const eb = entries.get(pb.slice(0, i + 1).join('/'));
+    return ea && eb ? byName(ea, eb) : pa[i].localeCompare(pb[i]);
+  }
+  return pa.length - pb.length;
+};
+
+/**
+ * The choice "Newer replaces older" makes: a different file goes from the newer side to the
+ * older one (the same date, or a folder against a file: skipped); what is on one side only is
+ * copied to the other; a file not checked yet is skipped until it is.
+ */
+export function defaultChoice(e, slack = TIME_SLACK) {
+  const one = oneSide(e);
+  if (one) return one === 'left' ? 'right' : 'left';
+  if (e.state !== 'changed' || e.left.dir || e.right.dir) return 'skip';
+  const d = (e.left.mtimeMs ?? 0) - (e.right.mtimeMs ?? 0);
+  return d > slack ? 'right' : d < -slack ? 'left' : 'skip';
+}
+
+/**
+ * The choice a preset makes for a unit. Everything to one side copies only (what is only on
+ * that side is skipped); making a side exactly like the other deletes that too. Files not
+ * checked yet are skipped until they are.
+ */
+export function presetChoice(e, preset = 'newer') {
+  if (preset === 'newer') return defaultChoice(e);
+  if (preset === 'skip' || e.state === 'unsure') return 'skip';
+  const to = preset === 'right' || preset === 'mirror-right' ? 'right' : 'left';
+  const one = oneSide(e);
+  if (!one || one !== to) return to;
+  return preset.startsWith('mirror-') ? to : 'skip';
+}
+
+/** Every unit's choice (rel → choice): the preset's, with the person's own (`overrides`) on top. */
+export function presetChoices(entries, preset = 'newer', overrides = new Map()) {
+  const out = new Map();
+  for (const rel of syncUnits(entries)) {
+    const own = overrides.get(rel);
+    out.set(rel, own === 'right' || own === 'left' || own === 'skip' ? own : presetChoice(entries.get(rel), preset));
+  }
+  return out;
+}
+
+/**
+ * The person's choices (`overrides`, rel → choice) with `choice` set for `rels`: a unit takes
+ * it, a folder on both sides gives it to every unit inside it. 'right' and 'left' copy: a
+ * unit only on that side (which it would delete) is skipped instead. 'delete' deletes each
+ * unit on one side, on its side (units on both sides stay as they were). 'skip' skips.
+ */
+export function setChoice(overrides, entries, rels, choice) {
+  const next = new Map(overrides);
+  const units = syncUnits(entries);
+  const isUnit = new Set(units);
+  const targets = new Set();
+  for (const rel of rels) {
+    if (isUnit.has(rel)) targets.add(rel);
+    else if (entries.get(rel)?.dir) for (const u of units) if (u.startsWith(`${rel}/`)) targets.add(u);
+  }
+  for (const rel of targets) {
+    const one = oneSide(entries.get(rel));
+    if (choice === 'delete') {
+      if (one) next.set(rel, one);
+    } else if (choice === 'right' || choice === 'left' || choice === 'skip') next.set(rel, choice !== 'skip' && one === choice ? 'skip' : choice);
+  }
+  return next;
+}
+
+/**
+ * Each folder's choice from the units inside it (folder rel → choice): 'right' or 'left' when
+ * all that goes, goes that way (some may be skipped), 'skip' when nothing goes, 'mixed' when
+ * some go each way. Folders with nothing inside to sync are not in it.
+ */
+export function folderChoices(choices) {
+  const tally = new Map();
+  for (const [rel, c] of choices) {
+    for (let p = parentOf(rel); p; p = parentOf(p)) {
+      const t = tally.get(p) ?? { right: 0, left: 0 };
+      if (c === 'right') t.right += 1;
+      else if (c === 'left') t.left += 1;
+      tally.set(p, t);
+    }
+  }
+  const out = new Map();
+  for (const [p, t] of tally) out.set(p, t.right && t.left ? 'mixed' : t.right ? 'right' : t.left ? 'left' : 'skip');
+  return out;
+}
+
+/** One folder's choice (see folderChoices), or null when nothing inside it is synced. */
+export const folderChoice = (choices, rel) => folderChoices(choices).get(rel) ?? null;
+
+/**
+ * What the choices do, as top-most relative paths: `toRight` copied from the left
+ * (`replaceRight` of them replace what is there), `toLeft` (`replaceLeft`), `deleteLeft`,
+ * `deleteRight`; `skipped` counts the units left alone.
+ */
+export function choicePlan(entries, choices) {
+  const plan = { toRight: [], toLeft: [], deleteLeft: [], deleteRight: [], replaceRight: 0, replaceLeft: 0, skipped: 0 };
+  for (const rel of syncUnits(entries)) {
+    const c = choices.get(rel);
+    const one = oneSide(entries.get(rel));
+    if (c !== 'right' && c !== 'left') plan.skipped += 1;
+    else if (one === c) (c === 'left' ? plan.deleteLeft : plan.deleteRight).push(rel);
+    else {
+      (c === 'right' ? plan.toRight : plan.toLeft).push(rel);
+      if (!one) plan[c === 'right' ? 'replaceRight' : 'replaceLeft'] += 1;
+    }
+  }
+  return plan;
 }
 
 /** The entries of a listing under `rel` (a folder): for a copy's progress or a delete's words. */
