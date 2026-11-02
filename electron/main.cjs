@@ -3112,8 +3112,10 @@ function createWindow() {
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url, referrer }) => {
-    // From a page the preview runs (allow-popups): at most one a second, as the frame's links.
-    if (previewHost?.owns(referrer?.url)) openFromPreview(url);
+    // From a page the preview runs (allow-popups): at most one a second, as the frame's links. A
+    // popup opened with noreferrer says nothing of where it came from: anything not from the app
+    // itself is held to the same pace, so a page's script cannot open tab after tab.
+    if (previewHost?.owns(referrer?.url) || !String(referrer?.url ?? '').startsWith(`${APP_ORIGIN}/`)) openFromPreview(url);
     else if (isSafeExternal(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
