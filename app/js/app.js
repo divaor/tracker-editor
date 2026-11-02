@@ -39,6 +39,8 @@ import { parentPath } from './folderPick.js';
 import { LanguageServersPanel, ReferencesPanel, RenameSymbolDialog, SetupServerDialog, WorkspaceEditDialog } from './ui/languageServers.js';
 import { BranchDialog, GitInitDialog, GitPanel } from './ui/gitPanel.js';
 import { GitAssist } from './ui/gitAssist.js';
+import { FilesAssist } from './ui/filesAssist.js';
+import { createFilesWork } from './filesWork.js';
 import { CHANGES_FILES, cleanCommitMessage, commitMessageMessages } from './gitAssist.js';
 import { gitError, mergeRequestLink, stageBlock } from './gitStatus.js';
 import { refreshAllGit, refreshGit } from './gitState.js';
@@ -1627,6 +1629,7 @@ export function App() {
   const [gitDir, setGitDir] = useState(null); // the folder whose repository the Git panel shows
   const [gitTick, setGitTick] = useState(0); // Git's state may have changed: the panel reads it again
   const [gitAssist, setGitAssist] = useState(null); // Git with the model: { dir, start, id }
+  const [filesAssist, setFilesAssist] = useState(null); // the model makes and changes files: { target, start, id }
   const [testRun, setTestRun] = useState(null); // the last test run, for the Tests panel
   const debugRef = useRef(null); // the debugger (dap.js), desktop
   const [debugTick, setDebugTick] = useState(0); // it changed: the panel and the status bar draw again
@@ -1900,7 +1903,8 @@ export function App() {
       // A synced file or tracker document (its tab key).
       openKey: (key) => actions.openFile(key.startsWith('f:') ? key.slice(2) : key),
       // Edits a server asks for (after a command): shown first when they reach files not open.
-      applyEdit: (edit, { label, server, placeOf }) => actions.applyWorkspaceEdit(edit, { title: label || `Changes from ${server}`, userEvent: 'input.codeaction', placeOf }),
+      // The answer to workspace/applyEdit: applied, and why not.
+      applyEdit: (edit, { label, server, placeOf }) => actions.applyWorkspaceEdit(edit, { title: label || `Changes from ${server}`, userEvent: 'input.codeaction', placeOf }).then(({ applied, failureReason }) => (failureReason ? { applied, failureReason } : { applied })),
       onQuickFix: () => actions.quickFix(),
       // Settings → Language servers, per language: off, and which server.
       languages: () => languageOptions(getSettings().lspLanguages),
@@ -2206,7 +2210,7 @@ export function App() {
    * Undo (in the message) takes it all back where nothing changed since. Returns
    * { applied, failureReason }, the answer to workspace/applyEdit.
    */
-  actions.applyWorkspaceEdit = async (edit, { title = 'Changes', preview = 'auto', userEvent = 'input', placeOf = null } = {}) => {
+  actions.applyWorkspaceEdit = async (edit, { title = 'Changes', preview = 'auto', userEvent = 'input', placeOf = null, quiet = false, serverText = true } = {}) => {
     const plan = editPlan(edit);
     if (plan.unsupported.length) {
       toast(`${title}: this would ${plan.unsupported.join(' and ')} files, which the editor does not do. Nothing was changed.`, { kind: 'error', timeout: 9000 });
@@ -2236,7 +2240,7 @@ export function App() {
         // A synced file: only while its tab is open (the server knows no other).
         const state = host.stateOf(place.key);
         const text = state?.doc.toString();
-        const synced = lsp?.syncedText(place.key);
+        const synced = serverText ? lsp?.syncedText(place.key) : null;
         entries.push(state ? { path: place.key, name: tabName(place.key), key: place.key, kind: 'tab', base: text, edits, ...(synced != null && synced !== text ? { error: 'changed since the server looked: try again' } : {}) } : { path: place.key, name: tabName(place.key), error: 'not open', edits });
         continue;
       }
@@ -2254,7 +2258,7 @@ export function App() {
       if (state) {
         // An open tab: the edits are for the text the server had, which is the text now (just sent).
         const text = state.doc.toString();
-        const synced = lsp?.syncedText(key);
+        const synced = serverText ? lsp?.syncedText(key) : null;
         entries.push({ path, key, kind: 'tab', base: text, edits, ...(synced != null && synced !== text ? { error: 'changed since the server looked: try again' } : {}) });
         continue;
       }
@@ -2344,17 +2348,23 @@ export function App() {
         }
       }
       if (back.length) lsp?.filesChanged(back);
-      toast(failed.length ? `Undone, except in ${failed.map(nameOf).join(', ')} (changed since).` : 'Undone.', { kind: failed.length ? 'error' : 'info', timeout: 8000 });
+      const why = failed.length ? `${failed.map(nameOf).join(', ')} changed since` : '';
+      if (!quiet) toast(failed.length ? `Undone, except in ${failed.map(nameOf).join(', ')} (changed since).` : 'Undone.', { kind: failed.length ? 'error' : 'info', timeout: 8000 });
+      return why;
     };
     const files = undo.length;
     // A quick fix in the open file speaks for itself; anything wider (or that failed) is told.
-    if (files > 1 || written.length || made.length || skipped.length || preview === 'always') {
+    if (!quiet && (files > 1 || written.length || made.length || skipped.length || preview === 'always')) {
       toast(
         `${title}: ${places} change${places === 1 ? '' : 's'} in ${files} file${files === 1 ? '' : 's'}${written.length + made.length ? ` (${written.length + made.length} saved to disk)` : ''}.${skipped.length ? ` Not changed: ${skipped.map((x) => `${nameOf(x.path)} (${x.reason})`).join(', ')}.` : ''}`,
         { kind: skipped.length ? 'error' : 'info', timeout: 12000, ...(undo.length ? { action: { label: 'Undo', run: undoAll } } : {}) },
       );
     }
-    return undo.length || !chosen.length ? { applied: true } : { applied: false, failureReason: skipped.map((x) => `${nameOf(x.path)}: ${x.reason}`).join('; ') };
+    const failureReason = skipped.map((x) => `${nameOf(x.path)}: ${x.reason}`).join('; ');
+    const result = undo.length || !chosen.length ? { applied: true } : { applied: false, failureReason };
+    // For callers that show the change themselves: how many files changed, why others did not,
+    // and `undo` (takes it back where nothing changed since: '' when it did, else why not).
+    return { ...result, done: undo.length, ...(skipped.length ? { skippedReason: failureReason } : {}), undo: undoAll };
   };
 
   /**
@@ -2739,6 +2749,7 @@ export function App() {
     const at = dir ?? gitDir ?? gitFolderNow();
     if (!at) return toast('Open a file or a folder from this computer in a Git repository first.');
     setAssist(false);
+    setFilesAssist(null);
     setGitAssist({ dir: at, start, id: Date.now() });
   };
   /**
@@ -2948,6 +2959,25 @@ export function App() {
     setAssistStart({ ...start, id: Date.now() });
     setAssist(true);
   };
+  /**
+   * The model makes and changes files (ui/filesAssist.js): in the folder of the tab `key` (else
+   * the open one), in `folder` (from Folders), or in the folder shown in Folders; `question` is
+   * asked at once.
+   */
+  actions.assistFiles = ({ key = null, folder = null, question = '' } = {}) => {
+    let target = folder ? { folder } : { key: key ?? store.session.active ?? null };
+    if (!target.folder && !target.key) {
+      const shown = getSettings().folder;
+      if (!shown || !window.desktop?.folders) return toast('Open a file, or a folder in Folders, first.');
+      target = { folder: shown };
+    }
+    setAssist(false);
+    setAssistStart(null);
+    setGitAssist(null);
+    setView('editor');
+    setFilesAssist({ target, start: question ? { question } : null, id: Date.now() });
+  };
+  actions.filesWork = (target) => createFilesWork({ ...target, host: () => hostRef.current, actions });
   /** A tab's whole text as the model panel's context (the file it is about). */
   const wholeFile = (key) => {
     hostRef.current?.flushAll();
@@ -4274,6 +4304,7 @@ export function App() {
       'git-pull': () => actions.gitQuick('pull'),
       'git-push': () => actions.gitQuick('push'),
       'git-ask': () => actions.gitAssist(),
+      'assist-files': () => actions.assistFiles(),
       'git-stage-change': () => actions.stageChangeAt(store.session.active, cursor?.line ?? 1),
       problems: () => actions.toggleProblems(),
       'indent-spaces': () => actions.setIndent({ tabs: false }),
@@ -4500,9 +4531,10 @@ export function App() {
         <div class="editor-area ${showPreview ? 'split' : ''} ${showPreview && previewFull ? 'preview-full' : ''} ${shownPanes.length ? 'panes-split' : ''} ${compare ? 'comparing' : ''} ${settings.whereFrame && activeKey ? 'framed' : ''}"
           data-kind=${kindOfKey(activeKey) ?? undefined} ref=${areaEl} style=${{ '--split': `${((settings.splitRatio || 0.5) * 100).toFixed(2)}%` }} onDragOver=${overArea}>
           <div class="editor-host ${paneDrop === 0 ? 'drop-here' : ''}" ref=${editorEl} style=${shownPanes.length ? { flex: `${paneShares[0]} 1 0px` } : undefined} ...${shownPanes.length || tabOver ? paneDropProps(0) : {}} />
-          ${assist && !gitAssist && ((activeKey && !activeCompare) || assistStart) && view === 'editor' && !compare && !activeSealed && html`<${AssistPanel} key=${`${activeKey}:${assistStart?.id ?? 0}`} scope=${assistScope} start=${assistStart} hasFile=${Boolean(activeKey)} actions=${actions} onClose=${() => (setAssist(false), setAssistStart(null), hostRef.current?.focus())} />`}
+          ${assist && !gitAssist && !filesAssist && ((activeKey && !activeCompare) || assistStart) && view === 'editor' && !compare && !activeSealed && html`<${AssistPanel} key=${`${activeKey}:${assistStart?.id ?? 0}`} scope=${assistScope} start=${assistStart} hasFile=${Boolean(activeKey)} actions=${actions} onClose=${() => (setAssist(false), setAssistStart(null), hostRef.current?.focus())} />`}
           ${gitAssist && view === 'editor' && html`<${GitAssist} key=${gitAssist.id} dir=${gitAssist.dir} start=${gitAssist.start} actions=${actions} onClose=${() => (setGitAssist(null), hostRef.current?.focus())} />`}
-          ${!assist && !gitAssist && modelReady && settings.assistBubble && activeKey && !activeCompare && !compare && !activeSealed && !docShown && !typingJob && html`<${AssistBubble} onOpen=${() => setAssist(true)} />`}
+          ${filesAssist && !gitAssist && view === 'editor' && html`<${FilesAssist} key=${filesAssist.id} target=${filesAssist.target} start=${filesAssist.start} actions=${actions} onClose=${() => (setFilesAssist(null), hostRef.current?.focus())} />`}
+          ${!assist && !gitAssist && !filesAssist && modelReady && settings.assistBubble && activeKey && !activeCompare && !compare && !activeSealed && !docShown && !typingJob && html`<${AssistBubble} onOpen=${() => setAssist(true)} />`}
           ${shownPanes.flatMap((p, i) => [paneHandle(i), paneView(p, i)])}
           ${tabOver && panesOn && store.session.panes.length < MAX_EXTRA &&
           html`<div class="pane-drop-new ${paneDrop === 'new' ? 'on' : ''}" ...${paneDropProps('new')}><${Icon} name="columns" size=${16} /><span>New pane</span></div>`}

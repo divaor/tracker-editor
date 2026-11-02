@@ -7967,6 +7967,78 @@ svg.up {
   opacity: 0.45;
 }
 
+/* Files with the model (ui/filesAssist.js): change cards, each showing what Apply does */
+.files-assist {
+  width: min(560px, calc(100% - 28px));
+}
+
+.fai-step.st-preparing .gai-step-icon {
+  animation: spin 1s linear infinite;
+}
+
+.fai-step.risk-type {
+  border-left-color: var(--accent);
+}
+
+.fai-step.st-typed .gai-step-icon {
+  color: var(--accent);
+}
+
+.fai-step.st-undone {
+  opacity: 0.7;
+}
+
+.fai-new summary {
+  cursor: pointer;
+}
+
+.fai-new pre,
+.fai-cmd,
+.fai-diff pre {
+  max-height: 260px;
+  margin: 4px 0 0;
+  overflow: auto;
+  padding: 6px 8px;
+  border-radius: 5px;
+  background: var(--surface);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.45;
+  white-space: pre;
+}
+
+.fai-diff {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.fai-hunk {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.fai-diff pre {
+  max-height: 200px;
+  margin: 0;
+}
+
+.fai-diff pre.del {
+  background: color-mix(in srgb, var(--danger) 11%, var(--surface));
+  color: color-mix(in srgb, var(--danger) 55%, var(--text));
+}
+
+.fai-diff pre.add {
+  background: color-mix(in srgb, var(--done) 13%, var(--surface));
+  color: color-mix(in srgb, var(--done) 50%, var(--text));
+}
+
+.fai-move {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 /* ---- Terminal (desktop): shells on servers, under the editor ------------------ */
 .terminal-panel {
   position: relative;

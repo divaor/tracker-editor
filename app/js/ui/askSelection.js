@@ -14,6 +14,8 @@ import { isDesktopApp } from '../platform.js';
 const MODES = [
   { id: 'answer', label: 'Answer' },
   { id: 'replace', label: 'Change the text' },
+  // Hands over to Files with the model (ui/filesAssist.js): files and folders made and changed.
+  { id: 'files', label: 'Change files', title: 'The model makes and changes files in this file’s folder (a whole project too); each change waits for your Apply' },
   { id: 'help', label: 'About the editor' },
 ];
 // Help with the editor first, so it is seen; then the text.
@@ -140,6 +142,7 @@ export function AssistPanel({ scope, actions, onClose, start = null, hasFile = t
     const q = question.trim();
     if (!q) return;
     if (conv?.status === 'done') return ask(conv.action, q);
+    if (mode === 'files') return actions.assistFiles({ question: q });
     // "How do I split the view?" is about the editor, not the text: the guide answers it.
     const kind = mode === 'answer' && looksLikeEditorQuestion(q) ? 'help' : mode;
     ask({ id: 'custom', label: q, kind, prompt: q, auto: kind !== mode });
@@ -267,11 +270,11 @@ export function AssistPanel({ scope, actions, onClose, start = null, hasFile = t
       ${!conv &&
       hasFile &&
       html`<div class="assist-mode" role="group" aria-label="What the model does">
-        ${MODES.map((m) => html`<button type="button" key=${m.id} class="chip ${mode === m.id ? 'on' : ''}" aria-pressed=${mode === m.id} onClick=${() => setMode(m.id)}>${m.label}</button>`)}
+        ${MODES.filter((m) => m.id !== 'files' || connectionOf(llm) !== 'async').map((m) => html`<button type="button" key=${m.id} class="chip ${mode === m.id ? 'on' : ''}" aria-pressed=${mode === m.id} title=${m.title ?? ''} onClick=${() => setMode(m.id)}>${m.label}</button>`)}
       </div>`}
       <div class="assist-input">
         <textarea ref=${input} rows="2" value=${question} aria-label="Your question" disabled=${conv?.status === 'asking'}
-          placeholder=${conv?.status === 'done' ? 'Ask a follow-up…' : mode === 'replace' ? 'What to do with the text: “make it a table”, “sort by date”…' : mode === 'help' ? 'How do I…? “compare two files”, “edit a file on a server”…' : 'Ask anything about it, or how to do something in the editor…'}
+          placeholder=${conv?.status === 'done' ? 'Ask a follow-up…' : mode === 'replace' ? 'What to do with the text: “make it a table”, “sort by date”…' : mode === 'files' ? 'Files to make or change: “add tests for this file”, “make a README for this folder”…' : mode === 'help' ? 'How do I…? “compare two files”, “edit a file on a server”…' : 'Ask anything about it, or how to do something in the editor…'}
           onInput=${(e) => setQuestion(e.currentTarget.value)}
           onKeyDown=${(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {

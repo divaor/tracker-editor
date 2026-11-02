@@ -452,7 +452,7 @@ With a model connected, a round ✦ button sits at the bottom right of the edito
 - **Format and convert**: Tidy / format, **Make it Markdown** (a plain text file becomes headings, lists and tables), **Convert to…** JSON, YAML, CSV, a Markdown table, XML, HTML, a bullet list or SQL INSERTs.
 - **Code and queries**: **Check the syntax** (problems by line, then the corrected version), Find problems, **Explain an error** (a pasted message, stack trace or console output), Add comments, Optimize, **Rewrite in…** another language or SQL dialect (Python, PowerShell, T-SQL, PostgreSQL…), **Write a regex…**.
 - **Translate**: To English, To Spanish, To another language….
-- **Or ask anything**: type in the box at the bottom. **Answer** replies in the panel; **Change the text** applies it ("make this a table", "sort by date"). After an answer you can **ask a follow-up**.
+- **Or ask anything**: type in the box at the bottom. **Answer** replies in the panel; **Change the text** applies it ("make this a table", "sort by date"); **Change files** makes or changes files and folders (see [The model makes and changes files](#the-model-makes-and-changes-files)). After an answer you can **ask a follow-up**.
 
 What comes back:
 - **A new version of the text** opens as a comparison: **Accept** replaces the selection (Undo takes it back), **As a new file** keeps it separately with the right extension (`.json`, `.md`, `.ps1`…), or **Copy**.
@@ -460,6 +460,19 @@ What comes back:
 - **Ask in the Claude app**: the same question in Claude instead (see [Your Claude subscription](#your-claude-subscription)).
 
 Turn the bubble off in **Settings → Model**; `Ctrl+K` still works.
+
+### The model makes and changes files
+
+In the ✦ panel, **Change files** (next to Answer and Change the text) hands what you ask to **Files with the model**, which creates and changes files and folders, not only the text open: "add tests for this file", "split this into modules", "make a README for this folder", or a whole new project ("make a small Express app here"). For a folder: in **Folders**, right-click a folder (or its header, or the empty space in it) → **Ask the model about this folder…**. Or **Ask the model to make or change files…** in the command palette (`Ctrl+Shift+P`).
+
+- **Where it works**: the folder of the file open (the folder shown in Folders that holds it, else the file's own folder), or the folder you asked about, on this computer or on a server; for a synced note, its project in My files (notes only, no folders). Everything stays inside that folder, and the editor writes only in folders you opened.
+- **It looks first**: the model sees the list of files and the file open, and reads or searches the others it needs; each look shows as a card with what it found.
+- **Each change shows first**: a new file with its text, an edit as the lines it takes out (red) and puts in (green), a rename (from → to), a delete (in red). **Apply** makes it, **Skip** leaves it out, **Stop** ends there, and **Apply all** makes the rest of the block (a delete still asks). What happened goes back to the model, which goes on or explains.
+- **Undo** on a card takes that change back (a deleted text file comes back with its text; a deleted folder only from the Recycle Bin, and on a server or the phone not at all).
+- **Commands**: when a project needs installing ("npm install"), the model types the command in a terminal in that folder and you press **Enter** to run it. Nothing runs by itself.
+- **Files open in tabs**: an edit to a file open in a tab goes into the tab and is saved; if the tab has edits of yours not saved yet, the change goes into the tab only, for you to save.
+- **Only explain, I'll do it**: the model says what to do instead; its changes show as a list and nothing is changed.
+- **Never**: secrets (`.env`, keys, certificates, credentials) are never read or written; encrypted files are never read or changed; tracker documents are read-only. It needs a model that answers at once (not a service that answers later).
 
 ### Help with the editor: ask how to do something
 
