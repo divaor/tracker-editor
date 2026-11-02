@@ -15085,9 +15085,19 @@ html[data-native='android'] body:has(.edit-bar) .toasts {
   width: 100%;
 }
 
-.ghist.phone .ghist-path {
+.ghist.phone .ghist-path,
+.ghist.phone .ghist-file-chip {
   flex: 1 1 40%;
   order: 6;
+}
+
+.ghist.phone .ghist-count,
+.ghist.phone .ghist-reload {
+  order: 7;
+}
+
+.ghist.phone .ghist-bar > .spacer {
+  display: none;
 }
 
 .ghist.phone .ghist-title {
