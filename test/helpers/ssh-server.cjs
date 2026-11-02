@@ -48,12 +48,25 @@ function miniSftp(sftp, home) {
 }
 
 /**
+ * A host key ssh2 can read. Its generateKeyPairSync drops an ed25519 public key's leading zero byte
+ * (about one key in 220 comes out 31 bytes long), and its own parser then refuses the key with
+ * "Malformed OpenSSH private key": the test that failed now and then until 0.48.1 (a dozen servers
+ * start in a run). The app never makes keys; only this stand-in does.
+ */
+function hostKeyPair() {
+  for (let tries = 1; ; tries++) {
+    const key = utils.generateKeyPairSync('ed25519').private;
+    if (!(utils.parseKey(key) instanceof Error) || tries >= 50) return key;
+  }
+}
+
+/**
  * Starts the server on 127.0.0.1 (`port` 0: any free one). `env` is added to what each command
  * gets (`PATH` replaces the usual one); `shell` is the user's login shell. Resolves { port, user,
  * password, execs, close(), dropAll() }.
  */
 function startSshServer({ port = 0, user = 'tester', password = 'secret', shell = '/bin/sh', home = os.homedir(), env = {}, sftpServer = SFTP_SERVERS.find((p) => fs.existsSync(p)) ?? null } = {}) {
-  const hostKey = utils.generateKeyPairSync('ed25519').private;
+  const hostKey = hostKeyPair();
   const execs = [];
   const clients = new Set();
   const children = new Set();
@@ -171,7 +184,7 @@ function startSshServer({ port = 0, user = 'tester', password = 'secret', shell 
   });
 }
 
-module.exports = { startSshServer, SFTP_SERVERS };
+module.exports = { startSshServer, hostKeyPair, SFTP_SERVERS };
 
 if (require.main === module && process.argv.length > 2) {
   const [port, user = 'tester', password = 'secret', shell = '/bin/sh'] = process.argv.slice(2);

@@ -26,7 +26,8 @@ const require = createRequire(import.meta.url);
 const places = require('../electron/places.cjs');
 const { createRemote, toUri } = require('../electron/remote.cjs');
 const { createGit, shellRunner, installCommand, parseInstallProbe, SHELL_PROLOGUE, ARGS_INLINE } = require('../electron/git.cjs');
-const { startSshServer } = require('./helpers/ssh-server.cjs');
+const { startSshServer, hostKeyPair } = require('./helpers/ssh-server.cjs');
+const { utils: sshUtils } = require('ssh2');
 const FAKE_DOCKER = fileURLToPath(new URL('./helpers/fake-docker.cjs', import.meta.url));
 
 // The scripts run as a server runs them: a POSIX sh with base64 and head -c, and git. Not on Windows.
@@ -69,6 +70,14 @@ const runVia =
 const gitWith = (run, where = 'build-box') => createGit({ parseStatus: gitStatus.parseStatus, parse: gitStatus, runner: shellRunner({ run, where: () => where }) });
 
 // ---- The command line ------------------------------------------------------------------------
+
+// The flaky test of 0.48: ssh2's generateKeyPairSync drops an ed25519 public key's leading zero byte
+// (about one key in 220), its parser then refuses the stand-in's host key ("Malformed OpenSSH
+// private key"). 600 keys: the old way passes this about once in 15 runs.
+test('the SSH stand-in always gets a host key ssh2 can read', () => {
+  const refused = Array.from({ length: 600 }, hostKeyPair).filter((k) => sshUtils.parseKey(k) instanceof Error);
+  assert.equal(refused.length, 0);
+});
 
 test('the command line for a server: sh -c with BOOT quoted, every other word base64; NUL and line breaks refused', () => {
   const line = places.bootCommand('echo hi', NASTY);
