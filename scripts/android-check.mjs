@@ -5,10 +5,11 @@
 // (Android's, through the app: spoken, and made into audio ahead for the page to play), a speech
 // server on the computer next to the phone (KOKORO=its /v1 address, as the emulator reaches it),
 // a PDF (pdf.js and its worker), converted documents, a shell on the phone (its Node.js and
-// pty addon, directly and through the terminal panel) and turning the app sideways. Writes
+// pty addon, directly and through the terminal panel), Git in a folder on an SSH server
+// (GIT_SSH=host:port, as the emulator reaches it) and turning the app sideways. Writes
 // android-check/report.json, screenshots, the WebView's console lines and Node's from logcat;
 // exits 1 when a check fails.
-//   [KOKORO=http://10.0.2.2:8880/v1] node scripts/android-check.mjs path/to/app-debug.apk
+//   [KOKORO=http://10.0.2.2:8880/v1] [GIT_SSH=10.0.2.2:2222] node scripts/android-check.mjs path/to/app-debug.apk
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -294,6 +295,91 @@ try {
     await page.keyboard.press('Enter');
     for (let i = 0; i < 10 && !/ui-42/.test((shown = await screen()) ?? ''); i++) await page.waitForTimeout(500);
     check('…and runs what is typed', /ui-42/.test(shown ?? ''), (shown ?? '').trim().slice(-300));
+  });
+
+  // Git in a folder on an SSH server (0.48.1): a real OpenSSH server with git on the computer
+  // next to the phone (GIT_SSH=host:port: the workflow's git-sshd, a repository with one commit
+  // and one change), its host key trusted in the app's own dialog; status, HEAD and blame through
+  // the bridge; the bar of changed lines and the branch for the file opened; then staged and
+  // committed from the Git panel, and the commit seen on the server with its own git's identity.
+  if (process.env.GIT_SSH) await part('Git on an SSH server', async () => {
+    const [host, port] = process.env.GIT_SSH.split(':');
+    const dir = '/home/ana/site';
+    await page.evaluate(() => {
+      document.querySelector('[aria-label="Hide the terminal"]')?.click();
+      document.activeElement?.blur?.();
+    });
+    const conn = await page.evaluate(async ({ host, port, dir }) => {
+      const saved = await window.desktop.remote.save({ name: 'git-box', protocol: 'sftp', host, port: Number(port), user: 'ana', auth: 'password', path: dir }, { password: 'check-pass' });
+      await (await import('/js/servers.js')).refreshServers();
+      window.__gitConnect = window.desktop.remote.connect(saved.id).then(
+        () => 'connected',
+        (err) => `failed: ${err.message}`,
+      );
+      return saved;
+    }, { host, port, dir });
+    const trusted = await page
+      .getByRole('button', { name: 'Trust and connect' })
+      .click({ timeout: 30_000 })
+      .then(() => true, (err) => err.message.split('\n')[0]);
+    const connected = await page.evaluate(() => window.__gitConnect);
+    check('an SSH server: its host key trusted in the app’s dialog, connected', trusted === true && connected === 'connected', { trusted, connected });
+    const root = `remote://${conn.id}${dir}`;
+    const file = `${root}/notes.txt`;
+    const got = await page.evaluate(async ({ root, file }) => {
+      const g = window.desktop.git;
+      const out = {};
+      try {
+        const status = await g.status(root);
+        out.status = status && { branch: status.branch, files: status.files, root: status.root };
+        const head = await g.head(file);
+        out.head = head && { branch: head.branch, text: head.text };
+        const now = await window.desktop.disk.read(file);
+        const blame = await g.blame(file, now.text, { format: { eol: now.eol, bom: now.bom, encoding: now.encoding } });
+        out.blame = blame?.lines && blame.lines.map((h) => (h ? (blame.commits[h].uncommitted ? 'not committed' : `${blame.commits[h].summary} · ${blame.commits[h].author}`) : null));
+        const info = await g.info(root);
+        out.info = info && { installed: info.installed, root: info.root };
+      } catch (err) {
+        out.error = err.message;
+      }
+      return out;
+    }, { root, file });
+    check('Git there: the branch and the changed file', got.status?.branch === 'main' && got.status.files?.['notes.txt'] === 'M', got.status ?? got);
+    check('…the file at the last commit', got.head?.text === 'line one\nline two\nline three\n' && got.head.branch === 'main', got.head ?? got);
+    check('…blame of the text: committed lines and the changed one', JSON.stringify(got.blame) === JSON.stringify(['First notes · Ana Silva', 'not committed', 'First notes · Ana Silva']), got.blame ?? got);
+    check('…git info says it is installed there', got.info?.installed === true, got.info ?? got);
+
+    // In the app: the file opened from the server shows its changes in the bar and its branch.
+    await page.evaluate(async (file) => {
+      const { store } = await import('/js/store.js');
+      store.openDiskFile(await window.desktop.disk.read(file));
+    }, file);
+    const marks = await page.waitForSelector('.editor-host .cm-git-mark', { state: 'attached', timeout: 20_000 }).then(() => page.locator('.editor-host .cm-git-mark').count(), () => 0);
+    const branch = await page.evaluate(() => document.querySelector('.status-git')?.textContent?.trim() ?? null);
+    check('the file opened from the server: its changed line marked, its branch known', marks >= 1 && /main/.test(branch ?? ''), { marks, branch });
+
+    // The Git panel (Ctrl+Shift+G): stage all, a message, commit; then on the server.
+    await page.keyboard.press('Control+Shift+G');
+    const panel = page.locator('.git-panel');
+    const shown = await panel.locator('.git-branch-btn').innerText({ timeout: 20_000 }).catch((err) => err.message.split('\n')[0]);
+    const changed = await panel.locator('.git-file-base').allInnerTexts();
+    check('the Git panel on the phone: the branch and the change', /main/.test(shown) && changed.includes('notes.txt'), { shown, changed });
+    screencap('git-panel.png');
+    await panel.getByRole('button', { name: 'Stage all' }).click();
+    await panel.locator('textarea[aria-label="Commit message"]').fill('Changed from the phone');
+    await panel.locator('.git-commit .btn.primary').click({ timeout: 20_000 });
+    const emptied = await panel.getByText('No changes since the last commit.').waitFor({ timeout: 30_000 }).then(() => true, () => false);
+    let onServer = '';
+    try {
+      onServer = execFileSync('docker', ['exec', '-u', 'ana', 'git-sshd', 'git', '-C', dir, 'log', '-1', '--format=%s · %an'], { encoding: 'utf8' }).trim();
+    } catch (err) {
+      onServer = String(err.message).slice(0, 200);
+    }
+    check('…staged and committed there, with the server’s own Git identity', emptied && onServer === 'Changed from the phone · Ana Silva', { emptied, onServer });
+    await page.evaluate(async (id) => {
+      document.querySelector('.git-panel [aria-label="Close"]')?.click();
+      await window.desktop.remote.disconnect(id).catch(() => {});
+    }, conn.id);
   });
 
   // Turning sideways (a folder comparison or two panes on a phone held upright): the app asks

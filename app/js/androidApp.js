@@ -655,6 +655,21 @@ function install() {
       declarations: (dirs, word) => nodeInvoke('code:declarations', dirs, word),
       symbols: (dirs, query) => nodeInvoke('code:symbols', dirs, query),
     },
+    // Git in folders on SSH servers, with the git there (as on the desktop; the phone has no git of
+    // its own, so the page never asks about its folders: app.js gitWorksAt, Folders' gitHere).
+    git: {
+      status: (dir) => nodeInvoke('git:status', dir),
+      head: (file) => nodeInvoke('git:head', file),
+      act: (dir, action) => nodeInvoke('git:act', dir, action),
+      index: (file) => nodeInvoke('git:index', file),
+      stageText: (file, text) => nodeInvoke('git:stage-text', file, text),
+      blame: (file, text, opts) => nodeInvoke('git:blame', file, text, opts),
+      commit: (file, hash) => nodeInvoke('git:commit', file, hash),
+      fileAt: (file, hash, rel) => nodeInvoke('git:file-at', file, hash, rel),
+      info: (dir) => nodeInvoke('git:info', dir),
+      init: (dir, opts) => nodeInvoke('git:init', dir, opts),
+      onProgress: (cb) => nodeOn('git:progress', cb),
+    },
     // Share → Tracker Editor, and text selected in another app: [{ title, text, url, files }].
     shared: {
       take: async () => take('shared'),

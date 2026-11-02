@@ -140,3 +140,40 @@ test('messages to the phone’s Node go in the order sent, keys for one terminal
   await new Promise((r) => setTimeout(r, 50));
   assert.deepEqual(after, ['a', 'c']);
 });
+
+// Every channel the Android app's bridge calls is one the main process (electron/main.cjs, or
+// mobile/node/android.cjs on the phone) answers; and its Git part (0.48.1: Git in folders on SSH
+// servers) offers what the desktop's preload does, so the Git panel, blame and the rest find it.
+test('the Android bridge calls only channels the main process answers; Git as on the desktop', async () => {
+  const fs = await import('node:fs');
+  const read = (p) => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
+  const bridgeSource = read('../app/js/androidApp.js');
+  const main = read('../electron/main.cjs') + read('../mobile/node/android.cjs');
+  const answered = new Set([...main.matchAll(/(?:ipcMain|bridge)\.(?:handle|on)\(\s*'([\w:-]+)'/g)].map((m) => m[1]));
+  const called = new Set([...bridgeSource.matchAll(/\b(?:nodeInvoke|nodeSend|inv)\(\s*'([\w:-]+)'/g)].map((m) => m[1]));
+  assert.ok(called.size > 40, `${called.size} channels found`);
+  const unanswered = [...called].filter((c) => !answered.has(c));
+  assert.deepEqual(unanswered, []);
+  // What the page listens for is what main sends.
+  const sent = new Set([...main.matchAll(/\.send\(\s*'([\w:-]+)'/g)].map((m) => m[1]));
+  for (const c of ['git:progress', 'term:data', 'folder:changed', 'transfer:update']) assert.ok(sent.has(c) && bridgeSource.includes(`nodeOn('${c}'`), c);
+  // The Git part: the preload's methods, each to the same channel.
+  const preload = read('../electron/preload.cjs');
+  // The object after `start` ("git: {"), to its closing brace.
+  const part = (src, start) => {
+    const from = src.indexOf(start);
+    assert.ok(from >= 0, start);
+    let depth = 0;
+    for (let i = src.indexOf('{', from); i < src.length; i++) {
+      if (src[i] === '{') depth++;
+      else if (src[i] === '}' && --depth === 0) return src.slice(from, i + 1);
+    }
+    return '';
+  };
+  const methods = (src) => [...src.matchAll(/^\s+(\w+)(?::\s*\(|\()/gm)].map((m) => m[1]).sort();
+  const channels = (src) => [...new Set([...src.matchAll(/'(git:[\w-]+)'/g)].map((m) => m[1]))].sort();
+  const desktopGit = part(preload, 'git: {');
+  const phoneGit = part(bridgeSource, 'git: {');
+  assert.deepEqual(methods(phoneGit), methods(desktopGit));
+  assert.deepEqual(channels(phoneGit), channels(desktopGit));
+});

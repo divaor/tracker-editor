@@ -2697,7 +2697,11 @@ export function App() {
   // made elsewhere); a server not connected now answers { offline } and what it said stays.
   const [gitHeads, setGitHeads] = useState({}); // key → { branch, root, tracked } or null
   /** Whether Git works for a path: on this computer, or on a server with a shell (SSH, Docker, WSL); not FTP. */
-  const gitWorksAt = (p) => Boolean(p) && !isContentPath(p) && (!isRemotePath(p) || hasShell(server(remoteParts(p).id)));
+  // Where Git runs: here (the desktop app), on a server with a shell, in a place. The phone has no
+  // git of its own: in the Android app only folders on SSH servers (0.48.1).
+  const gitWorksAt = (p) => Boolean(p) && !isContentPath(p) && (isRemotePath(p) ? hasShell(server(remoteParts(p).id)) : !isAndroidApp());
+  /** Where Git works, in words for messages. */
+  const GIT_WHERE = isAndroidApp() ? 'on an SSH server (the phone has no Git of its own)' : 'on this computer, on an SSH server, or in a Docker container or WSL';
   /** Where a path's Git runs, for its messages: { kind: 'ssh'|'docker'|'wsl', name }, or null here. */
   const gitPlaceOf = (p) => {
     const conn = isRemotePath(p) ? server(remoteParts(p).id) : null;
@@ -2805,8 +2809,9 @@ export function App() {
   actions.toggleBlameColumn = (key = null) => {
     const host = hostRef.current;
     const k = key ?? host?.codeContext()?.key ?? store.session.active;
-    if (!window.desktop?.git?.blame) return toast('Blame works in the desktop app, for files on this computer in a Git repository.');
-    if (!k?.startsWith('d:') || isRemotePath(k.slice(2)) || !gitHeads[k]) return toast('Blame is for files on this computer in a Git repository: open one first.');
+    if (!window.desktop?.git?.blame) return toast('Blame works in the desktop app (and in the Android app on SSH servers), for files in a Git repository.');
+    // Files on servers too (0.48.0 refused them here, while the line's blame worked there).
+    if (!k?.startsWith('d:') || !gitWorksAt(k.slice(2)) || !gitHeads[k]) return toast(`Blame is for a file in a Git repository, ${GIT_WHERE}: open one first.`);
     if (host.isBig(k)) return toast('This file is too large for blame.');
     const on = !host.hasBlameColumn(k);
     host.setBlameColumn(k, on);
@@ -2939,7 +2944,7 @@ export function App() {
   actions.compareWithHead = async (path = null) => {
     const key = path ? diskKey(path) : store.session.active;
     if (!key?.startsWith('d:') || !window.desktop?.git) return;
-    if (!gitWorksAt(key.slice(2))) return toast('Git needs a shell where the file is: an SSH server, a Docker container or WSL (not FTP).');
+    if (!gitWorksAt(key.slice(2))) return toast(isAndroidApp() && !isRemotePath(key.slice(2)) ? `Git works ${GIT_WHERE}.` : 'Git needs a shell where the file is: an SSH server, a Docker container or WSL (not FTP).');
     if (path && store.session.active !== key && (await actions.openDiskPath(path))) return;
     const head = await window.desktop.git.head(key.slice(2)).catch(() => null);
     if (head?.offline) {
@@ -3049,7 +3054,7 @@ export function App() {
     const f = getSettings().folder;
     return gitWorksAt(f) ? f : null;
   };
-  const NO_GIT_FOLDER = 'Open a file or a folder first (on this computer, on an SSH server, or in a Docker container or WSL): the Git panel shows its repository.';
+  const NO_GIT_FOLDER = `Open a file or a folder first (${GIT_WHERE}): the Git panel shows its repository.`;
   /** The Git panel (Ctrl+Shift+G): for `dir`'s repository, or the open file's / the folder's. */
   actions.toggleGit = (dir = null) => {
     if (!gitBridge()) return toast('Git works in the desktop app.');
@@ -3131,7 +3136,7 @@ export function App() {
     if (!gitBridge()?.init) return toast('Git works in the desktop app.');
     const f = getSettings().folder;
     const at = dir ?? (gitWorksAt(f) ? f : gitFolderNow());
-    if (!at || !gitWorksAt(at)) return toast('Open a folder in Folders first: on this computer, on an SSH server, or in a Docker container or WSL.');
+    if (!at || !gitWorksAt(at)) return toast(`Open a folder in Folders first: ${GIT_WHERE}.`);
     setDialog({ type: 'gitInit', dir: at });
   };
   /** A folder just made a repository: Folders and the status bar read Git again, and its panel opens. */

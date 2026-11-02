@@ -2,7 +2,8 @@
 # cannot stand in for: text from images (tesseract's worker and models as the APK holds them),
 # the phone's text to speech, Kokoro served from this machine as from a computer on the phone's
 # network, PDFs (pdf.js and its worker), documents converted on the page, a shell on the phone,
-# and folder comparisons laid out for a phone and turned sideways (scripts/android-check.mjs).
+# Git in a folder on an SSH server (a real OpenSSH with git, on this machine), and folder
+# comparisons laid out for a phone and turned sideways (scripts/android-check.mjs).
 # Run it by hand from Actions → Android check. Its APK is a debug build with WebView debugging
 # on, for this check only: the release's setting stays off.
 name: Android check
@@ -50,6 +51,27 @@ jobs:
           for i in $(seq 1 60); do curl -sf http://localhost:8880/health && exit 0; sleep 5; done
           docker logs kokoro | tail -40
           exit 1
+      # An SSH server with Git on this machine (Debian's OpenSSH and git), as a server the phone
+      # reaches at 10.0.2.2:2222: a repository in its user's home with one commit and one change.
+      - name: SSH server with Git
+        run: |
+          docker build -t git-sshd - <<'EOF'
+          FROM debian:bookworm-slim
+          RUN apt-get update && apt-get install -y --no-install-recommends openssh-server git && rm -rf /var/lib/apt/lists/* \
+           && mkdir -p /run/sshd && useradd -m -s /bin/bash ana && echo 'ana:check-pass' | chpasswd \
+           && sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+          USER ana
+          RUN git config --global user.name 'Ana Silva' && git config --global user.email ana@example.org \
+           && git init -q -b main /home/ana/site && cd /home/ana/site \
+           && printf 'line one\nline two\nline three\n' > notes.txt && git add notes.txt && git commit -q -m 'First notes' \
+           && printf 'line one\nline two, changed\nline three\n' > notes.txt
+          USER root
+          CMD ["/usr/sbin/sshd", "-D", "-e"]
+          EOF
+          docker run -d --name git-sshd -p 2222:22 git-sshd
+          for i in $(seq 1 30); do ssh-keyscan -p 2222 localhost >/dev/null 2>&1 && exit 0; sleep 1; done
+          docker logs git-sshd
+          exit 1
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -63,7 +85,7 @@ jobs:
           target: google_apis
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: KOKORO=http://10.0.2.2:8880/v1 node scripts/android-check.mjs $(ls android/app/build/outputs/apk/debug/*.apk)
+          script: KOKORO=http://10.0.2.2:8880/v1 GIT_SSH=10.0.2.2:2222 node scripts/android-check.mjs $(ls android/app/build/outputs/apk/debug/*.apk)
       # Each failed check as an annotation, so the run's page (and the API) says which one.
       - name: Failed checks
         if: failure()

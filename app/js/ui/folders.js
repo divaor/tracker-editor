@@ -27,9 +27,9 @@ const branchTitle = (g) => {
   const sync = [g.ahead && `${g.ahead} to push`, g.behind && `${g.behind} to pull`].filter(Boolean).join(', ');
   return `Git: branch ${g.branch}${g.upstream ? ` (${g.upstream}${sync ? `: ${sync}` : ''})` : ''} · ${changed ? `${changed} changed file${changed === 1 ? '' : 's'}` : 'nothing changed'} since the last commit\nClick for the Git panel`;
 };
-// Git can be asked about this folder (desktop: on this computer, on an SSH server or in a place;
-// not FTP servers, which have no shell, nor the Android app).
-const gitHere = (dir) => Boolean(window.desktop?.git?.init) && Boolean(dir) && (!isRemotePath(dir) || hasShell(server(remoteParts(dir).id)));
+// Git can be asked about this folder: on this computer (the desktop app), on an SSH server or in a
+// place; not FTP servers, which have no shell. The Android app: SSH servers only (no git on the phone).
+const gitHere = (dir) => Boolean(window.desktop?.git?.init) && Boolean(dir) && (isRemotePath(dir) ? hasShell(server(remoteParts(dir).id)) : !isAndroidApp());
 const dockerHere = (dir) => Boolean(window.desktop?.docker) && Boolean(dir) && !isRemotePath(dir);
 
 // What a folder's header carries when it is dragged to another place in the order.
