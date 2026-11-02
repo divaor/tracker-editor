@@ -10401,15 +10401,6 @@ summary.git-section-head {
 }
 
 /* ---- Ctrl+T and F12 in other files (ui/symbols.js) ---- */
-.symbol-row .quick-rel {
-  max-width: 45%;
-}
-
-.symbol-row .quick-kind {
-  flex: none;
-  color: var(--kc, currentColor);
-}
-
 /* ---- Language servers (lsp.js, ui/languageServers.js) ---- */
 .status-lsp {
   gap: 6px;
@@ -13425,10 +13416,6 @@ html[data-native='android'] body:has(.edit-bar) .toasts {
 
 /* ---- Find by asking (0.40): Ctrl+P's Ask row and the results panel ---- */
 .quick-row.quick-ask .icon,
-.quick-row.quick-ask .quick-name {
-  color: var(--accent);
-}
-
 .ask-body {
   gap: 8px;
 }
