@@ -6,8 +6,11 @@
 export const COMMAND_GROUPS = ['Files and tabs', 'Find', 'Edit and text', 'Code', 'Git', 'Debug', 'View', 'Tools', 'Folders view', 'Terminal'];
 
 /**
- * [{ id, group, label, keys?, desktop?, only?, hint?, run?, local? }]; `run: false` for keys that only work in place;
- * `local`: the label in local mode (no GitHub), or false to leave it out there.
+ * [{ id, group, label, keys?, desktop?, only?, hint?, run?, local?, when? }]; `run: false` for keys that only work in place;
+ * `local`: the label in local mode (no GitHub), or false to leave it out there; `when: 'debugging'`:
+ * its keys work only while a program is debugged (and may be another command's otherwise: F5).
+ * Keys can be changed (keybindings.js, Settings → Keys): a command with `keys` here gets them with
+ * nothing else to wire, through the window's key handler and `actions.command`.
  */
 export const COMMAND_LIST = [
   { id: 'new', group: 'Files and tabs', label: 'New file', keys: 'Alt+N', desktop: 'Mod+N' },
@@ -140,13 +143,13 @@ export const COMMAND_LIST = [
   { id: 'debug-file', group: 'Debug', label: 'Debug this file (Python, JavaScript, TypeScript)', keys: 'Alt+F5', only: 'desktop', hint: 'Python through debugpy, JavaScript and TypeScript through js-debug: it stops at the breakpoints' },
   { id: 'debug-test', group: 'Debug', label: 'Debug the test at the cursor', keys: 'Mod+Alt+F5', only: 'desktop', hint: 'pytest, unittest, node:test, Vitest and Jest; or right-click the ▶ next to a test' },
   { id: 'breakpoint-toggle', group: 'Debug', label: 'Toggle a breakpoint on this line', keys: 'F9', only: 'desktop', hint: 'Or click left of the line number; right-click there for a condition, a hit count or a log message' },
-  { id: 'debug-continue', group: 'Debug', label: 'Continue (while debugging)', keys: 'F5', only: 'desktop', hint: 'When nothing is being debugged, F5 runs the file' },
-  { id: 'debug-pause', group: 'Debug', label: 'Pause the program being debugged', only: 'desktop' },
-  { id: 'debug-step-over', group: 'Debug', label: 'Step over (to the next line)', keys: 'F10', only: 'desktop' },
-  { id: 'debug-step-into', group: 'Debug', label: 'Step into (the call on this line)', keys: 'F11', only: 'desktop', hint: 'While debugging; otherwise F11 is full screen' },
-  { id: 'debug-step-out', group: 'Debug', label: 'Step out (back to the caller)', keys: 'Shift+F11', only: 'desktop' },
-  { id: 'debug-restart', group: 'Debug', label: 'Restart debugging (or debug the last file again)', only: 'desktop' },
-  { id: 'debug-stop', group: 'Debug', label: 'Stop debugging', keys: 'Shift+F5', only: 'desktop' },
+  { id: 'debug-continue', group: 'Debug', label: 'Continue (while debugging)', keys: 'F5', only: 'desktop', when: 'debugging', hint: 'When nothing is being debugged, F5 runs the file' },
+  { id: 'debug-pause', group: 'Debug', label: 'Pause the program being debugged', only: 'desktop', when: 'debugging' },
+  { id: 'debug-step-over', group: 'Debug', label: 'Step over (to the next line)', keys: 'F10', only: 'desktop', when: 'debugging' },
+  { id: 'debug-step-into', group: 'Debug', label: 'Step into (the call on this line)', keys: 'F11', only: 'desktop', when: 'debugging', hint: 'While debugging; otherwise F11 is full screen' },
+  { id: 'debug-step-out', group: 'Debug', label: 'Step out (back to the caller)', keys: 'Shift+F11', only: 'desktop', when: 'debugging' },
+  { id: 'debug-restart', group: 'Debug', label: 'Restart debugging (or debug the last file again)', only: 'desktop', when: 'debugging' },
+  { id: 'debug-stop', group: 'Debug', label: 'Stop debugging', keys: 'Shift+F5', only: 'desktop', when: 'debugging' },
   { id: 'debug-panel', group: 'Debug', label: 'Debug panel: the call stack, variables, watch, breakpoints, the debug console', only: 'desktop', hint: 'Or the Debug item in the status bar while a run goes on' },
   { id: 'breakpoints-toggle-all', group: 'Debug', label: 'Turn all breakpoints off (or on again)', only: 'desktop' },
   { id: 'breakpoints-remove-all', group: 'Debug', label: 'Remove all breakpoints', only: 'desktop' },
@@ -159,6 +162,7 @@ export const COMMAND_LIST = [
   { id: 'read-aloud', group: 'View', label: 'Read aloud, pause or resume', keys: 'Alt+R' },
   { id: 'assistant', group: 'View', label: 'The model', keys: 'Mod+Shift+A' },
   { id: 'help', group: 'View', label: 'Help: commands, shortcuts and the guide', keys: 'F1' },
+  { id: 'keys-settings', group: 'View', label: 'Keys: change any command’s keys, or use VS Code’s or Notepad++’s', hint: 'Settings → Keys: record a key, take one from another command, reset' },
   { id: 'help-ask', group: 'View', label: 'Ask the model how to do something in the editor', hint: 'It answers from the guide. Also in the ✦ panel: Help with the editor' },
   { id: 'command-palette', group: 'View', label: 'Run a command by name (command palette)', keys: 'Mod+Shift+P', hint: 'Or Ctrl+P, then >' },
 
@@ -202,14 +206,15 @@ export function keysFor(command, { mac = false, desktop = false } = {}) {
 
 /**
  * The commands for this place (desktop-only ones left out in the browser), matching every
- * word of `query`; while searching, the ones whose label matches come first.
+ * word of `query` (in the label, group, hint or keys: `keysOf`, the keys in effect); while
+ * searching, the ones whose label matches come first.
  */
-export function findCommands(query = '', { desktop = false, list = COMMAND_LIST, mac = false, local = false } = {}) {
+export function findCommands(query = '', { desktop = false, list = COMMAND_LIST, mac = false, local = false, keysOf = (c) => keysFor(c, { mac, desktop }) } = {}) {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   // Local mode: nothing about syncing.
   if (local) list = list.filter((c) => c.local !== false).map((c) => (typeof c.local === 'string' ? { ...c, label: c.local } : c));
   const found = list.filter(
-    (c) => (desktop || c.only !== 'desktop') && words.every((w) => `${c.label} ${c.group} ${keysFor(c, { mac, desktop })} ${c.hint ?? ''}`.toLowerCase().includes(w)),
+    (c) => (desktop || c.only !== 'desktop') && words.every((w) => `${c.label} ${c.group} ${keysOf(c)} ${c.hint ?? ''}`.toLowerCase().includes(w)),
   );
   if (!words.length) return found;
   const rank = (c) => {

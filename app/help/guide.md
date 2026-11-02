@@ -821,6 +821,8 @@ Turn them on in **Settings → Desktop**.
 
 ## 15. Keyboard shortcuts
 
+These are the editor's own keys. Any of them can be changed, and VS Code's or Notepad++'s used instead (see *Your keys* below); the command palette (`Ctrl+Shift+P`) and Help (`F1`) always show the keys you have.
+
 | Keys | Action |
 | --- | --- |
 | `Alt+N` (desktop `Ctrl+N`) | New file |
@@ -885,6 +887,16 @@ Turn them on in **Settings → Desktop**.
 | Middle-click / double-click a tab | Close it / pin or unpin it |
 | Mouse wheel over the tabs | Scroll through them |
 | `Ctrl+Tab` | Next tab |
+
+### Your keys
+
+Settings → **Keys** (also **Help → Keys…** on the desktop, or **Keys** in the command palette) lists every command with its keys:
+
+- **Change**, then press the keys you want: they take the place of the command's keys. **+** adds another key to it, and the × on a key takes that one away. **Escape** stops without changing anything; **Backspace** leaves the command with no key.
+- A key another command has: it says whose it is, and **Take it over** moves it (that command keeps its other keys).
+- **Start from**: this editor's keys, **VS Code**'s or **Notepad++**'s. VS Code's: `F1` and `Ctrl+Shift+P` the command palette, `Ctrl+Shift+O` go to a function or section, `F5` debug and `Ctrl+F5` run, `Ctrl+Shift+V` the preview, `Ctrl+Shift+H` replace in files, `Ctrl+PageDown` / `Ctrl+PageUp` the next and previous tab, and on a Mac `Ctrl+G` go to line and `Ctrl+Shift+G` Git. Notepad++'s: `Ctrl+D` duplicate the line, `Ctrl+F3` select the next occurrence, `Ctrl+Q` comment, `Ctrl+Shift+U` / `Ctrl+U` upper and lower case, `Ctrl+B` the matching bracket, `Ctrl+Shift+P` play the macro, `Ctrl+Alt+S` save a copy, `Ctrl+Alt+F` / `Ctrl+Alt+Shift+F` fold and unfold. Chords (VS Code's `Ctrl+K Ctrl+0`) are not there, nor keys this editor keeps for its column selection or for keys that work in place. Your own changes stay on top of the one you pick: **Reset** on a command brings back that one's key, **Reset all** all of them.
+- A key needs `Ctrl`, `Alt` or `Cmd` (or is one of `F1`–`F12`), so typing is never taken; keys the system or the browser keep (copy, paste, `Cmd+Q` on a Mac, `Ctrl+W` in a browser) are refused. Keys that work in place (in the folders view, two panes, the terminal, a comparison) show as they are.
+- The new keys work everywhere the old ones did: in the text, in the window, in the desktop menus (which show them) and in macros; the old ones stop. **Export** saves them as a file; **Import…** takes such a file on another computer.
 
 ---
 

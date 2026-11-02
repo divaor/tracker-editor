@@ -920,6 +920,20 @@ ipcMain.on('dap:send', (event, id, message) => {
   if (fromApp(event)) dapHost.write(Number(id), message, event.sender);
 });
 ipcMain.handle('dap:stop', guard((event, id) => dapHost.stop(Number(id), event.sender)));
+// The keys in effect (the page's keys.js: a preset's, the person's changes): command id → an
+// accelerator, '' for none. The menu shows them, and registers the ones it registers by default.
+let menuKeys = {};
+const ACCELERATOR = /^[A-Za-z0-9+`\\=,./;'[\]-]{1,48}$/;
+ipcMain.on('menu:keys', (event, keys) => {
+  if (!fromApp(event) || !keys || typeof keys !== 'object' || Array.isArray(keys)) return;
+  const clean = {};
+  for (const [id, acc] of Object.entries(keys).slice(0, 500)) {
+    if (/^[\w-]{1,48}$/.test(id) && typeof acc === 'string' && (acc === '' || ACCELERATOR.test(acc))) clean[id] = acc;
+  }
+  if (JSON.stringify(clean) === JSON.stringify(menuKeys)) return;
+  menuKeys = clean;
+  buildMenu();
+});
 let debugging = false;
 ipcMain.on('debug:active', (event, on) => {
   if (!fromApp(event) || Boolean(on) === debugging) return;
@@ -2962,13 +2976,19 @@ function createWindow() {
 
 function buildMenu() {
   const isMac = process.platform === 'darwin';
+  // A command's key now (the page's, once it said; else the usual one); undefined for none.
+  const keyOf = (command, usual) => (Object.hasOwn(menuKeys, command) ? menuKeys[command] || undefined : usual);
+  const taken = (accelerator) => Object.values(menuKeys).includes(accelerator);
   // Shortcuts the editor itself handles are shown but left to it (registerAccelerator: false).
-  const shown = (label, accelerator, command) => ({ label, accelerator, registerAccelerator: false, click: () => send(command) });
+  const shown = (label, accelerator, command) => ({ label, accelerator: keyOf(command, accelerator), registerAccelerator: false, click: () => send(command) });
   const zoomWindow = (by) => {
     const wc = mainWindow?.webContents;
     if (wc) wc.setZoomLevel(by ? wc.getZoomLevel() + by : 0);
   };
-  const item = (label, accelerator, command) => ({ label, accelerator, click: () => send(command) });
+  const item = (label, accelerator, command) => ({ label, accelerator: keyOf(command, accelerator), click: () => send(command) });
+  // Run This File and Continue share F5 by default: each shows it only when it is the one F5 runs.
+  const runKey = keyOf('run-file', 'F5');
+  const continueKey = keyOf('debug-continue', 'F5');
   const template = [
     ...(isMac ? [{ role: 'appMenu' }] : []),
     {
@@ -2991,14 +3011,16 @@ function buildMenu() {
         item('Sync Now', 'CmdOrCtrl+S', 'sync'),
         item('Settings', 'CmdOrCtrl+,', 'settings'),
         { type: 'separator' },
-        isMac ? { role: 'close' } : { label: 'Quit', accelerator: 'CmdOrCtrl+Q', click: () => app.quit() },
+        // Ctrl+Q stays Quit unless a command was given it (Notepad++'s comment key).
+        isMac ? { role: 'close' } : { label: 'Quit', accelerator: taken('CmdOrCtrl+Q') ? undefined : 'CmdOrCtrl+Q', click: () => app.quit() },
       ],
     },
     {
       label: 'Edit',
       submenu: [
-        { role: 'undo' },
-        { role: 'redo' },
+        // Undo and redo follow their keys (a role keeps its own when the page has not said).
+        { role: 'undo', ...(Object.hasOwn(menuKeys, 'undo') ? { accelerator: keyOf('undo') } : {}) },
+        { role: 'redo', ...(Object.hasOwn(menuKeys, 'redo') ? { accelerator: keyOf('redo') } : {}) },
         { type: 'separator' },
         { role: 'cut' },
         { role: 'copy' },
@@ -3108,7 +3130,7 @@ function buildMenu() {
         shown('Outline and Links', 'CmdOrCtrl+Shift+O', 'outline'),
         shown('Terminal', 'Ctrl+`', 'terminal'),
         // While debugging, F5 continues (the page's keys; the menu only shows them).
-        shown('Run This File', debugging ? undefined : 'F5', 'run-file'),
+        { ...shown('Run This File', undefined, 'run-file'), accelerator: debugging && runKey === continueKey ? undefined : runKey },
         shown('Run the Test at the Cursor', 'CmdOrCtrl+F5', 'test-at-cursor'),
         shown('Run This File’s Tests', 'CmdOrCtrl+Shift+F5', 'test-file'),
         item('Run the Tests Again', undefined, 'test-again'),
@@ -3120,7 +3142,7 @@ function buildMenu() {
             shown('Debug the Test at the Cursor', 'CmdOrCtrl+Alt+F5', 'debug-test'),
             shown('Toggle a Breakpoint', 'F9', 'breakpoint-toggle'),
             { type: 'separator' },
-            { ...shown('Continue', debugging ? 'F5' : undefined, 'debug-continue'), enabled: debugging },
+            { ...shown('Continue', undefined, 'debug-continue'), accelerator: !debugging && runKey === continueKey ? undefined : continueKey, enabled: debugging },
             { ...shown('Pause', undefined, 'debug-pause'), enabled: debugging },
             { ...shown('Step Over', 'F10', 'debug-step-over'), enabled: debugging },
             { ...shown('Step Into', 'F11', 'debug-step-into'), enabled: debugging },
@@ -3158,7 +3180,7 @@ function buildMenu() {
         { label: 'Whole Window at Its Usual Size', click: () => zoomWindow(0) },
         { type: 'separator' },
         // While debugging, F11 steps into (the page's key): full screen keeps its item, not the key.
-        debugging ? { label: 'Toggle Full Screen', click: () => mainWindow?.setFullScreen(!mainWindow.isFullScreen()) } : { role: 'togglefullscreen' },
+        debugging && keyOf('debug-step-into', 'F11') === 'F11' ? { label: 'Toggle Full Screen', click: () => mainWindow?.setFullScreen(!mainWindow.isFullScreen()) } : { role: 'togglefullscreen' },
         { role: 'reload' },
         { role: 'toggleDevTools' },
       ],
@@ -3169,6 +3191,7 @@ function buildMenu() {
       submenu: [
         shown('Commands and Shortcuts', 'F1', 'help'),
         shown('Run a Command…', 'CmdOrCtrl+Shift+P', 'command-palette'),
+        item('Keys…', undefined, 'keys-settings'),
         item('Guide', undefined, 'help-guide'),
         { type: 'separator' },
         { label: 'Project on GitHub', click: () => shell.openExternal(REPO_URL) },

@@ -81,7 +81,8 @@ test('the passages stay within the budget, and rows of a table share its header'
     assert.ok(out.length > budget * 0.5, `${out.length} uses little of ${budget}`);
   }
   const keys = guideExcerpts('keys to fold, unfold, split view, format document, rename', GUIDE, { budget: 7000 });
-  const section = keys.split('### ').find((s) => s.startsWith('15. Keyboard shortcuts'));
+  // The table's own section (not its subsections, "15. Keyboard shortcuts › Your keys").
+  const section = keys.split('### ').find((s) => s.startsWith('15. Keyboard shortcuts\n'));
   assert.ok(section, 'the shortcuts table');
   assert.equal(section.split('| Keys | Action |').length, 2, 'its header once');
   assert.equal(guideExcerpts('', GUIDE), '');

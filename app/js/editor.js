@@ -111,6 +111,8 @@ import { breadcrumbsBar, refreshCrumbs } from './breadcrumbs.js';
 import { minimap } from './minimap.js';
 import { findFileRefs, pastedPath } from './fileRefs.js';
 import { addCursorAbove, addCursorBelow, columnBox, columnKeymap } from './columnSelect.js';
+import { EDITOR_COMMANDS, cmKey, keysChanged } from './keybindings.js';
+import { currentKeys, isKeyFor } from './keys.js';
 import { clipRanges, codeOfKey, lineTapSelection, selectLineRanges } from './editKeys.js';
 
 export { languages };
@@ -1025,6 +1027,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
   const server = new Compartment(); // a language server's completion, hover, problems (lsp.js)
   const crumbs = new Compartment(); // the breadcrumbs bar over the text (breadcrumbs.js)
   const mini = new Compartment(); // the minimap along the right (minimap.js)
+  const keysCfg = new Compartment(); // the keymap, from the keys in effect (keys.js)
   const indents = new Map(); // key → { tabs, size, source: 'detected' | 'editorconfig' | 'chosen' }
   let options = settings;
   let active = null;
@@ -1032,8 +1035,8 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
   const bigKeys = new Set(); // tabs in the lighter editor for very large files
   // Macro being recorded: keys the keymaps handle, and typed or pasted text, in order.
   let recording = null;
-  // The macro's own keys (Ctrl+Shift+R records, Alt+Shift+P plays) are not recorded.
-  const MACRO_KEYS = (e) => ((e.ctrlKey || e.metaKey) && e.shiftKey && /^r$/i.test(e.key)) || (e.altKey && e.shiftKey && e.code === 'KeyP');
+  // The macro's own keys (Ctrl+Shift+R records, Alt+Shift+P plays, or the keys they have now) are not recorded.
+  const MACRO_KEYS = (e) => isKeyFor(e, 'macro-record') || isKeyFor(e, 'macro-play');
   const recorder = [
     EditorView.domEventHandlers({
       keydown(e) {
@@ -1201,6 +1204,57 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
     onCursor?.({ key, line: line.number, column: sel.head - line.from + 1, selected: state.selection.ranges.reduce((n, r) => n + (r.to - r.from), 0), lines: state.doc.lines, cursors: state.selection.ranges.length, scope: scopeAt(state, sel.head), indent: indentFor(key) });
   };
 
+  // The editor's commands with keys (keybindings.js EDITOR_COMMANDS) and how each runs here: the
+  // rest are COMMANDS'. Ctrl+S and Alt+Z are the window's (its key handler sees them in the text too).
+  const EDITOR_KEYED = {
+    find: { run: openSearchPanel, scope: 'editor search-panel' },
+    replace: { run: openReplacePanel },
+    'goto-line': { run: gotoLine },
+    format: { run: () => onShortcut?.('format') ?? true },
+    // Code: definitions, usages, renaming; folding by level (as in Notepad++), problems (as in VS Code).
+    'goto-definition': { run: () => onShortcut?.('definition') ?? true },
+    'find-usages': { run: () => onShortcut?.('usages') ?? true },
+    'rename-symbol': { run: () => onShortcut?.('renameSymbol') ?? true },
+    'quick-fix': { run: () => onShortcut?.('quickFix') ?? true },
+    'organize-imports': { run: () => onShortcut?.('organizeImports') ?? true },
+  };
+  const runOf = (id) => EDITOR_KEYED[id]?.run ?? COMMANDS[id];
+  // CodeMirror's own keymaps, after the commands': a column from the keyboard (Shift+Alt+arrows, as
+  // in Notepad++; before CodeMirror's copy line up/down), then Tab expanding an Emmet abbreviation
+  // (HTML, XML, JSX: ul>li*3), else indenting.
+  const builtInKeys = [
+    ...columnKeymap,
+    ...closeBracketsKeymap,
+    ...defaultKeymap,
+    ...searchKeymap,
+    ...historyKeymap,
+    ...foldKeymap,
+    ...completionKeymap,
+    { key: 'Tab', run: emmetOnTab((state) => state.facet(languageName), () => options.emmet !== false) },
+    indentWithTab,
+  ];
+  /**
+   * The keymap from the keys in effect (keys.js): the editor's commands on their keys first; one
+   * whose keys a preset or the person changed loses CodeMirror's own bindings for it (its old key
+   * stops), and a key given to one of the window's commands is taken from CodeMirror (the window's
+   * key handler runs it).
+   */
+  function editorKeymap(table = currentKeys(options)) {
+    const ours = [];
+    for (const id of EDITOR_COMMANDS) {
+      const run = runOf(id);
+      const scope = EDITOR_KEYED[id]?.scope;
+      if (run) for (const combo of table.keys.get(id) ?? []) ours.push({ key: cmKey(combo), run, preventDefault: true, ...(scope ? { scope } : {}) });
+    }
+    const changed = [...table.keys.keys()].filter((id) => keysChanged(table, id));
+    const taken = changed
+      .filter((id) => !EDITOR_COMMANDS.has(id))
+      .flatMap((id) => (table.keys.get(id) ?? []).filter((combo) => !(table.own.get(id) ?? []).includes(combo)))
+      .map((combo) => ({ key: cmKey(combo), run: () => true, preventDefault: true }));
+    const dropped = new Set(changed.filter((id) => EDITOR_COMMANDS.has(id)).map(runOf).filter(Boolean));
+    return keymap.of([...ours, ...taken, ...builtInKeys.filter((b) => !dropped.has(b.run))]);
+  }
+
   function extensions(key, text) {
     // A very large file gets a lighter editor: no wrapping, matching, completion or highlighting.
     const big = isBigText(text);
@@ -1236,41 +1290,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       readingField,
       search({ top: true, createPanel: createSearchPanel }),
       placeholder('Type or paste here. Everything is saved on this device as you type and synced to GitHub.'),
-      keymap.of([
-        { key: 'Mod-g', run: gotoLine, preventDefault: true },
-        { key: 'Mod-h', mac: 'Mod-Alt-f', run: openReplacePanel, preventDefault: true },
-        { key: 'Alt-z', run: () => onShortcut?.('toggleWrap') ?? true },
-        { key: 'Shift-Alt-f', run: () => onShortcut?.('format') ?? true, preventDefault: true },
-        { key: 'Mod-s', run: () => onShortcut?.('sync') ?? true, preventDefault: true },
-        // Code: definitions, usages, renaming in the file; folding by level (as in Notepad++).
-        { key: 'F12', run: () => onShortcut?.('definition') ?? true, preventDefault: true },
-        { key: 'Shift-F12', run: () => onShortcut?.('usages') ?? true, preventDefault: true },
-        { key: 'F2', run: () => onShortcut?.('renameSymbol') ?? true, preventDefault: true },
-        { key: 'Mod-.', run: () => onShortcut?.('quickFix') ?? true, preventDefault: true },
-        { key: 'Shift-Alt-o', run: () => onShortcut?.('organizeImports') ?? true, preventDefault: true },
-        { key: 'Alt-0', run: COMMANDS.foldAll, preventDefault: true },
-        { key: 'Alt-Shift-0', run: unfoldAll, preventDefault: true },
-        { key: 'Alt-1', run: COMMANDS.foldTop, preventDefault: true },
-        { key: 'Alt-2', run: COMMANDS.foldLevel2, preventDefault: true },
-        { key: 'Alt-3', run: COMMANDS.foldLevel3, preventDefault: true },
-        // Problems: the next and the one before (as in VS Code; the list is the window's Ctrl+Shift+M).
-        { key: 'F8', run: nextDiagnostic, preventDefault: true },
-        { key: 'Shift-F8', run: previousDiagnostic, preventDefault: true },
-        { key: 'Mod-l', run: COMMANDS.selectLine, preventDefault: true },
-        { key: 'Mod-Shift-d', run: copyLineDown },
-        { key: 'Mod-Shift-k', run: deleteLine },
-        // A column from the keyboard (Shift+Alt+arrows, as in Notepad++; before CodeMirror's copy line up/down).
-        ...columnKeymap,
-        ...closeBracketsKeymap,
-        ...defaultKeymap,
-        ...searchKeymap,
-        ...historyKeymap,
-        ...foldKeymap,
-        ...completionKeymap,
-        // HTML, XML, JSX: Tab expands an Emmet abbreviation (ul>li*3), else indents.
-        { key: 'Tab', run: emmetOnTab((state) => state.facet(languageName), () => options.emmet !== false) },
-        indentWithTab,
-      ]),
+      keysCfg.of(editorKeymap()),
       lang.of([]),
       theme.of(config.theme),
       wrap.of(config.wrap),
@@ -1715,8 +1735,10 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
         if (!same('indentGuides') || !same('bracketColors') || !same('stickyScroll')) effects.push(aids.reconfigure(config.aids));
         if (!same('breadcrumbs') || !same('breadcrumbsAuto')) effects.push(crumbs.reconfigure(config.crumbs));
         if (!same('minimap') || !same('dark')) effects.push(mini.reconfigure(config.minimap));
+        if (keymapNow) effects.push(keysCfg.reconfigure(keymapNow));
         return effects;
       };
+      const keymapNow = same('keyBindings') && same('keyPreset') ? null : editorKeymap(currentKeys(next));
       for (const [key, state] of states) if (!viewOf(key)) states.set(key, state.update({ effects: effectsFor(key) }).state);
       if (active) view.dispatch({ effects: effectsFor(active) });
       for (const p of extra) p.view.dispatch({ effects: effectsFor(p.key) });

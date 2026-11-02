@@ -1,6 +1,7 @@
 import { isLocal } from '../settings.js';
 import { html, useEffect, useMemo, useRef, useState } from '../../vendor/preact-htm.js';
-import { findCommands, groupsOf, keysFor } from '../commands.js';
+import { findCommands, groupsOf } from '../commands.js';
+import { shownKeys } from '../keys.js';
 import { renderMarkdown } from '../markdown.js';
 import { ClearButton, Modal, Segmented } from './components.js';
 import { Icon } from './icons.js';
@@ -26,7 +27,7 @@ function CommandsTab({ query, setQuery, onRun }) {
   const input = useRef(null);
   const list = useRef(null);
   useEffect(() => input.current?.focus(), []);
-  const found = findCommands(query, { desktop, mac, local: isLocal() });
+  const found = findCommands(query, { desktop, mac, local: isLocal(), keysOf: shownKeys });
   const runnable = found.filter((c) => c.run !== false);
   const move = (e, step) => {
     const buttons = [...(list.current?.querySelectorAll('button.help-command') ?? [])];
@@ -59,9 +60,9 @@ function CommandsTab({ query, setQuery, onRun }) {
           <h3>${group}</h3>
           ${rows.map((c) =>
             c.run === false
-              ? html`<div class="help-command static" key=${c.id}><span class="help-label">${c.label}</span><${Keys} keys=${keysFor(c, { mac, desktop })} /></div>`
+              ? html`<div class="help-command static" key=${c.id}><span class="help-label">${c.label}</span><${Keys} keys=${shownKeys(c)} /></div>`
               : html`<button type="button" class="help-command" key=${c.id} title=${c.hint ?? 'Run it'} onClick=${() => onRun(c)}>
-                  <span class="help-label">${c.label}</span><${Keys} keys=${keysFor(c, { mac, desktop })} />
+                  <span class="help-label">${c.label}</span><${Keys} keys=${shownKeys(c)} />
                 </button>`,
           )}
         </section>`;

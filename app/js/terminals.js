@@ -6,6 +6,7 @@
 // the folder the shell says it is in (OSC 7 / 9;9 / 633, oscCwd: shells on this computer are
 // started so they say it), else the one it was opened in.
 // The tabs' order, the one in use and the panel split in two follow terminalTabs.js.
+import { isKeyFor } from './keys.js';
 import { outputTail } from './errorHelp.js';
 import { findFileRefs } from './fileRefs.js';
 import { getSettings, resolvedTheme } from './settings.js';
@@ -274,12 +275,12 @@ export async function openTerminal(connId, { cwd = '', label = 'Terminal', runne
     },
   });
   // Copy and paste as in terminals: Ctrl+Shift+C / V; Ctrl+C copies when text is
-  // selected (else it interrupts), Ctrl+V pastes. Ctrl+` hides the panel.
+  // selected (else it interrupts), Ctrl+V pastes. Ctrl+` (or the terminal's key now) hides the panel.
   term.attachCustomKeyEventHandler((e) => {
     if (e.type !== 'keydown') return true;
     const key = e.key.toLowerCase();
     const mod = e.ctrlKey || e.metaKey;
-    if (e.ctrlKey && e.key === '`') {
+    if (isKeyFor(e, 'terminal')) {
       e.preventDefault();
       onToggle();
       return false;

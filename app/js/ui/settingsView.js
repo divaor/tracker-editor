@@ -1,4 +1,5 @@
 import { html, useEffect, useState } from '../../vendor/preact-htm.js';
+import { KeysCard } from './keysCard.js';
 import { localShells } from '../terminals.js';
 import { clampFont, DEFAULT_FONT } from '../textSize.js';
 import { DEFAULT_LLM_URL } from '../llm.js';
@@ -998,6 +999,7 @@ export function SettingsView({ settings, sync, actions }) {
     </div>
     <${SyncCard} sync=${sync} actions=${actions} />
     <${EditorCard} settings=${settings} />
+    <${KeysCard} settings=${settings} />
     ${window.desktop?.lsp && html`<${LanguageServersCard} settings=${settings} actions=${actions} />`}
     <${ModelCard} settings=${settings} actions=${actions} />
     <${ReadAloudCard} settings=${settings} actions=${actions} />

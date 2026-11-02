@@ -397,6 +397,8 @@ contextBridge.exposeInMainWorld('desktop', {
     },
   },
   closeReady: () => ipcRenderer.send('app:close-ready'),
+  // The keys in effect (command id → accelerator, '' for none), for the menu to show and register.
+  setMenuKeys: (keys) => ipcRenderer.send('menu:keys', keys),
   onCommand(callback) {
     const listener = (_event, command) => callback(command);
     ipcRenderer.on('command', listener);

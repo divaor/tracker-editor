@@ -189,6 +189,10 @@ export const DEFAULT_SETTINGS = {
   ocrEngine: 'device',
   // Dictation (voice notes): a BCP 47 language, '' = the device's.
   dictationLang: '',
+  // Keys your way (keybindings.js, Settings → Keys): a preset's keys ('' = the editor's own,
+  // 'vscode', 'notepadpp'), and the person's changes on top: command id → [combinations], [] for none.
+  keyPreset: '',
+  keyBindings: {},
   // Settings migrations already applied on this device.
   version: 2,
 };

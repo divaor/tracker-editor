@@ -54,7 +54,7 @@ import { onTransfers, watchTransfers } from './transfers.js';
 import { TransfersCard } from './ui/transfers.js';
 import { baseName, besideSettings, claudeText, folderLabel, inPlaceSettings, isImageName, opensHere, remapPath, withCurrent } from './folders.js';
 import { folderOfPath, nearestTabs } from './comparePick.js';
-import { clampFont, DEFAULT_FONT, pinchFont, stepFont, textSizeKey } from './textSize.js';
+import { clampFont, DEFAULT_FONT, pinchFont, stepFont } from './textSize.js';
 import { keyboardState } from './editKeys.js';
 import { draggedPaths, draggedTab, dropped, isOwnDrop } from './dragOut.js';
 import { dataClient, getSyncState, movedTo, onSyncResult, onSyncState, syncNow } from './syncManager.js';
@@ -115,6 +115,8 @@ import { activeFor, folderGroupOf, loadRoots, rememberFolders, sectionFolders, t
 import { MAX_EXTRA, dragSizes, evenSizes, nextUnshown, paneSizes, panesThatFit, withSizes } from './paneLayout.js';
 import { stepView, suggestedProject, viewKey } from './tabGroups.js';
 import { isAndroidApp, isDesktopApp } from './platform.js';
+import { EDITOR_COMMANDS, combosOf, typesText } from './keybindings.js';
+import { commandOfEvent, keyContext, startKeys } from './keys.js';
 
 const isNarrow = () => matchMedia('(max-width: 860px)').matches;
 
@@ -4141,137 +4143,37 @@ export function App() {
     return () => window.removeEventListener('paste', onPaste);
   }, []);
 
-  // Keyboard shortcuts that work in the browser too (the desktop menu adds Ctrl+N, Ctrl+W, …).
+  // Keyboard shortcuts: the keys in effect (keys.js: commands.js's own, a preset's, the person's
+  // changes) run their command through actions.command. The editor's own commands are CodeMirror's
+  // (editor.js builds its keymap from the same keys); the terminal, the folders view, two panes and
+  // dialogs keep the keys they handle (they stop them before this). In the desktop app the menu
+  // registers some of the keys itself (main.cjs, from the same keys), so those never get here.
   useEffect(() => {
-    // The panes' keys (commands.js: split, pane-1…4, pane-move-next / -prev): 'split', 'next', 'prev', a pane's number, or null.
-    const paneKey = (e, mod) => {
-      if (!mod || e.shiftKey || e.target?.closest?.('.modal, .menu')) return null;
-      if (e.key === '\\' && !e.altKey) return 'split';
-      if (!e.altKey && /^Digit[1-4]$/.test(e.code)) return Number(e.code.slice(5));
-      if (e.altKey && e.key === 'ArrowRight') return 'next';
-      if (e.altKey && e.key === 'ArrowLeft') return 'prev';
-      return null;
+    // Commands whose keys do something only where the thing exists (elsewhere the key does nothing, as before).
+    const usable = {
+      'type-out': () => Boolean(window.desktop?.typing),
+      'clipboard-history': () => Boolean(window.desktop?.clipboardHistory),
+      'breakpoint-toggle': () => Boolean(window.desktop?.dap),
+      'debug-file': () => Boolean(window.desktop?.dap),
+      'debug-test': () => Boolean(window.desktop?.dap),
     };
+    const accept = (id) => !EDITOR_COMMANDS.has(id) && (usable[id]?.() ?? true);
     const onKey = (e) => {
-      const mod = e.ctrlKey || e.metaKey;
-      const k = e.key.toLowerCase();
-      if (e.key === 'F1' && !mod && !e.altKey) {
-        e.preventDefault();
-        actions.command('help');
-      } else if (textSizeKey(e) !== null) {
-        // Ctrl+= / Ctrl+- / Ctrl+0: the editor's text, not the whole page.
-        e.preventDefault();
-        actions.textSize(textSizeKey(e));
-      } else if (mod && !e.shiftKey && k === 'p') {
-        e.preventDefault();
-        setDialog({ type: 'quickOpen' });
-      } else if (mod && e.shiftKey && k === 'f') {
-        e.preventDefault();
-        setPanel('search');
-      } else if (mod && e.shiftKey && k === 'a') {
-        e.preventDefault();
-        setPanel((p) => (p === 'assistant' ? null : 'assistant'));
-      } else if (mod && !e.shiftKey && k === 'b') {
-        e.preventDefault();
-        setSidebar((s) => !s);
-      } else if (e.altKey && !mod && k === 'n') {
-        e.preventDefault();
-        actions.newFile();
-      } else if (e.altKey && !mod && k === 'r') {
-        e.preventDefault();
-        actions.readAloud();
-      } else if (e.altKey && !mod && k === 'w') {
-        e.preventDefault();
-        if (store.session.active) actions.close(store.session.active);
-      } else if (mod && e.shiftKey && k === 'r') {
-        e.preventDefault();
-        actions.toggleRecording();
-      } else if (mod && e.shiftKey && !e.altKey && k === 'p') {
-        e.preventDefault();
-        actions.commandPalette();
-      } else if (e.altKey && e.shiftKey && !mod && e.code === 'KeyP') {
-        e.preventDefault();
-        actions.playMacro();
-      } else if (mod && e.shiftKey && k === 'o') {
-        e.preventDefault();
-        actions.toggleOutline();
-      } else if (mod && e.shiftKey && !e.altKey && e.code === 'Period') {
-        e.preventDefault();
-        actions.command('breadcrumbs-focus');
-      } else if (mod && !e.shiftKey && !e.altKey && k === 't') {
-        e.preventDefault();
-        actions.gotoSymbolAll();
-      } else if (mod && e.shiftKey && k === 'm') {
-        e.preventDefault();
-        actions.toggleProblems();
-      } else if (mod && e.shiftKey && !e.altKey && k === 'b') {
-        e.preventDefault();
-        actions.showTasks();
-      } else if (mod && e.shiftKey && !e.altKey && k === 'g') {
-        e.preventDefault();
-        actions.toggleGit();
-      } else if (mod && !e.shiftKey && !e.altKey && k === 'k') {
-        e.preventDefault();
-        actions.askSelection();
-      } else if (e.altKey && !mod && !e.shiftKey && k === 'l') {
-        e.preventDefault();
-        actions.toggleFilter();
-      } else if (e.altKey && !mod && !e.shiftKey && (k === 'v' || e.code === 'KeyV')) {
-        e.preventDefault();
-        actions.tabViews();
-      } else if (mod && e.altKey && (e.key === 'PageDown' || e.key === 'PageUp')) {
-        e.preventDefault();
-        actions.stepTabView(e.key === 'PageDown' ? 1 : -1);
-      } else if (mod && e.altKey && e.key === 'Home') {
-        e.preventDefault();
-        actions.setTabView(null);
-      } else if (e.altKey && !mod && !e.shiftKey && k === 'i') {
-        e.preventDefault();
-        actions.openSnippets();
-      } else if (e.altKey && !mod && !e.shiftKey && k === 't' && window.desktop?.typing) {
-        e.preventDefault();
-        actions.typeOut();
-      } else if (mod && e.shiftKey && k === 'v' && window.desktop?.clipboardHistory) {
-        e.preventDefault();
-        actions.openClipboardHistory();
-      } else if (e.ctrlKey && e.key === '`') {
-        e.preventDefault();
-        actions.toggleTerminal();
-      } else if (e.key === 'F9' && !mod && !e.altKey && !e.shiftKey && window.desktop?.dap) {
-        e.preventDefault();
-        actions.toggleBreakpoint();
-      } else if (e.key === 'F5' && e.altKey && !e.shiftKey && window.desktop?.dap) {
-        // Alt+F5 debugs the file, Ctrl+Alt+F5 the test at the cursor.
-        e.preventDefault();
-        if (mod) actions.debugTest();
-        else actions.debugFile();
-      } else if (!mod && !e.altKey && debugRef.current?.active() && (e.key === 'F5' || e.key === 'F11' || (e.key === 'F10' && !e.shiftKey))) {
-        // While debugging: F5 continues (Shift: stops), F10 steps over, F11 into (Shift: out).
-        e.preventDefault();
-        if (e.key === 'F5') (e.shiftKey ? actions.debugStop : actions.debugContinue)();
-        else if (e.key === 'F10') actions.debugStepOver();
-        else (e.shiftKey ? actions.debugStepOut : actions.debugStepInto)();
-      } else if (e.key === 'F5' && !mod && !e.altKey && !e.shiftKey && isDesktopApp()) {
-        e.preventDefault();
-        actions.runFile();
-      } else if (e.key === 'F5' && mod && !e.altKey && isDesktopApp()) {
-        e.preventDefault();
-        actions.runTests({ scope: e.shiftKey ? 'file' : 'cursor' });
-      } else if (paneKey(e, mod)) {
-        // Panes side by side, all in one place: Ctrl+\\ a new pane, Ctrl+1–4 go to one, Ctrl+Alt+→/← move the tab along.
-        e.preventDefault();
-        const which = paneKey(e, mod);
-        if (which === 'split') actions.split();
-        else if (which === 'next' || which === 'prev') actions.movePane(which === 'next' ? 1 : -1);
-        else actions.focusPane(which);
-      } else if (mod && k === 's') {
-        e.preventDefault();
-        // A file on disk is saved; otherwise what was just typed is synced.
-        actions.saveOrSync();
-      }
+      const id = commandOfEvent(e, { debugging: Boolean(debugRef.current?.active()), accept });
+      if (!id) return;
+      // A key a person gave a command that types text (none can be set so) never leaves a field.
+      if (typesText(combosOf(e, keyContext())[0] ?? '') && e.target?.closest?.('input, textarea, select, [contenteditable]')) return;
+      e.preventDefault();
+      // Ctrl+S saves a file on disk, else syncs what was just typed (the menu's Sync Now syncs).
+      if (id === 'sync') return actions.saveOrSync();
+      actions.command(id);
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    const stopKeys = startKeys();
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      stopKeys();
+    };
   }, []);
 
   // Commands by name: the desktop menu's, and Help's (commands.js), so both run the same.
@@ -4392,6 +4294,10 @@ export function App() {
         syncNow();
       },
       settings: () => setView('settings'),
+      'keys-settings': () => {
+        setView('settings');
+        setTimeout(() => document.getElementById('keys')?.scrollIntoView({ block: 'start' }), 60);
+      },
       'toggle-sidebar': () => setSidebar((s) => !s),
       'toggle-wrap': () => actions.toggleWrap(),
       'text-larger': () => actions.textSize(1),
