@@ -33,6 +33,8 @@ export function tabFacts(key) {
   // A comparison goes with its left side (else its right): the folder or file it is about.
   if (k?.kind === 'compare') {
     const c = store.compare(k.id);
+    // A Git history goes with its file, else its repository's folder.
+    if (c?.mode === 'history') return c.file ? { ...tabFacts(`d:${c.file}`), key } : { key, kind: isRemotePath(c.root) ? 'remote' : 'disk', project: '', path: c.root };
     const side = [c?.left, c?.right].find((s) => s?.path || s?.key);
     if (side?.path) return { key, kind: isRemotePath(side.path) ? 'remote' : 'disk', project: '', path: side.path };
     return side?.key ? { ...tabFacts(side.key), key } : { key, kind: 'disk', project: '', path: '' };

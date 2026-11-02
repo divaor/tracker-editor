@@ -49,6 +49,7 @@ import { FilesAssist } from './ui/filesAssist.js';
 import { createFilesWork } from './filesWork.js';
 import { CHANGES_FILES, cleanCommitMessage, commitMessageMessages } from './gitAssist.js';
 import { gitError, mergeRequestLink, stageBlock } from './gitStatus.js';
+import { historyName, relIn } from './gitHistory.js';
 import { refreshAllGit, refreshGit } from './gitState.js';
 import { FolderSearchPanel } from './ui/folderSearch.js';
 import { AskPanel } from './ui/askPanel.js';
@@ -3097,6 +3098,71 @@ export function App() {
     lookUpGit(store.session.active);
     for (const key of hostRef.current?.panes ?? []) lookUpGit(key);
     setGitTick((n) => n + 1);
+    // The history tabs read again (ui/gitHistory.js).
+    window.dispatchEvent(new CustomEvent('git:changed'));
+  };
+  // ---- Git history (0.49; ui/gitHistory.js, gitHistory.js, gitGraph.js): a comparison tab of mode 'history' ----
+  /**
+   * A Git read for the history view (git.cjs act: history, commit-info, file-text, changed-since,
+   * branches): { ok, result } or { ok: false, error } as gitRun gives, without reading Git again after.
+   */
+  actions.gitLook = async (dir, action) => {
+    const bridge = gitBridge();
+    if (!bridge) return { ok: false, error: { kind: 'other', message: 'Git works in the desktop app.', detail: '' } };
+    const r = await bridge.act(dir, action).catch((err) => ({ ok: false, message: ipcMessage(err), stdout: '', stderr: '' }));
+    if (r.ok) return { ok: true, result: r.result };
+    if (r.offline) return { ok: false, error: { kind: 'offline', message: r.message || 'Not connected.', detail: '' } };
+    return { ok: false, error: gitError(r.stderr, r.stdout || r.message, { place: gitPlaceOf(dir) }) };
+  };
+  /** Whether Git can run where `p` is (here, or on a connection with a shell): menus offer its history then. */
+  actions.gitWorksAt = gitWorksAt;
+  /** Two texts compared in a tab of their own with a name (a commit's file before and after it). */
+  actions.openTextCompare = ({ name, left, right }) => {
+    hostRef.current?.flushAll();
+    store.openCompare({ mode: 'files', name, left, right });
+    setView('editor');
+  };
+  /** The top folder of the repository `dir` is in, or null (a toast says why). */
+  const historyRoot = async (dir) => {
+    const bridge = gitBridge();
+    if (!bridge) return (toast('Git works in the desktop app.'), null);
+    if (!gitWorksAt(dir)) return (toast(isAndroidApp() && !isRemotePath(dir) ? `Git works ${GIT_WHERE}.` : 'Git needs a shell where the file is: an SSH server, a Docker container or WSL (not FTP).'), null);
+    const status = await bridge.status(dir).catch((err) => ({ error: ipcMessage(err) }));
+    if (status?.offline) {
+      const id = remoteParts(dir).id;
+      return (toast(`${server(id)?.name ?? 'The server'} is not connected: connect again, then open the history.`, { action: { label: 'Reconnect', run: () => actions.reconnectServer(id) } }), null);
+    }
+    if (status?.error) return (toast(status.error, { kind: 'error' }), null);
+    if (!status?.root) return (toast('This folder is not in a Git repository.', { action: { label: 'Make it one…', run: () => actions.gitInit(dir) } }), null);
+    return status.root;
+  };
+  /** Shows a history tab: the one open for the same repository and file or folder, else a new one. */
+  const openHistory = (record) => {
+    const same = (c) => c?.mode === 'history' && c.root === record.root && (c.file ?? null) === (record.file ?? null) && (c.folder || '') === (record.folder || '');
+    const open = store.session.open.find((k) => k.startsWith('c:') && same(store.compare(k.slice(2))));
+    hostRef.current?.flushAll();
+    if (open) store.open(open);
+    else store.openCompare({ ...record, name: historyName(record) });
+    setView('editor');
+  };
+  /** The history of `dir`'s repository (else the open file's or the folder in Folders'); `folder`: only its commits. */
+  actions.gitHistory = async (dir = null, { folder = null, ref = '' } = {}) => {
+    const at = dir ?? gitFolderNow();
+    if (!at) return toast(NO_GIT_FOLDER);
+    const root = await historyRoot(at);
+    if (!root) return;
+    openHistory({ mode: 'history', root, ref, query: '', folder: (folder && relIn(root, folder)) || '' });
+  };
+  /** A file's history (the open disk tab's without `path`), followed through its renames. */
+  actions.fileHistory = async (path = null) => {
+    const active = store.session.active;
+    const p = path ?? (active?.startsWith('d:') ? active.slice(2) : null);
+    if (!p) return toast(`Open a file first (${GIT_WHERE}): its history comes from its Git repository.`);
+    const root = await historyRoot(parentDir(p));
+    if (!root) return;
+    const rel = relIn(root, p);
+    if (!rel) return toast('This file is not inside that Git repository.');
+    openHistory({ mode: 'history', root, file: p, rel, ref: '', query: '' });
   };
   // ---- Dockerize (0.47; dockerize.js, ui/dockerize.js): a project here made to run in Docker ----
   /** The dialog for `dir`, else the open file's project (looked for from its folder up), else the folder in Folders. */
@@ -4954,6 +5020,8 @@ export function App() {
       'goto-symbol-all': () => actions.gotoSymbolAll(),
       'command-palette': () => actions.commandPalette(),
       'git-compare': () => actions.compareWithHead(),
+      'git-history': () => actions.gitHistory(),
+      'git-file-history': () => actions.fileHistory(),
       'git-panel': () => actions.toggleGit(),
       'git-init': () => actions.gitInit(),
       dockerize: () => actions.dockerize(),

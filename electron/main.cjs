@@ -3471,6 +3471,8 @@ function buildMenu() {
             shown('Git Panel', 'CmdOrCtrl+Shift+G', 'git-panel'),
             item('Ask the Model about Git…', undefined, 'git-ask'),
             item('Switch Branch (Git)…', undefined, 'git-branch'),
+            item('History (Git)', undefined, 'git-history'),
+            item('History of This File (Git)', undefined, 'git-file-history'),
             item('Stage the Change at the Cursor (Git)', undefined, 'git-stage-change'),
             item('Revert the Change at the Cursor (Git)', undefined, 'git-revert-change'),
             item('Show the Change at the Cursor (Git)', undefined, 'git-show-change'),
