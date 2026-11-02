@@ -51,7 +51,7 @@ const STOP = new Set(
 );
 // Words people use for what the guide names otherwise.
 const ALIASES = {
-  shortcut: ['keys'], hotkey: ['keys'], keybinding: ['keys'], screen: ['view'], ssh: ['sftp', 'server'], ftp: ['ftp', 'server'], remote: ['server'],
+  shortcut: ['keys'], hotkey: ['keys'], keybinding: ['keys'], keys: ['keys', 'shortcut'], screen: ['view'], ssh: ['sftp', 'server'], ftp: ['ftp', 'server'], remote: ['server'],
   delete: ['trash', 'delete'], remove: ['trash', 'remove', 'delete'], erase: ['delete'], search: ['find'], lookup: ['find'], locate: ['find'],
   ai: ['model'], llm: ['model'], chatgpt: ['model'], gpt: ['model'], ollama: ['ollama', 'model'], copilot: ['suggest'], autocomplete: ['completion', 'suggest'],
   backup: ['history', 'backup'], restore: ['restore', 'history', 'trash'], revert: ['history', 'restore'], password: ['password', 'passphrase'],
