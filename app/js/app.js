@@ -124,6 +124,9 @@ import { isAndroidApp, isDesktopApp } from './platform.js';
 import { EDITOR_COMMANDS, combosOf, formatCombo, typesText } from './keybindings.js';
 import { commandOfEvent, isMacKeys, keyContext, shownKeys, startKeys } from './keys.js';
 
+/** Why the model panel does not open on an encrypted file: its text and name never go to the model. */
+const ENCRYPTED_NOT_SENT = 'This file is encrypted: its text and its name never go to the model.';
+
 const isNarrow = () => matchMedia('(max-width: 860px)').matches;
 
 // What the model may file a note under: your projects, and the tags in use (most used first).
@@ -642,6 +645,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         if (!sel) return toast('Open a file first.'), null;
         const k = parseKey(sel.key);
         const file = k.kind === 'file' ? store.get(k.id) : null;
+        if (file?.encrypted) return toast(ENCRYPTED_NOT_SENT), null;
         const name = file?.name ?? (k.kind === 'disk' ? store.diskTab(k.path) : store.repoTab(k.path))?.name ?? '';
         const language = findLanguage(name, file?.language)?.name ?? '';
         const whole = sel.from === sel.to;
@@ -654,6 +658,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         const k = parseKey(store.session.active ?? '');
         if (!k) return null;
         const file = k.kind === 'file' ? store.get(k.id) : null;
+        if (file?.encrypted) return null;
         const name = file?.name ?? (k.kind === 'disk' ? store.diskTab(k.path) : store.repoTab(k.path))?.name ?? '';
         return name ? { name, language: findLanguage(name, file?.language)?.name ?? '' } : null;
       },
@@ -2084,6 +2089,8 @@ export function App() {
   const previewType = activeKey ? previewKind(activeName, languageName) : '';
   // An encrypted file this device cannot read yet shows a lock instead of the editor.
   const activeSealed = Boolean(activeFile && store.isSealed(activeFile.id));
+  // Its text and its name never go to the model: no bubble, and the panel offers help with the editor only.
+  const activeEncrypted = Boolean(activeFile?.encrypted);
   const showPreview = Boolean(previewType) && preview.has(activeKey) && !compare && !activeSealed;
   // A document (PDF, e-book, Word…) shows as it looks, in the editor's place, unless "As text".
   const docShown = Boolean(((activeDisk?.doc && !activeDisk.asText) || activeRepo?.doc) && view === 'editor' && !compare);
@@ -3047,11 +3054,12 @@ export function App() {
     setFilesAssist({ target, start: question ? { question } : null, id: Date.now() });
   };
   actions.filesWork = (target) => createFilesWork({ ...target, host: () => hostRef.current, actions });
-  /** A tab's whole text as the model panel's context (the file it is about). */
+  /** A tab's whole text as the model panel's context (the file it is about); null for an encrypted file, which never goes to the model. */
   const wholeFile = (key) => {
     hostRef.current?.flushAll();
     const k = parseKey(key);
     const file = k?.kind === 'file' ? store.get(k.id) : null;
+    if (file?.encrypted) return toast(ENCRYPTED_NOT_SENT), null;
     const tab = k?.kind === 'disk' ? store.diskTab(k.path) : k?.kind === 'repo' ? store.repoTab(k.path) : null;
     const text = file ? store.text(file.id) : (tab?.text ?? '');
     const name = file?.name ?? tab?.name ?? '';
@@ -3061,9 +3069,13 @@ export function App() {
   actions.fixProblems = (key = activeKey) => {
     const list = problems[key]?.list ?? [];
     if (!list.length) return toast('No problems found in this file.');
-    actions.openAssist({ action: fixProblemsAction(list), context: wholeFile(key) });
+    const context = wholeFile(key);
+    if (context) actions.openAssist({ action: fixProblemsAction(list), context });
   };
-  actions.explainProblem = (problem, key = activeKey) => actions.openAssist({ action: explainProblemAction(problem), context: { ...wholeFile(key), ...(Number.isFinite(problem.from) ? { at: problem.from } : {}) } });
+  actions.explainProblem = (problem, key = activeKey) => {
+    const context = wholeFile(key);
+    if (context) actions.openAssist({ action: explainProblemAction(problem), context: { ...context, ...(Number.isFinite(problem.from) ? { at: problem.from } : {}) } });
+  };
   /**
    * The terminal's error (its selection, or the last output) explained by the model, with the
    * code around the places it names (files open here, or readable on disk).
@@ -3092,7 +3104,8 @@ export function App() {
   /** Opens the file an error points to and proposes a fixed version (compare, accept). */
   actions.fixForError = async (path, errorText) => {
     if (await actions.openDiskPath(path)) return;
-    setTimeout(() => actions.openAssist({ action: fixForErrorAction(errorText), context: wholeFile(diskKey(path)) }), 120);
+    const context = wholeFile(diskKey(path));
+    if (context) setTimeout(() => actions.openAssist({ action: fixForErrorAction(errorText), context }), 120);
   };
   /**
    * The question in the Claude app (with the person's Claude subscription): copied, and opened in
@@ -4205,7 +4218,8 @@ export function App() {
     const nameIt = async (id) => {
       const file = store.get(id);
       const settings = getSettings();
-      if (!file || done.has(id)) return;
+      // An encrypted file's text never goes to the model (a heading names it below only without one).
+      if (!file || done.has(id) || file.encrypted) return;
       const model = settings.llm.enabled && settings.llm.chatModel;
       const wantName = settings.autoName && isUntitled(file.name);
       const wantFiling = Boolean(model && settings.autoFile && created.has(id) && !file.project && !file.tags.length);
@@ -4752,10 +4766,10 @@ export function App() {
         <div class="editor-area ${showPreview ? 'split' : ''} ${showPreview && previewFull ? 'preview-full' : ''} ${shownPanes.length ? 'panes-split' : ''} ${compare ? 'comparing' : ''} ${settings.whereFrame && activeKey ? 'framed' : ''}"
           data-kind=${kindOfKey(activeKey) ?? undefined} ref=${areaEl} style=${{ '--split': `${((settings.splitRatio || 0.5) * 100).toFixed(2)}%` }} onDragOver=${overArea}>
           <div class="editor-host ${paneDrop === 0 ? 'drop-here' : ''}" ref=${editorEl} style=${shownPanes.length ? { flex: `${paneShares[0]} 1 0px` } : undefined} ...${shownPanes.length || tabOver ? paneDropProps(0) : {}} />
-          ${assist && !gitAssist && !filesAssist && ((activeKey && !activeCompare) || assistStart) && view === 'editor' && !compare && !activeSealed && html`<${AssistPanel} key=${`${activeKey}:${assistStart?.id ?? 0}`} scope=${assistScope} start=${assistStart} hasFile=${Boolean(activeKey)} actions=${actions} onClose=${() => (setAssist(false), setAssistStart(null), hostRef.current?.focus())} />`}
+          ${assist && !gitAssist && !filesAssist && ((activeKey && !activeCompare) || assistStart) && view === 'editor' && !compare && !activeSealed && html`<${AssistPanel} key=${`${activeKey}:${assistStart?.id ?? 0}`} scope=${assistScope} start=${assistStart} hasFile=${Boolean(activeKey) && !activeEncrypted} actions=${actions} onClose=${() => (setAssist(false), setAssistStart(null), hostRef.current?.focus())} />`}
           ${gitAssist && view === 'editor' && html`<${GitAssist} key=${gitAssist.id} dir=${gitAssist.dir} start=${gitAssist.start} actions=${actions} onClose=${() => (setGitAssist(null), hostRef.current?.focus())} />`}
           ${filesAssist && !gitAssist && view === 'editor' && html`<${FilesAssist} key=${filesAssist.id} target=${filesAssist.target} start=${filesAssist.start} actions=${actions} onClose=${() => (setFilesAssist(null), hostRef.current?.focus())} />`}
-          ${!assist && !gitAssist && !filesAssist && modelReady && settings.assistBubble && activeKey && !activeCompare && !compare && !activeSealed && !docShown && !typingJob && html`<${AssistBubble} onOpen=${() => setAssist(true)} />`}
+          ${!assist && !gitAssist && !filesAssist && modelReady && settings.assistBubble && activeKey && !activeCompare && !compare && !activeSealed && !activeEncrypted && !docShown && !typingJob && html`<${AssistBubble} onOpen=${() => setAssist(true)} />`}
           ${shownPanes.flatMap((p, i) => [paneHandle(i), paneView(p, i)])}
           ${tabOver && panesOn && store.session.panes.length < MAX_EXTRA &&
           html`<div class="pane-drop-new ${paneDrop === 'new' ? 'on' : ''}" ...${paneDropProps('new')}><${Icon} name="columns" size=${16} /><span>New pane</span></div>`}

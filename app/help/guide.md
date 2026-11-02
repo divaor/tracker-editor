@@ -582,6 +582,7 @@ For files whose text should not be readable in the GitHub repo:
 - Encrypted files show a 🔒 on their tab and in the sidebar. History and the trash decrypt them on an unlocked device.
 - An unlocked device keeps their text so they work offline. **Lock this device** keeps only the ciphertext there until you unlock again (it syncs first).
 - The Claude connector lists encrypted files but cannot read or change them.
+- **The model never gets them**: not their text, not their names. On an encrypted file there is no ✦ bubble, `Ctrl+K` offers help with the editor only, and asking about your files, summaries, suggestions, naming and filing new notes all leave encrypted files out.
 - **Stop encrypting** stores the text in the clear again from the next sync.
 
 ---

@@ -19,8 +19,9 @@ export function llmClient(settings = getSettings()) {
 }
 
 // What the model reads: { id, name, project, text }. Tracker documents have
-// the id "r:<path>" and are left out until they are downloaded.
-export const fileSources = (files) => files.map((f) => ({ id: f.id, name: f.name, project: f.project, text: store.text(f.id) }));
+// the id "r:<path>" and are left out until they are downloaded. Encrypted files
+// never: not embedded, not asked about, not even named.
+export const fileSources = (files) => files.filter((f) => !f.encrypted).map((f) => ({ id: f.id, name: f.name, project: f.project, text: store.text(f.id) }));
 export const docSources = (docs) =>
   docs.map((d) => ({ id: `r:${d.path}`, name: d.name, project: d.project, text: store.docText(d.path) })).filter((d) => d.text !== null);
 /** The editor's files and the tracker's documents. */
