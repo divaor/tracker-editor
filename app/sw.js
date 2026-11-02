@@ -78,6 +78,7 @@ const ASSETS = [
   'js/indent.js',
   'js/ui/problems.js',
   'js/gitAssist.js',
+  'js/fences.js',
   'js/fileSteps.js',
   'js/filesWork.js',
   'js/gitStatus.js',

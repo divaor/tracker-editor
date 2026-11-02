@@ -1,6 +1,8 @@
 // Suggestions as you type, from the connected model (grey text, Tab accepts): what to ask
 // for, and what of the answer to keep. Pure: the tests use it; inlineSuggest.js asks.
 
+import { unwrapFence } from './fences.js';
+
 /** Messages asking a chat model for the text at the cursor (for servers without FIM). */
 export function completionMessages({ prefix, suffix, language = '', name = '' }) {
   return [
@@ -21,8 +23,8 @@ export function completionMessages({ prefix, suffix, language = '', name = '' })
 export function cleanCompletion(answer, { prefix = '', suffix = '', maxLines = 12 } = {}) {
   let text = String(answer ?? '').replace(/\r\n?/g, '\n');
   // Fences: ```lang … ```
-  const fence = /^\s*```[\w+-]*\n([\s\S]*?)\n?```\s*$/.exec(text);
-  if (fence) text = fence[1];
+  const inner = unwrapFence(text);
+  if (inner !== null) text = inner;
   text = text.replace(/<CURSOR>/g, '');
   // An echo of the line so far ("const total = " answered as "const total = sum()").
   const lineSoFar = prefix.slice(prefix.lastIndexOf('\n') + 1);

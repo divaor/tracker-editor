@@ -3,6 +3,7 @@
 // at the call sites, the matching change in the next similar block). Pure, so the tests use it:
 // the edits made as small diffs, the request, the answer's edits placed in the text, the parts
 // each shows, which one comes next and when one is stale. nextEditView.js shows them.
+import { codeFences } from './fences.js';
 import { applyEdits, wholeChanges } from './fileSteps.js';
 
 /** How long a pause after the last edit before asking (ms). */
@@ -139,8 +140,9 @@ const tidy = (s) => String(s).replaceAll(CURSOR, '').replace(/\r\n?/g, '\n');
 /** The list of edits in an answer: JSON (fenced or not, prose around it), { edits: [...] } or a bare list. */
 function editsIn(reply) {
   const s = String(reply ?? '');
-  const fenced = /```(?:json)?[ \t]*\n?([\s\S]*?)```/i.exec(s);
-  const body = fenced ? fenced[1] : s;
+  // Fences as CommonMark reads them: an edit to a Markdown file may hold ``` of its own.
+  const fenced = codeFences(s).find((b) => !b.lang || b.lang === 'json');
+  const body = fenced ? fenced.body : s;
   const objectAt = body.indexOf('{');
   const listAt = body.indexOf('[');
   const candidates = [body.trim()];

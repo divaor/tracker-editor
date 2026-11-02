@@ -5,6 +5,7 @@
 // red), each backed up first so Undo can bring things back. Steps run in order and stop at the
 // first that fails or is skipped; the results go back to the model, which explains or fixes.
 import { html, useEffect, useLayoutEffect, useRef, useState } from '../../vendor/preact-htm.js';
+import { wordsBefore } from '../fences.js';
 import { gitGuide, gitMessages, mergeRequestFor, outputOf, parsePlan, resultsMessage, toAction } from '../gitAssist.js';
 import { mergeRequestLink } from '../gitStatus.js';
 import { renderMarkdown } from '../markdown.js';
@@ -45,7 +46,7 @@ const RISK = {
 };
 
 /** While the answer streams: the words before the steps' block. */
-const wordsSoFar = (text) => text.replace(/```[ \t]*(git-steps|json)[\s\S]*$/, '').trim();
+const wordsSoFar = (text) => wordsBefore(text, ['git-steps', 'json']);
 
 function StepCard({ s, onDecide, onUndo, waiting }) {
   const r = RISK[s.risk] ?? RISK.ask;

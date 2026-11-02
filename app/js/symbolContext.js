@@ -4,6 +4,8 @@
 // says, where a definition is (relative to the project) and the block with its caps. app.js
 // asks the server (actions.symbolsFor: hover and definition, SYMBOLS_WAIT in all).
 
+import { codeFences, withoutBlocks } from './fences.js';
+
 /** Names looked up at most, and how long the server has for all of them (ms). */
 export const MAX_SYMBOLS = 12;
 export const SYMBOLS_WAIT = 2000;
@@ -134,9 +136,9 @@ export function hoverParts(hover) {
     .map((p) => (typeof p === 'string' ? p : p?.language ? `\`\`\`${p.language}\n${p.value ?? ''}\n\`\`\`` : String(p?.value ?? '')))
     .join('\n\n')
     .replace(/\r\n?/g, '\n');
-  const fence = /```[^\n]*\n([\s\S]*?)```/.exec(md);
-  let signature = fence ? fence[1] : '';
-  let rest = md.replace(/```[^\n]*\n[\s\S]*?```/g, '\n\n');
+  const blocks = codeFences(md);
+  let signature = blocks[0]?.body ?? '';
+  let rest = withoutBlocks(md, blocks);
   if (!signature) {
     // Plain text: its first line is the type.
     const lines = rest.split('\n');

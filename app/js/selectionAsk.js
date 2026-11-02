@@ -3,6 +3,7 @@
 // new text (fix, convert, translate…), plus free questions and follow-ups.
 // Pure, so the Node tests can import it.
 import { EXPLAIN_ERROR } from './errorHelp.js';
+import { codeFences, unwrapFence } from './fences.js';
 
 export const ACTION_GROUPS = [
   { id: 'understand', label: 'Understand' },
@@ -105,8 +106,9 @@ export function selectionMessages({ kind, prompt }, { text, name = '', language 
  */
 export function cleanReplacement(reply, original) {
   let out = String(reply ?? '').replace(/^\s*\n/, '').replace(/\s+$/, '');
-  const fenced = /^```[\w+-]*\n([\s\S]*?)\n```$/.exec(out);
-  if (fenced && !original.trimStart().startsWith('```')) out = fenced[1];
+  // A fence around the whole answer (of any length: a ```` one may hold the text's own ```).
+  const inner = unwrapFence(out);
+  if (inner !== null && !/^\s*(```|~~~)/.test(original)) out = inner;
   // "Here is the text:" before the text itself.
   out = out.replace(/^(?:here(?:'s| is) (?:the|a|your) [^\n:]{0,40}:|aquí (?:está|tienes) [^\n:]{0,40}:)\s*\n/i, '');
   const trailing = /\n+$/.exec(original)?.[0] ?? '';
@@ -115,8 +117,9 @@ export function cleanReplacement(reply, original) {
 
 /** The last fenced code block in an answer (e.g. the corrected query), or ''. */
 export function lastCodeBlock(answer) {
-  const blocks = [...String(answer ?? '').matchAll(/```[\w+#-]*\n([\s\S]*?)\n```/g)];
-  return blocks.length ? blocks.at(-1)[1] : '';
+  const blocks = codeFences(answer);
+  const closed = blocks.filter((b) => b.closed);
+  return (closed.at(-1) ?? blocks.at(-1))?.body ?? '';
 }
 
 const EXTENSIONS = {

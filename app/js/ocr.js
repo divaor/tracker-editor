@@ -1,6 +1,8 @@
 // Text from images (OCR): the languages offered and tidying what tesseract
 // reads. Pure, so the Node tests can import it; ocrEngine.js does the reading.
 
+import { unwrapFence } from './fences.js';
+
 export const OCR_LANGUAGES = [
   { id: 'eng+spa', label: 'English and Spanish' },
   { id: 'eng', label: 'English' },
@@ -64,8 +66,8 @@ export function visionMessages(dataUrls, { langs = 'eng+spa' } = {}) {
 export function cleanVisionReply(reply) {
   let text = String(reply ?? '').trim();
   text = text.replace(/^(here (is|are) the (transcribed |extracted )?text[^\n:]*:|the text (in|from) the image (is|reads)[^\n:]*:|aquí está el texto[^\n:]*:)\s*/i, '');
-  const fenced = /^```[\w-]*\n([\s\S]*?)\n```$/.exec(text);
-  if (fenced) text = fenced[1];
+  const inner = unwrapFence(text);
+  if (inner !== null) text = inner;
   return text.trim();
 }
 

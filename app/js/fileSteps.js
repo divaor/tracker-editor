@@ -6,6 +6,8 @@
 // Apply; a terminal step only types a command for the person to run. Paths are relative to the
 // base folder and checked here; the main process checks every write again (picked folders only).
 
+import { codeFences, parseJsonLoose, withoutBlocks, wordsBefore } from './fences.js';
+
 /** At most this many rounds (the model answers, looks, answers again) for one question. */
 export const MAX_ROUNDS = 8;
 /** At most this many changes in one block, and this large a file. */
@@ -176,23 +178,24 @@ export function describeStep(raw) {
  */
 export function parsePlan(reply) {
   const text = String(reply ?? '');
-  const fence = /```[ \t]*(file-steps|json)?[^\n]*\n([\s\S]*?)```/g;
   const steps = [];
   const problems = [];
-  let words = text;
+  const used = [];
   let changes = 0;
-  for (const m of text.matchAll(fence)) {
-    const lang = m[1] ?? '';
+  // Fences as CommonMark reads them: a ``` inside a file's text (a README's code) never ends the block.
+  for (const block of codeFences(text)) {
+    const lang = block.lang;
+    if (lang && lang !== 'file-steps' && lang !== 'json') continue;
     let parsed;
     try {
-      parsed = JSON.parse(m[2]);
+      parsed = parseJsonLoose(block.body);
     } catch {
       if (lang === 'file-steps') problems.push('The steps were not valid JSON.');
       continue;
     }
     const items = Array.isArray(parsed) ? parsed : [parsed];
     if (lang !== 'file-steps' && !items.every((x) => x && typeof x === 'object' && typeof x.op === 'string')) continue;
-    words = words.replace(m[0], '');
+    used.push(block);
     for (const item of items) {
       const d = describeStep(item);
       if (d.problem) {
@@ -206,11 +209,11 @@ export function parsePlan(reply) {
       steps.push(d);
     }
   }
-  return { text: words.replace(/\n{3,}/g, '\n\n').trim(), steps, problems };
+  return { text: withoutBlocks(text, used), steps, problems };
 }
 
 /** While the answer streams: the words before the steps' block. */
-export const wordsSoFar = (text) => String(text ?? '').replace(/```[ \t]*(file-steps|json)[\s\S]*$/, '').trim();
+export const wordsSoFar = (text) => wordsBefore(text, ['file-steps', 'json']);
 
 const lf = (s) => String(s ?? '').replace(/\r\n?/g, '\n');
 const count = (text, part) => {

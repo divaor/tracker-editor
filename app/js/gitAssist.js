@@ -6,6 +6,7 @@
 // those that rewrite history or throw work away), and backs up before each of them (undo).
 // Steps never become a command line: each is an action of git.cjs's `act`, which checks its
 // fields again.
+import { codeFences, parseJsonLoose, withoutBlocks } from './fences.js';
 import { mergeRequestUrl } from './gitStatus.js';
 
 // What the model may name (the main process checks the same).
@@ -115,29 +116,30 @@ export function toAction(step) {
  */
 export function parsePlan(reply) {
   const text = String(reply ?? '');
-  const fence = /```[ \t]*(git-steps|json)?[^\n]*\n([\s\S]*?)```/g;
   const steps = [];
   const problems = [];
-  let words = text;
-  for (const m of text.matchAll(fence)) {
-    const lang = m[1] ?? '';
+  const used = [];
+  // Fences as CommonMark reads them: a ``` inside a step's text never ends the block.
+  for (const block of codeFences(text)) {
+    const lang = block.lang;
+    if (lang && lang !== 'git-steps' && lang !== 'json') continue;
     let parsed;
     try {
-      parsed = JSON.parse(m[2]);
+      parsed = parseJsonLoose(block.body);
     } catch {
       if (lang === 'git-steps') problems.push('The steps were not valid JSON.');
       continue;
     }
     const items = Array.isArray(parsed) ? parsed : [parsed];
     if (lang !== 'git-steps' && !items.every((x) => x && typeof x === 'object' && typeof x.op === 'string')) continue;
-    words = words.replace(m[0], '');
+    used.push(block);
     for (const item of items.slice(0, 20)) {
       const d = describeStep(item);
       if (d.problem) problems.push(d.problem);
       else steps.push(d);
     }
   }
-  return { text: words.replace(/\n{3,}/g, '\n\n').trim(), steps, problems };
+  return { text: withoutBlocks(text, used), steps, problems };
 }
 
 const rows = (items, fn) => (items.length ? items.map(fn).join('\n') : '(none)');
