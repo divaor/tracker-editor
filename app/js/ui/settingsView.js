@@ -27,6 +27,7 @@ import { KINDS } from '../where.js';
 import { COLOR_MODES } from './tabViews.js';
 import { looksLikeVisionModel } from '../ocr.js';
 import { isAndroidApp, isDesktopApp } from '../platform.js';
+import { minimapShown } from '../minimapLayout.js';
 
 const SYNC_FIELDS = ['owner', 'repo', 'branch', 'trackerPath', 'device'];
 const pick = (obj, keys) => Object.fromEntries(keys.map((k) => [k, obj[k] ?? '']));
@@ -209,6 +210,12 @@ function EditorCard({ settings }) {
       <${Check} checked=${settings.bracketColors !== false} label="Color bracket pairs by depth" onChange=${(v) => saveSettings({ bracketColors: v })} />
       <${Check} checked=${settings.stickyScroll !== false} label="Sticky scroll" hint="The lines that start the function or section you are in stay at the top"
         onChange=${(v) => saveSettings({ stickyScroll: v })} />
+      <${Check} checked=${settings.breadcrumbs === true || (settings.breadcrumbs !== false && !matchMedia('(max-width: 640px)').matches)} label="Breadcrumbs over the text"
+        hint="Where the file is and the code around the cursor (folder › file › class › function): click one for what is next to it, or Ctrl+Shift+."
+        onChange=${(v) => saveSettings({ breadcrumbs: v ? (matchMedia('(max-width: 640px)').matches ? true : null) : false })} />
+      <${Check} checked=${minimapShown(settings.minimap, { desktop: isDesktopApp() })} label="Minimap beside the scrollbar"
+        hint="The file at a glance, with problems and changed lines on its edge: click or drag to move; not in narrow windows"
+        onChange=${(v) => saveSettings({ minimap: v ? (isDesktopApp() ? null : true) : false })} />
       <${Check} checked=${settings.fileIcons !== false} label="File type icons" hint="In My files and Folders, an icon in the color of each kind of file (JSON, Python, pictures…)"
         onChange=${(v) => saveSettings({ fileIcons: v })} />
       <${Check} checked=${settings.wordWrap} label="Word wrap" hint="Alt+Z" onChange=${(v) => saveSettings({ wordWrap: v })} />

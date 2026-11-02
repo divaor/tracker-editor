@@ -17,10 +17,14 @@ function tidyItems(items) {
  * (under a button at the window's edge), `above: true` to end at y (over the status bar). Fixed, so bars that scroll sideways
  * do not clip it. Items: { label, icon?, run, disabled?, danger?, checked?, hint?, key? },
  * { separator: true } or { heading: true, label, color? }. Closes on a choice, a click elsewhere or Escape.
+ * `filter`: a field over a long list narrows it by label (Enter takes the first match).
  */
-export function Menu({ items, at, onClose, label = 'Menu', owner, className = '' }) {
+export function Menu({ items, at, onClose, label = 'Menu', owner, className = '', filter = false }) {
   const ref = useRef(null);
   const [pos, setPos] = useState({ left: at.x, top: at.y });
+  const [query, setQuery] = useState('');
+  const q = query.trim().toLowerCase();
+  const shown = filter && q ? items.filter((item) => item && !item.separator && !item.heading && String(item.label).toLowerCase().includes(q)) : items;
   useLayoutEffect(() => {
     const el = ref.current;
     // Inside the window.
@@ -28,7 +32,7 @@ export function Menu({ items, at, onClose, label = 'Menu', owner, className = ''
     const x = at.right ? at.x - r.width : at.x;
     const y = at.above ? at.y - r.height : at.y;
     setPos({ left: Math.max(8, Math.min(x, innerWidth - r.width - 8)), top: Math.max(8, Math.min(y, innerHeight - r.height - 8)) });
-    el?.querySelector('button:not(:disabled)')?.focus();
+    (el?.querySelector('.menu-filter') ?? el?.querySelector('button:not(:disabled)'))?.focus();
     // A press on the button that opened it is left to the button, which toggles.
     const onDown = (e) => !el.contains(e.target) && !owner?.current?.contains(e.target) && onClose();
     const onKey = (e) => {
@@ -50,17 +54,28 @@ export function Menu({ items, at, onClose, label = 'Menu', owner, className = ''
       document.removeEventListener('keydown', onKey, true);
     };
   }, []);
+  const take = (item) => {
+    onClose();
+    item.run();
+  };
   return html`<div class="menu ${className}" role="menu" aria-label=${label} ref=${ref} style=${{ left: `${pos.left}px`, top: `${pos.top}px` }}>
-    ${tidyItems(items).map((item, i) =>
+    ${filter &&
+    html`<input class="menu-filter" type="search" placeholder="Filter" aria-label=${`Filter ${label}`} value=${query} spellcheck="false" autocomplete="off"
+      onInput=${(e) => setQuery(e.currentTarget.value)}
+      onKeyDown=${(e) => {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        const first = shown.find((item) => item && !item.separator && !item.heading && !item.disabled);
+        if (first) take(first);
+      }} />`}
+    ${filter && q && !shown.length && html`<div class="menu-heading" role="presentation">Nothing matches</div>`}
+    ${tidyItems(shown).map((item, i) =>
       item.separator
         ? html`<div class="menu-separator" key=${`s${i}`} role="separator" />`
         : item.heading
           ? html`<div class="menu-heading" key=${item.key ?? `h${i}`} role="presentation">${item.color && html`<span class="view-dot" style=${{ '--gc': item.color }} />`}${item.label}</div>`
           : html`<button type="button" key=${item.key ?? item.label} role="menuitem" class="menu-item ${item.danger ? 'danger' : ''}" disabled=${item.disabled} title=${item.hint}
-            onClick=${() => {
-              onClose();
-              item.run();
-            }}>
+            onClick=${() => take(item)}>
             ${item.icon ? html`<${Icon} name=${item.icon} size=${15} />` : html`<span class="menu-icon" />`}<span>${item.label}</span>${item.hint && html`<span class="menu-hint">${item.hint}</span>`}${item.checked && html`<${Icon} name="check" size=${14} />`}
           </button>`,
     )}

@@ -74,6 +74,10 @@ export const DEFAULT_SETTINGS = {
   indentGuides: true,
   bracketColors: true,
   stickyScroll: true,
+  // The breadcrumbs bar over the text and the minimap beside it: null = as usual (breadcrumbs on but
+  // not on phones; the minimap in the desktop app only), else on or off.
+  breadcrumbs: null,
+  minimap: null,
   fileIcons: true,
   // Format document: 'server' (a language server's formatter first) or 'builtin' (Prettier and the editor's own first).
   formatter: 'server',

@@ -8948,6 +8948,144 @@ button.help-command:focus-visible {
   tab-size: 4;
 }
 
+/* ---- Breadcrumbs (breadcrumbs.js) and the minimap (minimap.js), in each editor view ---- */
+/* The bar above the text (after the find bar's place): the file's place, then the symbols
+   around the cursor; too long, it scrolls sideways to its end. Left as it is, phones hide it. */
+.cm-crumbs {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 1px;
+  min-height: 25px;
+  padding: 1px 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-2);
+  font-family: var(--font);
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  scrollbar-width: none;
+}
+
+.cm-crumbs::-webkit-scrollbar {
+  display: none;
+}
+
+.cm-crumbs[hidden] {
+  display: none;
+}
+
+.cm-crumb {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  max-width: 30ch;
+  height: 21px;
+  padding: 0 5px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.cm-crumb:hover,
+.cm-crumb:focus-visible {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.cm-crumb:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.cm-crumb-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cm-crumb-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--text-3);
+}
+
+.cm-crumb.kind-file,
+.cm-crumb.kind-symbol {
+  color: var(--text);
+}
+
+.cm-crumb.kind-symbol .cm-crumb-icon,
+.cm-crumb.kind-outline .cm-crumb-icon {
+  color: var(--accent);
+}
+
+.cm-crumb-sep {
+  flex: none;
+  padding: 0 1px;
+  color: var(--text-3);
+}
+
+@media (max-width: 640px) {
+  .cm-crumbs.auto {
+    display: none;
+  }
+}
+
+/* The minimap: a canvas beside the scrollbar (over the sticky lines), and room for it after the
+   text (MINIMAP.width + 12px). */
+.cm-minimap {
+  position: absolute;
+  z-index: 4;
+  border-left: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: var(--surface);
+}
+
+.cm-minimap[hidden] {
+  display: none;
+}
+
+.cm-minimap canvas {
+  display: block;
+  touch-action: none;
+}
+
+.cm-editor.cm-has-minimap .cm-content {
+  padding-right: 104px;
+}
+
+/* A breadcrumb's menu: not over the whole window; its filter stays on top. */
+.crumb-menu {
+  max-height: min(62vh, 540px);
+}
+
+.menu-filter {
+  position: sticky;
+  top: -5px;
+  z-index: 1;
+  flex: none;
+  height: 30px;
+  margin: -5px -5px 4px;
+  padding: 0 10px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 10px 10px 0 0;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.menu-filter:focus {
+  outline: none;
+}
+
 /* ---- Git (gitGutter.js, the folders view, the status bar) ---- */
 :root {
   --git-added: #2e9e5b;

@@ -33,6 +33,9 @@ import { TerminalPanel } from './ui/terminal.js';
 import { createLanguageServers } from './lsp.js';
 import { applyTextEdits, changedLanguages, changedLines, codeActionRows, editPlan, formatFirst, languageOptions, lineOf, textChanges, uriPath } from './lspTools.js';
 import { Menu } from './ui/menu.js';
+import { listingRows, placeCrumbs } from './crumbs.js';
+import { minimapShown } from './minimapLayout.js';
+import { parentPath } from './folderPick.js';
 import { LanguageServersPanel, ReferencesPanel, RenameSymbolDialog, SetupServerDialog, WorkspaceEditDialog } from './ui/languageServers.js';
 import { BranchDialog, GitInitDialog, GitPanel } from './ui/gitPanel.js';
 import { GitAssist } from './ui/gitAssist.js';
@@ -155,6 +158,11 @@ function download(name, text) {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+// Phones: the breadcrumbs left as they are do not show there.
+const PHONE_QUERY = () => typeof matchMedia === 'function' && matchMedia('(max-width: 640px)').matches;
+/** Whether the breadcrumbs show now: turned on, or left as they are and not on a phone. */
+const crumbsShown = (s) => s.breadcrumbs === true || (s.breadcrumbs !== false && !PHONE_QUERY());
 
 /** Everything the components need, in one place. */
 // The folders open in Folders, for quick open: [{ dir, label, kind }] (desktop only).
@@ -1613,6 +1621,7 @@ export function App() {
   const [refs, setRefs] = useState(null); // { word, list, server }: the References panel
   const [codeMenu, setCodeMenu] = useState(null); // { key, rows, at }: a language server's quick fixes
   const [gitMenu, setGitMenu] = useState(null); // { key, line, x, y }: a changed line's mark clicked
+  const [crumbMenu, setCrumbMenu] = useState(null); // a breadcrumb's menu: { id, at, label, items, owner }
   const [gitDir, setGitDir] = useState(null); // the folder whose repository the Git panel shows
   const [gitTick, setGitTick] = useState(0); // Git's state may have changed: the panel reads it again
   const [gitAssist, setGitAssist] = useState(null); // Git with the model: { dir, start, id }
@@ -1621,7 +1630,15 @@ export function App() {
   const [debugTick, setDebugTick] = useState(0); // it changed: the panel and the status bar draw again
   const [bpMenu, setBpMenu] = useState(null); // { key, line, x, y }: the breakpoint gutter right-clicked
   const actions = useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setCompare, setUsagesOf, setSearchSeed });
-  const editorOptions = (s) => ({ ...s, dark: resolvedTheme(s.theme) === 'dark', inlineSuggest: Boolean(s.inlineSuggest && s.llm.enabled && s.llm.provider !== 'async') });
+  const editorOptions = (s) => ({
+    ...s,
+    dark: resolvedTheme(s.theme) === 'dark',
+    inlineSuggest: Boolean(s.inlineSuggest && s.llm.enabled && s.llm.provider !== 'async'),
+    // Breadcrumbs: on unless turned off (left as they are, the stylesheet hides them on phones).
+    breadcrumbs: s.breadcrumbs !== false,
+    breadcrumbsAuto: s.breadcrumbs !== true && s.breadcrumbs !== false,
+    minimap: minimapShown(s.minimap, { desktop: isDesktopApp() }),
+  });
 
   /**
    * Suggestions as you type (inlineSuggest.js asks): the model's /completions with the text
@@ -1824,6 +1841,9 @@ export function App() {
       onPastePath: (path) => actions.offerPastedPath(path),
       onLineMenu: (at) => setLineMenu(at),
       onGitMark: (at) => setGitMenu(at),
+      // The breadcrumbs over the text: where the file is, and a crumb's menu.
+      crumbPlace: (key) => actions.crumbPlace(key),
+      onCrumbMenu: (m) => actions.crumbMenu(m),
       onTestMark: ({ key, test, debug }) => (debug ? actions.debugTest({ key, test }) : actions.runTests({ scope: 'test', key, test })),
       // The breakpoint gutter: a click toggles, a right-click opens the menu; edits move them.
       onBreakpointClick: ({ key, line, x, y, menu }) => (menu ? setBpMenu({ key, line, x, y }) : actions.toggleBreakpoint(key, line)),
@@ -1884,6 +1904,15 @@ export function App() {
       languages: () => languageOptions(getSettings().lspLanguages),
     });
   }, []);
+  // The breadcrumbs read their place again when the folders in Folders, the servers, or the open
+  // synced file's name or project change.
+  const crumbSig = (() => {
+    const k = parseKey(store.session.active);
+    const f = k?.kind === 'file' ? store.get(k.id) : null;
+    return `${(settings.folderSections ?? []).join('\n')}|${settings.folder ?? ''}|${f ? `${f.name}|${f.project ?? ''}` : ''}`;
+  })();
+  useEffect(() => hostRef.current?.refreshCrumbs?.(), [crumbSig]);
+  useEffect(() => onServers(() => hostRef.current?.refreshCrumbs?.()), []);
   // Turned off in Settings: the tabs lose their servers (turned on again: when shown next).
   useEffect(() => {
     if (settings.languageServers === false) lspRef.current?.detachAll();
@@ -2546,6 +2575,85 @@ export function App() {
     if (!tab) return;
     setCompare({ key, name: tab.name, language: '', left: { label: `Last commit (${head.branch || 'Git'})`, text: head.text }, right: { label: `${tab.name} now`, text: tab.text }, actions: [] });
   };
+  // ---- Breadcrumbs (breadcrumbs.js over each editor view; crumbs.js) ----
+  /** A tab's place for its breadcrumbs: from the folder shown in Folders that holds it; My files › project; Tracker › item. */
+  actions.crumbPlace = (key) => {
+    const k = parseKey(key);
+    if (k?.kind === 'file') {
+      const f = store.get(k.id);
+      return placeCrumbs({ key, file: f ? { name: f.name, project: f.project } : null });
+    }
+    if (k?.kind === 'repo') {
+      const d = store.doc(k.path);
+      return placeCrumbs({ key, doc: d ? { name: d.name, item: d.item } : { name: store.repoTab(k.path)?.name } });
+    }
+    const s = getSettings();
+    const roots = window.desktop?.folders ? [...withCurrent(s.folderSections, s.folder), ...sectionFolders(s)] : [];
+    return placeCrumbs({ key, roots, serverName: (id) => server(id)?.name ?? '' });
+  };
+  /**
+   * A breadcrumb's menu: a symbol's (`items` made by the bar), else what is next to the crumb: a
+   * folder's folders (they open further in the same menu) and files, the other files in the
+   * file's folder, a project's synced files, an item's tracker documents.
+   */
+  actions.crumbMenu = async ({ key, crumb, at, owner, items, label }) => {
+    const show = (list, title = label) => setCrumbMenu({ id: Date.now(), at, owner, label: title || 'Breadcrumbs', items: list.length ? list : [{ key: 'none', label: 'Nothing here', disabled: true, run: () => {} }] });
+    if (items) return show(items);
+    const k = parseKey(key);
+    const byName = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+    if (k?.kind === 'file') {
+      const files = store.live();
+      const me = store.get(k.id);
+      if (crumb.kind === 'files') {
+        const projects = [...new Set(files.map((f) => f.project || ''))].sort((a, b) => (a ? (b ? a.localeCompare(b) : -1) : 1));
+        return show(
+          projects.map((p) => ({ key: `p:${p}`, label: p || 'No project', icon: 'folder', checked: p === (me?.project || ''), run: () => actions.crumbMenu({ key, crumb: { kind: 'project', label: p }, at, owner }) })),
+          'My files',
+        );
+      }
+      const project = crumb.kind === 'project' ? crumb.label : me?.project || '';
+      return show(files.filter((f) => (f.project || '') === project).sort(byName).map((f) => ({ key: f.id, label: f.name, icon: 'file', checked: f.id === k.id, run: () => actions.openFile(f.id) })), project || 'No project');
+    }
+    if (k?.kind === 'repo') {
+      const docs = store.docs();
+      const me = docs.find((d) => d.path === k.path);
+      if (crumb.kind === 'tracker') {
+        const seen = new Map();
+        for (const d of docs) if (!seen.has(d.item.id)) seen.set(d.item.id, d.item);
+        return show(
+          [...seen.values()].sort((a, b) => (a.title || '').localeCompare(b.title || '')).map((it) => ({ key: it.id, label: it.title || 'Untitled', icon: 'doc', checked: it.id === me?.item.id, run: () => actions.crumbMenu({ key, crumb: { kind: 'item', label: it.title, itemId: it.id }, at, owner }) })),
+          'Tracker',
+        );
+      }
+      const itemId = crumb.kind === 'item' ? crumb.itemId : me?.item.id;
+      return show(docs.filter((d) => d.item.id === itemId).sort(byName).map((d) => ({ key: d.path, label: d.name, icon: 'doc', checked: d.path === k.path, run: () => actions.openFile(`r:${d.path}`) })), crumb.kind === 'item' ? crumb.label : me?.item.title);
+    }
+    if (k?.kind !== 'disk' || !window.desktop?.folders) return;
+    const dir = crumb.kind === 'file' ? parentPath(k.path) : crumb.path;
+    if (!dir) return;
+    const from = crumb.from ?? dir;
+    let listing;
+    try {
+      listing = await window.desktop.folders.list(dir);
+    } catch (err) {
+      return show([{ key: 'error', label: ipcMessage(err), icon: 'alert', disabled: true, run: () => {} }, !isRemotePath(k.path) && { key: 'show', label: 'Show its folder in Folders', icon: 'folderOpen', run: () => actions.showFolderOf(k.path) }].filter(Boolean), baseName(dir));
+    }
+    const { rows, more } = listingRows(listing.entries ?? [], { hidden: Boolean(getSettings().showHidden), filesOnly: crumb.kind === 'file' });
+    const up = dir !== from ? parentPath(dir) : '';
+    show(
+      [
+        up && { key: '..', label: '..', icon: 'arrowUp', hint: baseName(up), run: () => actions.crumbMenu({ key, crumb: { kind: 'folder', path: up, label: baseName(up), from }, at, owner }) },
+        ...rows.map((r) =>
+          r.dir
+            ? { key: r.path, label: r.name, icon: 'folder', run: () => actions.crumbMenu({ key, crumb: { kind: 'folder', path: r.path, label: r.name, from }, at, owner }) }
+            : { key: r.path, label: r.name, icon: 'file', checked: r.path === k.path, run: () => (opensHere(r.name) ? actions.openDiskPath(r.path) : actions.openOutside(r.path)) },
+        ),
+        more > 0 && { key: 'more', label: `…and ${more} more: show the folder in Folders`, icon: 'folderOpen', run: () => actions.showInFolders(dir) },
+      ].filter(Boolean),
+      crumb.kind === 'file' ? `Next to ${baseName(k.path)}` : baseName(dir),
+    );
+  };
+
   // ---- Git that writes: the Git panel, the branch picker, a change staged from the gutter ----
   // Commands that change files on disk wait while a tab in the repository has unsaved edits.
   const WORKING_TREE_OPS = new Set(['pull', 'switch', 'stash', 'stash-apply', 'stash-pop', 'abort', ...CHANGES_FILES]);
@@ -4087,6 +4195,9 @@ export function App() {
       } else if (mod && e.shiftKey && k === 'o') {
         e.preventDefault();
         actions.toggleOutline();
+      } else if (mod && e.shiftKey && !e.altKey && e.code === 'Period') {
+        e.preventDefault();
+        actions.command('breadcrumbs-focus');
       } else if (mod && !e.shiftKey && !e.altKey && k === 't') {
         e.preventDefault();
         actions.gotoSymbolAll();
@@ -4271,6 +4382,10 @@ export function App() {
       'indent-guides': () => saveSettings({ indentGuides: getSettings().indentGuides === false }),
       'bracket-colors': () => saveSettings({ bracketColors: getSettings().bracketColors === false }),
       'sticky-scroll': () => saveSettings({ stickyScroll: getSettings().stickyScroll === false }),
+      // Turned on: back to as usual where that shows them (then phones still leave them out).
+      'breadcrumbs-toggle': () => saveSettings({ breadcrumbs: crumbsShown(getSettings()) ? false : PHONE_QUERY() ? true : null }),
+      'breadcrumbs-focus': () => hostRef.current?.focusCrumbs() || toast(getSettings().breadcrumbs === false ? 'The breadcrumbs are off: turn them on in View → Breadcrumbs or Settings → Editor.' : 'Open a file first: the breadcrumbs show where you are in it.'),
+      'minimap-toggle': () => saveSettings({ minimap: minimapShown(getSettings().minimap, { desktop: isDesktopApp() }) ? false : isDesktopApp() ? null : true }),
       assistant: () => setPanel((p) => (p === 'assistant' ? null : 'assistant')),
       sync: () => {
         hostRef.current?.flushAll();
@@ -4569,6 +4684,14 @@ export function App() {
         { key: 'compare', label: 'Compare with the last commit', icon: 'compare', run: () => actions.compareWithHead() },
         { key: 'panel', label: 'The Git panel', icon: 'branch', hint: 'Ctrl+Shift+G', run: () => actions.toggleGit(parentDir(gitMenu.key.slice(2))) },
       ]} />`}
+    ${crumbMenu &&
+    html`<${Menu} key=${crumbMenu.id} className="crumb-menu" label=${crumbMenu.label} at=${crumbMenu.at} filter=${crumbMenu.items.length > 12} items=${crumbMenu.items} owner=${{ current: crumbMenu.owner }}
+      onClose=${() => {
+        const owner = crumbMenu.owner;
+        setCrumbMenu(null);
+        // Closed without a choice: back to the crumb it came from (the keyboard goes on from there).
+        requestAnimationFrame(() => (document.activeElement === document.body || !document.activeElement) && owner?.isConnected && owner.focus());
+      }} />`}
     ${bpMenu && html`<${Menu} label="Breakpoint" at=${{ x: bpMenu.x, y: bpMenu.y }} onClose=${() => setBpMenu(null)} items=${breakpointMenu(bpMenu)} />`}
     ${codeMenu &&
     html`<${Menu} className="code-actions" label="Quick fixes and refactorings" at=${codeMenu.at} onClose=${() => (setCodeMenu(null), hostRef.current?.focus())}

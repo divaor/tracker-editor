@@ -107,6 +107,8 @@ import { hasTestGutter, setTestInfo, testGutter, testMarkClick, testProblems } f
 import { breakpointClick, breakpointsIn, breakpointsMoved, debugGutter, hasDebugGutter, pausedLineOf, setBreakpointMarks, setPausedLine } from './debugGutter.js';
 import { emmetOnTab, linkedTags } from './htmlTools.js';
 import { inlineSuggestions } from './inlineSuggest.js';
+import { breadcrumbsBar, refreshCrumbs } from './breadcrumbs.js';
+import { minimap } from './minimap.js';
 import { findFileRefs, pastedPath } from './fileRefs.js';
 import { addCursorAbove, addCursorBelow, columnBox, columnKeymap } from './columnSelect.js';
 import { clipRanges, codeOfKey, lineTapSelection, selectLineRanges } from './editKeys.js';
@@ -325,6 +327,8 @@ function scopeEntries(state, pos) {
 
 // The file's name, for checks that depend on it (JSON with comments).
 const fileName = Facet.define({ combine: (values) => values[0] ?? '' });
+// The tab's key, in its state: plugins of a view (the breadcrumbs) know which file they show, in any pane.
+const tabKey = Facet.define({ combine: (values) => values[0] ?? '' });
 
 // The parser's syntax errors (problems.js treeErrors), and how far it read.
 function parserErrors(state) {
@@ -1002,7 +1006,7 @@ function fileRefAt(state, pos) {
  * `setPanes(slots)` shows other tabs in panes beside it (up to three more, paneLayout.js); a
  * tab's state, with its undo history, moves between the panes.
  */
-export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpenLink, onOpenRef, onSuggest, onImage, onPasteFiles, onPastePath, onProblems, onProblemAction, onDrop, onLineMenu, onGitMark, onTestMark, onBreakpointClick, onBreakpointsMoved, linkTargets, settings }) {
+export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpenLink, onOpenRef, onSuggest, onImage, onPasteFiles, onPastePath, onProblems, onProblemAction, onDrop, onLineMenu, onGitMark, onTestMark, onBreakpointClick, onBreakpointsMoved, crumbPlace, onCrumbMenu, linkTargets, settings }) {
   const states = new Map(); // key → EditorState
   const scroll = new Map(); // key → scroll position
   const pending = new Map(); // key → timer for onChange
@@ -1019,6 +1023,8 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
   const testBar = new Compartment(); // a test file's tests: ▶ to run each, then how it went (testGutter.js)
   const debugBar = new Compartment(); // breakpoints and the paused line, for files that can be debugged (debugGutter.js)
   const server = new Compartment(); // a language server's completion, hover, problems (lsp.js)
+  const crumbs = new Compartment(); // the breadcrumbs bar over the text (breadcrumbs.js)
+  const mini = new Compartment(); // the minimap along the right (minimap.js)
   const indents = new Map(); // key → { tabs, size, source: 'detected' | 'editorconfig' | 'chosen' }
   let options = settings;
   let active = null;
@@ -1067,6 +1073,18 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
     const p = focusedView && extra.find((x) => x.view === focusedView);
     return p ? { key: p.key, view: p.view } : { key: active, view };
   };
+  // Every view showing a tab now.
+  const liveViews = () => [active ? view : null, ...extra.map((p) => p.view)].filter(Boolean);
+  // The breadcrumbs bar, the same plugin for every view (its place from the app: `crumbPlace(key)`).
+  const crumbsPlugin = breadcrumbsBar({
+    placeOf: (v) => crumbPlace?.(v.state.facet(tabKey)) ?? [],
+    scopeOf: (state, pos) => scopeEntries(state, pos),
+    outlineOf: (state) => outlineOf(state),
+    keyOf: (v) => v.state.facet(tabKey),
+    onMenu: (m) => onCrumbMenu?.(m),
+    auto: () => options.breadcrumbsAuto !== false,
+  });
+  const minimaps = { light: minimap({ dark: false }), dark: minimap({ dark: true }) };
 
   // A key in a view as the keyboard would press it (the edit bar's keys, Ctrl+letter): the
   // editor's keymaps take it, and the window's shortcuts see it bubble up.
@@ -1138,6 +1156,8 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       gutter: [o.lineNumbers ? lineNumbers({ domEventHandlers: lineNumberHandlers }) : [], foldGutter()],
       checks: o.problems !== false && !big ? [problemsLinter(key, onProblems, onProblemAction), lintGutter()] : [],
       aids: big ? [] : [o.indentGuides !== false ? indentGuides : [], o.bracketColors !== false ? bracketColors : [], o.stickyScroll !== false ? stickyScroll : []],
+      crumbs: o.breadcrumbs !== false ? crumbsPlugin : [],
+      minimap: o.minimap ? minimaps[o.dark ? 'dark' : 'light'] : [],
     };
   };
   // A new tab's indentation: the one picked for it, else what its text uses (`fresh`: not the pick).
@@ -1258,6 +1278,9 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       tabs.of(config.tabs),
       checks.of(config.checks),
       aids.of(config.aids),
+      tabKey.of(key),
+      crumbs.of(config.crumbs),
+      mini.of(config.minimap),
       gitBar.of([]),
       // A click on a changed line's mark: the app offers to stage that change.
       gitMarkClick.of((v, line, at) => onGitMark?.({ key: keyOfView(v), line, ...at })),
@@ -1661,6 +1684,17 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
 
     setLanguage: loadLanguage,
 
+    /** The breadcrumbs read their file's place again (the folders in Folders, a file's project or name changed). */
+    refreshCrumbs() {
+      for (const v of liveViews()) v.dispatch({ effects: refreshCrumbs.of(null) });
+    },
+
+    /** Focuses the breadcrumbs of the pane typed in last (false when it has none). */
+    focusCrumbs() {
+      const v = current().view;
+      return Boolean(v && v.plugin(crumbsPlugin)?.focusLast());
+    },
+
     applySettings(next) {
       const before = options;
       options = next;
@@ -1679,6 +1713,8 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
         const effects = [theme.reconfigure(config.theme), wrap.reconfigure(config.wrap), whitespace.reconfigure(config.whitespace), tabs.reconfigure(config.tabs), gutter.reconfigure(config.gutter)];
         if (!same('problems')) effects.push(checks.reconfigure(config.checks));
         if (!same('indentGuides') || !same('bracketColors') || !same('stickyScroll')) effects.push(aids.reconfigure(config.aids));
+        if (!same('breadcrumbs') || !same('breadcrumbsAuto')) effects.push(crumbs.reconfigure(config.crumbs));
+        if (!same('minimap') || !same('dark')) effects.push(mini.reconfigure(config.minimap));
         return effects;
       };
       for (const [key, state] of states) if (!viewOf(key)) states.set(key, state.update({ effects: effectsFor(key) }).state);
