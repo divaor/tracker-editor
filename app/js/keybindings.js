@@ -227,8 +227,10 @@ export const PRESETS = {
       // Markdown: Open Preview.
       preview: ['Mod+Shift+V'],
       'clipboard-history': [],
-      // Source control.
+      // Source control; Go to Next / Previous Change (Alt+F5, free here once F5 debugs) and Show Next / Previous Change.
       'git-panel': { keys: ['Mod+Shift+G'], mac: ['Ctrl+Shift+G'] },
+      'git-next-change': ['Alt+F5', 'Alt+F3'],
+      'git-prev-change': ['Shift+Alt+F5', 'Shift+Alt+F3'],
       // F5 debugs, Ctrl+F5 runs without debugging; while debugging F6 pauses, Ctrl+Shift+F5 restarts.
       'debug-file': ['F5'],
       'run-file': { keys: ['Mod+F5'], mac: ['Ctrl+F5'] },

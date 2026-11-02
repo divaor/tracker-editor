@@ -102,7 +102,8 @@ import { isOwnDrop } from './dragOut.js';
 import { createSearchPanel, openReplacePanel } from './searchPanel.js';
 import { SYNTAX_LANGUAGES, problemsFor, treeErrors } from './problems.js';
 import { convertIndent, detectIndent } from './indent.js';
-import { gitGutter, gitInfo, gitMarkClick, setGitBase } from './gitGutter.js';
+import { changeAt, gitChangeAction, gitGutter, gitInfo, gitMarkClick, gotoChange, peekChange, peekLineOf, revertChange, setGitBase, showChange } from './gitGutter.js';
+import { blameAt, blameColumn, blameOf, blameState, inlineBlame, refreshBlame, setBlame } from './gitBlame.js';
 import { hasTestGutter, setTestInfo, testGutter, testMarkClick, testProblems } from './testGutter.js';
 import { breakpointClick, breakpointsIn, breakpointsMoved, debugGutter, hasDebugGutter, pausedLineOf, setBreakpointMarks, setPausedLine } from './debugGutter.js';
 import { emmetOnTab, linkedTags } from './htmlTools.js';
@@ -1073,7 +1074,7 @@ function nameAtPoint(v, x, y) {
  * `setPanes(slots)` shows other tabs in panes beside it (up to three more, paneLayout.js); a
  * tab's state, with its undo history, moves between the panes.
  */
-export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpenLink, onOpenRef, onDefinition, onTextMenu, onSuggest, onNextEdit, onImage, onPasteFiles, onPastePath, onProblems, onProblemAction, onDrop, onLineMenu, onGitMark, onTestMark, onBreakpointClick, onBreakpointsMoved, crumbPlace, onCrumbMenu, linkTargets, settings }) {
+export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpenLink, onOpenRef, onDefinition, onTextMenu, onSuggest, onNextEdit, onImage, onPasteFiles, onPastePath, onProblems, onProblemAction, onDrop, onLineMenu, onGitMark, onGitChange, onBlame, onTestMark, onBreakpointClick, onBreakpointsMoved, crumbPlace, onCrumbMenu, linkTargets, settings }) {
   const states = new Map(); // key → EditorState
   const scroll = new Map(); // key → scroll position
   const pending = new Map(); // key → timer for onChange
@@ -1087,6 +1088,7 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
   const checks = new Compartment(); // problems as you type
   const aids = new Compartment(); // indentation guides, bracket colors, sticky scroll
   const gitBar = new Compartment(); // lines changed since the last commit (files in a Git repository)
+  const blameBar = new Compartment(); // the blame column before the line numbers (gitBlame.js), per tab
   const testBar = new Compartment(); // a test file's tests: ▶ to run each, then how it went (testGutter.js)
   const debugBar = new Compartment(); // breakpoints and the paused line, for files that can be debugged (debugGutter.js)
   const server = new Compartment(); // a language server's completion, hover, problems (lsp.js)
@@ -1153,6 +1155,11 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
     auto: () => options.breadcrumbsAuto !== false,
   });
   const minimaps = { light: minimap({ dark: false }), dark: minimap({ dark: true }) };
+  // Blame (gitBlame.js): at the end of the cursor's line (setting `gitBlame`), and the column a tab
+  // may have; hovering or clicking either tells the app (its card).
+  const blameEvent = (v, info) => onBlame?.({ key: keyOfView(v), ...info });
+  const blamePlugin = inlineBlame({ enabled: () => options.gitBlame !== 'off', onEvent: blameEvent });
+  const blameCol = blameColumn({ onEvent: blameEvent });
 
   // A key in a view as the keyboard would press it (the edit bar's keys, Ctrl+letter): the
   // editor's keymaps take it, and the window's shortcuts see it bubble up.
@@ -1391,6 +1398,10 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       stickyCtrl,
       recorder,
       lineFilterField,
+      // Blame: the tab's (the app gives it), the column first of the gutters, the inline text at the cursor's line.
+      blameState,
+      blameBar.of([]),
+      blamePlugin,
       // Breakpoints, before the line numbers; a click or right-click goes to the app, as do the lines edits moved them to.
       debugBar.of([]),
       breakpointClick.of((v, at) => onBreakpointClick?.({ key: keyOfView(v), ...at })),
@@ -1426,8 +1437,10 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       crumbs.of(config.crumbs),
       mini.of(config.minimap),
       gitBar.of([]),
-      // A click on a changed line's mark: the app offers to stage that change.
+      // A click on a changed line's mark: the app offers to stage, revert or show that change.
       gitMarkClick.of((v, line, at) => onGitMark?.({ key: keyOfView(v), line, ...at })),
+      // The peek's Revert and Stage: the app does them (its toasts, the staged text).
+      gitChangeAction.of((v, { action, line }) => onGitChange?.({ key: keyOfView(v), action, line })),
       testBar.of([]),
       // A click on a test's mark: the app runs it.
       testMarkClick.of((v, test, at) => onTestMark?.({ key: keyOfView(v), test, ...at })),
@@ -1886,8 +1899,10 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       };
       const keymapNow = same('keyBindings') && same('keyPreset') ? null : editorKeymap(currentKeys(next));
       for (const [key, state] of states) if (!viewOf(key)) states.set(key, state.update({ effects: effectsFor(key) }).state);
-      if (active) view.dispatch({ effects: effectsFor(active) });
-      for (const p of extra) p.view.dispatch({ effects: effectsFor(p.key) });
+      // The inline blame turned on or off: each pane looks again.
+      const blame = same('gitBlame') ? [] : [refreshBlame.of(null)];
+      if (active) view.dispatch({ effects: [...effectsFor(active), ...blame] });
+      for (const p of extra) p.view.dispatch({ effects: [...effectsFor(p.key), ...blame] });
       if (active) report(view.state, active);
     },
 
@@ -1993,6 +2008,88 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
     gitChanges(key) {
       const state = viewOf(key)?.state ?? states.get(key);
       return state ? gitInfo(state) : null;
+    },
+    /**
+     * The change since the last commit whose mark is on `line` of a tab: { index, count, block,
+     * line (its mark's), kind, removed, added }, or null.
+     */
+    gitChangeAt(key, line) {
+      const state = viewOf(key)?.state ?? states.get(key);
+      return state ? changeAt(state, line) : null;
+    },
+    /**
+     * Puts the change at `line` of a shown tab back as it is at the last commit: one edit, so
+     * Ctrl+Z brings it back. { line, kind } or null (no change there, read-only, not shown).
+     */
+    revertChange(key, line) {
+      const v = viewOf(key);
+      if (!v) return null;
+      const done = revertChange(v, line);
+      if (done) {
+        v.focus();
+        focusedView = v === view ? null : v;
+      }
+      return done;
+    },
+    /** Opens the peek under the change at `line` of a shown tab (false when none is there). */
+    showChange(key, line) {
+      const v = viewOf(key);
+      if (!v || !showChange(v, line)) return false;
+      v.focus();
+      focusedView = v === view ? null : v;
+      return true;
+    },
+    /** The line a tab's peek shows (0: closed); `close` closes it. */
+    changePeek(key, { close = false } = {}) {
+      const v = viewOf(key);
+      const state = v?.state ?? states.get(key);
+      const line = state ? peekLineOf(state) : 0;
+      if (close && line && v) v.dispatch({ effects: peekChange.of(null) });
+      return line;
+    },
+    /**
+     * The next (1) or previous (-1) change since the last commit in the pane showing `key` (else
+     * the one typed in last): the cursor goes there, and the peek with it when open. { index,
+     * count } or null when nothing changed.
+     */
+    gotoChange(dir, key = null) {
+      const { view: v } = key ? { view: viewOf(key) } : current();
+      if (!v) return null;
+      const moved = gotoChange(v, dir);
+      if (moved) v.focus();
+      return moved;
+    },
+    // ---- Blame (gitBlame.js) ----
+    /** A tab's blame (git:blame's answer, or { status: 'big', size, max }), or null to take it away. */
+    setBlame(key, data) {
+      const v = viewOf(key);
+      const spec = { effects: setBlame.of(data ?? null) };
+      if (v) v.dispatch(spec);
+      else if (states.has(key)) states.set(key, states.get(key).update(spec).state);
+    },
+    /** A tab's blame now (moved by edits), or null: { status, commits, lines, me, mapped, source, … }. */
+    blameOf(key) {
+      const state = viewOf(key)?.state ?? states.get(key);
+      return state ? blameOf(state) : null;
+    },
+    /** What blame says of a tab's line: { status, line, hash, commit, me, age, root, rel } (or big), or null. */
+    blameAt(key, line) {
+      const state = viewOf(key)?.state ?? states.get(key);
+      return state ? blameAt(state, line) : null;
+    },
+    /** The blame column of a tab (before the line numbers): on or off. */
+    setBlameColumn(key, on) {
+      const state = viewOf(key)?.state ?? states.get(key);
+      if (!state || bigKeys.has(key) || this.hasBlameColumn(key) === Boolean(on)) return;
+      const spec = { effects: blameBar.reconfigure(on ? blameCol : []) };
+      const v = viewOf(key);
+      if (v) v.dispatch(spec);
+      else states.set(key, state.update(spec).state);
+    },
+    /** Does a tab show the blame column? */
+    hasBlameColumn(key) {
+      const state = viewOf(key)?.state ?? states.get(key);
+      return Boolean(state && blameBar.get(state) === blameCol);
     },
 
     /** A tab's indentation: { tabs, size, source } (source: 'detected', 'editorconfig', 'chosen' or 'default'). */

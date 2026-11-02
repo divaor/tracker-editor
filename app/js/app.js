@@ -43,6 +43,7 @@ import { minimapShown } from './minimapLayout.js';
 import { parentPath } from './folderPick.js';
 import { LanguageServersPanel, ReferencesPanel, RenameSymbolDialog, SetupServerDialog, WorkspaceEditDialog } from './ui/languageServers.js';
 import { BranchDialog, GitInitDialog, GitPanel } from './ui/gitPanel.js';
+import { BlameCard } from './ui/blame.js';
 import { GitAssist } from './ui/gitAssist.js';
 import { FilesAssist } from './ui/filesAssist.js';
 import { createFilesWork } from './filesWork.js';
@@ -1422,7 +1423,8 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
        * open is read (its format kept in `info` for saving back).
        */
       async readCompareSide(side) {
-        if (side.text != null) return { text: side.text, readOnly: false, savable: false };
+        // A text taken once (the clipboard, a browsed file), or history (a commit's file: read-only).
+        if (side.text != null) return { text: side.text, readOnly: Boolean(side.readOnly), savable: false };
         const k = parseKey(side.key);
         if (k?.kind === 'file') {
           const f = store.get(k.id);
@@ -1694,6 +1696,7 @@ export function App() {
   const [refs, setRefs] = useState(null); // { word, list, server }: the References panel
   const [codeMenu, setCodeMenu] = useState(null); // { key, rows, at }: a language server's quick fixes
   const [gitMenu, setGitMenu] = useState(null); // { key, line, x, y }: a changed line's mark clicked
+  const [blameCard, setBlameCard] = useState(null); // a line's commit (ui/blame.js): { key, line, from, mode, rect, info, column, id }
   const [crumbMenu, setCrumbMenu] = useState(null); // a breadcrumb's menu: { id, at, label, items, owner }
   const [gitDir, setGitDir] = useState(null); // the folder whose repository the Git panel shows
   const [gitTick, setGitTick] = useState(0); // Git's state may have changed: the panel reads it again
@@ -1968,6 +1971,10 @@ export function App() {
       onPastePath: (path) => actions.offerPastedPath(path),
       onLineMenu: (at) => setLineMenu(at),
       onGitMark: (at) => setGitMenu(at),
+      // The change peek's Revert and Stage.
+      onGitChange: ({ key, action, line }) => (action === 'revert' ? actions.revertChangeAt(key, line) : actions.stageChangeAt(key, line)),
+      // The inline blame or the blame column hovered, clicked or tapped: the commit's card.
+      onBlame: (event) => actions.blameEvent(event),
       // The breadcrumbs over the text: where the file is, and a crumb's menu.
       crumbPlace: (key) => actions.crumbPlace(key),
       onCrumbMenu: (m) => actions.crumbMenu(m),
@@ -1980,6 +1987,7 @@ export function App() {
       onDrop: (key) => {
         lspRef.current?.forget(key);
         actions.flushBreakpointMoves(key);
+        blameAsks.current.delete(key);
       },
       onChange(key, text, { urgent } = {}) {
         const k = parseKey(key);
@@ -2703,9 +2711,219 @@ export function App() {
         hostRef.current?.setGitBase(key, head?.text ?? null);
         const next = head ? { branch: head.branch, root: head.root, tracked: head.text !== null } : null;
         setGitHeads((all) => (JSON.stringify(all[key]) === JSON.stringify(next) ? all : { ...all, [key]: next }));
+        // HEAD may have moved (a commit, a switch): blame looks again (main says when nothing changed).
+        if (head) lookUpBlame(key);
+        else hostRef.current?.setBlame(key, null);
       },
       () => {},
     );
+  };
+  // ---- Blame (gitBlame.js in the editor, ui/blame.js): who changed each line, and when ----
+  // A shown tab of a file here in a repository gets the blame of its text as it is in the editor
+  // (unsaved lines are not committed yet), when the inline blame is on or the tab has the column.
+  // Asked when Git is looked up (a tab shows, the window comes back, Git changed) and once typing
+  // or a save settles; main answers { same } while neither the text nor HEAD changed.
+  const blameAsks = useRef(new Map()); // key → { seq, busy, again, known: { hash, head }, data (the answer the editor has) }
+  const blameWanted = (key) => getSettings().gitBlame !== 'off' || Boolean(hostRef.current?.hasBlameColumn(key));
+  const lookUpBlame = (key) => {
+    const bridge = window.desktop?.git;
+    const host = hostRef.current;
+    if (!bridge?.blame || !host || !key?.startsWith('d:') || !gitWorksAt(key.slice(2))) return;
+    const tab = store.diskTab(key.slice(2));
+    const state = host.stateOf(key);
+    if (!tab || tab.doc || !state || host.isBig(key)) return;
+    const asks = blameAsks.current;
+    if (!blameWanted(key)) {
+      asks.delete(key);
+      if (host.blameOf(key)) host.setBlame(key, null);
+      return;
+    }
+    const entry = asks.get(key) ?? { seq: 0, known: null, data: null };
+    // One at a time a tab (a large history takes a while): asked once more when it answers.
+    if (entry.busy) return void asks.set(key, { ...entry, again: true });
+    const text = state.doc.toString();
+    const seq = entry.seq + 1;
+    const now = host.blameOf(key);
+    asks.set(key, { ...entry, seq, busy: true, again: false });
+    const done = (patch = {}) => {
+      const at = asks.get(key);
+      if (at?.seq !== seq) return;
+      asks.set(key, { ...at, ...patch, busy: false, again: false });
+      if (at.again) lookUpBlame(key);
+    };
+    bridge.blame(key.slice(2), text, { format: { eol: tab.eol, bom: tab.bom, encoding: tab.encoding }, known: now && entry.data ? entry.known : null }).then(
+      (r) => {
+        const at = asks.get(key);
+        const h = hostRef.current;
+        // The text changed meanwhile: its turn comes (typing settling asks again).
+        if (!at || at.seq !== seq || !h || h.stateOf(key)?.doc.toString() !== text) return done();
+        if (!r) {
+          done({ known: null, data: null });
+          return h.setBlame(key, null);
+        }
+        if (r.same) {
+          // The text is back to what was blamed (an undo): the blame as it was, not as edits moved it.
+          if (at.data && h.blameOf(key)?.mapped) h.setBlame(key, at.data);
+          return done();
+        }
+        const data = r.tooBig ? { status: 'big', size: r.size, max: r.max } : r;
+        done({ known: { hash: r.hash, head: r.head }, data });
+        // A file too large is said once (the editor remembers it was).
+        if (r.tooBig && h.blameOf(key)?.status === 'big') return;
+        h.setBlame(key, data);
+      },
+      () => done(),
+    );
+  };
+  // Typing settled, a save, a reload: the shown tab's blame is asked again a moment later.
+  useEffect(() => {
+    const timers = new Map();
+    const off = store.subscribe((reason, detail) => {
+      if (reason !== 'disk' || !detail?.path || !window.desktop?.git?.blame) return;
+      const key = diskKey(detail.path);
+      if (key !== store.session.active && !hostRef.current?.panes.includes(key)) return;
+      clearTimeout(timers.get(key));
+      timers.set(key, setTimeout(() => (timers.delete(key), lookUpBlame(key)), 400));
+    });
+    return () => {
+      off();
+      for (const t of timers.values()) clearTimeout(t);
+    };
+  }, []);
+  // Another tab in front: a card about the one before goes.
+  useEffect(() => setBlameCard(null), [activeKey]);
+  // The inline blame turned on or off: the shown tabs get it, or lose it.
+  const blameSetting = settings.gitBlame === 'off' ? 'off' : 'line';
+  const blameSettingWas = useRef(blameSetting);
+  useEffect(() => {
+    if (blameSettingWas.current === blameSetting) return;
+    blameSettingWas.current = blameSetting;
+    for (const key of [store.session.active, ...(hostRef.current?.panes ?? [])]) if (key) lookUpBlame(key);
+    if (blameSetting === 'off') setBlameCard(null);
+  }, [blameSetting]);
+  /** The blame column of a tab (the pane typed in last's by default): on or off. */
+  actions.toggleBlameColumn = (key = null) => {
+    const host = hostRef.current;
+    const k = key ?? host?.codeContext()?.key ?? store.session.active;
+    if (!window.desktop?.git?.blame) return toast('Blame works in the desktop app, for files on this computer in a Git repository.');
+    if (!k?.startsWith('d:') || isRemotePath(k.slice(2)) || !gitHeads[k]) return toast('Blame is for files on this computer in a Git repository: open one first.');
+    if (host.isBig(k)) return toast('This file is too large for blame.');
+    const on = !host.hasBlameColumn(k);
+    host.setBlameColumn(k, on);
+    if (on && !host.blameOf(k)) lookUpBlame(k);
+    if (!on && getSettings().gitBlame === 'off') lookUpBlame(k);
+    setBlameCard(null);
+  };
+  /** Blame at the end of the cursor's line (setting `gitBlame`): on or off. */
+  actions.toggleInlineBlame = () => {
+    const off = getSettings().gitBlame !== 'off';
+    saveSettings({ gitBlame: off ? 'off' : 'line' });
+    toast(off ? 'Blame on the cursor’s line is off (Blame the whole file still shows the column).' : 'Blame on the cursor’s line is on: rest the cursor on a line of a file in a Git repository; hover it for the commit.', { key: 'git-blame' });
+  };
+  // The card: a mouse resting on the inline blame or a column's block opens it (and leaving both
+  // closes it); a click or a tap pins it until Escape, a press elsewhere or a scroll.
+  const blameTimers = useRef({ open: 0, close: 0 });
+  const blameShown = useRef(null);
+  blameShown.current = blameCard;
+  const openBlameCard = ({ key, line, from, rect, touch }, mode) => {
+    const host = hostRef.current;
+    const info = host?.blameAt(key, line);
+    if (!info) return;
+    // A file too large for blame: its card says so, and the note at the line has been said.
+    if (info.status === 'big') host.blameOf(key).told = true;
+    setBlameCard({ key, line, from, rect, touch: Boolean(touch), mode, info, column: host.hasBlameColumn(key), id: Date.now() });
+  };
+  actions.blameEvent = (event) => {
+    const t = blameTimers.current;
+    const shown = blameShown.current;
+    clearTimeout(t.open);
+    if (event.kind === 'leave') {
+      if (shown?.mode === 'hover') t.close = setTimeout(() => setBlameCard((c) => (c?.mode === 'hover' ? null : c)), 300);
+      return;
+    }
+    clearTimeout(t.close);
+    if (event.kind === 'click') return openBlameCard(event, 'pin');
+    // The same commit's card stays as it is.
+    const hash = hostRef.current?.blameAt(event.key, event.line)?.hash;
+    if (shown && shown.key === event.key && shown.info?.hash === hash) return;
+    t.open = setTimeout(() => openBlameCard(event, 'hover'), shown ? 120 : 350);
+  };
+  const closeBlameCard = ({ focus = false } = {}) => {
+    const key = blameShown.current?.key;
+    clearTimeout(blameTimers.current.open);
+    clearTimeout(blameTimers.current.close);
+    setBlameCard(null);
+    if (focus && key) hostRef.current?.focusKey(key);
+  };
+  // A commit's message and files, for its card (asked once per repository and commit).
+  const commitDetails = useRef(new Map());
+  actions.gitCommitDetails = (key, hash) => {
+    const path = key?.slice(2);
+    const root = gitHeads[key]?.root ?? parentDir(path ?? '');
+    const id = `${root}\n${hash}`;
+    if (!commitDetails.current.has(id)) {
+      const asked = window.desktop.git.commit(path, hash).catch(() => null);
+      commitDetails.current.set(id, asked);
+      asked.then((d) => !d && commitDetails.current.delete(id));
+    }
+    return commitDetails.current.get(id);
+  };
+  /** A line's commit: this file before and after it, compared in a tab of their own (read-only). */
+  actions.showBlameCommit = async (key, hash) => {
+    const git = window.desktop?.git;
+    const path = key?.slice(2);
+    const commit = hostRef.current?.blameOf(key)?.commits?.get(hash);
+    if (!git?.fileAt || !path || !commit || commit.uncommitted) return;
+    const short = hash.slice(0, 8);
+    const name = store.diskTab(path)?.name ?? baseName(path);
+    toast(`Reading ${name} at ${short}…`, { key: 'blame-commit', timeout: 15000 });
+    const prev = commit.previous;
+    const [after, before] = await Promise.all([git.fileAt(path, hash, commit.filename || null).catch(() => null), prev ? git.fileAt(path, prev.hash, prev.filename).catch(() => null) : Promise.resolve(null)]);
+    if (!after || after.text == null) return toast(`${name} could not be read at ${short}.`, { key: 'blame-commit', kind: 'error' });
+    toast(`${name} before and after ${short}`, { key: 'blame-commit', timeout: 2500 });
+    const when = commit.time ? new Date(commit.time * 1000).toLocaleDateString(undefined, { dateStyle: 'medium' }) : '';
+    const by = `${commit.author || commit.mail}${when ? `, ${when}` : ''}`;
+    hostRef.current?.flushAll();
+    store.openCompare({
+      mode: 'files',
+      name: `${name} @ ${short}`,
+      left: { text: before?.text ?? '', label: prev ? `Before ${short}` : `Before ${short} (not there yet)`, detail: prev ? `${prev.hash.slice(0, 8)} · ${prev.filename}` : `${commit.filename || name} came with this commit`, readOnly: true },
+      right: { text: after.text, label: `${short}: ${commit.summary}`.slice(0, 120), detail: `${by} · ${commit.filename || name}`, readOnly: true },
+    });
+    setView('editor');
+  };
+  // ---- Changes since the last commit, from the bar of changed lines (gitGutter.js) ----
+  /** The tab and line commands act on: the pane typed in last's cursor. */
+  const changeHere = () => {
+    const ctx = hostRef.current?.codeContext();
+    if (!ctx?.key) return null;
+    return { key: ctx.key, line: hostRef.current.cursorLine(ctx.key) || 1 };
+  };
+  /** Puts the change at `line` back as it is at the last commit (one edit: Ctrl+Z brings it back). */
+  actions.revertChangeAt = (key = null, line = null) => {
+    const here = key ? { key, line: line ?? hostRef.current?.cursorLine(key) ?? 1 } : changeHere();
+    if (!here || !here.key.startsWith('d:')) return toast('Revert works for files on this computer in a Git repository.');
+    const host = hostRef.current;
+    if (!host.gitChangeAt(here.key, here.line)) return toast(host.gitChanges(here.key) ? 'Nothing changed here since the last commit.' : 'This file is not in a Git repository (or is new).');
+    const done = host.revertChange(here.key, here.line);
+    if (!done) return toast('This file cannot be changed here.', { kind: 'error' });
+    const what = { added: 'The added lines are gone', deleted: 'The removed lines are back', modified: 'The lines are back' }[done.kind];
+    toast(`${what}, as at the last commit. Ctrl+Z brings yours back.`, { key: 'git-revert', action: { label: 'Undo', run: () => (hostRef.current?.focusKey(here.key), hostRef.current?.run('undo')) } });
+  };
+  /** The peek under the change at the cursor (or at `line`): the last commit's lines against the ones now. */
+  actions.showChangeAt = (key = null, line = null) => {
+    const here = key ? { key, line: line ?? hostRef.current?.cursorLine(key) ?? 1 } : changeHere();
+    const host = hostRef.current;
+    if (!here || !host?.gitChanges(here.key)) return toast('Changes since the last commit show for files on this computer in a Git repository.');
+    if (host.changePeek(here.key) && !line && host.gitChangeAt(here.key, here.line)?.line === host.changePeek(here.key)) return host.changePeek(here.key, { close: true });
+    if (!host.showChange(here.key, here.line)) toast('Nothing changed here since the last commit: Alt+F3 goes to the next change.');
+  };
+  /** The next (1) or previous (-1) change since the last commit in the pane typed in last. */
+  actions.gotoChange = (dir) => {
+    const host = hostRef.current;
+    const here = changeHere();
+    if (!here || !host.gitChanges(here.key)) return toast('Changes since the last commit show for files on this computer in a Git repository.');
+    if (!host.gotoChange(dir, here.key)) toast('Nothing changed in this file since the last commit.', { key: 'git-goto' });
   };
   useEffect(() => lookUpGit(activeKey), [activeKey]);
   useEffect(() => {
@@ -2872,6 +3090,7 @@ export function App() {
   actions.gitChanged = () => {
     refreshAllGit();
     lookUpGit(store.session.active);
+    for (const key of hostRef.current?.panes ?? []) lookUpGit(key);
     setGitTick((n) => n + 1);
   };
   // ---- Dockerize (0.47; dockerize.js, ui/dockerize.js): a project here made to run in Docker ----
@@ -4053,7 +4272,7 @@ export function App() {
     ];
   };
   // ---- The text's right-click menu (0.45): what IDEs offer there, for the kind of file ----
-  const TEXT_MENU_ICONS = { definition: 'arrowRight', references: 'search', rename: 'edit', symbol: 'list', 'quick-fix': 'bulb', format: 'code', cut: 'scissors', copy: 'copy', paste: 'clipboard', find: 'search', breakpoint: 'bug', 'run-file': 'play', 'debug-file': 'bug', 'test-at-cursor': 'check', 'debug-test': 'bug', ask: 'sparkle', files: 'filePlus' };
+  const TEXT_MENU_ICONS = { definition: 'arrowRight', references: 'search', rename: 'edit', symbol: 'list', 'quick-fix': 'bulb', format: 'code', cut: 'scissors', copy: 'copy', paste: 'clipboard', find: 'search', breakpoint: 'bug', 'run-file': 'play', 'debug-file': 'bug', 'test-at-cursor': 'check', 'debug-test': 'bug', 'git-revert': 'undo', 'git-stage': 'plus', ask: 'sparkle', files: 'filePlus' };
   /**
    * The items of the menu for `at` (editor.js onTextMenu): codeMenu.js's for the tab's language,
    * what its language server does, the Run group's choices and the model; each with the keys in
@@ -4067,8 +4286,12 @@ export function App() {
     const kinds = Array.isArray(fixes?.codeActionKinds) ? fixes.codeActionKinds : [];
     const run = runInfo(key);
     const file = k?.kind === 'file' ? store.get(k.id) : null;
+    // In a change since the last commit (a file here in a Git repository): revert or stage it.
+    const line = hostRef.current?.cursorLine(key) || 1;
+    const gitChange = k?.kind === 'disk' && Boolean(window.desktop?.git) && Boolean(hostRef.current?.gitChangeAt(key, line));
     const items = codeMenuItems({
       ...at,
+      gitChange,
       server: { attached: Boolean(fixes), organizeImports: kinds.some((x) => x === 'source' || x.startsWith('source.organizeImports')) },
       runs: Boolean(run?.runs),
       debugs: Boolean(run?.debugs),
@@ -4095,6 +4318,8 @@ export function App() {
       'debug-file': () => actions.debugFile({ key }),
       'test-at-cursor': () => actions.runTests({ scope: 'cursor', key }),
       'debug-test': () => actions.debugTest({ key }),
+      'git-revert': () => actions.revertChangeAt(key, line),
+      'git-stage': () => actions.stageChangeAt(key, line),
       ask: () => actions.openAssist({}),
       files: () => actions.assistFiles({ key }),
     };
@@ -4610,6 +4835,8 @@ export function App() {
       'breakpoint-toggle': () => Boolean(window.desktop?.dap),
       'debug-file': () => Boolean(window.desktop?.dap),
       'debug-test': () => Boolean(window.desktop?.dap),
+      'git-next-change': () => Boolean(window.desktop?.git),
+      'git-prev-change': () => Boolean(window.desktop?.git),
     };
     const accept = (id) => !EDITOR_COMMANDS.has(id) && (usable[id]?.() ?? true);
     const onKey = (e) => {
@@ -4733,7 +4960,16 @@ export function App() {
       'git-push': () => actions.gitQuick('push'),
       'git-ask': () => actions.gitAssist(),
       'assist-files': () => actions.assistFiles(),
-      'git-stage-change': () => actions.stageChangeAt(store.session.active, cursor?.line ?? 1),
+      'git-stage-change': () => {
+        const ctx = hostRef.current?.codeContext();
+        if (ctx?.key) actions.stageChangeAt(ctx.key, hostRef.current.cursorLine(ctx.key) || 1);
+      },
+      'git-revert-change': () => actions.revertChangeAt(),
+      'git-show-change': () => actions.showChangeAt(),
+      'git-next-change': () => actions.gotoChange(1),
+      'git-prev-change': () => actions.gotoChange(-1),
+      'git-blame-file': () => actions.toggleBlameColumn(),
+      'git-blame-toggle': () => actions.toggleInlineBlame(),
       problems: () => actions.toggleProblems(),
       'indent-spaces': () => actions.setIndent({ tabs: false }),
       'indent-tabs': () => actions.setIndent({ tabs: true }),
@@ -5057,9 +5293,16 @@ export function App() {
     html`<${Menu} label="This change" at=${{ x: gitMenu.x, y: gitMenu.y }} onClose=${() => setGitMenu(null)}
       items=${[
         { key: 'stage', label: 'Stage this change', icon: 'plus', hint: 'Only this block goes into the next commit', run: () => actions.stageChangeAt(gitMenu.key, gitMenu.line) },
-        { key: 'compare', label: 'Compare with the last commit', icon: 'compare', run: () => actions.compareWithHead() },
+        !hostRef.current?.stateOf(gitMenu.key)?.readOnly && { key: 'revert', label: 'Revert this change', icon: 'undo', hint: 'Back to the last commit’s lines; Ctrl+Z brings yours back', run: () => actions.revertChangeAt(gitMenu.key, gitMenu.line) },
+        { key: 'show', label: 'Show the change', icon: 'eye', hint: 'The last commit’s lines under it', run: () => actions.showChangeAt(gitMenu.key, gitMenu.line) },
+        { separator: true },
+        { key: 'compare', label: 'Compare with the last commit', icon: 'compare', run: () => actions.compareWithHead(gitMenu.key.slice(2)) },
         { key: 'panel', label: 'The Git panel', icon: 'branch', hint: 'Ctrl+Shift+G', run: () => actions.toggleGit(parentDir(gitMenu.key.slice(2))) },
       ]} />`}
+    ${blameCard && html`<${BlameCard} key=${blameCard.id} card=${blameCard} actions=${actions}
+      onEnter=${() => clearTimeout(blameTimers.current.close)}
+      onLeave=${() => actions.blameEvent({ kind: 'leave' })}
+      onClose=${closeBlameCard} />`}
     ${crumbMenu &&
     html`<${Menu} key=${crumbMenu.id} className="crumb-menu" label=${crumbMenu.label} at=${crumbMenu.at} filter=${crumbMenu.items.length > 12} items=${crumbMenu.items} owner=${{ current: crumbMenu.owner }}
       onClose=${() => {

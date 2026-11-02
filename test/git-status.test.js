@@ -133,3 +133,146 @@ test('Git’s messages in words', async () => {
   assert.equal(other.kind, 'other');
   assert.equal(other.message, 'fatal: the disk is full');
 });
+
+// ---- 0.48: reverting one change, the blocks the bar reads, blame's words ----
+
+// Applies a change ({ from, to, insert }) to a text.
+const applied = (text, c) => text.slice(0, c.from) + c.insert + text.slice(c.to);
+
+test('reverting one change: the block back as it is at the last commit, the rest left as it is', async () => {
+  const { revertBlock, diffBlocks } = await import('../app/js/gitStatus.js');
+  const base = 'a\nb\nc\nd\ne\n';
+  // Changed lines get the commit's back.
+  const changed = 'a\nB\nC\nd\ne\n';
+  assert.equal(applied(changed, revertBlock(base, changed, 2)), base);
+  assert.equal(applied(changed, revertBlock(base, changed, 3)), base, 'any line of the block');
+  assert.deepEqual(revertBlock(base, changed, 2).block, { aFrom: 1, aTo: 3, bFrom: 1, bTo: 3 });
+  // Added lines go (with their line break).
+  const added = 'a\nb\nnew1\nnew2\nc\nd\ne\n';
+  assert.equal(applied(added, revertBlock(base, added, 3)), base);
+  assert.equal(revertBlock(base, added, 3).insert, '');
+  // Removed lines come back: the mark is on the line before them.
+  const removed = 'a\nd\ne\n';
+  assert.equal(applied(removed, revertBlock(base, removed, 1)), base);
+  assert.equal(revertBlock(base, removed, 2), null, 'nothing changed on the line after');
+  assert.equal(revertBlock(base, base, 1), null, 'no change at all');
+  assert.equal(revertBlock(base, changed, 5), null, 'an unchanged line');
+});
+
+test('reverting at the start and the end of a file, with and without a last line break', async () => {
+  const { revertBlock } = await import('../app/js/gitStatus.js');
+  const cases = [
+    // [base, now, line]
+    ['a\nb\nc\n', 'b\nc\n', 1], // first line removed: the mark is on line 1
+    ['a\nb\nc\n', 'x\na\nb\nc\n', 1], // a line added at the start
+    ['a\nb\nc\n', 'A\nb\nc\n', 1], // the first line changed
+    ['a\nb\nc\n', 'a\nb\n', 2], // the last line removed (the text ends with a line break)
+    ['a\nb\nc', 'a\nb', 2], // the last line removed (no last line break)
+    ['a\nb\n', 'a\nb\nc\n', 3], // a line added at the end
+    ['a\nb', 'a\nb\nc', 3], // a line added at the end, no last line break
+    ['a\nb', 'a\nB', 2], // the last line changed
+    ['x\n', '', 1], // everything removed
+    ['', 'x\ny', 1], // everything new
+    ['a\nb\nc\n', 'a\nb\nc\nd', 4], // a line added after the last line break
+  ];
+  for (const [base, now, line] of cases) {
+    const change = revertBlock(base, now, line);
+    assert.ok(change, `${JSON.stringify(now)} at ${line}`);
+    assert.equal(applied(now, change), base, `${JSON.stringify(now)} → ${JSON.stringify(base)}`);
+  }
+});
+
+test('reverting one of two blocks next to each other leaves the other', async () => {
+  const { revertBlock, diffBlocks } = await import('../app/js/gitStatus.js');
+  const base = 'one\ntwo\nthree\nfour\nfive\n';
+  const now = 'ONE\ntwo\nTHREE\nfour\n';
+  const blocks = diffBlocks(base, now);
+  assert.equal(blocks.length, 3, 'line 1 changed, line 3 changed, line 5 removed');
+  assert.equal(applied(now, revertBlock(base, now, 1, blocks)), 'one\ntwo\nTHREE\nfour\n');
+  assert.equal(applied(now, revertBlock(base, now, 3, blocks)), 'ONE\ntwo\nthree\nfour\n');
+  assert.equal(applied(now, revertBlock(base, now, 4, blocks)), 'ONE\ntwo\nTHREE\nfour\nfive\n', 'the removal shows on line 4');
+  // Back to back: a changed line and lines removed right after it are one block.
+  const next = 'one\nTWO\nfive\n';
+  assert.deepEqual(diffBlocks(base, next), [{ aFrom: 1, aTo: 4, bFrom: 1, bTo: 2 }]);
+  assert.equal(applied(next, revertBlock(base, next, 2)), base);
+  // Each block reverted in turn (from the last up) brings the commit's text back.
+  let text = 'X\none\ntwo\nthree\nY\nfive\nZ\n';
+  for (let guard = 0; guard < 10 && text !== base; guard++) {
+    const b = diffBlocks(base, text);
+    const last = b[b.length - 1];
+    text = applied(text, revertBlock(base, text, last.bFrom === last.bTo ? Math.max(1, last.bFrom) : last.bFrom + 1, b));
+  }
+  assert.equal(text, base);
+});
+
+test('the bar’s changes from the blocks are lineChanges’ own', async () => {
+  const { changesOf, diffBlocks, changeIndexAt, markLineOf } = await import('../app/js/gitStatus.js');
+  let seed = 11;
+  const rand = (n) => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) % n);
+  for (let round = 0; round < 300; round++) {
+    const a = Array.from({ length: 1 + rand(25) }, () => `w${rand(6)}`);
+    const b = [...a];
+    for (let e = 0; e < 1 + rand(5); e++) {
+      const at = rand(b.length + 1);
+      const what = rand(3);
+      if (what === 0) b.splice(at, 0, `n${rand(100)}`);
+      else if (what === 1 && b.length > 1) b.splice(Math.min(at, b.length - 1), 1);
+      else if (b.length) b[Math.min(at, b.length - 1)] = `x${rand(100)}`;
+    }
+    const before = a.join('\n');
+    const now = b.join('\n');
+    const blocks = diffBlocks(before, now);
+    assert.deepEqual(changesOf(blocks), lineChanges(before, now), `round ${round}`);
+    // Every block's mark line finds a block marked there (lines removed before and after the
+    // first line share line 1: the first of them).
+    blocks.forEach((k, i) => {
+      const found = changeIndexAt(blocks, markLineOf(k));
+      assert.ok(found !== -1 && found <= i && markLineOf(blocks[found]) === markLineOf(k), `round ${round}, block ${i}`);
+    });
+  }
+});
+
+test('blame moved by an edit: the edited lines are not committed yet, the others keep theirs', async () => {
+  const { remapLines } = await import('../app/js/gitStatus.js');
+  const lines = ['a', 'b', 'c', 'd'];
+  assert.deepEqual(remapLines(lines, [{ aFrom: 1, aTo: 2, bFrom: 1, bTo: 2 }], '0'), ['a', '0', 'c', 'd'], 'a line typed in');
+  assert.deepEqual(remapLines(lines, [{ aFrom: 2, aTo: 2, bFrom: 2, bTo: 4 }], '0'), ['a', 'b', '0', '0', 'c', 'd'], 'two lines added');
+  assert.deepEqual(remapLines(lines, [{ aFrom: 1, aTo: 3, bFrom: 1, bTo: 1 }], '0'), ['a', 'd'], 'two lines deleted');
+  assert.deepEqual(remapLines(lines, [{ aFrom: 0, aTo: 1, bFrom: 0, bTo: 1 }, { aFrom: 3, aTo: 4, bFrom: 3, bTo: 5 }], '0'), ['0', 'b', 'c', '0', '0'], 'two edits');
+  // Two cursors on one line: one block.
+  assert.deepEqual(remapLines(lines, [{ aFrom: 1, aTo: 2, bFrom: 1, bTo: 2 }, { aFrom: 1, aTo: 2, bFrom: 1, bTo: 2 }], '0'), ['a', '0', 'c', 'd']);
+  // The line after the last one (a last line break) typed on.
+  assert.deepEqual(remapLines(lines, [{ aFrom: 4, aTo: 5, bFrom: 4, bTo: 5 }], '0'), ['a', 'b', 'c', 'd', '0']);
+});
+
+test('blame in words: how long ago, who, the line’s text, how new', async () => {
+  const { blameAgo, blameWho, blameLineText, blameAges, NOT_COMMITTED } = await import('../app/js/gitStatus.js');
+  const now = Date.UTC(2026, 10, 2, 12, 0, 0);
+  const at = (seconds) => now / 1000 - seconds;
+  assert.equal(blameAgo(at(10), now), 'just now');
+  assert.equal(blameAgo(at(70), now), 'a minute ago');
+  assert.equal(blameAgo(at(5 * 60), now), '5 minutes ago');
+  assert.equal(blameAgo(at(3600), now), 'an hour ago');
+  assert.equal(blameAgo(at(5 * 3600), now), '5 hours ago');
+  assert.equal(blameAgo(at(26 * 3600), now), 'yesterday');
+  assert.equal(blameAgo(at(3 * 86400), now), '3 days ago');
+  assert.equal(blameAgo(at(15 * 86400), now), '2 weeks ago');
+  assert.equal(blameAgo(at(65 * 86400), now), '2 months ago');
+  assert.equal(blameAgo(at(400 * 86400), now), 'a year ago');
+  assert.equal(blameAgo(at(800 * 86400), now), '2 years ago');
+  assert.equal(blameAgo(at(-30), now), 'just now', 'a clock ahead');
+  const mine = { hash: 'a'.repeat(40), author: 'Ana Silva', mail: 'Ana@Example.org', time: at(3 * 86400), summary: 'Fix the parser' };
+  const theirs = { hash: 'b'.repeat(40), author: 'Bruno Díaz', mail: 'bruno@example.org', time: at(400 * 86400), summary: 'First lines' };
+  const me = { name: 'Ana', email: 'ana@example.org' };
+  assert.equal(blameWho(mine, me), 'You', 'by the mail, whatever its case');
+  assert.equal(blameWho(theirs, me), 'Bruno Díaz');
+  assert.equal(blameWho(mine, null), 'Ana Silva');
+  assert.equal(blameLineText(mine, me, now), 'You, 3 days ago · Fix the parser');
+  assert.equal(blameLineText(theirs, me, now), 'Bruno Díaz, a year ago · First lines');
+  assert.equal(blameLineText({ hash: NOT_COMMITTED, uncommitted: true }, me, now), 'You · Not committed yet');
+  const ages = blameAges({ [mine.hash]: mine, [theirs.hash]: theirs, [NOT_COMMITTED]: { hash: NOT_COMMITTED, uncommitted: true, time: now / 1000 } });
+  assert.equal(ages.get(mine.hash), 1, 'the newest');
+  assert.equal(ages.get(theirs.hash), 0, 'the oldest');
+  assert.equal(ages.has(NOT_COMMITTED), false);
+  assert.equal(blameAges({ [mine.hash]: mine }).get(mine.hash), 1, 'one commit: new');
+});

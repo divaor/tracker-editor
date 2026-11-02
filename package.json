@@ -16,7 +16,7 @@
     "start": "electron .",
     "web": "node scripts/serve.js",
     "test": "node --test",
-    "test:phone-node": "node --test test/android-node.test.js test/ask-find.test.js test/ask-folders.test.js test/capture.test.js test/code-index.test.js test/dap.test.js test/debug-tools.test.js test/disk-files.test.js test/docker.test.js test/find-folder.test.js test/folder-compare-main.test.js test/folders.test.js test/git-model.test.js test/git-remote.test.js test/git.test.js test/lsp-remote.test.js test/lsp.test.js test/mirror.test.js test/places.test.js test/preview-server.test.js test/project-settings.test.js test/properties.test.js test/servers.test.js test/shell-integration.test.js test/test-run.test.js test/zip.test.js",
+    "test:phone-node": "node --test test/android-node.test.js test/ask-find.test.js test/ask-folders.test.js test/capture.test.js test/code-index.test.js test/dap.test.js test/debug-tools.test.js test/disk-files.test.js test/docker.test.js test/find-folder.test.js test/folder-compare-main.test.js test/folders.test.js test/git-blame.test.js test/git-model.test.js test/git-remote.test.js test/git.test.js test/lsp-remote.test.js test/lsp.test.js test/mirror.test.js test/places.test.js test/preview-server.test.js test/project-settings.test.js test/properties.test.js test/servers.test.js test/shell-integration.test.js test/test-run.test.js test/zip.test.js",
     "vendor": "node scripts/vendor.js",
     "android:node": "node scripts/android-node.js",
     "dist": "electron-builder --publish never",

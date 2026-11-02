@@ -225,6 +225,12 @@ function EditorCard({ settings, actions }) {
       <${Check} checked=${minimapShown(settings.minimap, { desktop: isDesktopApp() })} label="Minimap beside the scrollbar"
         hint="The file at a glance, with problems and changed lines on its edge: click or drag to move; not in narrow windows"
         onChange=${(v) => saveSettings({ minimap: v ? (isDesktopApp() ? null : true) : false })} />
+      ${isDesktopApp() &&
+      html`<div class="field span-2 git-blame-field"><span>Git blame</span>
+        <${Segmented} small label="Git blame" value=${settings.gitBlame === 'off' ? 'off' : 'line'} onChange=${(gitBlame) => saveSettings({ gitBlame })}
+          options=${[{ id: 'line', label: 'On the cursor’s line' }, { id: 'off', label: 'Off' }]} />
+        <small>Who changed the line and when, at its end while the cursor rests (files on this computer in a Git repository): hover it for the commit. The whole file’s: <strong>Blame the whole file</strong> in the command palette or the commit’s card.</small>
+      </div>`}
       <${Check} checked=${settings.fileIcons !== false} label="File type icons" hint="In My files and Folders, an icon in the color of each kind of file (JSON, Python, pictures…)"
         onChange=${(v) => saveSettings({ fileIcons: v })} />
       <${Check} checked=${settings.wordWrap} label="Word wrap" hint="Alt+Z" onChange=${(v) => saveSettings({ wordWrap: v })} />

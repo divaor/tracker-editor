@@ -61,6 +61,9 @@ function runWrite(args, cwd, { input = null, timeout = 120_000, onProgress = nul
     let stderr = '';
     const progress = onProgress ? progressLines(onProgress) : null;
     const timer = setTimeout(() => proc.kill(), timeout);
+    // Text as it comes, a character never cut in two between chunks (names and messages in UTF-8).
+    proc.stdout.setEncoding('utf8');
+    proc.stderr.setEncoding('utf8');
     proc.stdout.on('data', (d) => (stdout += d));
     proc.stderr.on('data', (d) => {
       stderr += d;
@@ -420,6 +423,9 @@ const cap = (text, max = 40_000) => {
 const cleanUrl = (url) => String(url).replace(/^([a-z][\w+.-]*:\/\/)[^/@\s]*@/i, '$1');
 const BACKUP_REFS = 'refs/tracker-editor/backups';
 const MAX_BACKUPS = 50;
+// Blame: texts up to this size (bytes), and a commit named by its hash only.
+const BLAME_MAX = 2 * 1024 * 1024;
+const safeHash = (rev) => typeof rev === 'string' && /^[0-9a-f]{4,64}$/i.test(rev);
 
 // A merge, rebase, cherry-pick or revert left halfway: the file each leaves in the .git folder.
 const IN_PROGRESS = [['MERGE_HEAD', 'merge'], ['REBASE_HEAD', 'rebase'], ['rebase-merge', 'rebase'], ['rebase-apply', 'rebase'], ['CHERRY_PICK_HEAD', 'cherry-pick'], ['REVERT_HEAD', 'revert']];
@@ -898,6 +904,77 @@ function createGit({ parseStatus, parse = {}, runner = null, runGit: runGitHere 
       const mode = /^(\d{6}) /.exec(staged)?.[1] ?? '100644';
       await runGitWrite(['update-index', '--add', '--cacheinfo', `${mode},${sha},${rel}`], root);
       return { root, rel };
+    },
+    /**
+     * Who changed each line of `rel` (a path inside the repository `root`) and when: `git blame
+     * --porcelain` of `bytes`, the editor's text as the file would be on disk (its line endings and
+     * encoding), given on stdin, so lines not saved or not committed yet are not committed yet.
+     * { root, rel, head (HEAD's commit, '' before the first), hash (sha1 of the bytes), me: { name,
+     * email } (who commits here), commits, lines } (gitStatus.js parseBlame), or with `untracked`
+     * (not in the last commit: every line is new). `known` ({ hash, head } of an answer before):
+     * { same: true } while neither changed. Over `max` bytes: { tooBig, size, max }, nothing run.
+     */
+    async blame(root, rel, bytes, { known = null, max = BLAME_MAX, timeout = 15_000 } = {}) {
+      if (!safeRel(rel)) throw new Error('Not a file of this repository');
+      const data = Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes ?? ''));
+      const hash = require('node:crypto').createHash('sha1').update(data).digest('hex');
+      const head = (await tryGit(['rev-parse', '--verify', '-q', 'HEAD'], root, { timeout: 5000 })).trim();
+      if (known && known.hash === hash && known.head === head) return { same: true, hash, head };
+      if (data.length > max) return { tooBig: true, size: data.length, max, hash, head };
+      const [name, email] = await Promise.all([tryGit(['config', 'user.name'], root, { timeout: 5000 }), tryGit(['config', 'user.email'], root, { timeout: 5000 })]);
+      const base = { root, rel, head, hash, me: { name: name.trim(), email: email.trim() } };
+      if (!head) return { ...base, untracked: true };
+      try {
+        // Reading: no lock of Git's taken, nothing asked.
+        const { stdout } = await runGitWrite(['blame', '--porcelain', '--contents', '-', '--', rel], root, { input: data, timeout, env: { ...writeEnv(), GIT_OPTIONAL_LOCKS: '0' } });
+        const parsed = parse.parseBlame ? parse.parseBlame(stdout) : { commits: {}, lines: [] };
+        return { ...base, ...parsed };
+      } catch (err) {
+        // A file not in the last commit (new, or the repository has none).
+        if (/no such path .* in HEAD|no such ref: HEAD|bad revision 'HEAD'/i.test(String(err.stderr ?? ''))) return { ...base, untracked: true };
+        throw err;
+      }
+    },
+    /**
+     * A commit, to show it: { hash, parents, author, mail, time, committer, committerMail,
+     * committerTime, message (whole), files: [{ status (A, M, D, R…), path, from? }] } (what it
+     * changed, against its first parent; 300 at most, `more` for the rest), or null.
+     */
+    async commitInfo(root, rev) {
+      if (!safeHash(rev)) throw new Error('Not a commit');
+      let out;
+      try {
+        out = await runGit(['show', '-s', '--no-color', '--format=%H%x00%P%x00%an%x00%ae%x00%at%x00%cn%x00%ce%x00%ct%x00%B', rev, '--'], root, { timeout: 10_000 });
+      } catch {
+        return null;
+      }
+      const [hash, parents, author, mail, time, committer, committerMail, committerTime, ...message] = out.split('\0');
+      const parentList = parents.split(' ').filter(Boolean);
+      const files = [];
+      let more = 0;
+      try {
+        const diff = await runGit(['diff-tree', '--no-commit-id', '-r', '-z', '--name-status', '-M', ...(parentList.length ? [parentList[0]] : ['--root']), hash], root, { timeout: 10_000 });
+        const parts = diff.split('\0').filter(Boolean);
+        for (let i = 0; i < parts.length; ) {
+          const status = parts[i++];
+          const two = /^[RC]/.test(status);
+          const entry = two ? { status: status[0], from: parts[i++], path: parts[i++] } : { status: status[0], path: parts[i++] };
+          if (files.length < 300) files.push(entry);
+          else more++;
+        }
+      } catch {
+        // the files stay unknown
+      }
+      return { hash, parents: parentList, author, mail, time: Number(time) || 0, committer, committerMail, committerTime: Number(committerTime) || 0, message: message.join('\0').replace(/\s+$/, ''), files, more };
+    },
+    /** A file's bytes at a commit: `rel` (a path inside the repository) at `rev` (a hash), or null when it is not there. */
+    async fileAt(root, rev, rel, { maxBuffer = 32 * 1024 * 1024 } = {}) {
+      if (!safeHash(rev) || !safeRel(rel)) throw new Error('Not a file at a commit');
+      try {
+        return await runGit(['show', `${rev}:${rel}`], root, { encoding: 'buffer', maxBuffer });
+      } catch {
+        return null;
+      }
     },
     /** Forgets which folders are in which repository (a repository was made or removed), and that git was missing. */
     forget: () => {

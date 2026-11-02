@@ -83,6 +83,9 @@ export const DEFAULT_SETTINGS = {
   // not on phones; the minimap in the desktop app only), else on or off.
   breadcrumbs: null,
   minimap: null,
+  // Git blame at the end of the cursor's line, while it rests (desktop, files in a repository):
+  // 'line', or 'off'; null = on.
+  gitBlame: null,
   fileIcons: true,
   // Format document: 'server' (a language server's formatter first) or 'builtin' (Prettier and the editor's own first).
   formatter: 'server',

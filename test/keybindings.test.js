@@ -239,3 +239,16 @@ test('keys from a file or the settings are cleaned', () => {
   assert.deepEqual(cleanBindings(null, ids), {});
   assert.deepEqual(cleanBindings(['F4'], ids), {});
 });
+
+test('0.48: the next and previous change since the last commit: Alt+F3, and VS Code’s Alt+F5 too', () => {
+  const plain = effectiveKeys(COMMAND_LIST, WIN);
+  assert.deepEqual(plain.get('git-next-change'), ['Alt+F3']);
+  assert.deepEqual(plain.get('git-prev-change'), ['Alt+Shift+F3']);
+  assert.deepEqual(plain.get('debug-file'), ['Alt+F5'], 'Alt+F5 stays Debug');
+  assert.deepEqual(plain.get('git-revert-change'), [], 'reverting has no key of its own');
+  const vs = effectiveKeys(COMMAND_LIST, { ...WIN, preset: 'vscode' });
+  assert.deepEqual(vs.get('git-next-change'), ['Alt+F5', 'Alt+F3']);
+  assert.deepEqual(vs.get('git-prev-change'), ['Alt+Shift+F5', 'Alt+Shift+F3']);
+  assert.deepEqual(vs.get('debug-file'), ['F5']);
+  assert.equal(effectiveKeys(COMMAND_LIST, WEB).has('git-next-change'), false, 'the desktop app’s');
+});

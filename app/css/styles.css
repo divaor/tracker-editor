@@ -10309,6 +10309,341 @@ button.help-command:focus-visible {
   top: 100%;
 }
 
+/* The change peek under a block (gitGutter.js): the last commit's lines against the ones now.
+   Padding, not margins, around it: CodeMirror sizes the gutter beside a block widget without them. */
+.cm-change-peek {
+  padding: 4px 0 6px;
+}
+
+.cm-peek-box {
+  border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--git-modified);
+  border-radius: 6px;
+  background: var(--surface-2);
+  font-family: var(--font);
+  overflow: hidden;
+}
+
+.cm-peek-box.added {
+  border-left-color: var(--git-added);
+}
+
+.cm-peek-box.deleted {
+  border-left-color: var(--git-deleted);
+}
+
+.cm-peek-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.cm-peek-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 52ch;
+  overflow: hidden;
+  color: var(--text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cm-peek-actions {
+  display: flex;
+  flex: none;
+  gap: 4px;
+}
+
+.cm-peek-btn {
+  padding: 1px 9px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text);
+  font: 12px/1.5 var(--font);
+  cursor: pointer;
+}
+
+.cm-peek-btn:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.cm-peek-btn.prev,
+.cm-peek-btn.next,
+.cm-peek-btn.close {
+  min-width: 26px;
+  padding: 1px 6px;
+}
+
+.cm-peek-body {
+  max-height: 45vh;
+  padding: 2px 0;
+  overflow: auto;
+  font-family: var(--mono);
+}
+
+.cm-peek-line {
+  display: flex;
+  padding: 0 8px;
+  white-space: pre;
+}
+
+.cm-peek-line.del {
+  background: color-mix(in srgb, var(--git-deleted) 13%, transparent);
+}
+
+.cm-peek-line.ins {
+  background: color-mix(in srgb, var(--git-added) 13%, transparent);
+}
+
+.cm-peek-line.more {
+  color: var(--text-3);
+  font-family: var(--font);
+  font-size: 12px;
+}
+
+.cm-peek-sign {
+  flex: none;
+  width: 2ch;
+  color: var(--text-3);
+  user-select: none;
+}
+
+.cm-peek-note {
+  padding: 1px 8px;
+  color: var(--text-3);
+  font-family: var(--font);
+  font-size: 12px;
+}
+
+/* Blame (gitBlame.js): at the end of the cursor's line, and the column before the line numbers. */
+.cm-inline-blame {
+  display: inline-block;
+  margin-left: 3ch;
+  overflow: hidden;
+  vertical-align: top;
+  color: var(--text-3);
+  font-family: var(--font);
+  font-size: 0.86em;
+  line-height: calc(1.55em / 0.86);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+  user-select: none;
+  animation: blame-in 0.18s ease-out;
+}
+
+.cm-inline-blame:hover {
+  color: var(--text-2);
+}
+
+@keyframes blame-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.cm-blame-gutter .cm-gutterElement {
+  padding: 0;
+  text-align: left;
+}
+
+.cm-blame-cell {
+  box-sizing: border-box;
+  max-width: 34ch;
+  height: 100%;
+  padding: 0 8px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--accent) calc(3% + var(--age, 0) * 20%), transparent);
+  color: var(--text-2);
+  font-size: 0.8em;
+  line-height: calc(1.55em / 0.8);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.cm-blame-cell.first {
+  box-shadow: inset 0 1px 0 var(--border);
+}
+
+.cm-blame-cell.uncommitted {
+  background: color-mix(in srgb, var(--git-added) 14%, transparent);
+  color: var(--text-3);
+  font-style: italic;
+}
+
+.cm-blame-cell:hover {
+  color: var(--text);
+}
+
+/* A line's commit (ui/blame.js) */
+.blame-card {
+  position: fixed;
+  z-index: 70;
+  width: min(400px, calc(100vw - 16px));
+  max-height: min(70vh, 540px);
+  padding: 10px 12px 12px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  color: var(--text);
+  font-size: 13px;
+  animation: rise 0.1s ease-out;
+}
+
+.blame-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.blame-avatar {
+  display: grid;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 50%;
+  background: hsl(var(--hue, 220) 50% 46%);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.blame-avatar.none {
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+
+.blame-who {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.blame-who strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.blame-when {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.blame-hash-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.blame-hash {
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: var(--surface-2);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.blame-chip {
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: 11px;
+}
+
+.blame-subject {
+  margin: 8px 0 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.blame-body {
+  max-height: 160px;
+  margin-top: 4px;
+  overflow-y: auto;
+  color: var(--text-2);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.blame-files {
+  margin-top: 8px;
+}
+
+.blame-files ul {
+  margin: 2px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.blame-files li {
+  display: flex;
+  gap: 6px;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.blame-files li bdi {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.blame-files li.mine {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.blame-file-status {
+  flex: none;
+  width: 1.3em;
+  font-family: var(--mono);
+  font-weight: 700;
+  text-align: center;
+}
+
+.blame-file-status.s-A {
+  color: var(--git-added);
+}
+
+.blame-file-status.s-M {
+  color: var(--git-modified);
+}
+
+.blame-file-status.s-D {
+  color: var(--git-deleted);
+}
+
+.blame-file-status.s-R,
+.blame-file-status.s-C {
+  color: var(--warn);
+}
+
+.blame-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.git-blame-field .segmented {
+  margin: 4px 0;
+}
+
 .git-badge {
   flex: none;
   min-width: 1.2em;

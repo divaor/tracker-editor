@@ -250,3 +250,78 @@ test('making a repository without the git program: it says so', async () => {
   assert.deepEqual(await g.info('/somewhere'), { installed: false, root: null, defaultBranch: '' });
   await assert.rejects(g.init('/somewhere'), /not installed/);
 });
+
+// ---- 0.48: blame of the editor's text, a commit for its card, a file at a commit ----
+
+test('blame of the editor’s text: unsaved lines not committed yet; the same text and HEAD say so; too large; new files', async () => {
+  const { parseBlame, NOT_COMMITTED } = await import('../app/js/gitStatus.js');
+  const { dir, git } = repoWithRemote();
+  git('config', 'user.name', 'Ana');
+  git('config', 'user.email', 'ana@example.org');
+  writeFileSync(path.join(dir, 'a.txt'), 'one\nTWO\nthree\n');
+  execFileSync('git', ['commit', '-q', '-am', 'Second'], { cwd: dir, env: { ...process.env, GIT_AUTHOR_NAME: 'Bruno', GIT_AUTHOR_EMAIL: 'bruno@example.org', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.org' } });
+  const [first, second] = git('log', '--reverse', '--format=%H').trim().split('\n');
+  const g = createGit({ parseStatus, parse: { parseBlame } });
+  // The editor has the third line changed and a fourth added, not saved.
+  const r = await g.blame(dir, 'a.txt', Buffer.from('one\nTWO\nthree!\nfour\n'));
+  assert.deepEqual(r.lines, [first, second, NOT_COMMITTED, NOT_COMMITTED]);
+  assert.equal(r.commits[second].author, 'Bruno');
+  assert.equal(r.commits[first].boundary, true);
+  assert.deepEqual(r.me, { name: 'Ana', email: 'ana@example.org' });
+  assert.equal(r.head, second);
+  assert.equal(r.root, dir);
+  assert.equal(r.rel, 'a.txt');
+  assert.match(r.hash, /^[0-9a-f]{40}$/);
+  // Asked again with what came back: nothing changed, nothing run.
+  assert.deepEqual(await g.blame(dir, 'a.txt', Buffer.from('one\nTWO\nthree!\nfour\n'), { known: { hash: r.hash, head: r.head } }), { same: true, hash: r.hash, head: r.head });
+  assert.ok(!(await g.blame(dir, 'a.txt', Buffer.from('one\n'), { known: { hash: r.hash, head: r.head } })).same, 'another text');
+  // Over the cap: said, not run.
+  const big = await g.blame(dir, 'a.txt', Buffer.alloc(64, 'x'), { max: 32 });
+  assert.equal(big.tooBig, true);
+  assert.equal(big.size, 64);
+  // A new file, not in Git yet: every line is new.
+  writeFileSync(path.join(dir, 'new.txt'), 'x\n');
+  const fresh = await g.blame(dir, 'new.txt', Buffer.from('x\ny\n'));
+  assert.equal(fresh.untracked, true);
+  assert.equal(fresh.lines, undefined);
+  // A repository without a commit yet.
+  const empty = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'git-empty-')));
+  execFileSync('git', ['init', '-q'], { cwd: empty });
+  const none = await g.blame(empty, 'a.txt', Buffer.from('a\n'));
+  assert.equal(none.untracked, true);
+  assert.equal(none.head, '');
+  await assert.rejects(g.blame(dir, '../a.txt', Buffer.from('')), /Not a file/);
+});
+
+test('a commit for its card, and a file before and after it (renamed too)', async () => {
+  const { parseBlame } = await import('../app/js/gitStatus.js');
+  const { dir, git } = repoWithRemote();
+  git('mv', 'a.txt', 'b.txt');
+  writeFileSync(path.join(dir, 'b.txt'), 'one\ntwo\nthree\nfour\n');
+  writeFileSync(path.join(dir, 'c.txt'), 'new\n');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'Rename and grow', '-m', 'The body\nof two lines.');
+  const [first, second] = git('log', '--reverse', '--format=%H').trim().split('\n');
+  const g = createGit({ parseStatus, parse: { parseBlame } });
+  const c = await g.commitInfo(dir, second);
+  assert.equal(c.hash, second);
+  assert.deepEqual(c.parents, [first]);
+  assert.equal(c.author, 't');
+  assert.equal(c.mail, 't@example.org');
+  assert.ok(c.time > 0);
+  assert.equal(c.message, 'Rename and grow\n\nThe body\nof two lines.');
+  assert.deepEqual(c.files.map((f) => [f.status, f.path, f.from ?? '']).sort(), [['A', 'c.txt', ''], ['R', 'b.txt', 'a.txt']]);
+  // The first commit: its files against nothing.
+  assert.deepEqual((await g.commitInfo(dir, first)).files, [{ status: 'A', path: 'a.txt' }]);
+  assert.equal(await g.commitInfo(dir, 'abcdef1234'), null, 'no such commit');
+  await assert.rejects(g.commitInfo(dir, 'HEAD~1'), /Not a commit/, 'hashes only');
+  // Blame names the line's commit and the one before it, with the file's names then.
+  const blame = await g.blame(dir, 'b.txt', Buffer.from('one\ntwo\nthree\nfour\n'));
+  const last = blame.commits[blame.lines[3]];
+  assert.equal(last.hash, second);
+  assert.deepEqual(last.previous, { hash: first, filename: 'a.txt' });
+  assert.equal((await g.fileAt(dir, second, 'b.txt')).toString(), 'one\ntwo\nthree\nfour\n');
+  assert.equal((await g.fileAt(dir, last.previous.hash, last.previous.filename)).toString(), 'one\ntwo\nthree\n');
+  assert.equal(await g.fileAt(dir, first, 'b.txt'), null, 'not there then');
+  await assert.rejects(g.fileAt(dir, first, '../x'), /Not a file/);
+});

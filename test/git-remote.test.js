@@ -380,6 +380,32 @@ test('over SSH: one change staged, making a repository, a folder reached through
   }
 });
 
+test('over SSH: blame of the editor’s text (an unsaved line not committed yet), a commit’s details, the file at a commit', { skip }, async () => {
+  const { dir } = repoWithRemote();
+  fs.writeFileSync(path.join(dir, 'a.txt'), 'one\nTWO\nthree\n');
+  gitHere(dir, 'commit', '-q', '-am', 'Shout two\n\nLouder.');
+  const s = await overSsh();
+  try {
+    const { g } = s;
+    const root = await g.repoOf(dir);
+    const text = Buffer.from('one\nTWO\nthree\nfour, not saved\n');
+    const b = await g.blame(root, 'a.txt', text);
+    assert.equal(b.lines.length, 4);
+    const who = b.lines.map((h) => (b.commits[h].uncommitted ? 'new' : b.commits[h].summary));
+    assert.deepEqual(who, ['first', 'Shout two', 'first', 'new']);
+    assert.deepEqual(b.me, { name: 't', email: 't@example.org' });
+    assert.deepEqual(await g.blame(root, 'a.txt', text, { known: { hash: b.hash, head: b.head } }), { same: true, hash: b.hash, head: b.head });
+    const info = await g.commitInfo(root, b.lines[1]);
+    assert.equal(info.message, 'Shout two\n\nLouder.');
+    assert.deepEqual(info.files, [{ status: 'M', path: 'a.txt' }]);
+    assert.equal((await g.fileAt(root, info.parents[0], 'a.txt')).toString(), 'one\ntwo\nthree\n');
+    assert.equal((await g.fileAt(root, info.hash, 'a.txt')).toString(), 'one\nTWO\nthree\n');
+    assert.equal(await g.fileAt(root, info.hash, 'missing.txt'), null);
+  } finally {
+    await s.done();
+  }
+});
+
 test('over SSH: git missing there: null, and info says so with the command that installs it', { skip: skip || (!BUSYBOX && 'no busybox here (a PATH without git)') }, async () => {
   // A PATH with sh and the usual tools but no git (busybox's applets), and an apk.
   const bb = tmp('ssh-nogit-');

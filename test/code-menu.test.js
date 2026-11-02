@@ -40,3 +40,14 @@ test('data and prose: shorter menus', () => {
   assert.equal(ids(codeMenuItems({ language: 'Plain text', model: false })), 'cut copy paste select-all | find');
   assert.deepEqual(Object.keys(EDIT_KEYS), ['cut', 'copy', 'paste', 'select-all']);
 });
+
+test('0.48: in a change since the last commit, revert or stage it (any kind of file)', () => {
+  assert.equal(ids(codeMenuItems({ language: 'Python', onName: true, runs: true, gitChange: true })), 'definition references rename symbol | format | cut copy paste select-all | comment | run-file | git-revert git-stage | ask');
+  assert.equal(ids(codeMenuItems({ language: 'Markdown', gitChange: true })), 'cut copy paste select-all | find | git-revert git-stage | ask');
+  const items = codeMenuItems({ language: 'JSON', gitChange: true });
+  assert.deepEqual(items.filter((i) => i.id?.startsWith('git-')).map((i) => [i.label, i.command]), [['Revert this change', 'git-revert-change'], ['Stage this change', 'git-stage-change']]);
+  // Read-only: staging only (the text cannot change).
+  assert.equal(ids(codeMenuItems({ language: 'YAML', readOnly: true, gitChange: true, model: false })), 'copy select-all | git-stage');
+  // Not in a change: neither.
+  assert.ok(!codeMenuItems({ language: 'Python' }).some((i) => i.id?.startsWith('git-')));
+});

@@ -213,6 +213,10 @@ contextBridge.exposeInMainWorld('desktop', {
     act: (dir, action) => ipcRenderer.invoke('git:act', dir, action),
     index: (file) => ipcRenderer.invoke('git:index', file),
     stageText: (file, text) => ipcRenderer.invoke('git:stage-text', file, text),
+    // Blame of the editor's text ({ format, known }), a commit for its card, a file at a commit.
+    blame: (file, text, opts) => ipcRenderer.invoke('git:blame', file, text, opts),
+    commit: (file, hash) => ipcRenderer.invoke('git:commit', file, hash),
+    fileAt: (file, hash, rel) => ipcRenderer.invoke('git:file-at', file, hash, rel),
     // Making a folder a repository: { installed, root, defaultBranch }, then git init.
     info: (dir) => ipcRenderer.invoke('git:info', dir),
     init: (dir, opts) => ipcRenderer.invoke('git:init', dir, opts),

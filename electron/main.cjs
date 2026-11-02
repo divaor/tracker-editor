@@ -2302,7 +2302,7 @@ async function gitTool(id = null, { quiet = false } = {}) {
   if (gitTools.has(key)) return gitTools.get(key);
   const { gitStatus } = await loadAppModules();
   const runner = id ? shellRunner({ run: (script, args, opts) => remote.runArgs(id, script, args, { ...opts, what: 'Git', connect: !quiet }), where: () => gitPlaceName(id) }) : null;
-  const tool = createGit({ parseStatus: gitStatus.parseStatus, parse: { parseBranches: gitStatus.parseBranches, parseStashes: gitStatus.parseStashes }, runner });
+  const tool = createGit({ parseStatus: gitStatus.parseStatus, parse: { parseBranches: gitStatus.parseBranches, parseStashes: gitStatus.parseStashes, parseBlame: gitStatus.parseBlame }, runner });
   if (!gitTools.has(key)) gitTools.set(key, tool);
   return gitTools.get(key);
 }
@@ -2390,6 +2390,77 @@ ipcMain.handle('git:stage-text', guard(async (_e, file, text) => {
   }
   const done = await t.tool.setIndexBytes(t.at, disk.encode(text, format));
   return { ...done, root: t.uri(done.root) };
+}));
+// Blame (the editor's inline blame and its column): who changed each line of a file opened
+// here, and when, for the editor's text (unsaved lines are not committed yet). The page gives the
+// file (checked) and its text, never a command; the text goes to git with the file's own line
+// endings and encoding (`format`: the tab's, else the file's on disk), so Git compares like with
+// like. `known` ({ hash, head } of the answer before) gives { same } while nothing changed.
+const textFormat = (format, file) => {
+  const ok = format && ['lf', 'crlf'].includes(format.eol) && ['utf-8', 'latin1'].includes(format.encoding ?? 'utf-8');
+  if (ok) return { eol: format.eol, bom: Boolean(format.bom), encoding: format.encoding ?? 'utf-8' };
+  try {
+    return disk.decode(fs.readFileSync(file));
+  } catch {
+    return {};
+  }
+};
+// Blame's calls: a file here or on a connection with a shell (not FTP), connected now (blame
+// never connects by itself), and its repository: { t (gitTarget), root, rel } or null.
+async function gitFileIn(file) {
+  const t = await gitTarget(file, { file: true, connected: true }).catch(quietNoShell);
+  if (!t || t.offline) return null;
+  const p = t.id ? path.posix : path;
+  try {
+    const root = await t.tool.repoOf(p.dirname(t.at));
+    if (!root) return null;
+    const rel = p.relative(root, t.at).split(p.sep).join('/');
+    return rel && !rel.startsWith('..') ? { t, root, rel } : null;
+  } catch (err) {
+    if (gitGone(err) || err.unusable) return null;
+    throw err;
+  }
+}
+// A server that went away while blame asked: nothing to show, not an error.
+async function gitQuiet(fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    if (gitGone(err) || err.unusable) return null;
+    throw err;
+  }
+}
+ipcMain.handle('git:blame', guard(async (_e, file, text, opts = {}) => {
+  if (typeof file !== 'string' || typeof text !== 'string') return null;
+  const at = await gitFileIn(file);
+  if (!at) return null;
+  const known = opts?.known && typeof opts.known.hash === 'string' && typeof opts.known.head === 'string' ? { hash: opts.known.hash, head: opts.known.head } : null;
+  return gitQuiet(async () => {
+    const res = await at.t.tool.blame(at.root, at.rel, disk.encode(text, textFormat(opts?.format, file)), { known });
+    return res?.root ? { ...res, root: at.t.uri(res.root) } : res;
+  });
+}));
+// A commit blame named, for its card: its whole message, who and when, the files it changed.
+ipcMain.handle('git:commit', guard(async (_e, file, hash) => {
+  if (typeof file !== 'string' || typeof hash !== 'string') return null;
+  const at = await gitFileIn(file);
+  return at ? gitQuiet(() => at.t.tool.commitInfo(at.root, hash)) : null;
+}));
+// A file of that repository at a commit (Show this commit: the file before and after it), decoded
+// as the editor reads files: { text } or null when it was not there. `rel` (a path inside the
+// repository: blame names the file as it was called then) defaults to the file's own.
+ipcMain.handle('git:file-at', guard(async (_e, file, hash, rel = null) => {
+  if (typeof file !== 'string' || typeof hash !== 'string') return null;
+  const at = await gitFileIn(file);
+  if (!at) return null;
+  const name = typeof rel === 'string' && rel ? rel : at.rel;
+  const bytes = await gitQuiet(() => at.t.tool.fileAt(at.root, hash, name));
+  if (!bytes) return null;
+  try {
+    return { text: disk.decode(bytes).text, rel: name };
+  } catch {
+    return { text: null, rel: name, binary: true };
+  }
 }));
 // Making a folder the person opened a repository (git init): what it would mean, then doing it.
 // On a server or in a place where git is missing, `install` is the command that installs it
@@ -3388,7 +3459,13 @@ function buildMenu() {
             item('Ask the Model about Git…', undefined, 'git-ask'),
             item('Switch Branch (Git)…', undefined, 'git-branch'),
             item('Stage the Change at the Cursor (Git)', undefined, 'git-stage-change'),
+            item('Revert the Change at the Cursor (Git)', undefined, 'git-revert-change'),
+            item('Show the Change at the Cursor (Git)', undefined, 'git-show-change'),
+            shown('Next Change (Git)', 'Alt+F3', 'git-next-change'),
+            shown('Previous Change (Git)', 'Shift+Alt+F3', 'git-prev-change'),
             item('Compare with the Last Commit (Git)', undefined, 'git-compare'),
+            item('Blame the Whole File (Git)', undefined, 'git-blame-file'),
+            item('Blame on the Cursor’s Line, On or Off (Git)', undefined, 'git-blame-toggle'),
             item('Pull (Git)', undefined, 'git-pull'),
             item('Push (Git)', undefined, 'git-push'),
             { type: 'separator' },

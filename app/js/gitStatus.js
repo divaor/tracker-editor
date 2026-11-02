@@ -220,6 +220,25 @@ export function diffBlocks(before, now, { maxEdits = 4000 } = {}) {
 }
 
 /**
+ * The block (diffBlocks) whose mark in the bar of changed lines is on `line` (1-based): changed
+ * or added lines on theirs, a removal on the line before it (line 1 at the start). -1 when none.
+ */
+export function changeIndexAt(blocks, line) {
+  const at = line - 1;
+  return (blocks ?? []).findIndex((k) => (k.bFrom === k.bTo ? Math.max(0, k.bFrom - 1) === at : k.bFrom <= at && at < k.bTo));
+}
+
+/** The line (1-based) a block's mark is on: its first line, or for a removal the line before it (1 at the start). */
+export const markLineOf = (block) => (block.bFrom === block.bTo ? Math.max(1, block.bFrom) : block.bFrom + 1);
+
+/**
+ * The bar's changes from diffBlocks' blocks, as lineChanges gives them: [{ kind: 'added' |
+ * 'modified', from, to }, { kind: 'deleted', at }] (1-based lines of the edited text).
+ */
+export const changesOf = (blocks) =>
+  blocks.map((k) => (k.bFrom === k.bTo ? { kind: 'deleted', at: k.bFrom } : { kind: k.aFrom === k.aTo ? 'added' : 'modified', from: k.bFrom + 1, to: k.bTo }));
+
+/**
  * Staging one change: the block of `now` (the file as edited) at `line` (1-based) taken into
  * `index` (the text staged), the rest left as staged: the new staged text, or null when no
  * change of `now` against `index` is there (it is staged already, or none). A removal counts on
@@ -228,12 +247,185 @@ export function diffBlocks(before, now, { maxEdits = 4000 } = {}) {
 export function stageBlock(index, now, line) {
   const blocks = diffBlocks(index, now);
   if (!blocks) return null;
-  const at = line - 1;
-  const block = blocks.find((k) => (k.bFrom === k.bTo ? Math.max(0, k.bFrom - 1) === at : k.bFrom <= at && at < k.bTo));
+  const block = blocks[changeIndexAt(blocks, line)];
   if (!block) return null;
   const a = index.split('\n');
   const b = now.split('\n');
   return [...a.slice(0, block.aFrom), ...b.slice(block.bFrom, block.bTo), ...a.slice(block.aTo)].join('\n');
+}
+
+/**
+ * Reverting one change: the block of `now` (the file as edited) whose mark is on `line` (1-based)
+ * put back as it is in `base` (the text at the last commit), the rest left as it is. One change of
+ * `now`'s characters, { from, to, insert, block, index } (for the editor to make as one edit, so
+ * Ctrl+Z brings it back); null when no change of `now` against `base` is there. `blocks`: the
+ * diffBlocks of the two, when known (the bar's own).
+ */
+export function revertBlock(base, now, line, blocks = diffBlocks(base, now)) {
+  if (!blocks) return null;
+  const index = changeIndexAt(blocks, line);
+  if (index === -1) return null;
+  const block = blocks[index];
+  const b = now.split('\n');
+  const old = base.split('\n').slice(block.aFrom, block.aTo);
+  let start = 0;
+  const starts = [0];
+  for (let k = 0; k < b.length; k++) starts.push((start += b[k].length + 1));
+  const done = (from, to, insert) => ({ from, to, insert, block, index });
+  if (block.bFrom < block.bTo) {
+    // Changed lines get the commit's; added ones go, with the line break after them (at the end: before).
+    if (old.length) return done(starts[block.bFrom], starts[block.bTo] - 1, old.join('\n'));
+    if (block.bTo < b.length) return done(starts[block.bFrom], starts[block.bTo], '');
+    return done(Math.max(0, starts[block.bFrom] - 1), now.length, '');
+  }
+  // Removed lines come back before the line now in their place (at the end: after the last one).
+  if (block.bFrom < b.length) return done(starts[block.bFrom], starts[block.bFrom], `${old.join('\n')}\n`);
+  return done(now.length, now.length, `\n${old.join('\n')}`);
+}
+
+// ---- Blame: who changed each line, and when ----
+
+/** The commit `git blame` names for lines not committed yet (the editor's text, or the file as it is). */
+export const NOT_COMMITTED = '0000000000000000000000000000000000000000';
+
+// A path as Git writes it: as it is, or quoted with C escapes ("caf\303\251.js": octal bytes of UTF-8).
+function unquotePath(text) {
+  if (text.length < 2 || text[0] !== '"' || text[text.length - 1] !== '"') return text;
+  const body = text.slice(1, -1);
+  const encoder = new TextEncoder();
+  const SIMPLE = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13 };
+  const bytes = [];
+  let i = 0;
+  while (i < body.length) {
+    const at = body.indexOf('\\', i);
+    for (const byte of encoder.encode(at === -1 ? body.slice(i) : body.slice(i, at))) bytes.push(byte);
+    if (at === -1) break;
+    const octal = /^[0-7]{3}/.exec(body.slice(at + 1, at + 4));
+    if (octal) {
+      bytes.push(parseInt(octal[0], 8));
+      i = at + 4;
+    } else {
+      const c = body[at + 1] ?? '';
+      if (c in SIMPLE) bytes.push(SIMPLE[c]);
+      else for (const byte of encoder.encode(c)) bytes.push(byte);
+      i = at + 2;
+    }
+  }
+  return new TextDecoder().decode(Uint8Array.from(bytes));
+}
+
+/**
+ * `git blame --porcelain` → { commits: { hash: { hash, author, mail, time, tz, committer,
+ * committerMail, committerTime, summary, previous: { hash, filename } | null, boundary, filename,
+ * uncommitted } }, lines: [the commit of each line, in order] }. Times are seconds since 1970,
+ * mails without their < >, file names as they are in that commit (relative to the repository's
+ * top); `previous` is the commit before it that had the line's file (the side "before" of the
+ * commit); `boundary` marks where the history blamed ends (the first commit). The all-zero
+ * commit is lines not committed yet (`uncommitted`). Lines' own text is left out.
+ */
+export function parseBlame(out) {
+  const commits = {};
+  const lines = [];
+  let current = null;
+  for (let raw of String(out ?? '').split('\n')) {
+    // A line's own text, after its header.
+    if (raw.startsWith('\t')) {
+      current = null;
+      continue;
+    }
+    if (raw.endsWith('\r')) raw = raw.slice(0, -1);
+    const head = /^([0-9a-f]{40}|[0-9a-f]{64}) \d+ (\d+)(?: \d+)?$/.exec(raw);
+    if (head) {
+      const hash = head[1];
+      current = commits[hash] ??= { hash, author: '', mail: '', time: 0, tz: '', committer: '', committerMail: '', committerTime: 0, summary: '', previous: null, boundary: false, filename: '', uncommitted: /^0+$/.test(hash) };
+      lines[Number(head[2]) - 1] = hash;
+      continue;
+    }
+    if (!current) continue;
+    const sp = raw.indexOf(' ');
+    const key = sp === -1 ? raw : raw.slice(0, sp);
+    const value = sp === -1 ? '' : raw.slice(sp + 1);
+    if (key === 'author') current.author = value;
+    else if (key === 'author-mail') current.mail = value.replace(/^<|>$/g, '');
+    else if (key === 'author-time') current.time = Number(value) || 0;
+    else if (key === 'author-tz') current.tz = value;
+    else if (key === 'committer') current.committer = value;
+    else if (key === 'committer-mail') current.committerMail = value.replace(/^<|>$/g, '');
+    else if (key === 'committer-time') current.committerTime = Number(value) || 0;
+    else if (key === 'summary') current.summary = value;
+    else if (key === 'boundary') current.boundary = true;
+    else if (key === 'filename') current.filename ||= unquotePath(value);
+    else if (key === 'previous' && !current.previous) {
+      const at = value.indexOf(' ');
+      if (at > 0) current.previous = { hash: value.slice(0, at), filename: unquotePath(value.slice(at + 1)) };
+    }
+  }
+  return { commits, lines: Array.from(lines, (hash) => hash ?? null) };
+}
+
+/**
+ * A per-line list (blame's commits) after an edit: each block ([{ aFrom, aTo, bFrom, bTo }]:
+ * 0-based lines before and after, ends excluded, in order; overlapping ones are joined) has its
+ * lines replaced by as many `fill` as it has now (edited lines are not committed); the others
+ * keep theirs, moved.
+ */
+export function remapLines(lines, blocks, fill) {
+  const joined = [];
+  for (const k of blocks) {
+    const last = joined[joined.length - 1];
+    if (last && (k.aFrom < last.aTo || k.bFrom < last.bTo)) {
+      last.aTo = Math.max(last.aTo, k.aTo);
+      last.bTo = Math.max(last.bTo, k.bTo);
+    } else joined.push({ ...k, aTo: Math.max(k.aFrom, k.aTo), bTo: Math.max(k.bFrom, k.bTo) });
+  }
+  const out = [];
+  let at = 0;
+  for (const k of joined) {
+    for (let i = at; i < k.aFrom; i++) out.push(lines[i] ?? null);
+    for (let i = k.bFrom; i < k.bTo; i++) out.push(fill);
+    at = Math.max(at, k.aTo);
+  }
+  for (let i = at; i < lines.length; i++) out.push(lines[i]);
+  return out;
+}
+
+/** How long ago a time (seconds since 1970) was, in words: "just now", "5 minutes ago", "yesterday", "3 weeks ago". */
+export function blameAgo(time, now = Date.now()) {
+  const s = Math.max(0, Math.round(now / 1000 - time));
+  const say = (n, one, unit) => (n <= 1 ? one : `${n} ${unit} ago`);
+  if (s < 45) return 'just now';
+  if (s < 45 * 60) return say(Math.round(s / 60), 'a minute ago', 'minutes');
+  if (s < 22 * 3600) return say(Math.round(s / 3600), 'an hour ago', 'hours');
+  const days = Math.round(s / 86400);
+  if (days < 2) return 'yesterday';
+  if (days < 7) return `${days} days ago`;
+  if (days < 30) return say(Math.round(days / 7), 'a week ago', 'weeks');
+  if (days < 365) return say(Math.round(days / 30.44), 'a month ago', 'months');
+  return say(Math.round(days / 365.25), 'a year ago', 'years');
+}
+
+/** Who a line's commit is by: "You" (the repository's user.email, or not committed yet), else the author. */
+export function blameWho(commit, me = null) {
+  if (!commit) return '';
+  if (commit.uncommitted) return 'You';
+  if (me?.email && commit.mail && commit.mail.toLowerCase() === me.email.toLowerCase()) return 'You';
+  return commit.author || commit.mail || 'Someone';
+}
+
+/** The words at the end of a line: "You, 3 days ago · Fix the parser", or "You · Not committed yet". */
+export function blameLineText(commit, me = null, now = Date.now()) {
+  if (!commit) return '';
+  if (commit.uncommitted) return 'You · Not committed yet';
+  return `${blameWho(commit, me)}, ${blameAgo(commit.time, now)}${commit.summary ? ` · ${commit.summary}` : ''}`;
+}
+
+/** How new each commit is among a file's, for the blame column's tint: Map hash → 0 (the oldest) … 1 (the newest). */
+export function blameAges(commits) {
+  const list = Object.values(commits ?? {}).filter((c) => !c.uncommitted);
+  const times = [...new Set(list.map((c) => c.time))].sort((a, b) => a - b);
+  const out = new Map();
+  for (const c of list) out.set(c.hash, times.length < 2 ? 1 : times.indexOf(c.time) / (times.length - 1));
+  return out;
 }
 
 /**

@@ -1,7 +1,8 @@
 // The text's right-click menu, and what Ctrl+click does, by the kind of file. A program gets
 // what IDEs offer, in their order: go to the definition, the references, rename, the file's
 // symbols, quick fixes and organizing imports (with a language server), formatting, cut, copy,
-// paste, a comment, a breakpoint, running, debugging, the test at the cursor, and the model.
+// paste, a comment, a breakpoint, running, debugging, the test at the cursor, a change since
+// the last commit (revert or stage it), and the model.
 // Data and markup files (JSON, YAML, XML…) get formatting and the edit items; prose (plain text,
 // Markdown) the shortest menu. Pure, so the Node tests import it: app.js turns the items into a
 // Menu with their actions and the keys in effect.
@@ -36,10 +37,12 @@ export const EDIT_KEYS = { cut: 'Mod+X', copy: 'Mod+C', paste: 'Mod+V', 'select-
  * - readOnly: nothing that changes the text;
  * - server: { attached, organizeImports } (what the file's language server does);
  * - runs, debugs, tests: what the Run group offers for this file (breakpoints with debugs);
+ * - gitChange: the cursor is in a change since the last commit (a file in a Git repository):
+ *   Revert this change, Stage this change (any kind of file);
  * - model: the model panel (Ctrl+K: it answers without a model too, from the guide and the
  *   Claude app); files: the model can change files here.
  */
-export function codeMenuItems({ language = '', onName = false, hasSelection = false, readOnly = false, server = {}, runs = false, debugs = false, tests = false, model = true, files = false } = {}) {
+export function codeMenuItems({ language = '', onName = false, hasSelection = false, readOnly = false, server = {}, runs = false, debugs = false, tests = false, gitChange = false, model = true, files = false } = {}) {
   const kind = fileKind(language);
   const items = [];
   const add = (id, label, command, extra = {}) => items.push({ id, label, command, ...extra });
@@ -69,6 +72,11 @@ export function codeMenuItems({ language = '', onName = false, hasSelection = fa
     if (debugs) add('debug-file', 'Debug this file', 'debug-file');
     if (tests) add('test-at-cursor', 'Run the test at the cursor', 'test-at-cursor');
     if (tests && debugs) add('debug-test', 'Debug the test at the cursor', 'debug-test');
+    sep();
+  }
+  if (gitChange) {
+    if (!readOnly) add('git-revert', 'Revert this change', 'git-revert-change');
+    add('git-stage', 'Stage this change', 'git-stage-change');
     sep();
   }
   if (model) add('ask', hasSelection ? 'Ask the model about the selection…' : 'Ask the model about this…', 'ask-selection');
