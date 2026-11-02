@@ -60,6 +60,9 @@ test('the page allows only same-origin scripts', async () => {
   const csp = /http-equiv="Content-Security-Policy"\s+content="([^"]+)"/.exec(html)?.[1] ?? '';
   assert.match(csp, /script-src 'self'(;|$)/);
   assert.doesNotMatch(html, /<script(?![^>]*\bsrc=)[^>]*>/, 'no inline scripts');
+  // Frames: the app's own pages (the srcdoc preview) and the desktop app's preview server on
+  // 127.0.0.1 (Run scripts: another origin, so a page's scripts never run as the app); nothing else.
+  assert.match(csp, /(^|; )frame-src 'self' http:\/\/127\.0\.0\.1:\*(;|$)/);
 });
 
 test('the app id is the editor’s own on the shared origin', async () => {

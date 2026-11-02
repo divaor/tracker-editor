@@ -3409,7 +3409,8 @@ export function App() {
     if (remote && conn?.protocol !== 'sftp') return toast(`${conn?.name ?? 'That server'} has no terminal: running files needs SSH (SFTP).`, { kind: 'error' });
     const path = remote ? remoteParts(k.path).path : k.path;
     const file = { path, dir: parentDir(path), name: path.split(/[\\/]/).pop() };
-    if (!remote && /\.html?$/i.test(file.name)) return window.desktop.folders.openExternal(k.path).catch((err) => toast(ipcMessage(err), { kind: 'error' }));
+    const web = remote ? null : webRun(k.path, file.name);
+    if (web?.opens) return actions.openInBrowser(web.page);
     const platform = remote ? 'linux' : (window.desktop.platform ?? 'linux');
     const custom = parseRunCommands(getSettings().runCommands);
     // Quoted for the shell the terminal runs (PowerShell, cmd, Git Bash, WSL…), known once it does.
@@ -3425,6 +3426,67 @@ export function App() {
     }
   };
   useEffect(() => retheme(), [settings.theme]);
+
+  // ---- HTML projects: Run opens the page in the browser, served on 127.0.0.1 (previewServer.cjs) ----
+  const webPages = useRef(new Map()); // path → { page, at }: the index.html a stylesheet or script belongs to
+  const [, setWebTick] = useState(0);
+  /** The page of a stylesheet or a script (null while asked, or none): asked again after 30 s. */
+  const pageOfFile = (path) => {
+    const known = webPages.current.get(path);
+    if (known && Date.now() - known.at < 30000) return known.page;
+    webPages.current.set(path, { page: known?.page ?? null, at: Date.now() });
+    window.desktop.preview.page(path).then(
+      (page) => page !== (known?.page ?? null) && (webPages.current.set(path, { page, at: Date.now() }), setWebTick((t) => t + 1)),
+      () => {},
+    );
+    return known?.page ?? null;
+  };
+  /** What Run opens in the browser for a file here: a page itself, or the page of a stylesheet (▶) or a script (▾); null: none. */
+  const webRun = (path, name) => {
+    if (/\.x?html?$/i.test(name)) return { kind: 'html', page: path, opens: true };
+    const kind = !window.desktop?.preview ? null : /\.css$/i.test(name) ? 'css' : /\.m?js$/i.test(name) ? 'js' : null;
+    const page = kind && pageOfFile(path);
+    return page ? { kind, page, opens: kind === 'css' } : null;
+  };
+  /** Run for a page: saved, then served from this computer and opened in the browser, which reloads it as files change. */
+  actions.openInBrowser = async (page = parseKey(store.session.active)?.path) => {
+    const k = parseKey(store.session.active);
+    hostRef.current?.flushAll();
+    if (k?.kind === 'disk' && store.diskTab(k.path)?.dirty && (await actions.saveDisk(k.path)) !== 'saved') return;
+    if (!window.desktop?.preview) return actions.openAsFile(page);
+    try {
+      await window.desktop.preview.open(page);
+    } catch (err) {
+      toast(ipcMessage(err), { kind: 'error' });
+    }
+  };
+  /** The page as a file (file://) with its own program, as before 0.46: scripts that fetch files may not work there. */
+  actions.openAsFile = (page = parseKey(store.session.active)?.path) => window.desktop.folders.openExternal(page).catch((err) => toast(ipcMessage(err), { kind: 'error' }));
+  /**
+   * The HTML preview's Run scripts for a tab: { on, serve, why, toggle } (`serve`: { path } for a
+   * file here, served from its folder; { key } for the rest, as one page); hidden in the Android app.
+   */
+  actions.previewRun = (key) => {
+    if (isAndroidApp()) return null;
+    const k = parseKey(key);
+    const encrypted = k?.kind === 'file' && (store.get(k.id)?.encrypted || store.isSealed(k.id));
+    const serve = !window.desktop?.preview || encrypted ? null : k?.kind === 'disk' && !isRemotePath(k.path) ? { path: k.path } : { key };
+    const chosen = getSettings().previewScripts ?? [];
+    return {
+      on: Boolean(serve) && chosen.includes(key),
+      serve,
+      why: window.desktop?.preview ? 'An encrypted file does not run its scripts here.' : 'Scripts run in the desktop app, which serves the page from your computer. Here they stay off.',
+      // Remembered per file (the last 300).
+      toggle: () => saveSettings({ previewScripts: chosen.includes(key) ? chosen.filter((x) => x !== key) : [...chosen, key].slice(-300) }),
+    };
+  };
+  /** The command: Run scripts on or off for the open HTML file (its preview opens). */
+  actions.previewScripts = () => {
+    const run = previewType === 'html' ? actions.previewRun(activeKey) : null;
+    if (!run?.serve) return toast(run ? run.why : 'Run scripts is for HTML files: open one first.');
+    if (!showPreview) actions.togglePreview();
+    run.toggle();
+  };
 
   // ---- Running tests: Ctrl+F5 the test at the cursor, Ctrl+Shift+F5 the file's, ▶ next to a test ----
   const testsBridge = () => (terminalsAvailable() && window.desktop?.terminal?.testProject ? window.desktop.terminal : null);
@@ -3803,12 +3865,13 @@ export function App() {
     if (remote && server(remoteParts(k.path).id)?.protocol !== 'sftp') return null;
     const name = baseName(k.path);
     const platform = remote ? 'linux' : (window.desktop.platform ?? 'linux');
-    const runs = (!remote && /\.html?$/i.test(name)) || Boolean(runCommandFor({ path: k.path, dir: parentDir(k.path), name }, { platform, kind: platform === 'win32' ? 'powershell' : 'posix', custom: parseRunCommands(getSettings().runCommands) }));
+    const web = remote ? null : webRun(k.path, name);
+    const runs = Boolean(web?.opens) || Boolean(runCommandFor({ path: k.path, dir: parentDir(k.path), name }, { platform, kind: platform === 'win32' ? 'powershell' : 'posix', custom: parseRunCommands(getSettings().runCommands) }));
     const debugs = !remote && debugAvailable() && Boolean(debugAdapterFor(k.path));
     const tests = looksLikeTestFile(name) || Boolean(hostRef.current?.hasTests(key));
-    if (!runs && !debugs && !tests) return null;
+    if (!runs && !debugs && !tests && !web) return null;
     const live = debugRef.current?.active() ? debugRef.current.run : null;
-    return { runs, debugs, tests, debug: live && { status: live.status } };
+    return { runs, debugs, tests, web, debug: live && { status: live.status } };
   };
   actions.debugContinue = () => debugRef.current?.continue();
   actions.debugPause = () => debugRef.current?.pause();
@@ -4500,6 +4563,7 @@ export function App() {
       },
       format: () => actions.formatDocument(),
       preview: () => actions.togglePreview(),
+      'preview-scripts': () => actions.previewScripts(),
       help: () => setDialog((d) => (d?.type === 'help' ? null : { type: 'help' })),
       'help-guide': () => setDialog({ type: 'help', tab: 'guide' }),
       'help-ask': () => actions.openAssist({ mode: 'help' }),
@@ -4698,6 +4762,7 @@ export function App() {
           ${compare && html`<${CompareView} key=${compare.sha ?? compare.left.label} compare=${compare} settings=${settings} onClose=${() => setCompare(null)} />`}
           ${showPreview && !previewFull && splitHandle('Resize the preview')}
           ${showPreview && html`<${Preview} key=${activeKey} kind=${previewType} name=${activeName} text=${activeText()}
+            run=${previewType === 'html' ? actions.previewRun(activeKey) : null} onBrowser=${activeDisk && !isRemotePath(activeDisk.path) ? () => actions.openInBrowser(activeDisk.path) : undefined}
             full=${previewFull} onFull=${isNarrow() ? undefined : () => setPreviewFull(!previewFull)} onClose=${actions.togglePreview}
             readKey=${`preview:${activeKey}`} textHidden=${previewFull || isNarrow()} onReader=${(r) => (previewReader = r)}
             onToggle=${(next) => {

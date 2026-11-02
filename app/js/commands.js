@@ -119,6 +119,7 @@ export const COMMAND_LIST = [
   { id: 'text-smaller', group: 'View', label: 'Smaller text', keys: 'Mod+-', hint: 'Fits more on a small screen' },
   { id: 'text-reset', group: 'View', label: 'The usual text size', keys: 'Mod+0' },
   { id: 'preview', group: 'View', label: 'Preview (Markdown, HTML, JSON, CSV…)' },
+  { id: 'preview-scripts', group: 'View', label: 'Run the HTML preview’s scripts (on or off)', only: 'desktop', hint: 'The page served from this computer, loaded as in a browser; remembered per file' },
   { id: 'split', group: 'View', label: 'Split view: the next tab in a new pane (up to four side by side)', keys: 'Mod+\\', hint: 'Or right-click a tab → Open in a new pane, or drag a tab to the right edge of the editor' },
   { id: 'pane-1', group: 'View', label: 'Go to the main pane', keys: 'Mod+1' },
   { id: 'pane-2', group: 'View', label: 'Go to pane 2 (opens one when there is none)', keys: 'Mod+2' },

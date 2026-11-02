@@ -4397,6 +4397,46 @@ button.where-chip:hover {
   font-weight: 550;
 }
 
+/* Run scripts (HTML): the page served from this computer (electron/previewServer.cjs) in a frame
+   of its own; off at first, remembered per file; the web app says why it cannot (aria-disabled). */
+.preview-head .preview-scripts {
+  min-height: 24px;
+  gap: 5px;
+  padding: 2px 8px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.preview-head .preview-scripts svg {
+  color: var(--git-added);
+}
+
+.preview-head .preview-scripts.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.preview-head .preview-scripts.on svg {
+  color: currentColor;
+}
+
+.preview-head .preview-scripts[aria-disabled='true'] {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.preview-frame-wrap.served .preview-note > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.preview-frame-wrap.served .preview-note .btn {
+  min-height: 22px;
+  gap: 4px;
+  padding: 1px 6px;
+  font-size: 12px;
+}
+
 .preview-scroll {
   flex: 1;
   min-height: 0;

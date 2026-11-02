@@ -3,9 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+    <!-- frame-src: the HTML preview's Run scripts shows the page from the desktop app's own
+         preview server on 127.0.0.1 (electron/previewServer.cjs): another origin than the app's,
+         so the page's scripts run there and cannot reach the app; the frame is sandboxed without
+         allow-top-navigation. 'self' keeps the srcdoc preview (scripts off) as it was. -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; object-src 'none'; base-uri 'self'; media-src 'self' blob:"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; frame-src 'self' http://127.0.0.1:*; object-src 'none'; base-uri 'self'; media-src 'self' blob:"
     />
     <title>Tracker Editor</title>
     <meta name="application-name" content="Tracker Editor" />

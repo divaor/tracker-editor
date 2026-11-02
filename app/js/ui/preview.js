@@ -46,12 +46,67 @@ function MarkdownPreview({ text, onToggle }) {
   return html`<div class="markdown preview-body" onClick=${onClick} dangerouslySetInnerHTML=${{ __html: renderMarkdown(shown) }} />`;
 }
 
-/** The page as a browser shows it, in a sandbox: its scripts, forms and links stay off. */
-function HtmlPreview({ text, name }) {
+/** The page as a browser shows it, in a sandbox: its scripts, forms and links stay off (unless `run` turns its scripts on). */
+function HtmlPreview({ text, name, run, onBrowser }) {
   const [shown] = useSettled(text);
+  if (run?.on && run.serve) return html`<${ServedPage} text=${text} name=${name} serve=${run.serve} onBrowser=${onBrowser} />`;
   return html`<div class="preview-frame-wrap">
     <p class="preview-note muted small"><${Icon} name="eye" size=${14} />Scripts and links are off in the preview.</p>
     <iframe class="preview-frame" sandbox="" srcdoc=${shown} title=${name} referrerpolicy="no-referrer" />
+  </div>`;
+}
+
+// What a page shown with its scripts may do in its frame. Never allow-top-navigation: it cannot
+// take the app's window elsewhere. allow-same-origin is its own origin (http://127.0.0.1:<port>,
+// the preview server), not the app's, so its modules, fetch() and storage work and the app stays
+// out of its reach. Popups and links elsewhere open in the browser (main.cjs).
+const SCRIPTS_SANDBOX = 'allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-downloads';
+
+/**
+ * Run scripts: the page served by the desktop app on 127.0.0.1 (electron/previewServer.cjs), as a
+ * web server would. A file here (`serve.path`) comes from its site's folder, with what is typed
+ * in place of the saved text; anything else (`serve.key`: a note, a tracker document, a file on a
+ * server) as one page. The frame loads again as the text settles and when another file of the
+ * site changes; browser pages reload themselves.
+ */
+function ServedPage({ text, name, serve, onBrowser }) {
+  const bridge = window.desktop.preview;
+  const [shown] = useSettled(text);
+  const [page, setPage] = useState(null); // { url, site }
+  const [error, setError] = useState('');
+  const frame = useRef(null);
+  const now = useRef({ page: null });
+  now.current.page = page;
+  const reload = () => {
+    if (frame.current && now.current.page) frame.current.src = now.current.page.url;
+  };
+  useEffect(() => {
+    let live = true;
+    (serve.path ? bridge.text(serve.path, shown).then(() => now.current.page ?? bridge.url(serve.path)) : bridge.note(serve.key, name, shown)).then(
+      (next) => {
+        if (!live) return;
+        setError('');
+        if (now.current.page?.url === next.url) reload();
+        else setPage(next);
+      },
+      (err) => live && setError(String(err?.message ?? err).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')),
+    );
+    return () => (live = false);
+  }, [shown]);
+  // Leaving: the file is served as saved again; a note's page goes.
+  useEffect(() => () => (serve.path ? bridge.text(serve.path, null) : bridge.note(serve.key, name, null)).catch(() => {}), []);
+  // Another file of its site changed (saved here or elsewhere), or a link out of it opened in the
+  // browser (`back`: the frame was refused the other site): the page again.
+  useEffect(() => bridge.onChanged?.(({ site, files, back }) => now.current.page?.site === site && (back || files.some((f) => f !== serve.path)) && reload()), []);
+  return html`<div class="preview-frame-wrap served">
+    <p class="preview-note muted small">
+      <${Icon} name="play" size=${14} /><span>Scripts run, served from this computer.</span>
+      <button type="button" class="btn ghost sm" title="Load the page again" onClick=${reload} disabled=${!page}><${Icon} name="rotate" size=${14} /><span class="label">Reload</span></button>
+      ${onBrowser && html`<button type="button" class="btn ghost sm" title="Open it in your browser (Run): it reloads there as you save" onClick=${onBrowser}><${Icon} name="external" size=${14} /><span class="label">In the browser</span></button>`}
+    </p>
+    ${error
+      ? html`<div class="notice error preview-problem"><${Icon} name="alert" size=${16} /><span>${error}</span></div>`
+      : page && html`<iframe class="preview-frame" ref=${frame} src=${page.url} sandbox=${SCRIPTS_SANDBOX} title=${name} referrerpolicy="no-referrer" />`}
   </div>`;
 }
 
@@ -180,9 +235,9 @@ function TablePreview({ text, delimiter }) {
  * kind comes from previewKind(); onToggle(text) edits the text (Markdown checklists);
  * onGoTo(line, column) shows a place in the text.
  */
-export function PreviewBody({ kind, text = '', name, onToggle, onGoTo }) {
+export function PreviewBody({ kind, text = '', name, onToggle, onGoTo, run, onBrowser }) {
   if (kind === 'markdown') return html`<${MarkdownPreview} text=${text} onToggle=${onToggle} />`;
-  if (kind === 'html') return html`<${HtmlPreview} text=${text} name=${name} />`;
+  if (kind === 'html') return html`<${HtmlPreview} text=${text} name=${name} run=${run} onBrowser=${onBrowser} />`;
   if (kind === 'svg') return html`<${SvgPreview} text=${text} name=${name} />`;
   if (kind === 'json') return html`<${JsonPreview} text=${text} onGoTo=${onGoTo} />`;
   if (kind === 'xml') return html`<${XmlPreview} text=${text} />`;
@@ -195,8 +250,10 @@ export function PreviewBody({ kind, text = '', name, onToggle, onGoTo }) {
  * switches); Full screen shows only the preview; `onClose` hides it. Markdown is read aloud as
  * `readKey` from the top of the preview or its selection, followed as it goes (ui/readAlong.js);
  * `onReader({ listen, hidesText })` lets Alt+R start it while the text is hidden (`textHidden`).
+ * HTML: `run` ({ on, serve, why, toggle }, app.js `previewRun`) is Run scripts (ServedPage);
+ * `onBrowser` opens the page in the browser.
  */
-export function Preview({ kind, text = '', name, onToggle, onGoTo, full = false, onFull, onClose, readKey, onReader, textHidden = false }) {
+export function Preview({ kind, text = '', name, onToggle, onGoTo, full = false, onFull, onClose, readKey, onReader, textHidden = false, run = null, onBrowser }) {
   const pane = useRef(null);
   const scroll = useRef(null);
   const [screen, setScreen] = useFullScreen(pane);
@@ -223,10 +280,19 @@ export function Preview({ kind, text = '', name, onToggle, onGoTo, full = false,
   }, [readable]);
   // Reading the preview stops with it (what it marks is gone).
   useEffect(() => () => readKey && getReaderState().key === readKey && stopReading(), [readKey]);
-  const body = html`<${PreviewBody} kind=${kind} text=${text} name=${name} onToggle=${onToggle} onGoTo=${onGoTo} />`;
+  const body = html`<${PreviewBody} kind=${kind} text=${text} name=${name} onToggle=${onToggle} onGoTo=${onGoTo} run=${run} onBrowser=${onBrowser} />`;
+  // Run scripts (HTML): off at first, remembered per file; where the page cannot be served (the
+  // web app, an encrypted note) the button says why instead.
+  const scripts =
+    kind === 'html' &&
+    run &&
+    html`<button type="button" class="btn ghost sm preview-scripts ${run.on ? 'on' : ''}" aria-pressed=${Boolean(run.on)} aria-disabled=${run.serve ? undefined : 'true'}
+      title=${!run.serve ? run.why : run.on ? 'Scripts run: the page is served from this computer and loads as in a browser. Click to turn them off.' : 'Run the page’s scripts: served from this computer, it loads as in a browser (its styles, scripts, modules and the files next to it)'}
+      onClick=${() => (run.serve ? run.toggle() : toast(run.why))}><${Icon} name="play" size=${14} /><span class="label">Run scripts</span></button>`;
   return html`<div class="preview-pane preview-${kind} ${full ? 'full' : ''} ${screen ? 'fills-screen' : ''}" ref=${pane}>
     <div class="preview-head">
       <${Icon} name="eye" size=${14} /><span class="preview-title">Preview</span><span class="spacer" />
+      ${scripts}
       ${readable &&
       html`<button type="button" class="btn ghost sm preview-listen" aria-pressed=${mine && reader.status === 'playing'}
         title=${mine ? (reader.status === 'playing' ? 'Pause reading (Alt+R)' : 'Go on reading (Alt+R)') : 'Read aloud from the top of the preview, or the selection, following along'}

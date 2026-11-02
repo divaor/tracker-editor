@@ -1050,7 +1050,11 @@ ipcMain.handle('disk:read-appended', guard((_e, file, offset, opts) =>
 ));
 ipcMain.handle('disk:write', guard((_e, file, text, opts) => {
   if (typeof text !== 'string') throw new Error('Nothing to save');
-  return isRemote(file) ? remote.write(file, text, opts ?? {}) : disk.writeTextFile(checkFile(file), text, opts ?? {});
+  if (isRemote(file)) return remote.write(file, text, opts ?? {});
+  const saved = disk.writeTextFile(checkFile(file), text, opts ?? {});
+  // Pages served from its folder reload (Run's browser page, the preview with its scripts).
+  if (!saved.conflict) previewHost?.changed(file);
+  return saved;
 }));
 ipcMain.handle('disk:stat', guard((_e, file) => {
   // A server that cannot be reached throws, so the page can tell it from a missing file.
@@ -1594,6 +1598,66 @@ ipcMain.handle('folder:open-external', guard(async (_e, file) => {
   const error = await shell.openPath(file);
   if (error) throw new Error(error);
   return true;
+}));
+
+// ---- HTML projects: pages served on 127.0.0.1 (previewServer.cjs) ----------------
+// Run (F5) opens a page in the browser and the preview's Run scripts shows it in a frame, both
+// from a small server here, so its scripts, modules and fetches load as from a web server. The
+// page names a file the editor may open (checkFile; never one on a server), never a folder, a
+// port or a program; the server serves only such files, from the page's site folder.
+const previewServer = require('./previewServer.cjs');
+let previewHost = null;
+const mayOpen = (file) => allowedFiles.has(file) || folders.allowedBy(allowedFolders, file);
+const preview = () =>
+  (previewHost ??= previewServer.createPreviewServer({
+    allowed: mayOpen,
+    tops: () => allowedFolders,
+    onChange: (info) => mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.send('preview:changed', info),
+  }));
+const servable = (file) => {
+  if (isRemote(file)) throw new Error('Files on servers are not served here: open the page from where it is published.');
+  return checkFile(file);
+};
+// A link or a popup out of a page the preview runs opens in the browser: http(s) and mailto
+// only, at most one a second (a page's script cannot open a flood of browser tabs).
+let lastPreviewOpen = 0;
+function openFromPreview(url) {
+  if (!isSafeExternal(url) || Date.now() - lastPreviewOpen < 1000) return;
+  lastPreviewOpen = Date.now();
+  shell.openExternal(url);
+}
+// A page reloaded or closed: its unsaved texts and notes go (files are served from disk again).
+const previewPages = new WeakSet();
+function watchPreviewPage(sender) {
+  if (previewPages.has(sender)) return;
+  previewPages.add(sender);
+  const forget = () => previewHost?.forget(sender);
+  sender.on('did-navigate', forget);
+  sender.once('destroyed', forget);
+}
+ipcMain.handle('preview:url', guard((event, file) => {
+  watchPreviewPage(event.sender);
+  return preview().url(servable(file));
+}));
+ipcMain.handle('preview:open', guard(async (_e, file) => {
+  const { url } = await preview().url(servable(file));
+  await shell.openExternal(url);
+  return url;
+}));
+// The page a stylesheet or a script belongs to (an index.html in its folder or above, in its site).
+ipcMain.handle('preview:page', guard((_e, file) => previewServer.pageOf(servable(file), { tops: allowedFolders, allowed: mayOpen })));
+// The unsaved text of a file the preview shows with its scripts (null: the file again).
+ipcMain.handle('preview:text', guard((event, file, text) => {
+  if (typeof text !== 'string') return typeof file === 'string' ? (previewHost?.setText(file, null) ?? false) : false;
+  watchPreviewPage(event.sender);
+  return preview().setText(servable(file), text, event.sender);
+}));
+// A note, a tracker document or a file on a server shown with its scripts: its text as one page.
+ipcMain.handle('preview:note', guard((event, key, name, text) => {
+  if (typeof key !== 'string') throw new Error('Not allowed');
+  if (typeof text !== 'string') return previewHost?.notePage(key, '', null) ?? null;
+  watchPreviewPage(event.sender);
+  return preview().notePage(key, String(name ?? ''), text, event.sender);
 }));
 // Properties: sizes, dates, owner and permissions; permissions can be changed
 // (on Windows only "read-only" means something here).
@@ -2933,14 +2997,38 @@ function createWindow() {
     }
   });
 
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (isSafeExternal(url)) shell.openExternal(url);
+  mainWindow.webContents.setWindowOpenHandler(({ url, referrer }) => {
+    // From a page the preview runs (allow-popups): at most one a second, as the frame's links.
+    if (previewHost?.owns(referrer?.url)) openFromPreview(url);
+    else if (isSafeExternal(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
   mainWindow.webContents.on('will-navigate', (event, url) => {
     if (url.startsWith(`${APP_ORIGIN}/`)) return;
     event.preventDefault();
     if (isSafeExternal(url)) shell.openExternal(url);
+  });
+  // A page the preview runs (served on 127.0.0.1): its links to other places open in the browser
+  // and the frame stays on the site. The window's CSP (frame-src) refuses other origins before
+  // will-frame-navigate, so those are caught as they start and the page is told to load the frame
+  // again once the refusal lands; other servers on 127.0.0.1 are stopped in will-frame-navigate.
+  const leaving = new Map(); // the address a frame was refused → its site (the refusal comes from another frame host)
+  mainWindow.webContents.on('did-start-navigation', (event) => {
+    const { url, isMainFrame, isSameDocument, frame } = event;
+    if (isMainFrame || isSameDocument || !frame || !/^https?:/i.test(url) || url.startsWith('http://127.0.0.1:') || !previewHost?.owns(frame.url)) return;
+    openFromPreview(url);
+    leaving.set(url, previewHost.siteOf(frame.url));
+    if (leaving.size > 20) leaving.delete(leaving.keys().next().value);
+  });
+  mainWindow.webContents.on('did-fail-provisional-load', (_e, _code, _text, url, isMainFrame) => {
+    if (isMainFrame || !leaving.has(url)) return;
+    mainWindow.webContents.send('preview:changed', { site: leaving.get(url), files: [], back: true });
+    leaving.delete(url);
+  });
+  mainWindow.webContents.on('will-frame-navigate', (event) => {
+    if (event.isMainFrame || !previewHost?.owns(event.frame?.url) || previewHost.owns(event.url)) return;
+    event.preventDefault();
+    openFromPreview(event.url);
   });
 
   mainWindow.on('close', (event) => {
@@ -3252,6 +3340,7 @@ app.on('before-quit', () => {
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   remote.disconnectAll();
+  previewHost?.stop();
   if (clipSaveTimer) saveClips();
 });
 

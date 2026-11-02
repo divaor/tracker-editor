@@ -342,6 +342,21 @@ contextBridge.exposeInMainWorld('desktop', {
       return () => ipcRenderer.removeListener('dap:exit', listener);
     },
   },
+  // HTML projects served on 127.0.0.1 (previewServer.cjs): the page names a file the editor may
+  // open; the main process makes the address. `open` shows it in the browser; `text` is a file's
+  // unsaved text (null: the file again); `note` a note's text as one page (null forgets it).
+  preview: {
+    url: (path) => ipcRenderer.invoke('preview:url', path),
+    open: (path) => ipcRenderer.invoke('preview:open', path),
+    page: (path) => ipcRenderer.invoke('preview:page', path),
+    text: (path, text) => ipcRenderer.invoke('preview:text', path, text),
+    note: (key, name, text) => ipcRenderer.invoke('preview:note', key, name, text),
+    onChanged(callback) {
+      const listener = (_event, info) => callback(info);
+      ipcRenderer.on('preview:changed', listener);
+      return () => ipcRenderer.removeListener('preview:changed', listener);
+    },
+  },
   // Dragging tabs or files out to other apps: { path } or { paths } on disk, or { name, text } for a copy.
   drag: {
     start: (item) => ipcRenderer.send('drag:start', item),

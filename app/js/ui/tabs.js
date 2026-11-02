@@ -467,10 +467,14 @@ const titled = (label, id) => {
  * file (a test file: its tests), the bug debugs it (a test file: the test at the cursor), ▾ has
  * the rest (the test at the cursor, the file's tests, again, the project's tasks, the panels).
  * While a debug run goes on, its controls take the group's place. `run`: { runs, debugs, tests,
- * debug: { status } | null } (app.js `runInfo`).
+ * web: { kind: 'html'|'css'|'js', page, opens } | null, debug: { status } | null } (app.js `runInfo`).
  */
 export function RunGroup({ run, actions }) {
-  const { runs, debugs, tests, debug } = run;
+  const { runs, debugs, tests, debug, web } = run;
+  // HTML projects: a page opens in the browser, served from this computer (it reloads as files
+  // change); a stylesheet opens its page; a script runs as before, its page in ▾.
+  const pageName = web && (web.page.split(/[\\/]/).pop() || 'the page');
+  const opensPage = web?.opens && web.kind !== 'html';
   const btn = (label, icon, id, onClick, { cls = '', text = '', disabled = false } = {}) =>
     html`<button type="button" class=${`run-btn ${cls}`} aria-label=${label} title=${titled(label, id)} disabled=${disabled} onMouseDown=${(e) => e.preventDefault()} onClick=${onClick}>
       <${Icon} name=${icon} size=${15} />${text && html`<span class="label">${text}</span>`}
@@ -487,7 +491,11 @@ export function RunGroup({ run, actions }) {
     </div>`;
   }
   const items = () => [
-    runs && { label: 'Run this file', icon: 'play', hint: keysOfCommand('run-file'), run: actions.runFile },
+    web?.kind === 'html' && { label: 'Open in the browser', icon: 'external', hint: keysOfCommand('run-file'), run: () => actions.openInBrowser(web.page) },
+    web?.kind === 'html' && { label: 'Open as a file (file://)', icon: 'file', hint: 'No server', run: () => actions.openAsFile(web.page) },
+    web && web.kind !== 'html' && { label: `Open ${pageName} in the browser`, icon: 'external', hint: opensPage ? keysOfCommand('run-file') : '', run: () => actions.openInBrowser(web.page) },
+    web && (runs || debugs || tests) && !web.opens && { separator: true },
+    runs && !web?.opens && { label: 'Run this file', icon: 'play', hint: keysOfCommand('run-file'), run: actions.runFile },
     debugs && { label: 'Debug this file', icon: 'bug', hint: keysOfCommand('debug-file'), run: () => actions.debugFile() },
     tests && (runs || debugs) && { separator: true },
     tests && { label: 'Run the test at the cursor', icon: 'play', hint: keysOfCommand('test-at-cursor'), run: () => actions.runTests({ scope: 'cursor' }) },
@@ -498,12 +506,14 @@ export function RunGroup({ run, actions }) {
     { label: 'The project’s tasks…', icon: 'list', hint: keysOfCommand('tasks') || 'npm scripts, make targets…', run: actions.showTasks },
     tests && { label: 'The Tests panel', icon: 'panelRight', run: () => actions.command('tests-panel') },
     debugs && { label: 'The Debug panel', icon: 'panelRight', run: actions.toggleDebugPanel },
-    runs && { label: 'How files of this type run…', icon: 'settings', hint: 'Settings → Editor → Run commands', run: actions.showSettings },
+    runs && !web?.opens && { label: 'How files of this type run…', icon: 'settings', hint: 'Settings → Editor → Run commands', run: actions.showSettings },
   ];
   return html`<div class="run-group" role="group" aria-label="Run and debug">
     ${tests
       ? btn('Run this file’s tests', 'play', 'test-file', () => actions.runTests({ scope: 'file' }), { cls: 'go', text: 'Run' })
-      : runs && btn('Run this file', 'play', 'run-file', actions.runFile, { cls: 'go', text: 'Run' })}
+      : web?.opens
+        ? btn(opensPage ? `Open ${pageName} in the browser` : 'Open in the browser', 'play', 'run-file', () => actions.openInBrowser(web.page), { cls: 'go', text: 'Run' })
+        : runs && btn('Run this file', 'play', 'run-file', actions.runFile, { cls: 'go', text: 'Run' })}
     ${debugs && (tests ? btn('Debug the test at the cursor', 'bug', 'debug-test', () => actions.debugTest()) : btn('Debug this file', 'bug', 'debug-file', () => actions.debugFile()))}
     <${MenuButton} label="More to run: tests, tasks, the panels" icon="chevronDown" className="run-btn run-more" items=${items} />
   </div>`;
