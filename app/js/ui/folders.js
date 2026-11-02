@@ -572,7 +572,13 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     const parents = new Set(items.map((e) => dirOf(e.path ?? e)));
     return parents.size === 1 ? [...parents][0] : dir;
   };
+  // Each pick counts (a click, the keys, a command): what an action made or moved is picked once the
+  // folders are read again only when nothing else was picked meanwhile. On a server or in a container that
+  // reading can come back after the person has gone on to another file, which F2 or Delete would then
+  // have taken for the new one.
+  const picks = useRef(0);
   const select = (paths, { at = paths[paths.length - 1] ?? null, keepAnchor = false } = {}) => {
+    picks.current += 1;
     setSelected(new Set(paths));
     setCursor(at);
     if (!keepAnchor) setAnchor(at);
@@ -648,23 +654,26 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   // After a change: the list read again, open tabs following what moved, what changed here selected.
   // A change made here: the filter looks in the folders inside again.
   const lookAgain = () => filter.trim() && setDeepTick((t) => t + 1);
-  const after = async ({ moves = [], made = [] }, done, undo) => {
+  // `since`: the picks when the action began (nothing picked after it: what it made is picked).
+  const after = async ({ moves = [], made = [], since = picks.current }, done, undo) => {
     await load();
     lookAgain();
     if (moves.length) actions.followDiskMoves(moves);
     const here = [...moves.map((m) => m.to), ...made].filter((p) => live.includes(dirOf(p)) || shown.has(dirOf(p)));
-    if (here.length) select(here);
+    if (here.length && picks.current === since) select(here);
     if (done) toast(done, undo ? { action: { label: 'Undo', run: undo }, timeout: 8000 } : {});
   };
   const create = async ({ kind, name, text, in: where = dir }) => {
     setCreating(null);
+    const since = picks.current;
     try {
       const path = kind === 'folder' ? await bridge.newFolder(where, name) : await bridge.newFile(where, name, { text: text ?? '' });
       await load();
       lookAgain();
-      select([path]);
+      const still = picks.current === since;
+      if (still) select([path]);
       if (kind === 'file' && opensInEditor(name)) await actions.openDiskPath(path);
-      list.current?.focus();
+      if (still) list.current?.focus();
     } catch (err) {
       fail(err);
       setCreating({ kind, name, text, in: where });
@@ -675,9 +684,10 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     setRenaming(null);
     list.current?.focus();
     if (name === e.name) return;
+    const since = picks.current;
     try {
       const to = await bridge.rename(e.path, name);
-      await after({ moves: [{ from: e.path, to }] }, `Renamed to ${name}`, async () => {
+      await after({ moves: [{ from: e.path, to }], since }, `Renamed to ${name}`, async () => {
         const back = await bridge.rename(to, e.name).catch(fail);
         if (back) after({ moves: [{ from: to, to: back }] });
       });
@@ -702,12 +712,13 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   };
   const copyIn = (files, target) => askExisting([...files].map((f) => f.name).filter(Boolean), target, (onExists) => copyInNow(files, target, onExists));
   const moveNow = async (paths, target, onExists) => {
+    const since = picks.current;
     try {
       if (paths.every((p) => dirOf(p) === target)) return toast(`${paths.length === 1 ? baseName(paths[0]) : count(paths.length, 'item')} ${paths.length === 1 ? 'is' : 'are'} already in ${baseName(target)}.`);
       const moves = await bridge.move(paths, target, { onExists });
       if (moves.transfer) return; // To or from a server: in the background (the Transfers card).
       if (!moves.length) return onExists === 'skip' && toast('Nothing was moved: those are there already.');
-      await after({ moves }, `Moved ${count(moves.length, 'item')} to ${baseName(target)}`, async () => {
+      await after({ moves, since }, `Moved ${count(moves.length, 'item')} to ${baseName(target)}`, async () => {
         const back = [];
         for (const m of moves) back.push(...(await bridge.move([m.to], dirOf(m.from)).catch((err) => (fail(err), []))));
         after({ moves: back });
@@ -717,11 +728,12 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     }
   };
   const copyNow = async (paths, target, onExists) => {
+    const since = picks.current;
     try {
       const copies = await bridge.copy(paths, target, { onExists });
       if (copies.transfer) return;
       if (!copies.length) return toast('Nothing was copied: those are there already.');
-      await after({ made: copies.map((c) => c.to) }, `Copied ${count(copies.length, 'item')}${target === dir ? '' : ` to ${baseName(target)}`}`, () =>
+      await after({ made: copies.map((c) => c.to), since }, `Copied ${count(copies.length, 'item')}${target === dir ? '' : ` to ${baseName(target)}`}`, () =>
         bridge.trash(copies.map((c) => c.to)).then(() => load(), fail),
       );
     } catch (err) {
@@ -729,11 +741,12 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     }
   };
   const copyInNow = async (files, target, onExists) => {
+    const since = picks.current;
     try {
       const copies = await bridge.copyIn(files, target, { onExists });
       if (copies.transfer) return;
       if (!copies.length) return toast('Nothing was added: those are there already.');
-      await after({ made: copies.map((c) => c.to) }, `Added ${count(copies.length, 'item')}${target === dir ? '' : ` to ${baseName(target)}`}`, () =>
+      await after({ made: copies.map((c) => c.to), since }, `Added ${count(copies.length, 'item')}${target === dir ? '' : ` to ${baseName(target)}`}`, () =>
         bridge.trash(copies.map((c) => c.to)).then(() => load(), fail),
       );
     } catch (err) {
@@ -807,10 +820,11 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
 
   const zipSelected = async (items) => {
     toast(`Compressing ${items.length === 1 ? items[0].name : count(items.length, 'item')}…`, { key: 'zip', timeout: 600000 });
+    const since = picks.current;
     try {
       const made = await bridge.zip(items.map((e) => e.path), folderOf(items));
       dismissToast('zip');
-      await after({ made: [made] }, `Made ${baseName(made)}`, () => bridge.trash([made]).then(() => load(), fail));
+      await after({ made: [made], since }, `Made ${baseName(made)}`, () => bridge.trash([made]).then(() => load(), fail));
     } catch (err) {
       dismissToast('zip');
       fail(err);
@@ -818,10 +832,11 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   };
   const extract = async (e) => {
     toast(`Extracting ${e.name}…`, { key: 'zip', timeout: 600000 });
+    const since = picks.current;
     try {
       const got = await bridge.unzip(e.path);
       dismissToast('zip');
-      await after({ made: [got.folder] }, `Extracted ${count(got.files, 'file')} into ${baseName(got.folder)}${got.skipped.length ? ` (${count(got.skipped.length, 'unsafe name')} left out)` : ''}`, () =>
+      await after({ made: [got.folder], since }, `Extracted ${count(got.files, 'file')} into ${baseName(got.folder)}${got.skipped.length ? ` (${count(got.skipped.length, 'unsafe name')} left out)` : ''}`, () =>
         bridge.trash([got.folder]).then(() => load(), fail),
       );
     } catch (err) {
