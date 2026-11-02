@@ -679,9 +679,15 @@ test('remote.cjs: a Docker place set up, opened, its files read, saved (and refu
   channel.write('ping\n');
   assert.ok(await until(() => echoed === 'ping\n'));
   channel.close();
-  // The container stops: disconnected, with why; then connecting says it is not running.
+  // The container stops as a file's watch looks at it: disconnected, with why. That look does not connect
+  // again by itself (it only failed, and its error hid why: 0.47 to 0.49).
+  const stoppedAt = events.length;
   w.setState((st) => (st.containers[0].State = 'exited'));
-  assert.ok(await until(() => events.some((e) => e.state === 'disconnected' && /stopped/.test(e.error))));
+  await assert.rejects(remote.stat(toUri(conn.id, path.join(w.app, 'src', 'main.js'))), /not running|not connected/);
+  assert.ok(await until(() => events.some((e) => e.state === 'disconnected' && /stopped|is not running/.test(e.error))));
+  assert.equal(remote.status(conn.id).state, 'disconnected');
+  assert.deepEqual(events.slice(stoppedAt).map((e) => e.state), ['disconnected'], 'not connected again');
+  // Then connecting says it is not running.
   assert.equal(remote.isConnected(conn.id), false);
   await assert.rejects(remote.read(toUri(conn.id, path.join(w.app, 'src', 'main.js'))), /is not running/);
   assert.equal(remote.status(conn.id).state, 'error');

@@ -856,6 +856,8 @@ class ExecSession {
   lost(message) {
     if (this.closed) return;
     this.closed = true;
+    // Why it ended (remote.cjs: a read does not connect again by itself after this).
+    this.endedWith = message || 'ended';
     this.stopWatching();
     this.onClose(message);
   }

@@ -1142,7 +1142,10 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
     try {
       return await fn(s, p, id);
     } catch (err) {
-      if (!again || s.alive !== false) throw friendlyError(err, conn);
+      // Once more on a new connection only when the old one died without a word (an FTP server's idle
+      // timeout). A place that said why it ended (its container stopped) is not connected again by a read:
+      // that only fails, and its error hid why (a file's watch looking as the container stopped did it).
+      if (!again || s.alive !== false || s.endedWith || err?.stopped) throw friendlyError(err, conn);
       try {
         return await fn(await session(id), p, id);
       } catch (retried) {
