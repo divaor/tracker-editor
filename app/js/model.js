@@ -149,6 +149,40 @@ export function parseIndex(source) {
 
 export const byteLength = (s) => new TextEncoder().encode(s).length;
 
+/**
+ * What a text was, to tell later whether edits came back to it (undone to what is saved): its
+ * length and a 53-bit hash (cyrb53). Not a secure hash; quick enough to take at each edit of an
+ * equal length, and never kept as the text itself (a big file is not held twice).
+ */
+export function textMark(text) {
+  const s = String(text ?? '');
+  let h1 = 0xdeadbeef ^ s.length;
+  let h2 = 0x41c6ce57 ^ s.length;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 2654435761);
+    h2 = Math.imul(h2 ^ c, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return { length: s.length, hash: 4294967296 * (2097151 & h2) + (h1 >>> 0) };
+}
+
+/** Whether `text` is the one `mark` (textMark) was taken of; false without a mark. */
+export const isMarked = (mark, text) => Boolean(mark) && mark.length === String(text ?? '').length && mark.hash === textMark(text).hash;
+
+/**
+ * A file tab (store.js's disk tabs) edited to `text`: { text, dirty, saved }. A tab with no unsaved
+ * edits holds what the file holds, so its mark is taken before the first edit; edits that come
+ * back to it (undone) leave the tab saved again (before 0.48.1 it stayed "Not saved"). A tab kept
+ * unsaved by an older version has no mark and stays unsaved.
+ */
+export function afterDiskEdit(tab, text) {
+  const saved = tab.dirty ? tab.saved : textMark(tab.text);
+  const dirty = !isMarked(saved, text);
+  return { text, dirty, saved: dirty ? saved : undefined };
+}
+
 /** Git's blob id for a text: SHA-1 of "blob <size>\0<content>". Lets the editor know a blob's sha without uploading it. */
 export async function gitBlobSha(content) {
   const body = new TextEncoder().encode(content);

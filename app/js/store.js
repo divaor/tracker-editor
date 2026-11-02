@@ -5,7 +5,7 @@ import { isSealed } from './crypto.js';
 import { kvDelete, kvGet, kvSet } from './kv.js';
 import { getSettings } from './settings.js';
 import { documentKind } from './docTypes.js';
-import { applyFilePatch, createFile, nowIso, tombstone, trackerDocs, untitledName } from './model.js';
+import { afterDiskEdit, applyFilePatch, createFile, nowIso, textMark, tombstone, trackerDocs, untitledName } from './model.js';
 import { isTextAttachment, newId } from './tracker-model.js';
 import { closePane, migratePanes, moveTab, placeTab, tidyPanes } from './paneLayout.js';
 
@@ -33,7 +33,8 @@ let trackerOps = []; // pending changes to tracker.json: { id, op: 'project' | '
 let repoTabs = new Map(); // path → { path, name, text, baseSha, dirty }
 // Files on disk edited in place (desktop), never synced: path → { path, name, text,
 // eol, bom, encoding, mtimeMs, size, truncated, dirty, follow, conflict, missing,
-// stale (text not read yet after a restart) }.
+// stale (text not read yet after a restart), saved (while dirty: textMark of the text the
+// file holds, so edits undone back to it leave the tab saved again) }.
 let diskTabs = new Map();
 let docTexts = new Map(); // blob sha → text of a tracker document (for search and offline reading)
 // Comparisons in tabs of their own (c:<id>): id → { id, mode: 'files' | 'folders', left, right,
@@ -614,7 +615,8 @@ export const store = {
   setDiskText(path, text, { urgent = false } = {}) {
     const tab = diskTabs.get(path);
     if (!tab || tab.text === text) return;
-    diskTabs.set(path, { ...tab, text, dirty: true });
+    // Unsaved, unless the edits came back to what the file holds (undone).
+    diskTabs.set(path, { ...tab, ...afterDiskEdit(tab, text) });
     persist.disk(urgent ? 0 : undefined);
     emit('disk', { path, text: true });
   },
@@ -623,7 +625,8 @@ export const store = {
   diskSaved(path, { text, mtimeMs, size }) {
     const tab = diskTabs.get(path);
     if (!tab) return;
-    diskTabs.set(path, { ...tab, mtimeMs, size, dirty: tab.text !== text, conflict: false, missing: false });
+    const dirty = tab.text !== text;
+    diskTabs.set(path, { ...tab, mtimeMs, size, dirty, saved: dirty ? textMark(text) : undefined, conflict: false, missing: false });
     persist.disk(0);
     emit('disk', { path });
   },
@@ -635,7 +638,7 @@ export const store = {
     const { text, eol, bom, encoding, mtimeMs, size, truncated } = info;
     // A document keeps the text its view read until it reads the file again.
     const keep = info.doc && tab.doc && Math.abs(mtimeMs - tab.mtimeMs) <= 1 ? tab.text : text;
-    diskTabs.set(path, { ...tab, text: keep, eol, bom, encoding, mtimeMs, size, truncated, readOnly: Boolean(info.readOnly), doc: info.doc ?? null, dirty: false, conflict: false, missing: false, stale: false });
+    diskTabs.set(path, { ...tab, text: keep, eol, bom, encoding, mtimeMs, size, truncated, readOnly: Boolean(info.readOnly), doc: info.doc ?? null, dirty: false, saved: undefined, conflict: false, missing: false, stale: false });
     persist.disk();
     emit('disk', { path });
   },
