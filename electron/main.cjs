@@ -2134,6 +2134,17 @@ ipcMain.handle('git:stage-text', guard(async (_e, file, text) => {
   }
   return (await git()).setIndexBytes(file, disk.encode(text, format));
 }));
+// Making a folder the person opened a repository (git init): what it would mean, then doing it.
+ipcMain.handle('git:info', guard(async (_e, dir) => {
+  if (typeof dir !== 'string' || isRemote(dir)) return null;
+  checkDir(dir);
+  return (await git()).info(dir);
+}));
+ipcMain.handle('git:init', guard(async (_e, dir, opts = {}) => {
+  if (typeof dir !== 'string' || isRemote(dir)) throw new Error('Git works on folders on this computer');
+  checkDir(dir);
+  return (await git()).init(dir, { branch: typeof opts?.branch === 'string' ? opts.branch.trim() : '' });
+}));
 ipcMain.handle('git:status', guard(async (_e, dir) => {
   if (typeof dir !== 'string' || isRemote(dir)) return null;
   checkDir(dir);

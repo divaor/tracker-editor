@@ -208,6 +208,9 @@ contextBridge.exposeInMainWorld('desktop', {
     act: (dir, action) => ipcRenderer.invoke('git:act', dir, action),
     index: (file) => ipcRenderer.invoke('git:index', file),
     stageText: (file, text) => ipcRenderer.invoke('git:stage-text', file, text),
+    // Making a folder a repository: { installed, root, defaultBranch }, then git init.
+    info: (dir) => ipcRenderer.invoke('git:info', dir),
+    init: (dir, opts) => ipcRenderer.invoke('git:init', dir, opts),
     onProgress(callback) {
       const listener = (_event, progress) => callback(progress);
       ipcRenderer.on('git:progress', listener);

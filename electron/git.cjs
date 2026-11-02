@@ -548,6 +548,52 @@ function createGit({ parseStatus, parse = {}, runGit = run, runGitWrite = runWri
     },
     /** Forgets which folders are in which repository (a repository was made or removed). */
     forget: () => roots.clear(),
+    /**
+     * What making `dir` a repository would mean: { installed (the git program is there), root
+     * (the repository `dir` is in already, or null), defaultBranch (the person's
+     * init.defaultBranch, or '') }.
+     */
+    async info(dir) {
+      if (!missing) {
+        try {
+          await runGit(['--version'], dir, { timeout: 5000 });
+        } catch (err) {
+          if (err.code === 'ENOENT') missing = true;
+        }
+      }
+      if (missing) return { installed: false, root: null, defaultBranch: '' };
+      roots.delete(dir);
+      const root = await repoOf(dir);
+      const named = (await tryGit(['config', '--get', 'init.defaultBranch'], dir)).trim();
+      return { installed: true, root, defaultBranch: safeBranch(named) ? named : '' };
+    },
+    /**
+     * Makes `dir` a Git repository (git init), its first branch named `branch` (else Git's own
+     * choice): { root, branch }. Refuses a folder that is a repository's top already; one inside
+     * another repository becomes a repository of its own (the page says so first).
+     */
+    async init(dir, { branch = '' } = {}) {
+      if (branch && !safeBranch(branch)) throw new Error('Not a branch name');
+      roots.delete(dir);
+      const before = await repoOf(dir);
+      if (missing) throw new Error('Git is not installed on this computer');
+      const real = (p) => {
+        try {
+          return fs.realpathSync.native(p);
+        } catch {
+          return path.resolve(p);
+        }
+      };
+      const key = (p) => (process.platform === 'win32' ? real(p).toLowerCase() : real(p));
+      if (before && key(before) === key(dir)) throw new Error('This folder is a Git repository already');
+      // Git's own check of the name, before anything is made.
+      if (branch) await runGit(['check-ref-format', '--branch', branch], dir, { timeout: 5000 });
+      await runGitWrite(['init', '-q'], dir);
+      if (branch) await runGitWrite(['symbolic-ref', 'HEAD', `refs/heads/${branch}`], dir);
+      roots.clear();
+      const root = await repoOf(dir);
+      return { root, branch: (await tryGit(['symbolic-ref', '--short', 'HEAD'], dir)).trim() };
+    },
     get missing() {
       return missing;
     },

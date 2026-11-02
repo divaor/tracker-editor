@@ -24,8 +24,10 @@ import { folderGroupOf } from '../tabViews.js';
 const branchTitle = (g) => {
   const changed = Object.keys(g.files).length;
   const sync = [g.ahead && `${g.ahead} to push`, g.behind && `${g.behind} to pull`].filter(Boolean).join(', ');
-  return `Git: branch ${g.branch}${g.upstream ? ` (${g.upstream}${sync ? `: ${sync}` : ''})` : ''} · ${changed ? `${changed} changed file${changed === 1 ? '' : 's'}` : 'nothing changed'} since the last commit`;
+  return `Git: branch ${g.branch}${g.upstream ? ` (${g.upstream}${sync ? `: ${sync}` : ''})` : ''} · ${changed ? `${changed} changed file${changed === 1 ? '' : 's'}` : 'nothing changed'} since the last commit\nClick for the Git panel`;
 };
+// Git can be asked about this folder (desktop, on this computer; not the Android app or servers).
+const gitHere = (dir) => Boolean(window.desktop?.git?.init) && Boolean(dir) && !isRemotePath(dir);
 
 // What a folder's header carries when it is dragged to another place in the order.
 const SECTION_DRAG = 'text/x-folder-section';
@@ -1015,11 +1017,18 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   // ---- Menus ----
 
   const sortItems = FOLDER_SORTS.map((s) => ({ label: `Sort by ${s.label.toLowerCase()}`, checked: (settings.folderSort || 'name') === s.id, run: () => saveSettings({ folderSort: s.id }) }));
+  // Git for a folder shown: its panel when it is in a repository, else making it one.
+  const gitItem = (d) =>
+    gitHere(d) &&
+    (gitOf(d)
+      ? { label: 'Git panel', icon: 'branch', hint: `Branch ${gitOf(d).branch} · Ctrl+Shift+G`, run: () => actions.toggleGit(d) }
+      : { label: 'Make it a Git repository…', icon: 'branch', hint: 'git init: Git starts keeping its history', run: () => actions.gitInit(d) });
   const backgroundItems = () => [
     { label: 'New file', icon: 'filePlus', run: () => startCreating('file') },
     { label: 'New folder (Ctrl+Shift+N)', icon: 'folderPlus', run: () => startCreating('folder') },
     { label: 'Paste (Ctrl+V)', icon: 'clipboard', run: paste },
     { label: 'Find in this folder… (Ctrl+Shift+F)', icon: 'search', run: () => actions.findInFolder(dir) },
+    gitItem(dir),
     window.desktop?.compare && { label: 'Compare with another folder…', icon: 'compare', run: () => actions.compareFolders(dir) },
     window.desktop?.compare && { label: 'Open in two panes…', icon: 'panes', hint: 'This folder and another side by side in a tab, to copy and move files between them', run: () => actions.twoPanes(dir) },
     { separator: true },
@@ -1059,6 +1068,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       toUnstage.length > 0 && { label: toUnstage.length === 1 ? 'Unstage (Git)' : `Unstage ${toUnstage.length} files (Git)`, icon: 'undo', hint: 'Leave out of the next commit', run: () => stageFiles(toUnstage, 'unstage') },
       images.length && images.length === items.length && { label: `Text from ${images.length === 1 ? 'the image' : `${images.length} images`}…`, icon: 'scan', run: () => actions.readImageFiles(images.map((e) => e.path), folderOf(images)) },
       files.length === 2 && items.length === 2 && files.every((e) => opensInEditor(e.name)) && { label: 'Compare the two', icon: 'compare', run: () => actions.compareDiskFiles(files[0].path, files[1].path) },
+      one?.dir && !remote && gitHere(one.path) && !gitOf(rootOf(one.path, live) ?? dir) && { label: 'Make it a Git repository…', icon: 'branch', hint: 'git init: Git starts keeping its history', run: () => actions.gitInit(one.path) },
       window.desktop?.compare && items.length === 2 && items.every((e) => e.dir) && { label: 'Compare the two folders', icon: 'compare', run: () => actions.compareFolders(items[0].path, items[1].path) },
       window.desktop?.compare && one?.dir && { label: 'Compare with another folder…', icon: 'compare', run: () => actions.compareFolders(one.path) },
       window.desktop?.compare && items.length === 2 && items.every((e) => e.dir) && { label: 'Open the two in two panes', icon: 'panes', run: () => actions.twoPanes(items[0].path, items[1].path) },
@@ -1142,6 +1152,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       { label: 'New folder here', icon: 'folderPlus', run: () => (expandFor(), setCreating({ kind: 'folder', name: 'New folder', in: s })) },
       { label: 'Paste here', icon: 'clipboard', disabled: !clip, run: () => clip && pasteInto(s, {}) },
       { label: 'Find in this folder…', icon: 'search', run: () => actions.findInFolder(s) },
+      gitItem(s),
       window.desktop?.compare && { label: 'Compare with another folder…', icon: 'compare', run: () => actions.compareFolders(s) },
       window.desktop?.compare && live.length === 2 && { label: `Compare with ${folderLabel(live.find((x) => x !== s))}`, icon: 'compare', run: () => actions.compareFolders(s, live.find((x) => x !== s)) },
       window.desktop?.compare && { label: 'Open in two panes…', icon: 'panes', run: () => actions.twoPanes(s) },
@@ -1348,7 +1359,8 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       <${Icon} name=${rem ? 'server' : 'folder'} size=${15} class="root-head-icon" />
       <span class="root-head-name">${name}</span>
       <span class="root-head-where">${where}</span>
-      ${!rem && gitOf(d) && html`<span class="git-branch" title=${branchTitle(gitOf(d))}><${Icon} name="branch" size=${12} />${gitOf(d).branch}</span>`}
+      ${!rem && gitOf(d) && html`<button type="button" class="git-branch" title=${branchTitle(gitOf(d))} aria-label=${`Git panel: ${placeName(d)}, branch ${gitOf(d).branch}`}
+        draggable="false" onClick=${(ev) => (ev.stopPropagation(), actions.toggleGit(d))} onDblClick=${(ev) => ev.stopPropagation()}><${Icon} name="branch" size=${12} /><span>${gitOf(d).branch}</span></button>`}
       ${rem && html`<span class="conn-dot state-${state}" />`}
       ${shut_ && matches > 0 && html`<span class="root-head-count" title=${`${matches} ${matches === 1 ? 'match' : 'matches'} in it: click to see`}>${matches}</span>`}
       <button type="button" class="icon-btn xs root-head-close" aria-label=${`Close ${name} here`} title="Close it here (nothing is deleted)"
@@ -1373,12 +1385,17 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
 
   return html`
     <div class="folders-head">
-      <div class="folders-root">
-        <button type="button" class="btn ghost sm folders-root-name ${remote ? 'kind-remote' : ''} ${dropTarget === root ? 'drop-target' : ''}"
-          title=${remote ? `${protocolName(conn?.protocol)} · ${conn?.user ? `${conn.user}@` : ''}${conn?.host} · ${connState?.state === 'connected' ? 'connected' : 'not connected'}` : root} onClick=${() => go(root)} ...${dropProps(root)}>
-          <${Icon} name=${remote ? 'server' : 'folder'} size=${15} /><span>${rootName(root)}</span>${remote && html`<span class="conn-dot state-${connState?.state}" />`}
-        </button>
-        ${!multi && !remote && gitOf(dir) && html`<span class="git-branch" title=${branchTitle(gitOf(dir))}><${Icon} name="branch" size=${12} />${gitOf(dir).branch}</span>`}
+      <div class="folders-root" style=${{ '--tools': recent.length > 0 ? 6 : 5 }}>
+        <span class="folders-root-title">
+          <button type="button" class="btn ghost sm folders-root-name ${remote ? 'kind-remote' : ''} ${dropTarget === root ? 'drop-target' : ''}"
+            title=${remote ? `${protocolName(conn?.protocol)} · ${conn?.user ? `${conn.user}@` : ''}${conn?.host} · ${connState?.state === 'connected' ? 'connected' : 'not connected'}` : root} onClick=${() => go(root)} ...${dropProps(root)}>
+            <${Icon} name=${remote ? 'server' : 'folder'} size=${15} /><span>${rootName(root)}</span>${remote && html`<span class="conn-dot state-${connState?.state}" />`}
+          </button>
+          ${!multi && !remote && gitHere(dir) &&
+          (gitOf(dir)
+            ? html`<button type="button" class="git-branch git-pill" title=${branchTitle(gitOf(dir))} aria-label=${`Git panel, branch ${gitOf(dir).branch}`} onClick=${() => actions.toggleGit(dir)}><${Icon} name="branch" size=${12} /><span>${gitOf(dir).branch}</span></button>`
+            : html`<button type="button" class="git-branch git-pill none" title="Git: this folder is not in a repository. Click for the Git panel, to make it one" aria-label="Git panel" onClick=${() => actions.toggleGit(dir)}><${Icon} name="branch" size=${13} /></button>`)}
+        </span>
         <span class="spacer" />
         ${tool('Up one folder (Backspace)', 'arrowUp', () => go(up), !up)}
         ${tool('Refresh (F5)', 'rotate', () => load())}

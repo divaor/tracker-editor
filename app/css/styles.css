@@ -8943,6 +8943,81 @@ button.help-command:focus-visible {
   white-space: nowrap;
 }
 
+/* A folder's branch is a button: a click opens its Git panel. */
+button.git-branch {
+  min-height: 22px;
+  padding: 1px 6px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+button.git-branch span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+button.git-branch:hover,
+button.git-branch:focus-visible {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--text);
+}
+
+/* One folder shown: its name and its branch (or the Git mark alone, when it is not in a
+   repository) as a pill. The two keep their whole width while they fit; the buttons after them
+   give way first (down to 20px each, `--tools` of them), and only then the name and the pill. */
+.folders-root-title {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  max-width: calc(100% - var(--tools, 5) * 22px);
+}
+
+.folders-root > .icon-btn {
+  min-width: 20px;
+}
+
+.git-pill {
+  flex: 0 0.4 auto;
+  min-width: 24px;
+  max-width: 12ch;
+  padding: 1px 6px !important;
+  background: color-mix(in srgb, var(--text) 7%, transparent) !important;
+}
+
+.git-pill:hover,
+.git-pill:focus-visible {
+  background: color-mix(in srgb, var(--accent) 16%, transparent) !important;
+}
+
+.git-pill.none {
+  justify-content: center;
+  color: var(--text-3);
+}
+
+.git-none p {
+  margin: 0 0 10px;
+}
+
+.git-init-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.git-init-form p {
+  margin: 0;
+}
+
+.git-init-form .notice .btn {
+  margin-top: 6px;
+}
+
 .status-git {
   gap: 4px;
   max-width: 24ch;

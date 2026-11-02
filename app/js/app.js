@@ -34,11 +34,11 @@ import { createLanguageServers } from './lsp.js';
 import { applyTextEdits, changedLanguages, changedLines, codeActionRows, editPlan, formatFirst, languageOptions, lineOf, textChanges, uriPath } from './lspTools.js';
 import { Menu } from './ui/menu.js';
 import { LanguageServersPanel, ReferencesPanel, RenameSymbolDialog, SetupServerDialog, WorkspaceEditDialog } from './ui/languageServers.js';
-import { BranchDialog, GitPanel } from './ui/gitPanel.js';
+import { BranchDialog, GitInitDialog, GitPanel } from './ui/gitPanel.js';
 import { GitAssist } from './ui/gitAssist.js';
 import { CHANGES_FILES, cleanCommitMessage, commitMessageMessages } from './gitAssist.js';
 import { gitError, mergeRequestLink, stageBlock } from './gitStatus.js';
-import { refreshAllGit } from './gitState.js';
+import { refreshAllGit, refreshGit } from './gitState.js';
 import { FolderSearchPanel } from './ui/folderSearch.js';
 import { AskPanel } from './ui/askPanel.js';
 import { findResults, measure, parseFindPlan, parsePick, pickMessages, plainPlan, planMessages, questionOf, rankMeasured, wantsPick } from './askFind.js';
@@ -2593,6 +2593,24 @@ export function App() {
     lookUpGit(store.session.active);
     setGitTick((n) => n + 1);
   };
+  /**
+   * Making a folder on this computer a Git repository (git init): `dir`, else the folder in
+   * Folders, else the open file's folder. The dialog asks the first branch's name.
+   */
+  actions.gitInit = (dir = null) => {
+    if (!gitBridge()?.init) return toast('Git works in the desktop app, for folders on this computer.');
+    const f = getSettings().folder;
+    const at = dir ?? (f && !isRemotePath(f) ? f : gitFolderNow());
+    if (!at || isRemotePath(at)) return toast('Open a folder from this computer in Folders first.');
+    setDialog({ type: 'gitInit', dir: at });
+  };
+  /** A folder just made a repository: Folders and the status bar read Git again, and its panel opens. */
+  actions.gitMade = (dir, made) => {
+    refreshGit([dir], { force: true });
+    actions.gitChanged();
+    actions.toggleGit(dir);
+    toast(`${dir.split(/[\\/]/).filter(Boolean).pop() ?? dir} is a Git repository now${made?.branch ? ` (branch ${made.branch})` : ''}: stage and commit its files here.`);
+  };
   /** The branch picker (the status bar's branch). */
   actions.chooseBranch = (dir = null) => {
     const at = dir ?? gitFolderNow();
@@ -4110,6 +4128,7 @@ export function App() {
       'command-palette': () => actions.commandPalette(),
       'git-compare': () => actions.compareWithHead(),
       'git-panel': () => actions.toggleGit(),
+      'git-init': () => actions.gitInit(),
       tasks: () => actions.showTasks(),
       'git-branch': () => actions.chooseBranch(),
       'git-fetch': () => actions.gitQuick('fetch'),
@@ -4356,6 +4375,7 @@ export function App() {
     html`<${QuickOpen} files=${store.live()} docs=${docs} openTabs=${openDiskTabs()} actions=${actions} initial=${dialog.query ?? ''} symbols=${() => (activeKey ? (hostRef.current?.codeContext()?.symbols ?? []) : [])}
       onAsk=${askReady() ? (q) => actions.askFind(q) : null}
       roots=${folderRoots(settings)} hidden=${Boolean(settings.showHidden)} onSymbol=${(entry) => actions.revealSymbol(entry)} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'gitInit' && html`<${GitInitDialog} dir=${dialog.dir} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'compareFolder' && html`<${CompareFolderDialog} other=${dialog.other} side=${dialog.side} panes=${dialog.panes} onPick=${dialog.onPick} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'saveCompare' && html`<${SaveCompareDialog} id=${dialog.id} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'savedCompares' && html`<${SavedComparesDialog} actions=${actions} onClose=${() => setDialog(null)} />`}

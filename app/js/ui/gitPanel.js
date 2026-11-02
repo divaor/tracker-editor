@@ -49,12 +49,17 @@ export function GitPanel({ dir, tick, actions, onClose }) {
   const [inProgress, setInProgress] = useState(null);
   const [stashing, setStashing] = useState(null); // { message, untracked } while asking
   const [writing, setWriting] = useState(null); // an AbortController while the model writes the message
+  const [none, setNone] = useState(null); // not a repository: { installed, root, defaultBranch } (git:info)
   const box = useRef(null);
 
   const load = async () => {
     const s = await bridge.status(dir).catch(() => null);
     setStatus(s);
-    if (!s) return;
+    if (!s) {
+      // Why not: no git program, or a folder not in a repository (offered to become one).
+      setNone((await bridge.info?.(dir).catch(() => null)) ?? null);
+      return;
+    }
     const [st, ip] = await Promise.all([bridge.act(dir, { op: 'stashes' }), bridge.act(dir, { op: 'in-progress' })]);
     setStashes(st?.ok ? st.result : []);
     setInProgress(ip?.ok ? ip.result : null);
@@ -127,7 +132,17 @@ export function GitPanel({ dir, tick, actions, onClose }) {
     </div>
     <div class="panel-body git-body">
       ${status === undefined && html`<p class="muted small">Reading…</p>`}
-      ${status === null && html`<p class="muted small">${baseName(dir)} is not in a Git repository (or Git is not installed on this computer). Open a file or a folder that is, and the panel shows its repository.</p>`}
+      ${status === null &&
+      (none && !none.installed
+        ? html`<div class="git-none">
+            <p class="small">Git is not installed on this computer. Install it, then read again.</p>
+            <p><button type="button" class="btn sm" onClick=${() => window.open('https://git-scm.com/downloads', '_blank', 'noopener')}><${Icon} name="external" size=${14} />Get Git (git-scm.com)</button></p>
+          </div>`
+        : html`<div class="git-none">
+            <p class="small"><strong>${baseName(dir)}</strong> is not in a Git repository.</p>
+            <p><button type="button" class="btn primary sm" onClick=${() => actions.gitInit(dir)}><${Icon} name="branch" size=${14} />Make it a Git repository…</button></p>
+            <p class="muted small">Or open a file or a folder that is in one: the panel shows its repository.</p>
+          </div>`)}
       ${status &&
       html`<div class="git-branch-row">
           <button type="button" class="btn sm git-branch-btn" disabled=${busy} title="Switch to another branch, or make one" onClick=${() => actions.chooseBranch(dir)}>
@@ -289,5 +304,75 @@ export function BranchDialog({ dir, actions, onClose }) {
           ${creating && nameProblem && html`<p class="small error-text">${nameProblem}</p>`}
           <span class="field-row"><button type="submit" class="btn primary sm" disabled=${busy || Boolean(nameProblem)}>Make it and switch</button><button type="button" class="btn ghost sm" onClick=${() => setCreating(null)}>Cancel</button></span>
         </form>`}
+  </${Modal}>`;
+}
+
+const sameFolder = (a, b) => {
+  const n = (p) => String(p).replace(/\\/g, '/').replace(/\/+$/, '');
+  return /^[a-z]:/i.test(String(a)) ? n(a).toLowerCase() === n(b).toLowerCase() : n(a) === n(b);
+};
+const errorText = (err) => String(err?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
+
+/**
+ * Making a folder on this computer a Git repository (git init): the first branch's name (the
+ * person's init.defaultBranch, else main). A folder inside another repository says so first (a
+ * second repository for the same files); one that is a repository already offers its panel.
+ */
+export function GitInitDialog({ dir, actions, onClose }) {
+  const bridge = window.desktop?.git;
+  const [info, setInfo] = useState(undefined); // undefined: reading; { installed, root, defaultBranch } or { error }
+  const [branch, setBranch] = useState('main');
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState('');
+  useEffect(() => {
+    bridge.info(dir).then(
+      (i) => {
+        setInfo(i ?? { error: 'Git works on folders on this computer.' });
+        if (i?.defaultBranch) setBranch(i.defaultBranch);
+      },
+      (err) => setInfo({ error: errorText(err) }),
+    );
+  }, [dir]);
+  const name = baseName(dir);
+  const already = Boolean(info?.root) && sameFolder(info.root, dir);
+  const inside = info?.root && !already ? info.root : null;
+  const ready = Boolean(info?.installed) && !already;
+  const nameProblem = branchNameProblem(branch.trim());
+  const make = async (ev) => {
+    ev.preventDefault();
+    if (!ready || nameProblem || busy) return;
+    setBusy(true);
+    setProblem('');
+    try {
+      const made = await bridge.init(dir, { branch: branch.trim() });
+      onClose();
+      actions.gitMade(dir, made);
+    } catch (err) {
+      setProblem(errorText(err));
+      setBusy(false);
+    }
+  };
+  return html`<${Modal} title=${`Make ${name} a Git repository`} onClose=${onClose} className="git-init-dialog"
+    footer=${html`<span class="spacer" /><button type="button" class="btn" onClick=${onClose}>${ready ? 'Cancel' : 'Close'}</button>
+      ${ready && html`<button type="submit" form="git-init-form" class="btn primary" disabled=${busy || Boolean(nameProblem)}>${busy ? 'Making it…' : 'Make it a repository'}</button>`}`}>
+    ${info === undefined && html`<p class="muted small">Looking at the folder…</p>`}
+    ${info?.error && html`<p class="notice error" role="alert"><${Icon} name="alert" size=${15} /><span>${info.error}</span></p>`}
+    ${info && !info.error && !info.installed &&
+    html`<p class="notice"><${Icon} name="info" size=${15} /><span>Git is not installed on this computer. Install it from <a href="https://git-scm.com/downloads" target="_blank" rel="noopener">git-scm.com</a>, then try again.</span></p>`}
+    ${already &&
+    html`<p class="notice"><${Icon} name="info" size=${15} /><span>${name} is a Git repository already.</span></p>
+      <p><button type="button" class="btn sm" onClick=${() => (onClose(), actions.toggleGit(dir))}><${Icon} name="branch" size=${14} />Open its Git panel</button></p>`}
+    ${ready &&
+    html`<form id="git-init-form" class="git-init-form" onSubmit=${make}>
+      <p class="small">Git starts keeping the history of <strong>${name}</strong> <bdi class="muted">(${dir})</bdi>. No file changes and nothing is committed yet: stage and commit its files in the Git panel next.</p>
+      ${inside &&
+      html`<p class="notice warn"><${Icon} name="alert" size=${15} /><span>${name} is inside the repository <strong>${baseName(inside)}</strong> <bdi>(${inside})</bdi>. A repository here is a second one for the same files, and ${baseName(inside)} may still follow them: usually you want its Git panel instead.
+        <button type="button" class="btn ghost xs" onClick=${() => (onClose(), actions.toggleGit(inside))}>Open ${baseName(inside)}’s Git panel</button></span></p>`}
+      <label class="field"><span class="field-label">The first branch’s name</span>
+        <input value=${branch} spellcheck="false" autocomplete="off" aria-invalid=${Boolean(nameProblem)} onInput=${(e) => setBranch(e.currentTarget.value)} autofocus />
+      </label>
+      ${nameProblem && html`<p class="small error-text">${nameProblem}</p>`}
+      ${problem && html`<p class="notice error small" role="alert"><${Icon} name="alert" size=${14} /><span>${problem}</span></p>`}
+    </form>`}
   </${Modal}>`;
 }

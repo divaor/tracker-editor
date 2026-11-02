@@ -217,3 +217,36 @@ test('a pull that conflicts: in progress, then aborted', async () => {
   assert.equal(await g.act(dir, { op: 'in-progress' }), null);
   assert.deepEqual((await g.status(dir)).files, {});
 });
+
+test('making a folder a repository: what it would mean, git init with a branch name, the refusals', async () => {
+  const dir = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'git-init-')));
+  const g = createGit({ parseStatus });
+  const before = await g.info(dir);
+  assert.equal(before.installed, true);
+  assert.equal(before.root, null);
+  assert.equal(await g.status(dir), null);
+  const made = await g.init(dir, { branch: 'trunk' });
+  assert.deepEqual(made, { root: dir, branch: 'trunk' });
+  const s = await g.status(dir);
+  assert.equal(s.root, dir);
+  assert.equal(s.branch, 'trunk');
+  await assert.rejects(g.init(dir, { branch: 'main' }), /a Git repository already/);
+  // A folder inside it is in that repository, and becomes one of its own only when asked.
+  const inner = path.join(dir, 'sub');
+  mkdirSync(inner);
+  assert.equal((await g.info(inner)).root, dir);
+  assert.equal((await g.init(inner)).root, inner);
+  await assert.rejects(g.init(inner, { branch: 'bad name' }), /Not a branch name/);
+  await assert.rejects(g.init(path.join(dir, 'other'), { branch: '-x' }), /Not a branch name/);
+});
+
+test('making a repository without the git program: it says so', async () => {
+  const g = createGit({
+    parseStatus,
+    runGit: async () => {
+      throw Object.assign(new Error('spawn git ENOENT'), { code: 'ENOENT' });
+    },
+  });
+  assert.deepEqual(await g.info('/somewhere'), { installed: false, root: null, defaultBranch: '' });
+  await assert.rejects(g.init('/somewhere'), /not installed/);
+});
