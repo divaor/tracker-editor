@@ -16,6 +16,7 @@ import { Menu, MenuButton } from './menu.js';
 import { Modal } from './components.js';
 import { Splitter } from './splitter.js';
 import { PanesTab } from './twoPanes.js';
+import { GitHistoryTab } from './gitHistory.js';
 import { SidewaysButton, usePhoneLayout } from './phone.js';
 
 const message = (err) => String(err?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
@@ -685,6 +686,8 @@ function SyncConfirm({ plan, record, entries, onRun, onClose }) {
 /** A comparison in its tab: two files or two folders. */
 export function CompareTab({ id, record, settings, actions }) {
   if (!record) return null;
+  // A repository's or a file's Git history (ui/gitHistory.js).
+  if (record.mode === 'history') return html`<${GitHistoryTab} key=${`${id}:history`} id=${id} record=${record} settings=${settings} actions=${actions} />`;
   if (record.mode === 'panes')
     return html`<${PanesTab} key=${`${id}:panes`} id=${id} record=${record} settings=${settings} actions=${actions} star=${html`<${SaveStar} id=${id} record=${record} actions=${actions} />`} />`;
   return record.mode === 'folders'

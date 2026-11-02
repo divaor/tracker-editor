@@ -39,7 +39,7 @@ function tabInfo(key) {
   const k = parseKey(key);
   if (k?.kind === 'compare') {
     const c = store.compare(k.id);
-    return c && { kind: 'compare', icon: c.mode === 'panes' ? 'panes' : null, name: compareName(c), project: '', unsynced: Boolean(c.dirty), dotTitle: 'Not saved', title: compareTitle(c) };
+    return c && { kind: 'compare', icon: c.mode === 'panes' ? 'panes' : c.mode === 'history' ? 'history' : null, name: compareName(c), project: '', unsynced: Boolean(c.dirty), dotTitle: 'Not saved', title: compareTitle(c) };
   }
   const kind = kindOfKey(key);
   if (k?.kind === 'file') {
@@ -242,7 +242,8 @@ export function TabBar({ session, projects, settings, actions }) {
       { label: isPinned ? 'Unpin' : 'Pin', icon: 'pin', run: () => store.pin(key, !isPinned) },
       isCompare && { label: 'Save this comparison…', icon: 'star', disabled: !actions.canSaveCompare(key), run: () => actions.saveCompare(key) },
       ...(!isCompare && !narrowScreen() ? paneItems(key) : []),
-      !isCompare && { label: 'History', icon: 'history', run: () => (actions.showInMain(key), actions.showHistory()) },
+      !isCompare && parseKey(key)?.kind !== 'disk' && { label: 'History', icon: 'history', run: () => (actions.showInMain(key), actions.showHistory()) },
+      parseKey(key)?.kind === 'disk' && actions.gitWorksAt?.(parseKey(key).path) && { label: 'History (Git)', icon: 'history', hint: 'Its commits, through its renames', run: () => actions.fileHistory(parseKey(key).path) },
       !isCompare && { label: 'Compare with…', icon: 'columns', run: () => (actions.showInMain(key), actions.compareWith()) },
       !isCompare && { label: 'Compare with clipboard', icon: 'copy', run: () => (actions.showInMain(key), actions.compareWithClipboard()) },
       { separator: true },
@@ -630,6 +631,7 @@ export function FileBar({ file, repo, disk, sealed, projects, canPreview, previe
     { label: 'Record or stop a macro (Ctrl+Shift+R)', icon: 'play', run: actions.toggleRecording },
     { label: 'Run the macro…', icon: 'skipForward', run: actions.runMacro },
     !disk && { label: 'History', icon: 'history', run: actions.showHistory },
+    disk && actions.gitWorksAt?.(disk.path) && { label: 'History (Git)', icon: 'history', hint: 'Its commits, through its renames', run: () => actions.fileHistory(disk.path) },
     { label: 'Compare with…', icon: 'columns', run: actions.compareWith },
     { label: 'Compare with clipboard', icon: 'copy', run: actions.compareWithClipboard },
     { label: 'Text from an image…', icon: 'scan', run: actions.imageToText },

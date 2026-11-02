@@ -14547,3 +14547,575 @@ html[data-native='android'] body:has(.edit-bar) .toasts {
 .ask-searched {
   margin: 0;
 }
+
+/* ---- Git history (ui/gitHistory.js): a comparison tab of mode 'history' --------------------
+   The commits newest first (rows drawn only near the screen), the graph's lanes in eight colors
+   (the file types' colors, so they follow the theme), the commit picked below. */
+.editor-area > .ghist {
+  position: absolute;
+  inset: 0;
+  background: var(--surface);
+}
+
+.editor-area.panes-split > .ghist {
+  right: auto;
+  width: var(--main-pane-w, 50%);
+}
+
+.ghist {
+  --graph-0: var(--ft-blue);
+  --graph-1: var(--ft-orange);
+  --graph-2: var(--ft-green);
+  --graph-3: var(--ft-purple);
+  --graph-4: var(--ft-red);
+  --graph-5: var(--ft-cyan);
+  --graph-6: var(--ft-pink);
+  --graph-7: var(--ft-brown);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.ghist-bar {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 3px 8px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  scrollbar-width: none;
+}
+
+.ghist-bar > * {
+  flex-shrink: 0;
+}
+
+.ghist-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 28ch;
+  font-weight: 600;
+}
+
+.ghist-title > span,
+.ghist-ref > span,
+.ghist-file-chip > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ghist-ref > span {
+  max-width: 16em;
+}
+
+.ghist-search,
+.ghist-path {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 4px 0 7px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-2);
+}
+
+.ghist-search:focus-within,
+.ghist-path:focus-within {
+  border-color: var(--accent);
+}
+
+/* (Over the page's input rule, which is more specific than one class.) */
+.ghist .ghist-search input,
+.ghist .ghist-path input {
+  width: 17em;
+  min-width: 0;
+  min-height: 0;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.ghist .ghist-path input {
+  width: 9em;
+}
+
+.ghist-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 24em;
+  padding: 2px 3px 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  font-size: 12px;
+}
+
+.ghist-count {
+  white-space: nowrap;
+}
+
+.ghist-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.ghist-list {
+  position: relative;
+  flex: 0 0 var(--ghist-split, 58%);
+  min-height: 60px;
+  overflow: auto;
+  outline: none;
+}
+
+.ghist-list:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--accent-soft);
+}
+
+.ghist-rows {
+  position: relative;
+}
+
+.ghist-row {
+  position: absolute;
+  right: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 4px;
+  font-size: 13px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.ghist-row:hover {
+  background: var(--surface-2);
+}
+
+.ghist-row.picked {
+  background: var(--accent-soft);
+}
+
+.ghist-list:focus .ghist-row.picked {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.ghist-graph {
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.ghist-graph path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+}
+
+.ghist-dot {
+  fill: currentColor;
+}
+
+.ghist-dot.merge {
+  fill: var(--surface);
+  stroke: currentColor;
+  stroke-width: 2;
+}
+
+.ghist-head-ring {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+}
+
+.g-c0 { color: var(--graph-0); }
+.g-c1 { color: var(--graph-1); }
+.g-c2 { color: var(--graph-2); }
+.g-c3 { color: var(--graph-3); }
+.g-c4 { color: var(--graph-4); }
+.g-c5 { color: var(--graph-5); }
+.g-c6 { color: var(--graph-6); }
+.g-c7 { color: var(--graph-7); }
+
+.ghist-main {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.ghist-subject {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ghist-row.at-head .ghist-subject {
+  font-weight: 600;
+}
+
+.ghist-was {
+  max-width: 30%;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 12px;
+  text-overflow: ellipsis;
+}
+
+.ghist-author {
+  flex: 0 0 auto;
+  width: 11em;
+  overflow: hidden;
+  color: var(--text-2);
+  text-overflow: ellipsis;
+}
+
+.ghist-date {
+  flex: 0 0 auto;
+  width: 6.5em;
+  color: var(--text-2);
+  text-align: right;
+}
+
+.ghist-hash {
+  flex: 0 0 auto;
+  width: 4.8em;
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.ghist-row-menu {
+  flex-shrink: 0;
+  opacity: 0;
+}
+
+.ghist-row:hover .ghist-row-menu,
+.ghist-row.picked .ghist-row-menu,
+.ghist-row-menu:focus-visible {
+  opacity: 1;
+}
+
+.ghist-chips {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 3px;
+  max-width: 55%;
+  overflow: hidden;
+}
+
+.ghist-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 14em;
+  height: 18px;
+  padding: 0 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ghist-chip > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ghist-chip.head {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+.ghist-chip.detached {
+  border-color: var(--warn);
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.ghist-chip.branch {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  color: var(--accent);
+}
+
+.ghist-chip.remote {
+  border-style: dashed;
+}
+
+.ghist-chip.tag {
+  border-color: color-mix(in srgb, var(--warn) 55%, var(--border));
+  color: var(--warn);
+}
+
+.ghist-chip.more {
+  cursor: default;
+}
+
+.ghist-note {
+  margin: 12px;
+}
+
+.ghist .spinner {
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: -2px;
+}
+
+.ghist-splitter.horizontal {
+  height: 5px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+  cursor: row-resize;
+}
+
+.ghist-details {
+  flex: 1 1 0;
+  min-height: 80px;
+  padding: 10px 14px 14px;
+  overflow: auto;
+}
+
+.ghist-dhead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ghist-dsubject {
+  margin: 0;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.ghist-meta,
+.ghist-hashline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  margin: 6px 0 0;
+}
+
+.ghist-fullhash {
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.ghist-parent {
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ghist-message {
+  max-height: 14em;
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ghist-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 0;
+}
+
+.ghist-files-head {
+  margin: 12px 0 6px;
+}
+
+.ghist-files {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ghist-file {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 6px;
+}
+
+.ghist-file:hover {
+  background: var(--surface-2);
+}
+
+.ghist-file.followed {
+  background: var(--accent-soft);
+}
+
+.ghist-file-open {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ghist-st {
+  flex: 0 0 auto;
+  width: 1.4em;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.st-A .ghist-st { color: var(--done); }
+.st-M .ghist-st,
+.st-T .ghist-st { color: var(--warn); }
+.st-D .ghist-st { color: var(--danger); }
+.st-R .ghist-st,
+.st-C .ghist-st { color: var(--accent); }
+
+.ghist-fname {
+  flex-shrink: 0;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ghist-fdir,
+.ghist-from {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ghist-file-tools {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 2px;
+  opacity: 0;
+}
+
+.ghist-file:hover .ghist-file-tools,
+.ghist-file:focus-within .ghist-file-tools {
+  opacity: 1;
+}
+
+@media (pointer: coarse) {
+  .ghist-row-menu,
+  .ghist-file-tools {
+    opacity: 1;
+  }
+}
+
+.ghist-name-form {
+  display: grid;
+  gap: 8px;
+}
+
+.ghist-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.branch-history {
+  margin-top: 6px;
+}
+
+/* Phones: two lines a row, a narrower graph, the bar wrapping, the details below. */
+.ghist.phone .ghist-bar {
+  flex-wrap: wrap;
+  overflow: visible;
+}
+
+.ghist.phone .ghist-search {
+  flex: 1 1 100%;
+  order: 5;
+}
+
+.ghist.phone .ghist-search input,
+.ghist.phone .ghist-path input {
+  flex: 1;
+  width: 100%;
+}
+
+.ghist.phone .ghist-path {
+  flex: 1 1 40%;
+  order: 6;
+}
+
+.ghist.phone .ghist-title {
+  max-width: 50%;
+}
+
+.ghist-two {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ghist-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.ghist-sub {
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.ghist.phone .ghist-details {
+  padding: 8px 10px 12px;
+}

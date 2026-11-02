@@ -1028,6 +1028,8 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     (gitOf(d)
       ? { label: 'Git panel', icon: 'branch', hint: `Branch ${gitOf(d).branch} · Ctrl+Shift+G`, run: () => actions.toggleGit(d) }
       : { label: 'Make it a Git repository…', icon: 'branch', hint: 'git init: Git starts keeping its history', run: () => actions.gitInit(d) });
+  // Its history (0.49): the commits that changed the folder (every commit at a repository's top).
+  const historyItem = (d) => gitHere(d) && gitOf(d) && { label: 'History (Git)', icon: 'history', hint: 'Its commits, with their graph', run: () => actions.gitHistory(d, { folder: d }) };
   // Dockerize (0.47): a folder here whose names (shown, or opened in the tree) make it a project.
   const dockerItem = (d) => {
     const listed = listings.get(d)?.entries ?? children.get(d);
@@ -1040,6 +1042,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     { label: 'Find in this folder… (Ctrl+Shift+F)', icon: 'search', run: () => actions.findInFolder(dir) },
     { label: 'Ask the model about this folder…', icon: 'sparkle', hint: 'It can make and change files here; each change waits for your Apply', run: () => actions.assistFiles({ folder: dir }) },
     gitItem(dir),
+    historyItem(dir),
     dockerItem(dir),
     window.desktop?.compare && { label: 'Compare with another folder…', icon: 'compare', run: () => actions.compareFolders(dir) },
     window.desktop?.compare && { label: 'Open in two panes…', icon: 'panes', hint: 'This folder and another side by side in a tab, to copy and move files between them', run: () => actions.twoPanes(dir) },
@@ -1081,6 +1084,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       images.length && images.length === items.length && { label: `Text from ${images.length === 1 ? 'the image' : `${images.length} images`}…`, icon: 'scan', run: () => actions.readImageFiles(images.map((e) => e.path), folderOf(images)) },
       files.length === 2 && items.length === 2 && files.every((e) => opensInEditor(e.name)) && { label: 'Compare the two', icon: 'compare', run: () => actions.compareDiskFiles(files[0].path, files[1].path) },
       one?.dir && gitHere(one.path) && !gitOf(rootOf(one.path, live) ?? dir) && { label: 'Make it a Git repository…', icon: 'branch', hint: 'git init: Git starts keeping its history', run: () => actions.gitInit(one.path) },
+      one && gitHere(one.path) && gitOf(rootOf(one.path, live) ?? dir) && gitOn(one.path) !== 'U' && { label: one.dir ? 'History of this folder (Git)' : 'History of this file (Git)', icon: 'history', hint: one.dir ? 'The commits that changed it' : 'Its commits, through its renames', run: () => (one.dir ? actions.gitHistory(one.path, { folder: one.path }) : actions.fileHistory(one.path)) },
       one?.dir && !remote && dockerItem(one.path),
       window.desktop?.compare && items.length === 2 && items.every((e) => e.dir) && { label: 'Compare the two folders', icon: 'compare', run: () => actions.compareFolders(items[0].path, items[1].path) },
       window.desktop?.compare && one?.dir && { label: 'Compare with another folder…', icon: 'compare', run: () => actions.compareFolders(one.path) },
@@ -1170,6 +1174,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       { label: 'Find in this folder…', icon: 'search', run: () => actions.findInFolder(s) },
       { label: 'Ask the model about this folder…', icon: 'sparkle', hint: 'It can make and change files here; each change waits for your Apply', run: () => actions.assistFiles({ folder: s }) },
       gitItem(s),
+      historyItem(s),
       dockerItem(s),
       window.desktop?.compare && { label: 'Compare with another folder…', icon: 'compare', run: () => actions.compareFolders(s) },
       window.desktop?.compare && live.length === 2 && { label: `Compare with ${folderLabel(live.find((x) => x !== s))}`, icon: 'compare', run: () => actions.compareFolders(s, live.find((x) => x !== s)) },

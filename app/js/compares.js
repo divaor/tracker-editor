@@ -56,11 +56,13 @@ export function compareName(c) {
 }
 
 /** What a comparison tab is: "Folders compared", "Two panes"… */
-export const compareKind = (c) => (c?.mode === 'panes' ? 'Two panes' : c?.mode === 'folders' ? 'Folders compared' : 'Files compared');
+export const compareKind = (c) => (c?.mode === 'history' ? 'Git history' : c?.mode === 'panes' ? 'Two panes' : c?.mode === 'folders' ? 'Folders compared' : 'Files compared');
 
 /** Its tooltip: both sides in full. */
 export function compareTitle(c) {
   if (!c) return '';
+  // A Git history (ui/gitHistory.js): the file or the repository, and what is shown.
+  if (c.mode === 'history') return [`Git history of ${c.file ? c.rel || c.file : c.root}`, c.file ? `in ${c.root}, through its renames` : '', c.ref ? `on ${c.ref}` : '', c.folder ? `changes to ${c.folder}` : '', c.query ? `searching “${c.query}”` : ''].filter(Boolean).join('\n');
   const what = compareKind(c);
   return `${what}:\n← ${[sideName(c.left), sideWhere(c.left)].filter(Boolean).join(' · ')}\n→ ${[sideName(c.right), sideWhere(c.right)].filter(Boolean).join(' · ')}`;
 }

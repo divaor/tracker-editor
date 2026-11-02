@@ -181,6 +181,7 @@ export function GitPanel({ dir, tick, actions, onClose }) {
     <div class="panel-head">
       <h2><${Icon} name="branch" size=${16} />Git<span class="muted small git-repo" title=${shownPath(root ?? dir)}>${name}</span>${conn && html`<span class="muted small git-where" title=${`Git runs on ${connLabel(conn)}, with its own Git and sign-ins`}>${connLabel(conn)}</span>`}</h2>
       <span class="spacer" />
+      ${status && actions.gitHistory && html`<button type="button" class="icon-btn sm" aria-label="History" title="History: the commits with their graph, branches and tags" onClick=${() => actions.gitHistory(root ?? dir)}><${Icon} name="history" size=${15} /></button>`}
       ${status && html`<button type="button" class="icon-btn sm" aria-label="Ask the model about this repository" title="Ask the model: about this repository, or to do something in it" onClick=${() => askModel()}><${Icon} name="sparkle" size=${15} /></button>`}
       <button type="button" class="icon-btn sm" aria-label="Read again" title="Read again" disabled=${busy} onClick=${load}><${Icon} name="rotate" size=${15} /></button>
       <button type="button" class="icon-btn sm" aria-label="Close" onClick=${onClose}><${Icon} name="x" size=${16} /></button>
@@ -364,6 +365,7 @@ export function BranchDialog({ dir, actions, onClose }) {
           ${creating && nameProblem && html`<p class="small error-text">${nameProblem}</p>`}
           <span class="field-row"><button type="submit" class="btn primary sm" disabled=${busy || Boolean(nameProblem)}>Make it and switch</button><button type="button" class="btn ghost sm" onClick=${() => setCreating(null)}>Cancel</button></span>
         </form>`}
+    ${creating === null && actions.gitHistory && html`<button type="button" class="btn ghost sm branch-history" onClick=${() => (onClose(), actions.gitHistory(dir))}><${Icon} name="history" size=${14} />History: the commits of every branch</button>`}
   </${Modal}>`;
 }
 
