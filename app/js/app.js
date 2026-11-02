@@ -2872,7 +2872,10 @@ export function App() {
     }
   };
   actions.dockerRun = (root, plan) =>
-    dockerTerminal(root, () => plan.up, () => plan.url && toast(`Building and starting it: once the terminal says it started, it is at ${plan.url}.`, { timeout: 15000, action: { label: 'Open', run: () => window.open(plan.url, '_blank', 'noopener') } }));
+    dockerTerminal(root, () => plan.up, () =>
+      plan.url
+        ? toast(`Building and starting it: once the terminal says it started, it is at ${plan.url}.`, { timeout: 15000, action: { label: 'Open', run: () => window.open(plan.url, '_blank', 'noopener') } })
+        : window.desktop?.remote?.places && toast('Building and starting it in the terminal. Once it has started, open the container for its files and a terminal inside it.', { timeout: 15000, action: { label: 'Open the container', run: () => actions.pickPlace('docker') } }));
   actions.dockerOffline = (root, plan) =>
     dockerTerminal(root, (kind) => offlineBuildLine(plan, kind), () => toast('Building the offline package: once the terminal says it is ready, copy the docker/offline folder to the server and run its install script.', { timeout: 15000 }));
   actions.dockerReview = (root, plan) => actions.assistFiles({ folder: root, question: reviewQuestion(plan) });
