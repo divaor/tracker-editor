@@ -44,3 +44,21 @@ test('local mode (no GitHub): nothing about syncing in Help', () => {
   assert.equal(findCommands('save a file', { local: true }).find((c) => c.id === 'sync')?.label, 'Save a file from disk or a server');
   assert.ok(!findCommands('', { local: true }).some((c) => /sync/i.test(c.label)), 'no word about syncing');
 });
+
+// The Android app has some of the desktop's commands (0.48.1): Folders, servers, terminals, folder
+// comparisons and Git on SSH servers. Help, the palette and the model's help list those there,
+// and not what it lacks (Docker, debugging, running files, language servers).
+test('the Android app lists the desktop commands it has, and only those', async () => {
+  const { commandLines, helpContext } = await import('../app/js/editorHelp.js');
+  for (const c of COMMAND_LIST.filter((x) => x.android)) assert.equal(c.only, 'desktop', `${c.id}: android marks a desktop-only command`);
+  const ids = (opts) => findCommands('', opts).map((c) => c.id);
+  const phone = ids({ android: true });
+  for (const id of ['git-panel', 'git-blame-file', 'git-branch', 'git-push', 'folders', 'server-add', 'terminal', 'tasks', 'compare-folders', 'two-panes', 'project-settings']) assert.ok(phone.includes(id), id);
+  for (const id of ['dockerize', 'docker-open', 'wsl-open', 'run-file', 'debug-file', 'quick-fix', 'language-servers', 'preview-scripts', 'type-out', 'screenshot-ocr']) assert.ok(!phone.includes(id), id);
+  const browser = ids({});
+  assert.ok(!browser.includes('git-panel') && !browser.includes('folders'), 'not in a browser');
+  assert.ok(ids({ desktop: true }).includes('dockerize'));
+  assert.match(commandLines('git panel commit', { android: true }), /Git panel.*\[desktop and Android apps\]/);
+  assert.doesNotMatch(commandLines('dockerize docker image', { android: true }), /Dockerize/);
+  assert.equal(helpContext('x', '', { android: true }).android, true);
+});

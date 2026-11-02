@@ -5,7 +5,7 @@ import { shownKeys } from '../keys.js';
 import { renderMarkdown } from '../markdown.js';
 import { ClearButton, Modal, Segmented } from './components.js';
 import { Icon } from './icons.js';
-import { isDesktopApp } from '../platform.js';
+import { isAndroidApp, isDesktopApp } from '../platform.js';
 
 const TABS = [
   { id: 'commands', label: 'Commands and shortcuts' },
@@ -27,7 +27,7 @@ function CommandsTab({ query, setQuery, onRun }) {
   const input = useRef(null);
   const list = useRef(null);
   useEffect(() => input.current?.focus(), []);
-  const found = findCommands(query, { desktop, mac, local: isLocal(), keysOf: shownKeys });
+  const found = findCommands(query, { desktop, android: isAndroidApp(), mac, local: isLocal(), keysOf: shownKeys });
   const runnable = found.filter((c) => c.run !== false);
   const move = (e, step) => {
     const buttons = [...(list.current?.querySelectorAll('button.help-command') ?? [])];

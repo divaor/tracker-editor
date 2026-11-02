@@ -4,7 +4,7 @@
 // the passages that fit for a model on this computer, plus the commands that fit with their
 // keys, so the answer says what the editor really does. Without a model, the passages are the
 // answer. Pure: the tests import it.
-import { COMMAND_LIST, keysFor } from './commands.js';
+import { COMMAND_LIST, inPlace, keysFor } from './commands.js';
 
 export const HELP_GROUP = { id: 'help', label: 'Help with the editor' };
 
@@ -216,18 +216,18 @@ export function guideExcerpts(question, guide, { budget = 8000, chunks = guideCh
 }
 
 /** The commands that fit `question`, with their keys on this computer ("- Split view on or off: Ctrl+\"). */
-export function commandLines(question, { desktop = false, mac = false, max = 12, list = COMMAND_LIST } = {}) {
+export function commandLines(question, { desktop = false, android = false, mac = false, max = 12, list = COMMAND_LIST } = {}) {
   const terms = queryTerms(question);
   if (!terms.length) return '';
   return list
-    .filter((c) => desktop || c.only !== 'desktop')
+    .filter((c) => inPlace(c, { desktop, android }))
     .map((c) => ({ c, s: scoreOf(`${c.label} ${c.hint ?? ''} ${c.group}`, c.label, terms) }))
     .filter((r) => r.s > 0)
     .sort((a, b) => b.s - a.s)
     .slice(0, max)
     .map(({ c }) => {
-      const keys = keysFor(c, { mac, desktop });
-      return `- ${c.label}${keys ? `: ${keys}` : ''}${c.hint ? ` (${c.hint})` : ''}${c.only === 'desktop' ? ' [desktop app]' : ''}`;
+      const keys = keysFor(c, { mac, desktop: desktop || android });
+      return `- ${c.label}${keys ? `: ${keys}` : ''}${c.hint ? ` (${c.hint})` : ''}${c.only === 'desktop' ? (c.android ? ' [desktop and Android apps]' : ' [desktop app]') : ''}`;
     })
     .join('\n');
 }
@@ -236,13 +236,14 @@ export function commandLines(question, { desktop = false, mac = false, max = 12,
  * What goes with a help question: the whole guide (`whole`, for a model that takes it all) or the
  * passages that fit within `budget` characters, the commands that fit, and where the person is.
  */
-export function helpContext(question, guide, { whole = false, desktop = false, mac = false, budget = 8000, name = '', language = '', version = '', trouble = false } = {}) {
+export function helpContext(question, guide, { whole = false, desktop = false, android = false, mac = false, budget = 8000, name = '', language = '', version = '', trouble = false } = {}) {
   const text = String(guide ?? '').trim();
   return {
     guide: whole ? text : '',
     excerpts: whole ? '' : guideExcerpts(question, text, { budget, trouble }),
-    commands: commandLines(question, { desktop, mac }),
+    commands: commandLines(question, { desktop, android, mac }),
     desktop,
+    android,
     mac,
     name,
     language,
@@ -250,8 +251,8 @@ export function helpContext(question, guide, { whole = false, desktop = false, m
   };
 }
 
-function whereLine({ desktop, mac, name, language }) {
-  const parts = [desktop ? 'in the desktop app' : 'in the web app (a browser or the phone)'];
+function whereLine({ desktop, android, mac, name, language }) {
+  const parts = [desktop ? 'in the desktop app' : android ? 'in the Android app' : 'in the web app (a browser or the phone)'];
   if (mac) parts.push('on a Mac');
   if (name) parts.push(`with ${name}${language ? ` (${language})` : ''} open`);
   return `I am ${parts.join(', ')}.`;

@@ -6,7 +6,7 @@ import { shownKeys } from '../keys.js';
 import { isMac, Keys } from './help.js';
 import { PickList } from './symbols.js';
 import { Marked } from './listNav.js';
-import { isDesktopApp } from '../platform.js';
+import { isAndroidApp, isDesktopApp } from '../platform.js';
 
 // A color per group of commands (the file type colors), so a group is found at a glance.
 const GROUP_TINTS = ['blue', 'cyan', 'purple', 'indigo', 'orange', 'red', 'green', 'teal', 'brown', 'pink'];
@@ -20,7 +20,7 @@ export function CommandPalette({ initial = '', onRun, onClose }) {
   const [query, setQuery] = useState(initial);
   const mac = isMac();
   const desktop = isDesktopApp();
-  const rows = findCommands(query, { desktop, mac, local: isLocal(), keysOf: shownKeys }).filter((c) => c.run !== false);
+  const rows = findCommands(query, { desktop, android: isAndroidApp(), mac, local: isLocal(), keysOf: shownKeys }).filter((c) => c.run !== false);
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   return html`<${PickList} title="Run a command" placeholder="Type part of a command (format, fold, problems…)" query=${query} setQuery=${setQuery} rows=${rows}
     onClose=${onClose} onPick=${(c) => onRun(c)} empty="No command matches." action="run" icon="keyboard"

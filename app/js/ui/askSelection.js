@@ -9,7 +9,7 @@ import { APP_VERSION } from '../version.js';
 import { toast } from './components.js';
 import { isMac } from './help.js';
 import { Icon } from './icons.js';
-import { isDesktopApp } from '../platform.js';
+import { isAndroidApp, isDesktopApp } from '../platform.js';
 
 const MODES = [
   { id: 'answer', label: 'Answer' },
@@ -40,6 +40,7 @@ async function editorHelpFor(question, { file = null, trouble = false, budget } 
   return helpContext(question, await loadGuide(), {
     whole: !budget && !local,
     desktop: isDesktopApp(),
+    android: isAndroidApp(),
     mac: isMac(),
     budget: budget ?? 7000,
     name: file?.name ?? '',

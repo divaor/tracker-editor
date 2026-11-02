@@ -1,12 +1,14 @@
 // Every command with its shortcut, for Help (F1): the cheat sheet, searchable, where
 // a command can also be run. `keys` use "Mod" for Ctrl (Cmd on macOS) and "Alt" for
 // Alt (Option); `desktop` keys apply in the desktop app instead; `only` marks commands
-// that exist only there ('desktop'). Pure, so the Node tests can check it.
+// that exist only there ('desktop'), and `android` those of them the Android app has too
+// (Folders, servers, terminals, folder comparisons, Git on SSH servers). Pure, so the Node
+// tests can check it.
 
 export const COMMAND_GROUPS = ['Files and tabs', 'Find', 'Edit and text', 'Code', 'Git', 'Debug', 'View', 'Tools', 'Folders view', 'Terminal'];
 
 /**
- * [{ id, group, label, keys?, desktop?, only?, hint?, run?, local?, when? }]; `run: false` for keys that only work in place;
+ * [{ id, group, label, keys?, desktop?, only?, android?, hint?, run?, local?, when? }]; `run: false` for keys that only work in place;
  * `local`: the label in local mode (no GitHub), or false to leave it out there; `when: 'debugging'`:
  * its keys work only while a program is debugged (and may be another command's otherwise: F5).
  * Keys can be changed (keybindings.js, Settings → Keys): a command with `keys` here gets them with
@@ -16,9 +18,9 @@ export const COMMAND_LIST = [
   { id: 'new', group: 'Files and tabs', label: 'New file', keys: 'Alt+N', desktop: 'Mod+N' },
   { id: 'quick-open', group: 'Files and tabs', label: 'Open a file by name', keys: 'Mod+P' },
   { id: 'disk-open', group: 'Files and tabs', label: 'Open a file from this computer (edit in place)', keys: 'Mod+O', only: 'desktop' },
-  { id: 'folder-open', group: 'Files and tabs', label: 'Open a folder', only: 'desktop' },
-  { id: 'folder-beside', group: 'Folders view', label: 'Folders side by side: add some (here or on servers), reorder, close', only: 'desktop', hint: 'Each one under its own header: drag the headers to change the order' },
-  { id: 'server-add', group: 'Files and tabs', label: 'Connect to a server', only: 'desktop' },
+  { id: 'folder-open', group: 'Files and tabs', label: 'Open a folder', only: 'desktop', android: true },
+  { id: 'folder-beside', group: 'Folders view', label: 'Folders side by side: add some (here or on servers), reorder, close', only: 'desktop', android: true, hint: 'Each one under its own header: drag the headers to change the order' },
+  { id: 'server-add', group: 'Files and tabs', label: 'Connect to a server', only: 'desktop', android: true },
   { id: 'docker-open', group: 'Files and tabs', label: 'Open a Docker container (its files and a terminal)', only: 'desktop', hint: 'A running container, like a server: Folders, tabs, find, the terminal' },
   { id: 'wsl-open', group: 'Files and tabs', label: 'Open a WSL distribution (its files and a terminal)', only: 'desktop', hint: 'Windows: Ubuntu, Debian… like a server' },
   { id: 'open-disk', group: 'Files and tabs', label: 'Import files' },
@@ -102,26 +104,26 @@ export const COMMAND_LIST = [
   { id: 'foldLevel2', group: 'Code', label: 'Fold one level in (methods in classes)', keys: 'Alt+2' },
   { id: 'foldLevel3', group: 'Code', label: 'Fold two levels in', keys: 'Alt+3' },
   { id: 'problems', group: 'Code', label: 'Problems in this file (errors as you type)', keys: 'Mod+Shift+M', hint: 'JSON, YAML, XML, HTML, CSS and code' },
-  { id: 'git-compare', group: 'Git', label: 'Compare with the last commit (Git)', only: 'desktop', hint: 'A file in a Git repository (here, on an SSH server, in a container or WSL); or click ±N in the status bar' },
-  { id: 'git-ask', group: 'Git', label: 'Ask the model about Git: explain, fix, or do it for you', only: 'desktop', hint: 'It sees the repository; steps that are hard to undo wait for your Run and are backed up first. Or ✦ in the Git panel' },
-  { id: 'git-panel', group: 'Git', label: 'Git panel: stage, commit, pull, push, stash', keys: 'Mod+Shift+G', only: 'desktop', hint: 'For the repository of the open file, or of the folder in Folders' },
-  { id: 'git-init', group: 'Git', label: 'Make a folder a Git repository (git init)…', only: 'desktop', hint: 'The folder in Folders; or right-click a folder in Folders, or the Git panel of a folder that is not in one' },
-  { id: 'git-branch', group: 'Git', label: 'Switch branch, or make a new one (Git)', only: 'desktop', hint: 'Or click the branch in the status bar' },
-  { id: 'git-stage-change', group: 'Git', label: 'Stage the change at the cursor (Git)', only: 'desktop', hint: 'That block alone; or click its mark next to the line numbers' },
-  { id: 'git-revert-change', group: 'Git', label: 'Revert the change at the cursor (Git): back to the last commit’s lines', only: 'desktop', hint: 'One edit: Ctrl+Z brings yours back. Or click its mark next to the line numbers, or right-click in it' },
-  { id: 'git-show-change', group: 'Git', label: 'Show the change at the cursor (Git): the last commit’s lines under it', only: 'desktop', hint: 'With Revert, Stage, the previous and next change; Esc closes it' },
-  { id: 'git-next-change', group: 'Git', label: 'Next change since the last commit (Git)', keys: 'Alt+F3', only: 'desktop', hint: 'In the file; the open change peek follows' },
-  { id: 'git-prev-change', group: 'Git', label: 'Previous change since the last commit (Git)', keys: 'Shift+Alt+F3', only: 'desktop' },
-  { id: 'git-blame-file', group: 'Git', label: 'Blame the whole file (Git): who changed each line, and when (on or off)', only: 'desktop', hint: 'A column before the line numbers, tinted by age; hover a block for its commit' },
-  { id: 'git-blame-toggle', group: 'Git', label: 'Blame on the cursor’s line (Git): who changed it, and when (on or off)', only: 'desktop', hint: 'At the end of the line, while the cursor rests; hover it for the commit. Settings → Editor' },
-  { id: 'git-fetch', group: 'Git', label: 'Fetch (Git): see what is new on the remote', only: 'desktop' },
-  { id: 'git-pull', group: 'Git', label: 'Pull (Git): bring the remote’s commits in', only: 'desktop' },
-  { id: 'git-push', group: 'Git', label: 'Push (Git): send your commits', only: 'desktop' },
+  { id: 'git-compare', group: 'Git', label: 'Compare with the last commit (Git)', only: 'desktop', android: true, hint: 'A file in a Git repository (here, on an SSH server, in a container or WSL); or click ±N in the status bar' },
+  { id: 'git-ask', group: 'Git', label: 'Ask the model about Git: explain, fix, or do it for you', only: 'desktop', android: true, hint: 'It sees the repository; steps that are hard to undo wait for your Run and are backed up first. Or ✦ in the Git panel' },
+  { id: 'git-panel', group: 'Git', label: 'Git panel: stage, commit, pull, push, stash', keys: 'Mod+Shift+G', only: 'desktop', android: true, hint: 'For the repository of the open file, or of the folder in Folders' },
+  { id: 'git-init', group: 'Git', label: 'Make a folder a Git repository (git init)…', only: 'desktop', android: true, hint: 'The folder in Folders; or right-click a folder in Folders, or the Git panel of a folder that is not in one' },
+  { id: 'git-branch', group: 'Git', label: 'Switch branch, or make a new one (Git)', only: 'desktop', android: true, hint: 'Or click the branch in the status bar' },
+  { id: 'git-stage-change', group: 'Git', label: 'Stage the change at the cursor (Git)', only: 'desktop', android: true, hint: 'That block alone; or click its mark next to the line numbers' },
+  { id: 'git-revert-change', group: 'Git', label: 'Revert the change at the cursor (Git): back to the last commit’s lines', only: 'desktop', android: true, hint: 'One edit: Ctrl+Z brings yours back. Or click its mark next to the line numbers, or right-click in it' },
+  { id: 'git-show-change', group: 'Git', label: 'Show the change at the cursor (Git): the last commit’s lines under it', only: 'desktop', android: true, hint: 'With Revert, Stage, the previous and next change; Esc closes it' },
+  { id: 'git-next-change', group: 'Git', label: 'Next change since the last commit (Git)', keys: 'Alt+F3', only: 'desktop', android: true, hint: 'In the file; the open change peek follows' },
+  { id: 'git-prev-change', group: 'Git', label: 'Previous change since the last commit (Git)', keys: 'Shift+Alt+F3', only: 'desktop', android: true },
+  { id: 'git-blame-file', group: 'Git', label: 'Blame the whole file (Git): who changed each line, and when (on or off)', only: 'desktop', android: true, hint: 'A column before the line numbers, tinted by age; hover a block for its commit' },
+  { id: 'git-blame-toggle', group: 'Git', label: 'Blame on the cursor’s line (Git): who changed it, and when (on or off)', only: 'desktop', android: true, hint: 'At the end of the line, while the cursor rests; hover it for the commit. Settings → Editor' },
+  { id: 'git-fetch', group: 'Git', label: 'Fetch (Git): see what is new on the remote', only: 'desktop', android: true },
+  { id: 'git-pull', group: 'Git', label: 'Pull (Git): bring the remote’s commits in', only: 'desktop', android: true },
+  { id: 'git-push', group: 'Git', label: 'Push (Git): send your commits', only: 'desktop', android: true },
   { id: 'nextProblem', group: 'Code', label: 'Next problem', keys: 'F8' },
   { id: 'previousProblem', group: 'Code', label: 'Previous problem', keys: 'Shift+F8' },
 
   { id: 'toggle-sidebar', group: 'View', label: 'Show or hide the file list', keys: 'Mod+B' },
-  { id: 'folders', group: 'View', label: 'Folders (this computer and servers)', keys: 'Mod+Shift+E', only: 'desktop' },
+  { id: 'folders', group: 'View', label: 'Folders (this computer and servers)', keys: 'Mod+Shift+E', only: 'desktop', android: true },
   { id: 'toggle-wrap', group: 'View', label: 'Word wrap', keys: 'Alt+Z' },
   { id: 'text-larger', group: 'View', label: 'Larger text', keys: 'Mod+=', hint: 'Also Ctrl+mouse wheel, a pinch on a phone, or Aa in the status bar' },
   { id: 'text-smaller', group: 'View', label: 'Smaller text', keys: 'Mod+-', hint: 'Fits more on a small screen' },
@@ -138,13 +140,13 @@ export const COMMAND_LIST = [
   { id: 'pane-close', group: 'View', label: 'Close this pane (its tab stays open)', hint: 'Or × on the pane’s head' },
   { id: 'panes-close', group: 'View', label: 'Only the main pane: close the others' },
   { id: 'outline', group: 'View', label: 'Outline and links', keys: 'Mod+Shift+O' },
-  { id: 'terminal', group: 'View', label: 'Terminal (this computer or a server)', keys: 'Ctrl+`', only: 'desktop' },
-  { id: 'terminal-split', group: 'View', label: 'Two terminals side by side (or one again)', only: 'desktop', hint: 'Or drag a terminal tab onto the left or right half of the panel' },
-  { id: 'tasks', group: 'Terminal', label: 'Tasks: run a project’s npm scripts, Makefile targets, pyproject or Composer scripts', keys: 'Mod+Shift+B', only: 'desktop', hint: 'From the open file’s project and the folders in Folders; each in a terminal of its own' },
-  { id: 'project-settings', group: 'Tools', label: 'This project’s settings (.tracker-editor.json): open it, or make one', only: 'desktop', hint: 'Its own run commands, tasks, variables, language servers, formatter and test framework' },
-  { id: 'terminal-rename', group: 'View', label: 'Rename the terminal', only: 'desktop', hint: 'Or double-click its tab' },
+  { id: 'terminal', group: 'View', label: 'Terminal (this computer or a server)', keys: 'Ctrl+`', only: 'desktop', android: true },
+  { id: 'terminal-split', group: 'View', label: 'Two terminals side by side (or one again)', only: 'desktop', android: true, hint: 'Or drag a terminal tab onto the left or right half of the panel' },
+  { id: 'tasks', group: 'Terminal', label: 'Tasks: run a project’s npm scripts, Makefile targets, pyproject or Composer scripts', keys: 'Mod+Shift+B', only: 'desktop', android: true, hint: 'From the open file’s project and the folders in Folders; each in a terminal of its own' },
+  { id: 'project-settings', group: 'Tools', label: 'This project’s settings (.tracker-editor.json): open it, or make one', only: 'desktop', android: true, hint: 'Its own run commands, tasks, variables, language servers, formatter and test framework' },
+  { id: 'terminal-rename', group: 'View', label: 'Rename the terminal', only: 'desktop', android: true, hint: 'Or double-click its tab' },
   { id: 'terminal-tabs-keys', group: 'View', label: 'Terminal tabs: reorder, or show one on a side of the panel', keys: 'Drag the tab', only: 'desktop', run: false, hint: 'Along the tabs to reorder; onto the left or right half to show two; a side’s name back onto the tabs shows one again' },
-  { id: 'explain-error', group: 'Tools', label: 'Ask the model about the error in the terminal', only: 'desktop', hint: 'The selection, or the last output, with the code it points to' },
+  { id: 'explain-error', group: 'Tools', label: 'Ask the model about the error in the terminal', only: 'desktop', android: true, hint: 'The selection, or the last output, with the code it points to' },
   { id: 'fix-problems', group: 'Tools', label: 'Fix the problems in this file with the model', hint: 'Or Explain / Fix with the model in a problem’s tooltip' },
   { id: 'open-in-claude', group: 'Tools', label: 'Ask in the Claude app (your Claude subscription)', hint: 'Opens Claude with the selection or the file; the question is copied too' },
   { id: 'test-at-cursor', group: 'Tools', label: 'Run the test at the cursor (or its suite)', keys: 'Mod+F5', only: 'desktop', hint: 'Jest, Vitest, Mocha, node:test, pytest, unittest, go test, cargo test, PHPUnit, Pest, dotnet test; or click ▶ next to a test' },
@@ -190,8 +192,8 @@ export const COMMAND_LIST = [
   { id: 'clipboard-history', group: 'Tools', label: 'Clipboard history', keys: 'Mod+Shift+V', only: 'desktop' },
   { id: 'compare-with', group: 'Tools', label: 'Compare with another file…', hint: 'An open tab (the ones next to it first), a file in your folders, my files, or Browse…' },
   { id: 'compare-clipboard', group: 'Tools', label: 'Compare with the clipboard' },
-  { id: 'compare-folders', group: 'Tools', label: 'Compare two folders…', only: 'desktop', hint: 'The folder open in Folders with another one (here or on a server); or a folder’s menu → Compare with another folder…' },
-  { id: 'two-panes', group: 'Tools', label: 'Two panes: two folders side by side…', only: 'desktop', hint: 'The folder open in Folders and another one (here or on a server), to copy and move files between them, like WinSCP' },
+  { id: 'compare-folders', group: 'Tools', label: 'Compare two folders…', only: 'desktop', android: true, hint: 'The folder open in Folders with another one (here or on a server); or a folder’s menu → Compare with another folder…' },
+  { id: 'two-panes', group: 'Tools', label: 'Two panes: two folders side by side…', only: 'desktop', android: true, hint: 'The folder open in Folders and another one (here or on a server), to copy and move files between them, like WinSCP' },
   { id: 'two-panes-keys', group: 'Tools', label: 'In two panes: copy / move to the other side, new folder, delete, the other side', keys: 'F5 / F6 / F7 / F8 / Tab', run: false },
   { id: 'compare-saved', group: 'Tools', label: 'Open a saved comparison…', hint: 'The comparisons saved with their ☆' },
   { id: 'compare-keys', group: 'Tools', label: 'In a comparison: next / previous change, copy it to the right / left', keys: 'Alt+↓ / Alt+↑ / Alt+→ / Alt+←', run: false },
@@ -219,17 +221,20 @@ export function keysFor(command, { mac = false, desktop = false } = {}) {
   return mac ? keys.replace(/Mod\+/g, 'Cmd+').replace(/Alt\+/g, 'Option+') : keys.replace(/Mod\+/g, 'Ctrl+');
 }
 
+/** Whether a command is there: the desktop app has them all, the Android app those marked `android`. */
+export const inPlace = (c, { desktop = false, android = false } = {}) => desktop || c.only !== 'desktop' || (android && c.android === true);
+
 /**
  * The commands for this place (desktop-only ones left out in the browser), matching every
  * word of `query` (in the label, group, hint or keys: `keysOf`, the keys in effect); while
  * searching, the ones whose label matches come first.
  */
-export function findCommands(query = '', { desktop = false, list = COMMAND_LIST, mac = false, local = false, keysOf = (c) => keysFor(c, { mac, desktop }) } = {}) {
+export function findCommands(query = '', { desktop = false, android = false, list = COMMAND_LIST, mac = false, local = false, keysOf = (c) => keysFor(c, { mac, desktop: desktop || android }) } = {}) {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   // Local mode: nothing about syncing.
   if (local) list = list.filter((c) => c.local !== false).map((c) => (typeof c.local === 'string' ? { ...c, label: c.local } : c));
   const found = list.filter(
-    (c) => (desktop || c.only !== 'desktop') && words.every((w) => `${c.label} ${c.group} ${keysOf(c)} ${c.hint ?? ''}`.toLowerCase().includes(w)),
+    (c) => inPlace(c, { desktop, android }) && words.every((w) => `${c.label} ${c.group} ${keysOf(c)} ${c.hint ?? ''}`.toLowerCase().includes(w)),
   );
   if (!words.length) return found;
   const rank = (c) => {
