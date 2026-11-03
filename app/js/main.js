@@ -3,6 +3,7 @@ import { App } from './app.js';
 import { requestPersistence } from './kv.js';
 import { applyTheme, getSettings, onSettings } from './settings.js';
 import { closeStore, flush, store } from './store.js';
+import { chats } from './chatStore.js';
 import { startSync, stopSync } from './syncManager.js';
 import { claimActiveTab } from './tabLock.js';
 import { loadVault } from './vault.js';
@@ -26,6 +27,7 @@ function showInactive() {
 // A newer tab took over: hand over the latest text and stop for good.
 async function stepDown({ saved }) {
   window.dispatchEvent(new Event('editor:flush'));
+  await chats.flush().catch(() => {});
   await stopSync();
   await closeStore({ save: saved });
   render(null, root);
@@ -40,7 +42,7 @@ try {
     applyFont(s);
   });
   if (await claimActiveTab(stepDown)) {
-    await Promise.all([store.load(), loadVault()]);
+    await Promise.all([store.load(), loadVault(), chats.ready()]);
     render(html`<${App} />`, root);
     startSync();
     requestPersistence();
@@ -48,6 +50,7 @@ try {
     const saveNow = () => {
       window.dispatchEvent(new Event('editor:flush'));
       flush();
+      chats.flush().catch(() => {});
     };
     document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && saveNow());
     window.addEventListener('pagehide', saveNow);

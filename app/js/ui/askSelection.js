@@ -10,6 +10,9 @@ import { toast } from './components.js';
 import { isMac } from './help.js';
 import { Icon } from './icons.js';
 import { isAndroidApp, isDesktopApp } from '../platform.js';
+import { chatPreview, chatTitle, chatToResume, fitTurns, historyBudget, keptAction, keptContext, leftOutNote, newChatId } from '../chats.js';
+import { chats } from '../chatStore.js';
+import { ChatButtons, ChatList, KeptNote, useChats } from './chats.js';
 
 const MODES = [
   { id: 'answer', label: 'Answer' },
@@ -61,14 +64,27 @@ async function editorHelpFor(question, { file = null, trouble = false, budget } 
  * from the terminal. Its context may have no `key` (the terminal's output): then there is no
  * text to replace, and `fixTarget` (a file the error points to) offers to fix that file.
  * `start.mode` 'help' opens it on questions about the editor (also all it offers without `hasFile`).
+ * Chats are kept (chatStore.js): it opens on the chat shown last for this tab (`chatKey`: the
+ * open tab, null for none or an encrypted one), else the newest about it; `start.chatId` opens
+ * one from the list, `start.view` 'chats' the list itself.
  */
-export function AssistPanel({ scope, actions, onClose, start = null, hasFile = true }) {
+const metaOf = (chat) => ({ title: chat.title, named: Boolean(chat.named), createdAt: chat.createdAt, link: chat.link ?? null });
+
+export function AssistPanel({ scope, actions, onClose, start = null, hasFile = true, chatKey = null }) {
   const [question, setQuestion] = useState('');
   // With no file open, only questions about the editor.
   const [mode, setMode] = useState(hasFile ? (start?.mode ?? 'answer') : 'help');
   const [found, setFound] = useState(null); // without a model: the guide's passages for a question
   const [pending, setPending] = useState(null); // { action, value }: an action waiting for its value
   const [conv, setConv] = useState(null); // { context, action, turns: [{ question, answer }], status, phase }
+  // The chat kept for it: its id (null until the first answer), what it is about, whether it came back from earlier.
+  const [chatId, setChatId] = useState(null);
+  const [chatMeta, setChatMeta] = useState(null);
+  const [kept, setKept] = useState(false);
+  const [listOpen, setListOpen] = useState(start?.view === 'chats');
+  const chatRef = useRef({ id: null, meta: null });
+  const rows = useChats();
+  const chatScope = `ask:${chatKey ?? ''}`;
   const controller = useRef(null);
   const input = useRef(null);
   const valueInput = useRef(null);
@@ -76,14 +92,17 @@ export function AssistPanel({ scope, actions, onClose, start = null, hasFile = t
   const { llm } = getSettings();
   useLayoutEffect(() => input.current?.focus(), []);
   useLayoutEffect(() => valueInput.current?.focus(), [pending?.action.id]);
-  // Escape closes it from anywhere (a value being picked first), unless something else used the key.
+  // Escape closes it from anywhere (a value being picked or the list of chats first), unless something else used the key.
   const pendingRef = useRef(null);
   pendingRef.current = pending;
+  const listRef = useRef(false);
+  listRef.current = listOpen;
   useLayoutEffect(() => {
     const onKey = (e) => {
       if (e.key !== 'Escape' || e.defaultPrevented) return;
       e.preventDefault();
       if (pendingRef.current) setPending(null);
+      else if (listRef.current) setListOpen(false);
       else onClose();
     };
     document.addEventListener('keydown', onKey);
@@ -91,20 +110,103 @@ export function AssistPanel({ scope, actions, onClose, start = null, hasFile = t
   }, []);
   useEffect(() => () => controller.current?.abort(), []);
   useLayoutEffect(() => {
-    if (start?.action && llm.enabled && llm.chatModel) ask(start.action, '', start.context);
+    if (start?.action && llm.enabled && llm.chatModel) return void ask(start.action, '', start.context);
+    // The chat it had last for this tab (or the one picked in the list) comes back.
+    let live = true;
+    chats.ready().then(() => {
+      if (!live) return;
+      const id = start?.chatId ?? (start?.view ? null : chatToResume(chats.list(), { kind: 'ask', key: chatKey, current: chats.current(chatScope) }));
+      if (id) openChat(id);
+    });
+    return () => (live = false);
   }, []);
   useEffect(() => end.current?.scrollIntoView({ block: 'nearest' }), [conv?.turns.length, conv?.status]);
+
+  /** A kept chat shown again, to read and go on with. */
+  const openChat = async (id) => {
+    const chat = await chats.load(id);
+    if (!chat || chat.kind !== 'ask' || !chat.state?.conv?.turns?.length) return false;
+    controller.current?.abort();
+    chatRef.current = { id: chat.id, meta: metaOf(chat) };
+    setChatId(chat.id);
+    setChatMeta(metaOf(chat));
+    setKept(true);
+    setPending(null);
+    setConv({ ...chat.state.conv, status: 'done', phase: '' });
+    if (hasFile && chat.state.mode) setMode(chat.state.mode);
+    chats.setCurrent(chatScope, chat.id);
+    setListOpen(false);
+    return true;
+  };
+  /** A new chat: the one shown stays in the list. */
+  const newChat = ({ keepList = false } = {}) => {
+    controller.current?.abort();
+    chatRef.current = { id: null, meta: null };
+    setChatId(null);
+    setChatMeta(null);
+    setKept(false);
+    setConv(null);
+    if (!keepList) setListOpen(false);
+    chats.setCurrent(chatScope, null);
+    setTimeout(() => input.current?.focus(), 0);
+  };
+  /** Keeps the conversation as it is now (its answered turns): a new chat at its first answer. */
+  const persist = async ({ context, action, turns }) => {
+    const answered = turns.filter((t) => t.answer);
+    if (!answered.length) return;
+    const { id: known, meta } = chatRef.current;
+    const id = known ?? newChatId();
+    const link = meta?.link ?? actions.chatLink?.(context, chatKey) ?? null;
+    chatRef.current = { id, meta: { ...(meta ?? {}), link } };
+    setChatId(id);
+    chats.setCurrent(chatScope, id);
+    const row = chats.row(id);
+    const named = Boolean(row?.named ?? meta?.named);
+    const keptChat = await chats.save({
+      id,
+      kind: 'ask',
+      title: named ? (row?.title ?? meta.title) : chatTitle(answered[0].question, { name: context.help ? '' : context.name, action: action.id !== 'custom' && action.kind !== 'help' }),
+      named,
+      createdAt: meta?.createdAt,
+      saved: Boolean(row?.saved),
+      link,
+      turns: answered.length,
+      preview: chatPreview(answered.at(-1).answer),
+      state: { mode, conv: { context: keptContext(context), action: keptAction(action), turns: answered } },
+    });
+    if (chatRef.current.id === id) {
+      chatRef.current.meta = metaOf(keptChat);
+      setChatMeta(metaOf(keptChat));
+    }
+  };
+  /** A chat picked in the list: here when it is about this tab (or the editor), else where it belongs. */
+  const openFromList = async (row) => {
+    if (row.kind === 'ask' && (row.link?.help || !row.link?.key || row.link.key === chatKey) && (await openChat(row.id))) return;
+    actions.openChat(row);
+  };
 
   // A follow-up continues the conversation about the same text. A question about the editor
   // (kind 'help') goes with the guide's passages instead of the text.
   const ask = async (action, followUp = '', given = null) => {
+    // Another question that is not a follow-up starts a new chat (the one shown stays in the list).
+    if (!followUp && chatRef.current.id) {
+      chatRef.current = { id: null, meta: null };
+      setChatId(null);
+      setChatMeta(null);
+      setKept(false);
+    }
     const help = (followUp ? conv.action : action).kind === 'help';
     const file = help && !followUp ? actions.openFileInfo() : null;
     const asked = help && !followUp ? action.prompt || fileQuestion(file ?? {}) : '';
     let context = followUp ? conv.context : (given ?? (help ? { help: true, label: 'Tracker Editor help', name: 'Tracker Editor', text: asked, whole: false, file } : actions.assistContext()));
     if (!context) return;
-    const turns = followUp ? conv.turns : [];
-    const history = turns.flatMap((t, i) => [...(i > 0 ? [{ role: 'user', content: t.question }] : []), { role: 'assistant', content: t.answer }]).concat(followUp ? [{ role: 'user', content: followUp }] : []);
+    // A question that failed before is left out (it is asked again as this one).
+    const turns = followUp ? conv.turns.filter((t) => t.answer) : [];
+    // A long chat: the first answer and the latest that fit go again with the follow-up.
+    const fitted = fitTurns(turns, historyBudget(connectionOf(llm)));
+    const history = fitted.turns
+      .flatMap((t, i) => [...(i > 0 ? [{ role: 'user', content: t.question }] : []), { role: 'assistant', content: t.answer }, ...(i === 0 && fitted.left ? [{ role: 'user', content: leftOutNote(fitted.left) }, { role: 'assistant', content: 'Understood.' }] : [])])
+      .concat(followUp ? [{ role: 'user', content: followUp }] : []);
     controller.current?.abort();
     const signal = (controller.current = new AbortController()).signal;
     const asking = [...turns, { question: followUp || (help ? asked : action.label), answer: '' }];
@@ -141,6 +243,7 @@ export function AssistPanel({ scope, actions, onClose, start = null, hasFile = t
       }
       show(reply || out);
       setConv((c) => c && { ...c, status: 'done' });
+      persist({ context, action, turns: [...asking.slice(0, -1), { ...asking.at(-1), answer: reply || out }] });
       setTimeout(() => input.current?.focus(), 0);
     } catch (err) {
       if (err?.name === 'AbortError') return setConv((c) => (c && c.turns.length > 1 ? { ...c, turns: c.turns.slice(0, -1), status: 'done' } : null));
@@ -150,7 +253,8 @@ export function AssistPanel({ scope, actions, onClose, start = null, hasFile = t
   const submit = () => {
     const q = question.trim();
     if (!q) return;
-    if (conv?.status === 'done') return ask(conv.action, q);
+    // A follow-up, also after an answer that failed in a chat with earlier ones.
+    if (conv?.status === 'done' || (conv?.status === 'error' && conv.turns.some((t) => t.answer))) return ask(conv.action, q);
     if (mode === 'files') return actions.assistFiles({ question: q });
     // "How do I split the view?" is about the editor, not the text: the guide answers it.
     const kind = mode === 'answer' && looksLikeEditorQuestion(q) ? 'help' : mode;
@@ -182,7 +286,8 @@ export function AssistPanel({ scope, actions, onClose, start = null, hasFile = t
     <span class="assist-title"><${Icon} name="sparkle" size=${16} />Model</span>
     <span class="assist-scope" title="Select text in the file to ask about just that part">${conv ? contextLabel(conv.context) : start?.context ? contextLabel(start.context) : mode === 'help' ? 'Tracker Editor help' : scope}</span>
     <span class="spacer" />
-    ${conv && html`<button type="button" class="btn ghost sm" title="Start over" onClick=${() => (controller.current?.abort(), setConv(null))}>New</button>`}
+    ${llm.enabled && llm.chatModel && html`<${ChatButtons} chatId=${chatId} saved=${Boolean(rows.find((r) => r.id === chatId)?.saved)} listOpen=${listOpen} onToggleList=${() => setListOpen(!listOpen)} onNew=${() => newChat()} />`}
+    ${conv && !chatId && html`<button type="button" class="btn ghost sm" title="Start over" onClick=${newChat}>New</button>`}
     <button type="button" class="icon-btn sm" aria-label="Close" title="Close (Esc)" onClick=${onClose}><${Icon} name="x" size=${16} /></button>
   </div>`;
 
@@ -215,6 +320,15 @@ export function AssistPanel({ scope, actions, onClose, start = null, hasFile = t
 
   const last = conv?.turns.at(-1);
   const code = conv?.status === 'done' ? lastCodeBlock(last?.answer) : '';
+  // What it can still do with the text: only while that file is the one open (a kept chat may be about another).
+  const onText = Boolean(conv?.context.key) && conv.context.key === chatKey;
+  if (listOpen)
+    return html`<aside class="assist-panel" role="dialog" aria-label="Ask the model">
+      ${head}
+      <div class="assist-body">
+        <${ChatList} here=${actions.chatHere?.(chatKey) ?? { key: chatKey }} currentId=${chatId} onOpen=${openFromList} onDeleted=${(id) => id === chatRef.current.id && newChat({ keepList: true })} />
+      </div>
+    </aside>`;
   return html`<aside class="assist-panel" role="dialog" aria-label="Ask the model">
     ${head}
     <div class="assist-body">
@@ -246,6 +360,7 @@ export function AssistPanel({ scope, actions, onClose, start = null, hasFile = t
       </div>`}
       ${conv &&
       html`<div class="assist-thread" aria-live="polite">
+        ${kept && html`<${KeptNote} chat=${chatMeta} />`}
         ${conv.turns.map(
           (t, i) => html`<div class="assist-turn" key=${i}>
             <p class="assist-question">${t.question}</p>
@@ -267,9 +382,9 @@ export function AssistPanel({ scope, actions, onClose, start = null, hasFile = t
         html`<div class="card-actions assist-answer-actions">
           ${conv.context.fixTarget &&
           html`<button type="button" class="btn primary sm" title="Opens the file and proposes a fixed version to compare and accept" onClick=${() => (onClose(), actions.fixForError(conv.context.fixTarget, conv.context.errorText))}><${Icon} name="check" size=${14} />Fix ${conv.context.fixTarget.split(/[\\/]/).pop()}</button>`}
-          ${code && conv.context.key && html`<button type="button" class="btn primary sm" title="Compare the code in the answer with your text, then accept it" onClick=${() => (onClose(), actions.proposeReplacement(conv.context, cleanReplacement(code, conv.context.text), { label: 'The code from the answer' }))}><${Icon} name="check" size=${14} />Use the code</button>`}
+          ${code && onText && html`<button type="button" class="btn primary sm" title="Compare the code in the answer with your text, then accept it" onClick=${() => (onClose(), actions.proposeReplacement(conv.context, cleanReplacement(code, conv.context.text), { label: 'The code from the answer' }))}><${Icon} name="check" size=${14} />Use the code</button>`}
           <button type="button" class="btn sm" onClick=${() => navigator.clipboard.writeText(last.answer).then(() => toast('Copied'))}><${Icon} name="copy" size=${14} />Copy</button>
-          ${conv.context.key && html`<button type="button" class="btn sm" title="Below the text it is about" onClick=${() => actions.insertAfter(conv.context, last.answer)}><${Icon} name="filePlus" size=${14} />Insert below</button>`}
+          ${onText && html`<button type="button" class="btn sm" title="Below the text it is about" onClick=${() => actions.insertAfter(conv.context, last.answer)}><${Icon} name="filePlus" size=${14} />Insert below</button>`}
           <button type="button" class="btn sm" onClick=${() => (onClose(), actions.answerAsNote(conv.context, conv.action.label, conv.turns.map((t, i) => (i ? `**${t.question}**\n\n${t.answer}` : t.answer)).join('\n\n')))}><${Icon} name="file" size=${14} />Save as note</button>
           ${claudeButton()}
         </div>`}

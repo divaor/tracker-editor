@@ -15,6 +15,9 @@ import { binName } from './folders.js';
 import { toast } from './components.js';
 import { Icon } from './icons.js';
 import { SymbolsNote } from './askSelection.js';
+import { chatPreview, chatTitle, chatToResume, fitMessages, historyBudget, newChatId, settledSteps } from '../chats.js';
+import { chats } from '../chatStore.js';
+import { ChatButtons, ChatList, KeptNote, useChats } from './chats.js';
 
 // The guide's section about this, loaded once: the model says how the cards work when asked.
 let guideText = null;
@@ -97,9 +100,14 @@ function StepCard({ s, waiting, many, onDecide, onUndo }) {
   </div>`;
 }
 
+/** The last words the model wrote in a chat's turns (the list's preview). */
+const lastText = (turns) => [...turns].reverse().flatMap((t) => [...t.parts].reverse()).find((p) => p.text)?.text ?? '';
+
 /**
  * `target`: { key } (a tab: its folder, or a synced note) or { folder }. `start`: { question } to
- * ask at once. `actions.filesWork(target)` makes the work (filesWork.js).
+ * ask at once, or { resume } a kept chat to open. `actions.filesWork(target)` makes the work
+ * (filesWork.js). The chat is kept (chatStore.js) and taken up again when it opens for the same
+ * target, until New chat.
  */
 export function FilesAssist({ target, start = null, actions, onClose }) {
   const { llm } = getSettings();
@@ -116,29 +124,120 @@ export function FilesAssist({ target, start = null, actions, onClose }) {
   const decide = useRef(null);
   const input = useRef(null);
   const end = useRef(null);
+  // The chat kept for it (chatStore.js): null until the first question; `kept` when it came back from earlier.
+  const [chatId, setChatId] = useState(null);
+  const [chatMeta, setChatMeta] = useState(null);
+  const [kept, setKept] = useState(false);
+  const [listOpen, setListOpen] = useState(false);
+  const chatRef = useRef({ id: null, meta: null });
+  const turnsRef = useRef([]);
+  turnsRef.current = turns;
+  const explainRef = useRef(explainOnly);
+  explainRef.current = explainOnly;
+  const rows = useChats();
+  const chatScope = `files:${target.key ?? target.folder ?? ''}`;
+  const listRef = useRef(false);
+  listRef.current = listOpen;
 
   useLayoutEffect(() => input.current?.focus(), []);
-  useEffect(() => () => (controller.current?.abort(), decide.current?.('stop')), []);
+  // Closing keeps the chat as it is (a change waiting for Apply was not made).
+  useEffect(() => () => (controller.current?.abort(), decide.current?.('stop'), persist()), []);
   useEffect(() => end.current?.scrollIntoView({ block: 'nearest' }), [turns, busy]);
   useLayoutEffect(() => {
-    if (start?.question && ready && !work.unavailable) ask(start.question);
+    if (start?.question && ready && !work.unavailable) return void ask(start.question);
+    let live = true;
+    chats.ready().then(() => {
+      if (!live) return;
+      const id = start?.resume ?? chatToResume(chats.list(), { kind: 'files', key: target.key ?? null, folder: target.folder ?? null, current: chats.current(chatScope) });
+      if (id) openChat(id);
+    });
+    return () => (live = false);
   }, []);
   useLayoutEffect(() => {
     const onKey = (e) => {
       if (e.key !== 'Escape' || e.defaultPrevented) return;
       e.preventDefault();
+      if (listRef.current) return setListOpen(false);
       onClose();
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, []);
 
+  /** A kept chat shown again: what was done stays as it ended (no Undo: that was the session's). */
+  const openChat = async (id) => {
+    const chat = await chats.load(id);
+    if (!chat || chat.kind !== 'files' || !chat.state?.turns?.length) return false;
+    chatRef.current = { id: chat.id, meta: chat };
+    setChatId(chat.id);
+    setChatMeta(chat);
+    setKept(true);
+    const restored = chat.state.turns.map((t) => ({ ...t, parts: settledSteps(t.parts) }));
+    turnsRef.current = restored;
+    setTurns(restored);
+    history.current = chat.state.history ?? [];
+    setExplainOnly(Boolean(chat.state.explainOnly));
+    setError('');
+    chats.setCurrent(chatScope, chat.id);
+    setListOpen(false);
+    return true;
+  };
+  const newChat = ({ keepList = false } = {}) => {
+    history.current = [];
+    chatRef.current = { id: null, meta: null };
+    turnsRef.current = [];
+    setTurns([]);
+    setError('');
+    setChatId(null);
+    setChatMeta(null);
+    setKept(false);
+    if (!keepList) setListOpen(false);
+    chats.setCurrent(chatScope, null);
+    setTimeout(() => input.current?.focus(), 0);
+  };
+  /** Keeps the chat as it is now (a new one at its first question). */
+  function persist() {
+    const ts = turnsRef.current;
+    if (!ts.length || work.unavailable) return;
+    const { id: known, meta } = chatRef.current;
+    const id = known ?? newChatId();
+    const link = meta?.link ?? (target.folder ? actions.chatLinkFolder?.(target.folder) : actions.chatLink?.({ key: target.key }, target.key)) ?? null;
+    chatRef.current = { id, meta: { ...(meta ?? {}), link } };
+    chats.setCurrent(chatScope, id);
+    const row = chats.row(id);
+    const named = Boolean(row?.named);
+    chats
+      .save({
+        id,
+        kind: 'files',
+        title: named ? row.title : chatTitle(ts[0].question),
+        named,
+        createdAt: meta?.createdAt,
+        saved: Boolean(row?.saved),
+        link,
+        turns: ts.length,
+        preview: chatPreview(lastText(ts)),
+        state: { target, explainOnly: explainRef.current, turns: ts, history: history.current },
+      })
+      .then((chat) => {
+        if (chatRef.current.id === id) chatRef.current.meta = chat;
+      });
+    setChatId(id);
+  }
+  /** A chat picked in the list: here when it is about the same files, else in its own panel. */
+  const openFromList = async (row) => {
+    const same = row.kind === 'files' && ((target.key && row.link?.key === target.key) || (target.folder && row.link?.folder === target.folder));
+    if (same && (await openChat(row.id))) return;
+    actions.openChat(row);
+  };
+
   const updateLast = (fn) => setTurns((ts) => (ts.length ? [...ts.slice(0, -1), fn(ts.at(-1))] : ts));
   const setPart = (index, part) => updateLast((t) => ({ ...t, parts: t.parts.map((p, i) => (i === index ? part : p)) }));
 
   /** One answer from the model, streamed into a new part; resolves to the plan. */
   const modelTurn = async (content, workspace, signal, opts) => {
-    const messages = filesMessages(content, workspace, history.current, opts);
+    // A long chat: its oldest messages shortened to what fits.
+    const messages = filesMessages(content, workspace, fitMessages(history.current, historyBudget(connectionOf(llm))), opts);
     let partIndex = -1;
     updateLast((t) => {
       partIndex = t.parts.length;
@@ -161,6 +260,8 @@ export function FilesAssist({ target, start = null, actions, onClose }) {
     const plan = parsePlan(full);
     setPart(partIndex, { text: plan.text });
     if (plan.problems.length) updateLast((t) => ({ ...t, problems: [...(t.problems ?? []), ...plan.problems] }));
+    // Kept after the render that shows it.
+    setTimeout(persist, 0);
     return plan;
   };
 
@@ -271,7 +372,7 @@ export function FilesAssist({ target, start = null, actions, onClose }) {
     } finally {
       setBusy(null);
       setPhase('');
-      setTimeout(() => input.current?.focus(), 0);
+      setTimeout(() => (persist(), input.current?.focus()), 0);
     }
   };
 
@@ -281,6 +382,7 @@ export function FilesAssist({ target, start = null, actions, onClose }) {
     setTurns((ts) => ts.map((t) => ({ ...t, parts: t.parts.map((p) => (p.steps ? { steps: p.steps.map((c) => (c === s ? { ...c, status: 'undone', undo: null } : c)) } : p)) })));
     history.current.push({ role: 'user', content: `(I undid “${s.text}”: it is back to how it was before it.)` }, { role: 'assistant', content: 'Understood.' });
     toast(`Undone: ${s.text}`);
+    setTimeout(persist, 0);
   };
   const stop = () => {
     controller.current?.abort();
@@ -292,7 +394,8 @@ export function FilesAssist({ target, start = null, actions, onClose }) {
     <span class="assist-title"><${Icon} name="filePlus" size=${16} />Files with the model</span>
     <span class="assist-scope" title=${work.base?.where ?? ''}>${work.label ?? ''}</span>
     <span class="spacer" />
-    ${turns.length > 0 && html`<button type="button" class="btn ghost sm" title="Start over" disabled=${Boolean(busy)} onClick=${() => ((history.current = []), setTurns([]), setError(''))}>New</button>`}
+    ${ready && !work.unavailable && html`<${ChatButtons} chatId=${chatId} saved=${Boolean(rows.find((r) => r.id === chatId)?.saved)} listOpen=${listOpen} busy=${Boolean(busy)} onToggleList=${() => setListOpen(!listOpen)} onNew=${() => newChat()} />`}
+    ${turns.length > 0 && !chatId && html`<button type="button" class="btn ghost sm" title="Start over" disabled=${Boolean(busy)} onClick=${newChat}>New</button>`}
     <button type="button" class="icon-btn sm" aria-label="Close" title="Close (Esc)" onClick=${onClose}><${Icon} name="x" size=${16} /></button>
   </div>`;
 
@@ -306,6 +409,13 @@ export function FilesAssist({ target, start = null, actions, onClose }) {
     </aside>`;
   }
 
+  if (listOpen)
+    return html`<aside class="assist-panel files-assist" role="dialog" aria-label="Files with the model">
+      ${head}
+      <div class="assist-body">
+        <${ChatList} here=${target.key ? (actions.chatHere?.(target.key) ?? { key: target.key }) : (actions.chatHereFolder?.(target.folder) ?? {})} currentId=${chatId} onOpen=${openFromList} onDeleted=${(id) => id === chatRef.current.id && newChat({ keepList: true })} />
+      </div>
+    </aside>`;
   return html`<aside class="assist-panel files-assist" role="dialog" aria-label="Files with the model">
     ${head}
     <div class="assist-body">
@@ -315,6 +425,7 @@ export function FilesAssist({ target, start = null, actions, onClose }) {
         <div class="gai-suggest">${SUGGESTIONS[kind].map((s) => html`<button type="button" class="chip" key=${s} onClick=${() => ask(s)}>${s}</button>`)}</div>
       </div>`}
       <div class="assist-thread" aria-live="polite">
+        ${kept && turns.length > 0 && html`<${KeptNote} chat=${chatMeta} />`}
         ${turns.map(
           (t, ti) => html`<div class="assist-turn" key=${ti}>
             <p class="assist-question">${t.question}</p>

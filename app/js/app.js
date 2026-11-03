@@ -56,13 +56,14 @@ import { FolderSearchPanel } from './ui/folderSearch.js';
 import { AskPanel } from './ui/askPanel.js';
 import { findResults, measure, parseFindPlan, parsePick, pickMessages, plainPlan, planMessages, questionOf, rankMeasured, wantsPick } from './askFind.js';
 import { askPicture, diskPlace, docSources, foundLabel, itemSources, searchedWords, syncedSources, tabKeyOf, trackerItemUrl } from './askSources.js';
-import { FOUND } from './tabGroups.js';
+import { FOUND, groupOf } from './tabGroups.js';
+import { chats } from './chatStore.js';
 import { PropertiesDialog } from './ui/properties.js';
 import { lastSyncText, mirror as mirrorById, onMirrors, watchMirrors as watchMirrorStatus } from './mirrors.js';
 import { MirrorDeletesDialog, MirrorDialog, MirrorsDialog } from './ui/mirrors.js';
 import { onTransfers, watchTransfers } from './transfers.js';
 import { TransfersCard } from './ui/transfers.js';
-import { baseName, besideSettings, claudeText, folderLabel, inPlaceSettings, isImageName, opensHere, remapPath, withCurrent } from './folders.js';
+import { baseName, besideSettings, claudeText, folderLabel, inPlaceSettings, isImageName, isWithin, opensHere, remapPath, withCurrent } from './folders.js';
 import { folderOfPath, nearestTabs } from './comparePick.js';
 import { clampFont, DEFAULT_FONT, pinchFont, stepFont } from './textSize.js';
 import { keyboardState } from './editKeys.js';
@@ -705,7 +706,18 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       insertAfter(context, answer) {
         if (store.session.active !== context.key) store.open(context.key);
         setTimeout(() => {
-          if (!hostRef.current?.insertBelow(context.key, context.to, answer)) return toast('The file is not open any more. Copy the answer instead.', { kind: 'error' });
+          // After the text it was about where it is now (the file may have changed since: a chat kept
+          // from earlier); the whole file's end for a whole file; the end when the text is not there.
+          const doc = hostRef.current?.stateOf(context.key)?.doc.toString();
+          let to = context.to;
+          if (doc !== undefined) {
+            if (context.whole) to = doc.length;
+            else if (doc.slice(context.from, context.to) !== context.text) {
+              const at = doc.indexOf(context.text);
+              to = at >= 0 ? at + context.text.length : doc.length;
+            }
+          }
+          if (!hostRef.current?.insertBelow(context.key, to, answer)) return toast('The file is not open any more. Copy the answer instead.', { kind: 'error' });
           toast('Added below', { action: { label: 'Undo', run: () => hostRef.current?.run('undo') } });
         }, 0);
       },
@@ -3441,12 +3453,80 @@ export function App() {
     setAssistStart({ ...start, id: Date.now() });
     setAssist(true);
   };
+
+  // ---- Chats with the model (0.50; chats.js, chatStore.js, ui/chats.js): kept on this device ----
+  /** The tab group a tab or a folder is in, as Chats filters by it: { id, name, color, folder, folders, project }. */
+  const chatGroupOf = ({ key = null, path = null } = {}) => {
+    try {
+      const state = tabViewState();
+      const id = key ? state.groupOfKey(key) : groupOf({ key: '', kind: isRemotePath(path) ? 'remote' : 'disk', path }, state.ctx);
+      const g = state.groups.find((x) => x.id === id) ?? (id?.startsWith('f:') ? folderGroupOf(id.slice(2)) : null);
+      return { id, name: g?.name ?? state.nameOf(id), color: g?.color ?? null, folder: g?.path ?? g?.folder ?? (id?.startsWith('f:') ? id.slice(2) : null), folders: g?.folders ?? [], project: g?.kind === 'project' ? g.name : '' };
+    } catch {
+      return null;
+    }
+  };
+  /** What a chat about the tab `key` is linked to: the file, where it is, its folder, project and group (null for an encrypted file). */
+  const chatLinkOf = (key) => {
+    const k = parseKey(key ?? '');
+    if (!k || k.kind === 'compare') return null;
+    const file = k.kind === 'file' ? store.get(k.id) : null;
+    if (file?.encrypted) return null;
+    const name = file?.name ?? (k.kind === 'disk' ? (store.diskTab(k.path)?.name ?? baseName(k.path)) : (store.repoTab(k.path)?.name ?? baseName(k.path)));
+    const group = chatGroupOf({ key });
+    const folder = k.kind === 'disk' ? (group?.folder && isWithin(k.path, group.folder) ? group.folder : parentDir(k.path)) : null;
+    const project = file ? (file.project ?? '') : k.kind === 'repo' ? (store.doc(k.path)?.project ?? '') : (group?.project ?? '');
+    return { key, name, where: kindOfKey(key), folder, project, group };
+  };
+  /** The model panel's chat link: its text's file, else (the editor's help, the terminal's output) the tab it was asked from. */
+  actions.chatLink = (context, chatKey) => {
+    if (context?.help) return { help: true, ...(chatLinkOf(chatKey) ?? {}) };
+    if (context?.key) return chatLinkOf(context.key);
+    return { ...(chatLinkOf(chatKey) ?? {}), key: null, name: context?.label ?? '' };
+  };
+  /** A chat about a folder (Files and Git with the model): its name, where it is and its group. */
+  actions.chatLinkFolder = (folder, extra = {}) => (folder ? { key: null, name: baseName(folder) || folder, folder, where: isRemotePath(folder) ? 'remote' : 'disk', project: '', group: chatGroupOf({ path: folder }), ...extra } : null);
+  /** What Chats calls "this file" and "this project": the tab (or folder) a panel is about, and its group. */
+  actions.chatHere = (chatKey) => ({ key: chatKey, group: chatKey ? chatGroupOf({ key: chatKey }) : null });
+  actions.chatHereFolder = (folder) => ({ key: null, group: folder ? chatGroupOf({ path: folder }) : null });
+  /** Opens the tab a chat is about (true when it is open now). */
+  const openChatKey = async (key) => {
+    const k = parseKey(key ?? '');
+    if (k?.kind === 'disk') return (await actions.openDiskPath(k.path, { report: false })) === null;
+    if (k?.kind === 'file') {
+      if (!store.get(k.id) || store.get(k.id).deleted) return false;
+      actions.openFile(k.id);
+      return true;
+    }
+    if (k?.kind === 'repo') {
+      await actions.openFile(key);
+      return store.session.active === key;
+    }
+    return false;
+  };
+  /** A chat from the list, in its own panel: the model panel on its file (opened first when it can be), Files or Git with the model, Ask about my files. */
+  actions.openChat = async (row) => {
+    if (!row) return;
+    if (row.kind === 'files') return actions.assistFiles({ resume: row.id, folder: row.link?.key ? null : (row.link?.folder ?? null), key: row.link?.key ?? null });
+    if (row.kind === 'git') return actions.gitAssist(row.link?.folder ?? null, { resume: row.id });
+    if (row.kind === 'library') {
+      setAssist(false);
+      setAssistStart(null);
+      setLibraryChat({ id: row.id, at: Date.now() });
+      return setPanel('assistant');
+    }
+    const key = row.link?.help ? null : row.link?.key;
+    if (key && key !== store.session.active && !(await openChatKey(key))) toast(`${row.link?.name || 'Its file'} is not open here, so its text cannot change; the chat goes on.`, { timeout: 6000 });
+    actions.openAssist({ chatId: row.id });
+  };
+  /** The list of chats (command model-chats). */
+  actions.showChats = () => actions.openAssist({ view: 'chats' });
   /**
    * The model makes and changes files (ui/filesAssist.js): in the folder of the tab `key` (else
    * the open one), in `folder` (from Folders), or in the folder shown in Folders; `question` is
    * asked at once.
    */
-  actions.assistFiles = ({ key = null, folder = null, question = '' } = {}) => {
+  actions.assistFiles = ({ key = null, folder = null, question = '', resume = null } = {}) => {
     let target = folder ? { folder } : { key: key ?? store.session.active ?? null };
     if (!target.folder && !target.key) {
       const shown = getSettings().folder;
@@ -3457,7 +3537,7 @@ export function App() {
     setAssistStart(null);
     setGitAssist(null);
     setView('editor');
-    setFilesAssist({ target, start: question ? { question } : null, id: Date.now() });
+    setFilesAssist({ target, start: question ? { question } : resume ? { resume } : null, id: Date.now() });
   };
   actions.filesWork = (target) => createFilesWork({ ...target, host: () => hostRef.current, actions });
   /** A tab's whole text as the model panel's context (the file it is about); null for an encrypted file, which never goes to the model. */
@@ -3567,6 +3647,7 @@ export function App() {
   const [askRun, setAskRun] = useState(null);
   const askRef = useRef(null); // { id, controller }
   const [assistantFound, setAssistantFound] = useState(null); // { label, sources } for the model's panel
+  const [libraryChat, setLibraryChat] = useState(null); // { id, at }: a kept chat of Ask about my files to open
   const askReady = () => {
     const { llm } = getSettings();
     return Boolean(llm.enabled && llm.chatModel && connectionOf(llm) !== 'async');
@@ -5109,7 +5190,7 @@ export function App() {
       'read-aloud': () => actions.readAloud(),
       flush: async () => {
         hostRef.current?.flushAll();
-        await flush();
+        await Promise.all([flush(), chats.flush().catch(() => {})]);
         if (store.pendingCount()) await Promise.race([syncNow(), new Promise((r) => setTimeout(r, 5000))]);
         window.desktop.closeReady?.();
       },
@@ -5119,6 +5200,7 @@ export function App() {
       help: () => setDialog((d) => (d?.type === 'help' ? null : { type: 'help' })),
       'help-guide': () => setDialog({ type: 'help', tab: 'guide' }),
       'help-ask': () => actions.openAssist({ mode: 'help' }),
+      'model-chats': () => actions.showChats(),
       'compare-with': () => actions.compareWith(),
       'compare-clipboard': () => actions.compareWithClipboard(),
       'compare-folders': () => (getSettings().folder ? actions.compareFolders(getSettings().folder) : toast('Open a folder in Folders first (Ctrl+Shift+E), then compare it with another one.')),
@@ -5304,7 +5386,7 @@ export function App() {
         <div class="editor-area ${showPreview ? 'split' : ''} ${showPreview && previewFull ? 'preview-full' : ''} ${shownPanes.length ? 'panes-split' : ''} ${compare ? 'comparing' : ''} ${settings.whereFrame && activeKey ? 'framed' : ''}"
           data-kind=${kindOfKey(activeKey) ?? undefined} ref=${areaEl} style=${{ '--split': `${((settings.splitRatio || 0.5) * 100).toFixed(2)}%` }} onDragOver=${overArea}>
           <div class="editor-host ${paneDrop === 0 ? 'drop-here' : ''}" ref=${editorEl} style=${shownPanes.length ? { flex: `${paneShares[0]} 1 0px` } : undefined} ...${shownPanes.length || tabOver ? paneDropProps(0) : {}} />
-          ${assist && !gitAssist && !filesAssist && ((activeKey && !activeCompare) || assistStart) && view === 'editor' && !compare && !activeSealed && html`<${AssistPanel} key=${`${activeKey}:${assistStart?.id ?? 0}`} scope=${assistScope} start=${assistStart} hasFile=${Boolean(activeKey) && !activeEncrypted} actions=${actions} onClose=${() => (setAssist(false), setAssistStart(null), hostRef.current?.focus())} />`}
+          ${assist && !gitAssist && !filesAssist && ((activeKey && !activeCompare) || assistStart) && view === 'editor' && !compare && !activeSealed && html`<${AssistPanel} key=${`${activeKey}:${assistStart?.id ?? 0}`} scope=${assistScope} start=${assistStart} hasFile=${Boolean(activeKey) && !activeEncrypted} chatKey=${activeKey && !activeEncrypted && !activeCompare ? activeKey : null} actions=${actions} onClose=${() => (setAssist(false), setAssistStart(null), hostRef.current?.focus())} />`}
           ${gitAssist && view === 'editor' && html`<${GitAssist} key=${gitAssist.id} dir=${gitAssist.dir} start=${gitAssist.start} actions=${actions} onClose=${() => (setGitAssist(null), hostRef.current?.focus())} />`}
           ${filesAssist && !gitAssist && view === 'editor' && html`<${FilesAssist} key=${filesAssist.id} target=${filesAssist.target} start=${filesAssist.start} actions=${actions} onClose=${() => (setFilesAssist(null), hostRef.current?.focus())} />`}
           ${!assist && !gitAssist && !filesAssist && modelReady && settings.assistBubble && activeKey && !activeCompare && !compare && !activeSealed && !activeEncrypted && !docShown && !typingJob && html`<${AssistBubble} onOpen=${() => setAssist(true)} />`}
@@ -5368,7 +5450,7 @@ export function App() {
     ${panel === 'outline' && activeKey && (activeFile || activeRepo || activeDisk) && !activeSealed &&
     html`<${OutlinePanel} name=${activeName} text=${activeText()} language=${languageName} fileId=${activeFile?.id}
       cursorLine=${cursor?.line} actions=${actions} onClose=${() => setPanel(null)} />`}
-    ${panel === 'assistant' && html`<${AssistantPanel} key=${assistantFound?.at ?? 0} files=${scoped} docs=${scopedDocs} activeFile=${activeFile} activeRepo=${activeRepo} asked=${assistantFound} settings=${settings} actions=${actions} onClose=${() => setPanel(null)} />`}
+    ${panel === 'assistant' && html`<${AssistantPanel} key=${`${assistantFound?.at ?? 0}:${libraryChat?.at ?? 0}`} files=${scoped} docs=${scopedDocs} activeFile=${activeFile} activeRepo=${activeRepo} asked=${assistantFound} resume=${libraryChat?.id ?? null} settings=${settings} actions=${actions} onClose=${() => (setPanel(null), setLibraryChat(null))} />`}
     ${panel === 'ask' && html`<${AskPanel} key=${askRun?.id} run=${askRun} actions=${actions} onClose=${() => (actions.stopAskFind(), setPanel(null))} />`}
 
     ${dialog?.type === 'quickOpen' &&

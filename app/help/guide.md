@@ -512,6 +512,19 @@ What comes back:
 
 Turn the bubble off in **Settings → Model**; `Ctrl+K` still works.
 
+### Chats with the model: kept, by file and project
+
+Every chat with the model is kept on this device as you ask: in the ✦ panel, **Files with the model**, **Git with the model** and **Ask about my files**. Closing a panel loses nothing.
+
+- **Back where you left it**: open the ✦ panel on a file again and its last chat is there, to read or to go on with a follow-up. Files with the model takes up its chat for the same folder, Git with the model for the same repository.
+- **New chat** (+ at the top of the panel) starts afresh; the chat before stays in the list. A question that is not a follow-up (an action button, a problem to explain) starts a new chat too.
+- **Chats** (the clock at the top of a panel, or **Chats with the model** in the command palette) lists them: **This file**, **This project** (the file's [tab group](#tab-views-one-project-at-a-time-or-several): its project, or the folder it is in), **All** and **Saved**, newest first, with what each is about, when, and how the last answer began. Type to find one by its words. Click one to open it: a chat about another file opens that file first; a Files or Git chat opens in its own panel.
+- **☆ Save** keeps a chat for good. The newest 500 chats stay; past that the oldest go, but never a saved one.
+- **Rename** (the pencil) gives a chat your own name; **Delete** (the bin) removes it, with **Undo** in the message.
+- **A chat from earlier** says so at its top (when it began, what about). Its follow-ups go on from what the model saw then; **Insert below** and **Use the code** work while its file is the one open. In Files and Git with the model, what was done shows as it ended: Git's **Undo** still works (its backups are in the repository), a file change's does not.
+- **Long chats**: a follow-up sends the first answer and the latest ones that fit what the model can take (less for a model on this computer), and says that some were left out.
+- **Only here**: chats stay on this device and are never synced. Encrypted files never go to the model, so they are never in a chat. **Settings → Model → Chats with the model** says how many are kept and deletes them all (or the ones not saved).
+
 ### The model makes and changes files
 
 In the ✦ panel, **Change files** (next to Answer and Change the text) hands what you ask to **Files with the model**, which creates and changes files and folders, not only the text open: "add tests for this file", "split this into modules", "make a README for this folder", or a whole new project ("make a small Express app here"). For a folder: in **Folders**, right-click a folder (or its header, or the empty space in it) → **Ask the model about this folder…**. Or **Ask the model to make or change files…** in the command palette (`Ctrl+Shift+P`).

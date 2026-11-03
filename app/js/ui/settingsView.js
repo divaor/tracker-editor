@@ -18,7 +18,7 @@ import { localDataInfo } from '../localData.js';
 import { parseData } from '../tracker-model.js';
 import { timeAgo } from '../format.js';
 import { APP_VERSION } from '../version.js';
-import { Card, Check, Field, Segmented } from './components.js';
+import { Card, Check, Field, Segmented, toast } from './components.js';
 import { EncryptionCard } from './encryption.js';
 import { TYPING_SPEEDS } from '../typing.js';
 import { DICTATION_LANGUAGES } from '../dictation.js';
@@ -28,6 +28,8 @@ import { KINDS } from '../where.js';
 import { COLOR_MODES } from './tabViews.js';
 import { looksLikeVisionModel } from '../ocr.js';
 import { isAndroidApp, isDesktopApp } from '../platform.js';
+import { useChats } from './chats.js';
+import { chats } from '../chatStore.js';
 import { minimapShown } from '../minimapLayout.js';
 import { isMacKeys } from '../keys.js';
 import { projectStatus } from '../project.js';
@@ -622,7 +624,30 @@ function ModelCard({ settings, actions }) {
       <${Check} checked=${settings.assistBubble} label="Model button at the bottom right of the editor" hint="Help with the selection, or the whole file: fix, convert, check the syntax, translate, ask. Ctrl+K opens it too." onChange=${(v) => saveSettings({ assistBubble: v })} />
       <${Check} checked=${settings.symbolContext !== false} label="Questions take what the language server knows" hint="When the file has a language server: the types, signatures and definitions of up to 12 names in the selection (or around the cursor) go with the question; the panel says how many. Never for encrypted files." onChange=${(v) => saveSettings({ symbolContext: v })} />
     </div>
+    <${ChatsNote} actions=${actions} />
   </${Card}>`;
+}
+
+/** Chats with the model kept on this device: how many, the list, and deleting them all. */
+function ChatsNote({ actions }) {
+  const rows = useChats();
+  const saved = rows.filter((r) => r.saved).length;
+  const removeAll = async (keepSaved) => {
+    const what = keepSaved ? `the ${rows.length - saved} chats not saved` : `all ${rows.length} chats${saved ? `, the ${saved} saved too` : ''}`;
+    if (!confirm(`Delete ${what}? They cannot come back.`)) return;
+    const n = await chats.removeAll({ keepSaved });
+    toast(`Deleted ${n} chat${n === 1 ? '' : 's'}`);
+  };
+  return html`<div class="field span-2 chats-note">
+    <span>Chats with the model</span>
+    <p class="muted small">${rows.length ? `${rows.length} kept on this device${saved ? `, ${saved} saved for good` : ''}.` : 'None yet.'} Every panel keeps its chats here as you ask (never synced): open one again from a panel's Chats button or the command “Chats with the model”. The newest 500 stay, and the saved ones (☆) always.</p>
+    ${rows.length > 0 &&
+    html`<div class="card-actions">
+      <button type="button" class="btn sm" onClick=${() => actions.showChats?.()}><${Icon} name="history" size=${14} />Show the chats</button>
+      ${saved > 0 && saved < rows.length && html`<button type="button" class="btn sm" onClick=${() => removeAll(true)}><${Icon} name="trash" size=${14} />Delete the ones not saved…</button>`}
+      <button type="button" class="btn sm danger" onClick=${() => removeAll(false)}><${Icon} name="trash" size=${14} />Delete all chats…</button>
+    </div>`}
+  </div>`;
 }
 
 // A model service that takes a request, answers with a task id, and gives the
