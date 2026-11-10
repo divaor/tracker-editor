@@ -113,7 +113,9 @@ function ended(s, code) {
   s.code = code;
   // A run waiting for its command to end: the shell ended first.
   for (const w of s.waiters.splice(0)) w(null);
-  s.term.write(`\r\n\x1b[2m[The session ended${code ? ` (exit code ${code})` : ''}. Press Enter to start a new one.]\x1b[0m\r\n`);
+  // Kept on its server (tmux): only the connection went; what ran there goes on.
+  if (s.tmux) s.term.write(`\r\n\x1b[2m[Disconnected. It keeps running on the server (tmux): press Enter to take it up again.]\x1b[0m\r\n`);
+  else s.term.write(`\r\n\x1b[2m[The session ended${code ? ` (exit code ${code})` : ''}. Press Enter to start a new one.]\x1b[0m\r\n`);
   changed();
 }
 
@@ -149,7 +151,7 @@ async function start(s) {
   try {
     const cols = s.term.cols || lastSize.cols;
     const rows = s.term.rows || lastSize.rows;
-    const { id, shell, profile, label, distro, integrated } = await bridge().open(s.connId, { cols, rows, cwd: s.cwd, ...(s.shellId ? { shell: s.shellId } : {}) });
+    const { id, shell, profile, label, distro, integrated } = await bridge().open(s.connId, { cols, rows, cwd: s.cwd, ...(s.shellId ? { shell: s.shellId } : {}), ...(s.keep ? { keep: s.keep } : {}) });
     clearTimeout(slow);
     const before = takeEarly(id);
     // Closed while it was starting: the shell ends right away.
@@ -198,7 +200,10 @@ const pasteInto = (term) => navigator.clipboard.readText().then((text) => text &
  * Opens a terminal on a server (an SFTP connection's id) or on this computer ('local'),
  * in `cwd` when given. Resolves with the session once its shell runs (or shows why it did not).
  */
-export async function openTerminal(connId, { cwd = '', label = 'Terminal', runner = false, shell = null, task = '' } = {}) {
+/** A name for a terminal kept on a server (its tmux session there). */
+export const keptName = () => `te-${Date.now().toString(36).slice(-4)}${Math.random().toString(36).slice(2, 8)}`;
+
+export async function openTerminal(connId, { cwd = '', label = 'Terminal', runner = false, shell = null, task = '', keep = '' } = {}) {
   if (!bridge()) throw new Error('Terminals work in the desktop app.');
   const { Terminal, FitAddon } = await load();
   wire();
@@ -218,7 +223,10 @@ export async function openTerminal(connId, { cwd = '', label = 'Terminal', runne
   term.loadAddon(fit);
   // This computer's: the shell asked for, else the one chosen in Settings (else the default).
   const shellId = connId === 'local' ? (shell ?? getSettings().terminalShell ?? '') : '';
-  const s = { key: `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, id: null, connId, cwd, cwdNow: '', label, title: '', term, fit, el: null, exited: false, code: null, starting: false, typed: '', runner, task, shellId, integrated: false, waiters: [] };
+  // On a server, a terminal of your own is kept there (tmux, when the server has it: setting
+  // terminalTmux): a reconnect or a reopen attaches to it again. Run and task terminals are not.
+  const kept = connId !== 'local' && !runner && !task && getSettings().terminalTmux !== false ? keep || keptName() : '';
+  const s = { key: `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, id: null, connId, cwd, cwdNow: '', label, title: '', term, fit, el: null, exited: false, code: null, starting: false, typed: '', runner, task, shellId, integrated: false, waiters: [], keep: kept, tmux: false };
   // The folder the shell says it is in after each command (OSC 7, 9;9, 633): links start there.
   const windows = connId === 'local' && window.desktop?.platform === 'win32';
   const onCwd = (ident) => (data) => {
@@ -231,6 +239,14 @@ export async function openTerminal(connId, { cwd = '', label = 'Terminal', runne
     return Boolean(p);
   };
   for (const ident of [7, 9]) term.parser.registerOscHandler(ident, onCwd(ident));
+  // The server started it in tmux (remote.cjs prints OSC 7350 first): it is kept there.
+  term.parser.registerOscHandler(7350, (data) => {
+    if (data === 'tmux' && !s.tmux) {
+      s.tmux = true;
+      changed();
+    }
+    return true;
+  });
   // 633: the folder (P;Cwd=), or a command ended (D;code): what waits for it hears it.
   term.parser.registerOscHandler(633, (data) => {
     const end = commandEnded(data);
@@ -372,6 +388,8 @@ export function closeTerminal(s) {
   s.closed = true;
   for (const w of s.waiters.splice(0)) w(null);
   if (s.id && !s.exited) bridge().close(s.id);
+  // Closed for good: a terminal kept on its server (tmux) ends there too.
+  if (s.keep) bridge()?.endKept?.(s.connId, s.keep).catch(() => {});
   s.term.dispose();
   s.el?.remove();
   sessions.splice(at, 1);

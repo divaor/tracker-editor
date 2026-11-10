@@ -208,7 +208,7 @@ export function TerminalPanel({ settings, actions, onHide }) {
   // The folder it is in now (what the shell said after its last command).
   const folderOf = (s) => (terminalFolder(s) ? baseName(terminalFolder(s)) : '');
   const nameOf = (s) => (s.task && !s.name ? `${s.label} · ${folderOf(s)}` : tabName({ name: s.name, runner: s.runner, place: place(s), folder: folderOf(s) }));
-  const titleOf = (s) => [s.name ? `${nameOf(s)}: ${tabName({ runner: s.runner, place: place(s), folder: folderOf(s) })}` : nameOf(s), terminalFolder(s), s.profileLabel && s.connId === 'local' ? s.profileLabel : '', s.title].filter(Boolean).join('\n');
+  const titleOf = (s) => [s.name ? `${nameOf(s)}: ${tabName({ runner: s.runner, place: place(s), folder: folderOf(s) })}` : nameOf(s), terminalFolder(s), s.profileLabel && s.connId === 'local' ? s.profileLabel : '', s.tmux ? 'Kept on the server (tmux): a reconnect or Reopen takes it up again; × ends it there' : '', s.title].filter(Boolean).join('\n');
   const rename = (s) => setRenaming(s.key);
 
   // ---- Dragging tabs: along the strip (their order), onto a half of the screens (split) ----

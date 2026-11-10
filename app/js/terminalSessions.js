@@ -2,7 +2,8 @@
 // went away: settings `terminalLast`) and the recent ones (every terminal opened, newest first:
 // settings `terminalRecent`). An entry is { connId ('local' or a server's id), cwd (the folder
 // it was in last), shell (this computer's shell profile, '' = the usual one), name (its own
-// name, '' = none) }. Terminals kept for running files, tests and tasks are left out.
+// name, '' = none), keep (a server's: its tmux session's name, when it is kept there) }. Terminals
+// kept for running files, tests and tasks are left out.
 
 /** At most this many recent terminals are kept, and this many in a session. */
 export const MAX_RECENT = 12;
@@ -15,11 +16,12 @@ export function cleanEntry(e) {
   if (!e || typeof e !== 'object') return null;
   const connId = text(e.connId, 100);
   if (!connId) return null;
-  return { connId, cwd: text(e.cwd), shell: connId === 'local' ? text(e.shell, 100) : '', name: text(e.name, 60).trim() };
+  const keep = connId !== 'local' && /^te-[a-z0-9]{4,24}$/.test(e.keep ?? '') ? e.keep : '';
+  return { connId, cwd: text(e.cwd), shell: connId === 'local' ? text(e.shell, 100) : '', name: text(e.name, 60).trim(), ...(keep ? { keep } : {}) };
 }
 
 /** Where an entry is, as one string (its shell counts on this computer). */
-export const entryKey = (e) => `${e.connId}\u0000${e.cwd}\u0000${e.connId === 'local' ? e.shell : ''}`;
+export const entryKey = (e) => (e.keep ? `${e.connId}\u0000tmux\u0000${e.keep}` : `${e.connId}\u0000${e.cwd}\u0000${e.connId === 'local' ? e.shell : ''}`);
 
 /** A list of entries kept: clean, once each (the first wins), at most `max`. */
 export function cleanEntries(list, max = MAX_RECENT) {
@@ -42,7 +44,7 @@ export function cleanEntries(list, max = MAX_RECENT) {
 export function entryOf(s) {
   if (!s || s.runner || s.task) return null;
   const shell = s.connId === 'local' ? s.profile || s.shellId || '' : '';
-  return cleanEntry({ connId: s.connId, cwd: s.cwdNow || s.cwd || '', shell, name: s.name || '' });
+  return cleanEntry({ connId: s.connId, cwd: s.cwdNow || s.cwd || '', shell, name: s.name || '', keep: s.keep || '' });
 }
 
 /** The terminals open now, as a session to keep (in the tabs' order). */

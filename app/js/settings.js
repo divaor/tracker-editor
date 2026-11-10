@@ -79,6 +79,9 @@ export const DEFAULT_SETTINGS = {
   // Terminals to open again (terminalSessions.js): the ones open when the app last went away, and
   // the recent ones, newest first ({ connId, cwd, shell, name }; kept on this device).
   terminalLast: [],
+  // A terminal of your own on an SSH server runs in tmux there when the server has it: a reconnect
+  // or a reopen takes it up again, its output and what runs in it too.
+  terminalTmux: true,
   terminalRecent: [],
   indentGuides: true,
   bracketColors: true,

@@ -769,6 +769,8 @@ ipcMain.handle('tests:report', guard(async (_e, id) => {
     return null;
   }
 }));
+// A kept terminal's tmux session on an SSH server ended (its × in the panel): remote.cjs checks the name.
+ipcMain.handle('term:end-kept', guard(async (_event, connId, keep) => remote.endKeptShell(String(connId), String(keep ?? '').slice(0, 40))));
 ipcMain.handle('term:open', guard(async (event, connId, opts = {}) => {
   const cols = clampInt(opts.cols, 20, 500, 100);
   const rows = clampInt(opts.rows, 5, 200, 24);
@@ -778,7 +780,7 @@ ipcMain.handle('term:open', guard(async (event, connId, opts = {}) => {
   const stream =
     connId === 'local'
       ? localShell.openLocalShell({ cols, rows, cwd, shell, hooksDir: path.join(app.getPath('userData'), 'shell-integration'), distros: process.platform === 'win32' && wslDistros ? await wslDistros : [] })
-      : await remote.openShell(String(connId), { cols, rows, cwd });
+      : await remote.openShell(String(connId), { cols, rows, cwd, keep: typeof opts.keep === 'string' ? opts.keep.slice(0, 40) : '' });
   const id = crypto.randomBytes(6).toString('hex');
   const sender = event.sender;
   const decoder = new StringDecoder('utf8');

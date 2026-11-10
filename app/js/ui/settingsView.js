@@ -260,6 +260,8 @@ function EditorCard({ settings, actions }) {
       <${Check} checked=${settings.autoFile} label="File new notes under a project, with tags" hint="By the model, from your projects and the tags you use. Undo is in the message."
         onChange=${(v) => saveSettings({ autoFile: v })} />
       ${isDesktopApp() && html`<${TerminalShellField} settings=${settings} />`}
+      ${window.desktop?.terminal && html`<${Check} checked=${settings.terminalTmux !== false} label="Keep terminals on SSH servers running (tmux)" hint="When the server has tmux: a dropped connection, a restart or Reopen takes the terminal up again, with its output and what runs in it. × on its tab ends it there."
+        onChange=${(v) => saveSettings({ terminalTmux: v })} />`}
       ${isDesktopApp() &&
       html`<${Field} label="Run commands (F5)" wide hint=${`One "type: command" per line, to change or add to the built-in ones (${Object.keys(RUN_COMMANDS).filter((e) => RUN_COMMANDS[e]).slice(0, 8).join(', ')}…). {file} is the file, {dir} its folder, {name} its name; an empty command turns a type off.`}>
         <textarea class="run-commands" rows="3" spellcheck=${false} value=${settings.runCommands ?? ''} placeholder=${'py: uv run {file}\nts: bun {file}'} onInput=${(e) => saveSettings({ runCommands: e.currentTarget.value })} />

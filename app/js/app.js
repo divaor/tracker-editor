@@ -3958,7 +3958,7 @@ export function App() {
     setTerminalShown(true);
     let first = null;
     for (const e of entries) {
-      const s = await actions.openTerminal(e.connId, e.cwd, e.shell ? { shell: e.shell } : {});
+      const s = await actions.openTerminal(e.connId, e.cwd, { ...(e.shell ? { shell: e.shell } : {}), ...(e.keep ? { keep: e.keep } : {}) });
       if (s && e.name) renameTerminal(s, e.name);
       first ??= s;
     }

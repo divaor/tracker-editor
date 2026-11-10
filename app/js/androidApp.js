@@ -632,6 +632,7 @@ function install() {
     // Terminals: on servers over SSH, and a shell on the phone.
     terminal: {
       open: (connId, opts) => nodeInvoke('term:open', connId, opts),
+      endKept: (connId, keep) => nodeInvoke('term:end-kept', connId, keep),
       shells: () => nodeInvoke('term:shells'),
       tasks: (dirs) => nodeInvoke('tasks:files', dirs),
       input: (id, data) => nodeSend('term:input', id, data),

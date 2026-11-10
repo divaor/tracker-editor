@@ -286,6 +286,8 @@ contextBridge.exposeInMainWorld('desktop', {
   // Terminals on servers (SSH): a shell over the server's connection.
   terminal: {
     open: (connId, opts) => ipcRenderer.invoke('term:open', connId, opts),
+    // A terminal kept on a server (tmux) ended for good: its session there goes too.
+    endKept: (connId, keep) => ipcRenderer.invoke('term:end-kept', connId, keep),
     // The shells on this computer ({ id, label, kind }), to open one by its id.
     shells: () => ipcRenderer.invoke('term:shells'),
     // Tasks in the projects around these folders (package.json, Makefile, pyproject.toml, composer.json).

@@ -103,6 +103,10 @@ const AUTH_ORDER = {
 const PASSWORD_PROMPT = /password|contraseña|senha|kennwort|mot de passe/i;
 /** A path quoted for a POSIX shell. */
 const shellQuote = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+// Terminals kept on a server (tmux): the session's name, made by the page ("te-" and letters and
+// digits), and the mark a kept terminal prints first (OSC 7350), which the page reads.
+const KEPT_NAME = /^te-[a-z0-9]{4,24}$/;
+const KEPT_MARK_SH = '\\033]7350;tmux\\007';
 
 /**
  * A timer that stops while the person is asked something (a host key, a code),
@@ -336,14 +340,39 @@ class SftpSession {
   }
 
   /** A terminal on the server: a login shell, in `cwd` when given. Resolves with the channel (a duplex stream). */
-  async shell({ cols = 80, rows = 24, cwd = '' } = {}) {
+  /**
+   * A terminal: the login shell in `cwd`. With `keep` (a name, KEPT_NAME), inside that tmux session
+   * when the server has tmux: attached again when it is there (a reconnect, a reopen), made in
+   * `cwd` when not; the channel closing only detaches it. It says so first (`KEPT_MARK`).
+   */
+  async shell({ cols = 80, rows = 24, cwd = '', keep = '' } = {}) {
     const pty = { term: 'xterm-256color', cols, rows };
     const windows = await this.windows();
+    const name = !windows && KEPT_NAME.test(keep) ? keep : '';
+    const plain = `${cwd ? `cd -- ${shellQuote(cwd)} 2>/dev/null; ` : ''}exec "\${SHELL:-/bin/sh}" -l`;
     return new Promise((resolve, reject) => {
       const done = (err, stream) => (err ? reject(err) : resolve(stream));
-      if (cwd && !windows) this.client.exec(`cd -- ${shellQuote(cwd)} 2>/dev/null; exec "\${SHELL:-/bin/sh}" -l`, { pty }, done);
+      if (name) {
+        // The mouse on for this session only: the wheel scrolls its history (Shift+drag still selects).
+        const tmux = `tmux new-session -A -s ${shellQuote(name)}${cwd ? ` -c ${shellQuote(cwd)}` : ''} \\; set-option -q mouse on`;
+        // Through sh: the login shell runs the command line, and it may be fish.
+        const script = `if command -v tmux >/dev/null 2>&1; then printf '${KEPT_MARK_SH}'; exec ${tmux}; fi; ${plain}`;
+        this.client.exec(`exec sh -c ${shellQuote(script)}`, { pty }, done);
+      } else if (cwd && !windows) this.client.exec(plain, { pty }, done);
       else this.client.shell(pty, done);
     });
+  }
+
+  /** Ends a kept terminal's tmux session (closed with ×); nothing when it is gone already. */
+  async endKept(keep) {
+    if (!KEPT_NAME.test(keep) || (await this.windows())) return false;
+    const stream = await this.openExec(`exec sh -c ${shellQuote(`tmux kill-session -t ${shellQuote(`=${keep}`)} 2>/dev/null; exit 0`)}`);
+    await new Promise((resolve) => {
+      stream.on('close', resolve);
+      stream.resume();
+      stream.stderr?.resume();
+    });
+    return true;
   }
 
   /** A command on the server without a terminal (a language server): resolves with its channel. */
@@ -1367,14 +1396,26 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
     },
 
     /** A terminal on an SFTP (SSH) server or in a place, in `cwd`: resolves with its channel (a place's: a pseudo-terminal here). */
-    async openShell(id, { cols, rows, cwd } = {}) {
+    async openShell(id, { cols, rows, cwd, keep = '' } = {}) {
       const conn = find(id);
       if (!SHELL_PROTOCOLS.includes(conn.protocol)) throw new Error(`${conn.name} is an ${protocolLabel(conn.protocol)} server; a terminal needs SSH (SFTP).`);
       const s = await session(id);
       try {
-        return await s.shell({ cols, rows, cwd });
+        // Kept (tmux) on SSH servers only: places' terminals are on this computer's pseudo-terminal.
+        return await s.shell({ cols, rows, cwd, ...(conn.protocol === 'sftp' ? { keep } : {}) });
       } catch (err) {
         throw friendlyError(err, conn);
+      }
+    },
+
+    /** Ends a kept terminal's tmux session on an SSH server (its × in the panel); not connected: nothing. */
+    async endKeptShell(id, keep) {
+      const conn = find(id);
+      if (conn.protocol !== 'sftp' || !api.isConnected(id)) return false;
+      try {
+        return await (await session(id)).endKept(keep);
+      } catch {
+        return false;
       }
     },
 

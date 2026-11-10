@@ -71,3 +71,15 @@ test('a shell that changes folder takes its old line in the recent list', () => 
   // A place still open in another terminal stays.
   assert.deepEqual(withRecent([before, other], [after, before], { drop: [before] }), [after, before, other]);
 });
+
+test('a terminal kept on its server (tmux): its session goes with it, and tells it apart', () => {
+  const kept = entryOf(session({ connId: 'srv1', cwd: '/srv', keep: 'te-ab12cd34' }));
+  assert.deepEqual(kept, { connId: 'srv1', cwd: '/srv', shell: '', name: '', keep: 'te-ab12cd34' });
+  // Two kept terminals in the same folder are two; a cd keeps it the same one.
+  const other = { connId: 'srv1', cwd: '/srv', keep: 'te-zz99yy88' };
+  assert.equal(withRecent([kept], [other]).length, 2);
+  assert.equal(withRecent([kept], [{ ...kept, cwd: '/srv/app' }]).length, 1);
+  // A name not made by the app, or on this computer, is dropped.
+  assert.equal(cleanEntries([{ connId: 'srv1', cwd: '/', keep: 'x; rm -rf /' }])[0].keep, undefined);
+  assert.equal(cleanEntries([{ connId: 'local', cwd: '/', keep: 'te-ab12cd34' }])[0].keep, undefined);
+});
