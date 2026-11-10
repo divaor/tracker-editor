@@ -15,12 +15,13 @@ import { previewKind } from './previews.js';
 import { FORMATTABLE, formatText, formatterFor, guessFormatter } from './formatter.js';
 import { getReaderState, onReaderState, setReaderHighlighter, startReading, stopReading, toggleReading } from './reader.js';
 import { getSettings, isLocal, isSyncConfigured, onSettings, resolvedTheme, saveSettings } from './settings.js';
+import { cleanEntries, entryLabel, entryOf, MAX_SESSION, notOpen, sessionOf, sessionSummary, withRecent } from './terminalSessions.js';
 import { diskKey, fileKey, flush, parseKey, repoKey, store } from './store.js';
 import { diskAvailable, diskReadOnly, openDiskFiles, recheckServerTabs, reloadDiskTab, saveDiskTab, unwatchDisk, watchDiskTabs } from './diskTabs.js';
 import { connIcon, hasShell, isContentPath, isRemotePath, KINDS, kindOfKey, remoteAddress, remoteParts, remoteRoot, toRemoteUri } from './where.js';
 import { onServers, placeKinds, refreshPlaceKinds, server, watchServers } from './servers.js';
 import { HostKeyDialog, PromptDialog, ServerDialog, SshImportDialog } from './ui/servers.js';
-import { activeTerminal, focusTerminal, openTerminal, retheme, runAndWait, runInTerminal, setActiveTerminal, setRefHandler, setToggleHandler, showTerminalOn, splitTerminals, terminalFolder, terminals, terminalsAvailable, terminalText, unsplitTerminals } from './terminals.js';
+import { activeTerminal, focusTerminal, localShells, onTerminals, openTerminal, renameTerminal, retheme, runAndWait, runInTerminal, setActiveTerminal, setRefHandler, setToggleHandler, showTerminalOn, splitTerminals, terminalFolder, terminals, terminalsAvailable, terminalText, unsplitTerminals } from './terminals.js';
 import { parseRunCommands, quoteFor, runCommandFor, runLine, wslPath } from './runFile.js';
 import { detectFramework, firstMessageLine, FRAMEWORKS, looksLikeTestFile, parseOutput, parseReport, placeFailures, reportExt, summaryText, testAt, testCommand, testLanguage, testsInFile, testStates } from './testRun.js';
 import { TestsPanel } from './ui/tests.js';
@@ -34,7 +35,7 @@ import { DockerizeDialog } from './ui/dockerize.js';
 import { offlineBuildLine, reviewQuestion } from './dockerize.js';
 import { findFileRefs, pastedPath, resolveRef } from './fileRefs.js';
 import { claudeAppPrompt, claudeAppUrl, codeAround, errorContextText, EXPLAIN_ERROR, explainProblemAction, fixForErrorAction, fixProblemsAction } from './errorHelp.js';
-import { TerminalPanel } from './ui/terminal.js';
+import { TerminalAgain, TerminalPanel } from './ui/terminal.js';
 import { createLanguageServers } from './lsp.js';
 import { applyTextEdits, changedLanguages, changedLines, codeActionRows, editPlan, formatFirst, languageOptions, lineOf, locations, textChanges, uriPath } from './lspTools.js';
 import { Menu } from './ui/menu.js';
@@ -3881,6 +3882,105 @@ export function App() {
     setTerminalShown(true);
     requestAnimationFrame(() => window.dispatchEvent(new Event('terminal:rename')));
   };
+  // Terminals to open again (terminalSessions.js): the last session (the terminals open when
+  // the app last went away: setting `terminalLast`, read as it started) and the recent ones
+  // (`terminalRecent`). The app shows how many run (the status bar) and re-renders when that changes.
+  const previousTerminals = useMemo(() => cleanEntries(getSettings().terminalLast, MAX_SESSION), []);
+  // The terminals open since the panel last had none (session key → where it is now): closed one
+  // by one, they are all still the last session; a new start after none begins again.
+  const stretch = useRef({ empty: true, map: new Map() });
+  const [terminalCount, setTerminalCount] = useState(0);
+  const [shellNames, setShellNames] = useState({}); // this computer's shells: id → label
+  useEffect(() => {
+    if (!terminalsAvailable()) return undefined;
+    localShells().then((list) => setShellNames(Object.fromEntries((list ?? []).map((x) => [x.id, x.label]))));
+    const placed = new Map(); // session key → where it was recorded in the recent list
+    let timer = null;
+    const record = () => {
+      const entries = [];
+      const drop = [];
+      for (const t of terminals()) {
+        const e = entryOf(t);
+        if (!e) continue;
+        const was = placed.get(t.key);
+        if (was && JSON.stringify(was) === JSON.stringify(e)) continue;
+        entries.push(e);
+        if (was) drop.push(was);
+        placed.set(t.key, e);
+      }
+      if (entries.length) saveSettings({ terminalRecent: withRecent(getSettings().terminalRecent, entries, { drop }) });
+    };
+    const off = onTerminals(() => {
+      const list = terminals();
+      const st = stretch.current;
+      if (list.length && st.empty) st.map.clear();
+      st.empty = !list.length;
+      for (const t of list) {
+        const e = entryOf(t);
+        if (e) st.map.set(t.key, e);
+      }
+      setTerminalCount(list.length);
+      clearTimeout(timer);
+      timer = setTimeout(record, 1500);
+    });
+    // Going away (hidden, closed, reloaded, a newer tab): the terminals open now are the last session.
+    const remember = () => {
+      const last = lastStretch();
+      if (last.length) saveSettings({ terminalLast: last });
+    };
+    window.addEventListener('editor:flush', remember);
+    return () => {
+      off();
+      clearTimeout(timer);
+      window.removeEventListener('editor:flush', remember);
+    };
+  }, []);
+  // Open now: those; none: all that were open before they were closed (this run's).
+  const lastStretch = () => (terminals().length ? sessionOf(terminals()) : cleanEntries([...stretch.current.map.values()], MAX_SESSION));
+  const terminalPlace = (connId) => connId === 'local' || hasShell(server(connId));
+  const terminalNames = { serverName: (id) => server(id)?.name ?? '', shellLabel: (id) => shellNames[id] ?? id };
+  /**
+   * What the terminal can open again: { running (how many are open), last (the last session's
+   * terminals not open now: this run's when all were closed, else the one before the app
+   * started), lastText, recent (the recent ones not open now nor in `last`), label(entry) }.
+   */
+  actions.terminalChoices = () => {
+    const open = terminals();
+    const closedNow = open.length ? [] : lastStretch();
+    const lastSet = closedNow.length ? closedNow : previousTerminals;
+    const last = notOpen(lastSet, open, terminalPlace);
+    const recent = notOpen(getSettings().terminalRecent, [...open, ...last], terminalPlace).slice(0, 6);
+    return { running: open.length, last, lastText: last.length ? sessionSummary(last, terminalNames) : '', recent, label: (e) => entryLabel(e, terminalNames) };
+  };
+  /** Opens terminals again where they were (their shell and name too), the first one in use. */
+  actions.reopenTerminals = async (entries) => {
+    if (!terminalsAvailable() || !entries?.length) return;
+    setTerminalShown(true);
+    let first = null;
+    for (const e of entries) {
+      const s = await actions.openTerminal(e.connId, e.cwd, e.shell ? { shell: e.shell } : {});
+      if (s && e.name) renameTerminal(s, e.name);
+      first ??= s;
+    }
+    if (first) {
+      setActiveTerminal(first);
+      requestAnimationFrame(() => focusTerminal(first));
+    }
+  };
+  /** The command "Reopen the last terminal session". */
+  actions.reopenLastTerminals = () => {
+    if (!terminalsAvailable()) return toast('Terminals work in the desktop app.', { kind: 'error' });
+    const { last } = actions.terminalChoices();
+    if (!last.length) return toast(terminals().length ? 'The last session’s terminals are open already.' : 'No terminal session to reopen yet: Ctrl+` opens one.');
+    return actions.reopenTerminals(last);
+  };
+  /** Shows the terminal panel with what runs in it (none: one where you are, as Ctrl+`). */
+  actions.showTerminals = () => {
+    if (!terminalsAvailable()) return;
+    if (!terminals().length) return actions.toggleTerminal();
+    setTerminalShown(true);
+    requestAnimationFrame(() => focusTerminal(activeTerminal()));
+  };
   /** A folder: a terminal there in the editor (on a server, or this computer). */
   actions.terminalHere = (dir) => (isRemotePath(dir) ? actions.openTerminal(remoteParts(dir).id, remoteParts(dir).path) : actions.openTerminal('local', dir));
   /** A folder on this computer in the system's own terminal app. */
@@ -5071,6 +5171,7 @@ export function App() {
       terminal: () => actions.toggleTerminal(),
       'terminal-split': () => actions.splitTerminal(),
       'terminal-rename': () => actions.renameTerminal(),
+      'terminal-reopen': () => actions.reopenLastTerminals(),
       'run-file': () => actions.runFile(),
       'test-at-cursor': () => actions.runTests({ scope: 'cursor' }),
       'test-file': () => actions.runTests({ scope: 'file' }),
@@ -5426,7 +5527,7 @@ export function App() {
         <${ReadAloudBar} />
         ${editing && activeKey && !activeSealed && !compare && !activeCompare && hostRef.current
           ? html`<${EditBar} host=${hostRef.current} actions=${actions} save=${activeDisk ? 'Save' : isLocal(settings) ? null : 'Sync'} />`
-          : html`<${StatusBar} recording=${recording} big=${big && Boolean(activeKey) && !docShown} cursor=${activeKey && !docShown && !activeCompare ? cursor : null} language=${languageName} file=${activeFile} repo=${activeRepo} disk=${activeDisk} settings=${settings} sync=${sync} actions=${actions} group=${activeGroup}
+          : html`<${StatusBar} recording=${recording} big=${big && Boolean(activeKey) && !docShown} cursor=${activeKey && !docShown && !activeCompare ? cursor : null} language=${languageName} file=${activeFile} repo=${activeRepo} disk=${activeDisk} settings=${settings} sync=${sync} actions=${actions} group=${activeGroup} terminals=${terminalsAvailable() ? { count: terminalCount, shown: terminalShown } : null}
           problems=${settings.problems !== false && activeKey ? problems[activeKey] : null} problemsOpen=${panel === 'problems'}
           lsp=${activeKey && settings.languageServers !== false ? lspRef.current?.statusOf(activeKey) : null} lspOpen=${panel === 'servers'}
           git=${activeKey && gitHeads[activeKey] ? { ...gitHeads[activeKey], changes: hostRef.current?.gitChanges(activeKey)?.changes ?? null } : null}
@@ -5562,7 +5663,9 @@ function Welcome({ actions, hasFiles, configured, desktop }) {
         <button type="button" class="btn" onClick=${() => actions.openFromDisk()}><${Icon} name="upload" size=${16} />Import files</button>
         ${desktop && html`<button type="button" class="btn" title="Edit a file where it is (a log, a config file); it is not synced" onClick=${() => actions.openDiskFiles()}><${Icon} name="disk" size=${16} />Open from disk</button>`}
         ${window.desktop?.folders && html`<button type="button" class="btn" title="Browse a folder and open its files where they are; they are not synced (Ctrl+Shift+E)" onClick=${() => actions.showFolders()}><${Icon} name="folderOpen" size=${16} />Open a folder</button>`}
+        ${terminalsAvailable() && !actions.terminalChoices().running && html`<button type="button" class="btn" title="A terminal on this computer, in the folder shown in Folders (Ctrl+\`)" onClick=${() => actions.showTerminals()}><${Icon} name="terminal" size=${16} />Open a terminal</button>`}
       </div>
+      ${terminalsAvailable() && html`<${TerminalAgain} actions=${actions} showRunning title="Terminals" />`}
       ${!configured && html`<p class="notice"><${Icon} name="cloudOff" size=${16} /><span>Not syncing yet. <button type="button" class="btn link" onClick=${actions.showSettings}>Set up sync</button> with the same repo and token as the tracker (or paste its setup code).</span></p>`}
       <dl class="shortcuts">
         <div><dt><kbd>Alt</kbd> <kbd>N</kbd></dt><dd>New file</dd></div>

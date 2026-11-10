@@ -5120,6 +5120,19 @@ body:is(.resizing-x, .resizing-y) iframe {
   margin-top: 18px;
 }
 
+/* Terminals to bring back (ui/terminal.js TerminalAgain): no file open, and an empty terminal panel. */
+.terminal-again { margin: 14px 0 4px; display: grid; gap: 8px; }
+.terminal-again h2 { margin: 0; font-size: 14px; font-weight: 600; color: var(--text-2); }
+.terminal-again-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.terminal-again-summary { min-width: 0; overflow-wrap: anywhere; }
+.terminal-again-recent { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.terminal-again-one { max-width: 100%; min-width: 0; }
+.terminal-again-one .terminal-again-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.terminal-again-one .muted { white-space: nowrap; }
+.terminal-empty .terminal-again { margin: 0 0 6px; }
+/* The status bar's Terminal while terminals run in the hidden panel: how many. */
+.status-terminal-count { margin-left: 5px; min-width: 16px; padding: 0 5px; border-radius: 999px; background: color-mix(in srgb, var(--kind-disk, var(--accent)) 18%, transparent); color: var(--text); font-size: 11px; font-weight: 600; line-height: 16px; text-align: center; }
+
 /* ---- Side panels ------------------------------------------------------------- */
 .panel {
   grid-area: panel;

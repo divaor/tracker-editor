@@ -76,6 +76,10 @@ export const DEFAULT_SETTINGS = {
   // The shell new terminals on this computer start (an id from term:shells: 'pwsh', 'gitbash',
   // 'wsl:Ubuntu', 'zsh'…); '' = the first one found. F5 and the tasks run in it too.
   terminalShell: '',
+  // Terminals to open again (terminalSessions.js): the ones open when the app last went away, and
+  // the recent ones, newest first ({ connId, cwd, shell, name }; kept on this device).
+  terminalLast: [],
+  terminalRecent: [],
   indentGuides: true,
   bracketColors: true,
   stickyScroll: true,

@@ -38,6 +38,49 @@ let dragging = null; // { key, from: 'tab' | 'half' }
 const touchScreen = () => matchMedia('(pointer: coarse)').matches;
 const roomForTwo = () => !matchMedia('(max-width: 640px)').matches;
 
+/** The menu's last section: the last session's terminals and the recent ones, to open again. */
+function againItems(actions) {
+  const { last, lastText, recent, label } = actions.terminalChoices();
+  if (!last.length && !recent.length) return [];
+  return [
+    { separator: true },
+    ...(last.length ? [{ key: 'again-last', label: 'Reopen the last session', icon: 'history', hint: lastText, run: () => actions.reopenTerminals(last) }] : []),
+    ...(recent.length ? [{ heading: true, key: 'h-recent', label: 'Recent' }] : []),
+    ...recent.map((e, i) => {
+      const { label: name, where, detail } = label(e);
+      return { key: `recent-${i}`, label: `${name} · ${where}`, icon: e.connId === 'local' ? 'disk' : 'server', hint: detail, run: () => actions.reopenTerminals([e]) };
+    }),
+  ];
+}
+
+/**
+ * Terminals to bring back (no file open, an empty panel): the ones running while the panel is
+ * hidden, the last session (the terminals open when the app last went away, or before they were
+ * all closed) and the recent ones; nothing when there is none of them.
+ */
+export function TerminalAgain({ actions, showRunning = false, title = '' }) {
+  const { running, last, lastText, recent, label } = actions.terminalChoices();
+  if (!(showRunning && running) && !last.length && !recent.length) return null;
+  return html`<div class="terminal-again">
+    ${title && html`<h2>${title}</h2>`}
+    <div class="terminal-again-actions">
+      ${showRunning && running > 0 && html`<button type="button" class="btn primary sm" title="Ctrl+\`" onClick=${actions.showTerminals}><${Icon} name="terminal" size=${15} />Show the terminal (${running} running)</button>`}
+      ${last.length > 0 && html`<button type="button" class="btn sm" title=${last.map((e) => `${label(e).label} · ${label(e).where} · ${label(e).detail}`).join('\n')} onClick=${() => actions.reopenTerminals(last)}><${Icon} name="history" size=${15} />Reopen the last session</button>
+        <span class="muted small terminal-again-summary">${lastText}</span>`}
+    </div>
+    ${recent.length > 0 &&
+    html`<div class="terminal-again-recent" role="group" aria-label="Recent terminals">
+      <span class="muted small">Recent</span>
+      ${recent.map((e, i) => {
+        const { label: name, where, detail } = label(e);
+        return html`<button type="button" key=${i} class="btn sm terminal-again-one" title=${`${where} · ${detail}`} onClick=${() => actions.reopenTerminals([e])}>
+          <${Icon} name=${e.connId === 'local' ? 'disk' : 'server'} size=${14} /><span class="terminal-again-name">${name}</span><span class="muted">${where}</span>
+        </button>`;
+      })}
+    </div>`}
+  </div>`;
+}
+
 /** The name being typed for a tab: Enter (or leaving it) keeps it, Escape goes back. */
 function TabNameField({ initial, onDone, onCancel }) {
   const input = useRef(null);
@@ -158,6 +201,7 @@ export function TerminalPanel({ settings, actions, onHide }) {
     ...(sftp.length
       ? sftp.map((c) => ({ label: connLabel(c), hint: connDetail(c), icon: connIcon(c), run: () => actions.openTerminal(c.id) }))
       : [{ label: 'Connect to a server…', icon: 'server', run: () => actions.editServer() }]),
+    ...againItems(actions),
   ];
   // This computer's terminals by their shell when there is a choice of them; servers' by name.
   const place = (s) => (s.connId === 'local' ? (shells.length > 1 && s.profileLabel ? s.profileLabel : KINDS.disk.label) : connLabel(server(s.connId)));
@@ -323,6 +367,7 @@ export function TerminalPanel({ settings, actions, onHide }) {
       </div>`}
       ${!list.length &&
       html`<div class="terminal-empty">
+        <${TerminalAgain} actions=${actions} />
         <p>A terminal on ${KINDS.disk.label.toLowerCase()}, on a server (signed in like its files), or in a Docker container or a WSL distribution.</p>
         <div class="terminal-empty-servers">
           <button type="button" class="btn sm" onClick=${here}><${Icon} name="disk" size=${15} />${KINDS.disk.label}</button>

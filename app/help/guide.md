@@ -824,6 +824,15 @@ Each terminal is a tab in the panel. With a few open (a server, this computer, a
   - Closing a terminal on a side puts the next one there; with no other left, the panel shows one again.
 - Phones and narrow windows show one terminal at a time.
 
+### Bringing terminals back: hidden, closed, after a restart (desktop and the Android app)
+
+Hiding the panel (`` Ctrl+` `` or ⌄) never ends a shell, and terminals you close or lose to a restart can be opened again where they were:
+
+- **Hidden**: while terminals run with the panel hidden, the status bar's **Terminal** shows how many (**Terminal 2**); click it to bring them back as they were. With no file open, the welcome screen says so too: **Show the terminal (2 running)**. Without any running, the status bar's **Terminal** opens one in the open file's folder, and the welcome screen has **Open a terminal**.
+- **The last session**: the terminals open when the app last closed (or reloaded), or the ones you just closed, each in the folder it was in last (after a `cd` too), with its shell and its name. **Reopen the last session** opens them all again: on the welcome screen when no file is open, in the empty terminal panel, in the panel's **+** menu, and the command **Reopen the last terminal session**. Ones open already are not opened twice.
+- **Recent**: the terminals you opened lately (on this computer, on servers, in containers) are listed under **Recent** in those same places; a click opens that one again. A server connects as it does for its files.
+- Terminals made for running a file, tests or a task are not kept. This list is kept on this device only.
+
 ### Folders: a file explorer
 
 The sidebar has two views on the desktop: **My files** (synced) and **Folders** (on this computer). **View → Folders** (`Ctrl+Shift+E`) shows it; **File → Open Folder…** or the welcome screen's **Open a folder** adds one. Pick a folder in the system dialog (the buttons start it in Documents, Desktop or Downloads). The editor can only reach what is inside the folders you picked.

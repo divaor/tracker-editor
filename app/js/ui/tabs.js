@@ -832,7 +832,7 @@ function ServerStatus({ lsp, open, actions }) {
   </button>`;
 }
 
-export function StatusBar({ recording, big, cursor, language, file, repo, disk, settings, actions, problems, problemsOpen, git, lsp, lspOpen, group, debug, debugOpen, project }) {
+export function StatusBar({ recording, big, cursor, language, file, repo, disk, settings, actions, problems, problemsOpen, git, lsp, lspOpen, group, debug, debugOpen, project, terminals }) {
   const setLanguage = (value) => file && actions.patch(file.id, { language: value === 'auto' ? '' : value });
   let state = '';
   const kind = file ? 'synced' : repo ? 'doc' : disk ? (isRemotePath(disk.path) ? 'remote' : 'disk') : null;
@@ -911,12 +911,17 @@ export function StatusBar({ recording, big, cursor, language, file, repo, disk, 
     <button type="button" class="status-item status-btn-text ${settings.wordWrap ? 'on' : ''}" title="Word wrap (Alt+Z)" aria-pressed=${settings.wordWrap} onClick=${() => saveSettings({ wordWrap: !getSettings().wordWrap })}>
       <${Icon} name="wrap" size=${14} /><span class="hide-narrow">Wrap</span>
     </button>
-    ${terminalsAvailable() &&
-    html`<button type="button" class="status-item status-btn-text status-terminal"
-      title=${disk ? `Open a terminal in this file’s folder${kind === 'remote' ? ' on the server' : ''} (Ctrl+\` shows or hides the terminal)` : 'Open a terminal (Ctrl+` shows or hides it)'}
-      aria-label=${disk ? 'Open a terminal in this file’s folder' : 'Open a terminal'} onClick=${actions.terminalForFile}>
-      <${Icon} name="terminal" size=${14} /><span class="hide-narrow">Terminal</span>
-    </button>`}
+    ${terminalsAvailable() && (terminals?.count && !terminals.shown
+      ? html`<button type="button" class="status-item status-btn-text status-terminal hidden-running"
+          title=${`${terminals.count} terminal${terminals.count === 1 ? '' : 's'} running, hidden: show ${terminals.count === 1 ? 'it' : 'them'} (Ctrl+\`)`}
+          aria-label=${`Show the terminal: ${terminals.count} running`} onClick=${actions.showTerminals}>
+          <${Icon} name="terminal" size=${14} /><span class="hide-narrow">Terminal</span><span class="status-terminal-count">${terminals.count}</span>
+        </button>`
+      : html`<button type="button" class="status-item status-btn-text status-terminal"
+          title=${disk ? `Open a terminal in this file’s folder${kind === 'remote' ? ' on the server' : ''} (Ctrl+\` shows or hides the terminal)` : 'Open a terminal (Ctrl+` shows or hides it)'}
+          aria-label=${disk ? 'Open a terminal in this file’s folder' : 'Open a terminal'} onClick=${actions.terminalForFile}>
+          <${Icon} name="terminal" size=${14} /><span class="hide-narrow">Terminal</span>
+        </button>`)}
     ${disk?.doc
       ? null
       : disk
