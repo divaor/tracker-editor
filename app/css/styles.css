@@ -11583,6 +11583,89 @@ summary.git-section-head {
   margin: 0 4px;
 }
 
+/* Picking files in the Git panel: a box per row and one for the section, the bar of what to do. */
+.git-check {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  margin: 0 2px 0 4px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.git-section-head .git-check {
+  margin-left: 4px;
+}
+
+.git-file.picked {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.git-file.picked:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.git-pickbar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  margin: 0 0 4px;
+  padding: 2px 2px 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg));
+}
+
+.git-pick-count {
+  margin-right: 4px;
+  font-weight: 600;
+}
+
+.git-pick-none {
+  margin-left: auto;
+}
+
+.git-pickbar .btn {
+  padding: 2px 7px;
+}
+
+.git-pickbar .icon-btn.sm {
+  width: 26px;
+  height: 26px;
+}
+
+.git-pickbar .btn.danger {
+  color: var(--danger, #c0392b);
+}
+
+.git-stash-what {
+  flex-basis: 100%;
+}
+
+.git-kept-help {
+  margin: 0 0 6px;
+}
+
+.git-kept-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 2px 4px;
+}
+
+.git-kept-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* The Git panel's files in conflict (ui/conflicts.js), each with its ways out. */
 .git-conflicts {
   padding: 8px 8px 6px;

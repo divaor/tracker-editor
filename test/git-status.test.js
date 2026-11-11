@@ -132,6 +132,11 @@ test('Git’s messages in words', async () => {
   const other = gitError('remote: Counting objects: 5\nhint: something\nfatal: the disk is full');
   assert.equal(other.kind, 'other');
   assert.equal(other.message, 'fatal: the disk is full');
+  // On Windows a refused key names the usual cause: Git's own ssh, without Windows' ssh-agent.
+  const denied = 'git@gitlab.example.com: Permission denied (publickey).\nfatal: Could not read from remote repository.';
+  assert.match(gitError(denied, '', { windows: true }).message, /core\.sshCommand C:\/Windows\/System32\/OpenSSH\/ssh\.exe/);
+  assert.doesNotMatch(gitError(denied).message, /sshCommand/, 'not elsewhere');
+  assert.doesNotMatch(gitError("fatal: could not read Username for 'https://x': terminal prompts disabled", '', { windows: true }).message, /sshCommand/, 'not for https');
 });
 
 // ---- 0.48: reverting one change, the blocks the bar reads, blame's words ----

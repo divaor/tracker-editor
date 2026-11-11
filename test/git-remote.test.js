@@ -333,6 +333,15 @@ test('over SSH: a pull that conflicts (in progress, aborted), the snapshot for t
     assert.deepEqual(await g.act(dir, { op: 'ignore', patterns: ['*.log', 'build/'] }), { added: ['*.log', 'build/'], already: 0 });
     assert.equal(fs.readFileSync(path.join(dir, '.gitignore'), 'utf8'), '*.log\nbuild/\n');
     assert.equal((await g.act(dir, { op: 'snapshot' })).gitignore, true);
+    // 0.52: ignored on that server only (.git/info/exclude there), listed as kept out, taken back.
+    fs.writeFileSync(path.join(dir, 'local.tmp'), 'x\n');
+    assert.deepEqual((await g.act(dir, { op: 'ignore', patterns: ['/local.tmp'], where: 'local' })).added, ['/local.tmp']);
+    assert.ok((await g.act(dir, { op: 'kept-out' })).patterns.includes('/local.tmp'));
+    assert.equal((await g.act(dir, { op: 'unignore', patterns: ['/local.tmp'], where: 'local' })).removed, 1);
+    // Discard there: a new file deleted, a tracked one back.
+    fs.writeFileSync(path.join(dir, 'a.txt'), 'scribbled\n');
+    assert.deepEqual(await g.act(dir, { op: 'discard', paths: ['a.txt', 'local.tmp'] }), { restored: 1, deleted: 1 });
+    assert.equal(fs.existsSync(path.join(dir, 'local.tmp')), false);
     // read: a file as it is now, never one outside the repository (a link out is refused).
     assert.equal(await g.act(dir, { op: 'read', path: '.gitignore' }), '*.log\nbuild/\n');
     fs.writeFileSync(path.join(base, 'secret.txt'), 'outside\n');

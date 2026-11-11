@@ -25,14 +25,41 @@ function run(args, cwd, { encoding = 'utf8', timeout = 15000, maxBuffer = 64 * 1
   });
 }
 
-// For the commands that change things: Git's own locks, and never a prompt or an editor.
-function writeEnv(env = process.env) {
+/** The program a command line runs, as its name alone: "C:/Windows/System32/OpenSSH/ssh.exe -v" → "ssh". */
+function programOf(command) {
+  const m = /^\s*(?:"([^"]*)"|'([^']*)'|(\S+))/.exec(String(command ?? ''));
+  const word = m ? (m[1] ?? m[2] ?? m[3]) : '';
+  return word.split(/[\\/]/).pop().toLowerCase().replace(/\.exe$/, '');
+}
+
+/**
+ * For the commands that change things: Git's own locks, and never a prompt or an editor.
+ * `sshCommand`: the repository's core.sshCommand (its config, the global one…). ssh asks for
+ * nothing (keys from the agent, hosts already known): BatchMode. GIT_SSH_COMMAND outranks
+ * core.sshCommand, so a configured one is kept as it is (with BatchMode added when it is
+ * OpenSSH); until 0.52 it was always replaced by plain `ssh`, which on Windows is Git's own
+ * and does not see Windows' ssh-agent ("Permission denied (publickey)" in the editor only).
+ */
+function writeEnv(env = process.env, { sshCommand = '' } = {}) {
   const out = { ...env, LC_ALL: 'C', GIT_TERMINAL_PROMPT: '0', GIT_EDITOR: 'true', GIT_MERGE_AUTOEDIT: 'no', GCM_INTERACTIVE: env.GCM_INTERACTIVE ?? 'auto' };
   delete out.GIT_OPTIONAL_LOCKS;
-  // ssh asks for nothing in a terminal (keys from the agent, hosts already known).
-  if (!env.GIT_SSH_COMMAND && !env.GIT_SSH) out.GIT_SSH_COMMAND = 'ssh -o BatchMode=yes';
+  if (!env.GIT_SSH_COMMAND && !env.GIT_SSH) {
+    const own = String(sshCommand ?? '').trim();
+    if (!own) out.GIT_SSH_COMMAND = 'ssh -o BatchMode=yes';
+    else if (programOf(own) === 'ssh' && !/batchmode/i.test(own)) out.GIT_SSH_COMMAND = `${own} -o BatchMode=yes`;
+    // Another program (plink…) or BatchMode already there: Git runs its own setting.
+  }
   return out;
 }
+
+/** The commands that may reach a remote over ssh: they read core.sshCommand first. */
+const REMOTE_COMMANDS = new Set(['fetch', 'pull', 'push', 'ls-remote', 'clone', 'submodule', 'remote']);
+/** The repository's core.sshCommand ('' when none). */
+const configuredSsh = (cwd) =>
+  run(['config', '--get', 'core.sshCommand'], cwd, { timeout: 5000 }).then(
+    (out) => out.trim(),
+    () => '',
+  );
 
 /** Calls `onProgress(line)` with each line of what comes in chunks (--progress writes "\r" between updates). */
 function progressLines(onProgress) {
@@ -49,7 +76,12 @@ function progressLines(onProgress) {
  * `err.stderr`). `input` goes to its stdin; `onProgress(line)` gets each line of stderr as it
  * comes (--progress writes "\r" between updates).
  */
-function runWrite(args, cwd, { input = null, timeout = 120_000, onProgress = null, env = writeEnv() } = {}) {
+function runWrite(args, cwd, opts = {}) {
+  if (opts.env || !REMOTE_COMMANDS.has(args[0])) return spawnWrite(args, cwd, { ...opts, env: opts.env ?? writeEnv() });
+  return configuredSsh(cwd).then((sshCommand) => spawnWrite(args, cwd, { ...opts, env: writeEnv(process.env, { sshCommand }) }));
+}
+
+function spawnWrite(args, cwd, { input = null, timeout = 120_000, onProgress = null, env } = {}) {
   return new Promise((resolve, reject) => {
     let proc;
     try {
@@ -123,6 +155,7 @@ function localRunner({ runGit = run, runGitWrite = runWrite } = {}) {
       }
     },
     async writeFile(p, bytes) {
+      fs.mkdirSync(path.dirname(p), { recursive: true });
       fs.writeFileSync(p, bytes);
     },
     async realpath(p) {
@@ -563,6 +596,8 @@ function createGit({ parseStatus, parse = {}, runner = null, runGit: runGitHere 
   // Backups (Git with the model): before a step that changes history or files, the commit HEAD
   // is on (a ref of ours, so Git never collects it) and the changes not committed (`git stash
   // create`: a commit, the files untouched), listed in a file in the .git folder.
+  /** .git/info/exclude (a worktree's own, wherever Git keeps it). */
+  const excludeFile = async (root) => p.resolve(root, oneLine(await runGit(['rev-parse', '--git-path', 'info/exclude'], root, { timeout: 5000 })));
   const backupFile = async (root) => p.resolve(root, oneLine(await runGit(['rev-parse', '--git-path', BACKUP_FILE], root, { timeout: 5000 })));
   async function readBackups(root, known = null) {
     try {
@@ -798,7 +833,49 @@ function createGit({ parseStatus, parse = {}, runner = null, runGit: runGitHere 
         }
         case 'stash': {
           const message = String(action.message ?? '').replace(/[\r\n]+/g, ' ').slice(0, 200);
-          return w(['stash', 'push', ...(action.untracked ? ['--include-untracked'] : []), ...(message ? ['-m', message] : [])]);
+          // Some files only (the Git panel's picked ones), staged and not, new ones with `untracked`.
+          const only = action.paths == null ? [] : ['--', ...rels(action.paths)];
+          return w(['stash', 'push', ...(action.untracked ? ['--include-untracked'] : []), ...(message ? ['-m', message] : []), ...only]);
+        }
+        case 'discard': {
+          // The changes not staged of these files thrown away: tracked ones back to what is
+          // staged (or committed), new ones (not in Git) deleted. Staged changes stay.
+          const list = rels(action.paths);
+          const known = new Set((await runGit(['ls-files', '-z', '--', ...list], root)).split('\0').filter(Boolean));
+          const tracked = list.filter((x) => known.has(x));
+          const fresh = list.filter((x) => !known.has(x));
+          if (tracked.length) await w(['restore', '--worktree', '--', ...tracked]);
+          if (fresh.length) await w(['clean', '-f', '-q', '--', ...fresh]);
+          return { restored: tracked.length, deleted: fresh.length };
+        }
+        case 'skip': {
+          // Changes to tracked files left out on this computer only (skip-worktree): Git acts as
+          // if they were not changed, nothing is shared. `on` false: followed again.
+          return w(['update-index', action.on === false ? '--no-skip-worktree' : '--skip-worktree', '--', ...rels(action.paths)]);
+        }
+        case 'kept-out': {
+          // What this computer keeps out of Git: tracked files with skip-worktree, and the
+          // patterns of .git/info/exclude (never shared, unlike .gitignore).
+          const tags = await runGit(['ls-files', '-v', '-z'], root, { timeout: 30000 });
+          const skipped = tags.split('\0').filter((x) => x.startsWith('S ')).map((x) => x.slice(2)).slice(0, 2000);
+          const file = await excludeFile(root);
+          const got = await r.readFile(file, 1024 * 1024);
+          const patterns = got ? got.bytes.toString('utf8').split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#')) : [];
+          return { skipped, patterns };
+        }
+        case 'unignore': {
+          // Patterns taken out of .gitignore or (`where` 'local') .git/info/exclude, as written.
+          const patterns = Array.isArray(action.patterns) ? action.patterns.filter(safePattern).map((x) => x.trim()) : [];
+          if (!patterns.length) throw new Error('No patterns');
+          const file = action.where === 'local' ? await excludeFile(root) : p.join(root, '.gitignore');
+          const got = await r.readFile(file, 4 * 1024 * 1024);
+          if (!got) return { removed: 0 };
+          const text = got.bytes.toString('utf8');
+          const drop = new Set(patterns);
+          const lines = text.split(/(?<=\n)/);
+          const kept = lines.filter((l) => !drop.has(l.trim()));
+          if (kept.length !== lines.length) await r.writeFile(file, Buffer.from(kept.join(''), 'utf8'));
+          return { removed: lines.length - kept.length };
         }
         case 'stash-apply':
         case 'stash-pop':
@@ -957,9 +1034,10 @@ function createGit({ parseStatus, parse = {}, runner = null, runGit: runGitHere 
           return w(['tag', ...(message ? ['-a', '-F', '-'] : []), action.name, ...(action.rev ? [action.rev] : [])], { input: message || null });
         }
         case 'ignore': {
-          const patterns = Array.isArray(action.patterns) ? action.patterns.filter(safePattern).slice(0, 50) : [];
+          const patterns = Array.isArray(action.patterns) ? action.patterns.filter(safePattern).slice(0, 500) : [];
           if (!patterns.length) throw new Error('No patterns');
-          const file = p.join(root, '.gitignore');
+          // .gitignore (shared with everyone), or `where` 'local': .git/info/exclude (this computer only).
+          const file = action.where === 'local' ? await excludeFile(root) : p.join(root, '.gitignore');
           // None yet: ''.
           const got = await r.readFile(file, 4 * 1024 * 1024);
           if (got && got.size > got.bytes.length) throw new Error('The .gitignore is too large to change here');
@@ -1145,4 +1223,4 @@ function createGit({ parseStatus, parse = {}, runner = null, runGit: runGitHere 
   };
 }
 
-module.exports = { createGit, localRunner, shellRunner, installCommand, parseInstallProbe, SHELL_PROLOGUE, SHELL_SCRIPTS, ARGS_INLINE, writeEnv, safeRel, safeBranch, safeRev, safeRange, cleanUrl };
+module.exports = { createGit, localRunner, shellRunner, installCommand, parseInstallProbe, SHELL_PROLOGUE, SHELL_SCRIPTS, ARGS_INLINE, writeEnv, programOf, safeRel, safeBranch, safeRev, safeRange, cleanUrl };

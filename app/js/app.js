@@ -3056,7 +3056,7 @@ export function App() {
 
   // ---- Git that writes: the Git panel, the branch picker, a change staged from the gutter ----
   // Commands that change files on disk wait while a tab in the repository has unsaved edits.
-  const WORKING_TREE_OPS = new Set(['pull', 'switch', 'stash', 'stash-apply', 'stash-pop', 'abort', ...CHANGES_FILES]);
+  const WORKING_TREE_OPS = new Set(['pull', 'switch', 'stash', 'stash-apply', 'stash-pop', 'abort', 'discard', ...CHANGES_FILES]);
   const gitBridge = () => window.desktop?.git ?? null;
   const parentDir = (p) => p.replace(/[\\/][^\\/]*$/, '') || p;
   const insideRoot = (root, p) => {
@@ -3097,7 +3097,7 @@ export function App() {
       }
       const unsaved = status?.root ? store.session.open.filter((k) => k.startsWith('d:') && store.diskTab(k.slice(2))?.dirty && insideRoot(status.root, k.slice(2))).map((k) => store.diskTab(k.slice(2)).name) : [];
       if (unsaved.length) {
-        const what = action.op === 'switch' ? 'Switching branches' : action.op.startsWith('stash') ? 'The stash' : action.op === 'pull' ? 'Pulling' : `git ${action.op}`;
+        const what = action.op === 'switch' ? 'Switching branches' : action.op.startsWith('stash') ? 'The stash' : action.op === 'pull' ? 'Pulling' : action.op === 'discard' ? 'Discarding changes' : `git ${action.op}`;
         return { ok: false, error: { kind: 'unsaved', message: `Save ${unsaved.slice(0, 3).join(', ')}${unsaved.length > 3 ? ` and ${unsaved.length - 3} more` : ''} first: ${what} changes files on disk.`, detail: '' } };
       }
     }
@@ -3106,7 +3106,7 @@ export function App() {
     if (r.ok) return { ok: true, result: r.result };
     // The server or place went away (or could not be reached): said so, with Reconnect in the panel.
     if (r.offline) return { ok: false, error: { kind: 'offline', message: r.message || 'Not connected.', detail: '' } };
-    return { ok: false, error: gitError(r.stderr, r.stdout || r.message, { place: gitPlaceOf(dir) }) };
+    return { ok: false, error: gitError(r.stderr, r.stdout || r.message, { place: gitPlaceOf(dir), windows: window.desktop?.platform === 'win32' }) };
   };
   /** Git's state may have changed (a command here, a commit elsewhere): Folders, the status bar, the bar of changed lines and the panel read it again. */
   actions.gitChanged = () => {
@@ -3128,7 +3128,7 @@ export function App() {
     const r = await bridge.act(dir, action).catch((err) => ({ ok: false, message: ipcMessage(err), stdout: '', stderr: '' }));
     if (r.ok) return { ok: true, result: r.result };
     if (r.offline) return { ok: false, error: { kind: 'offline', message: r.message || 'Not connected.', detail: '' } };
-    return { ok: false, error: gitError(r.stderr, r.stdout || r.message, { place: gitPlaceOf(dir) }) };
+    return { ok: false, error: gitError(r.stderr, r.stdout || r.message, { place: gitPlaceOf(dir), windows: window.desktop?.platform === 'win32' }) };
   };
   /** Whether Git can run where `p` is (here, or on a connection with a shell): menus offer its history then. */
   actions.gitWorksAt = gitWorksAt;

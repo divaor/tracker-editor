@@ -492,7 +492,7 @@ export const placeWords = (place) => (!place?.name ? '' : place.kind === 'docker
  * Git without switch and restore, older than 2.23), 'other'. `place` ({ kind, name }): Git ran on
  * a server or in a place, with its own sign-ins and settings, and the words say so.
  */
-export function gitError(stderr = '', stdout = '', { place = null } = {}) {
+export function gitError(stderr = '', stdout = '', { place = null, windows = false } = {}) {
   const text = `${stderr}\n${stdout}`;
   const lines = String(stderr || stdout)
     .split(/\r?\n|\r/)
@@ -506,7 +506,12 @@ export function gitError(stderr = '', stdout = '', { place = null } = {}) {
       kind: 'auth',
       message: there
         ? `Git on ${there} could not sign in to the remote. It signs in as Git does in a terminal there, never asking here: with an SSH key on ${there} (in its agent, or without a passphrase, the remote's host known there) or a credential helper set up there. Set one up there, then try again.`
-        : 'Git could not sign in to the remote. Set up a credential helper (Git Credential Manager on Windows, the keychain on macOS) or an SSH key with its agent running, then try again.',
+        : `Git could not sign in to the remote. Set up a credential helper (Git Credential Manager on Windows, the keychain on macOS) or an SSH key with its agent running, then try again.${
+            // Git for Windows' own ssh does not see Windows' ssh-agent (the usual cause when ssh -T works in PowerShell).
+            windows && is(/Permission denied \(publickey/i)
+              ? ' On Windows, Git uses its own ssh unless told otherwise, and that one does not see Windows’ ssh-agent: git config --global core.sshCommand C:/Windows/System32/OpenSSH/ssh.exe makes it use Windows’ ssh.'
+              : ''
+          }`,
       detail,
     };
   if (is(/Please tell me who you are|empty ident|unable to auto-detect email/i))

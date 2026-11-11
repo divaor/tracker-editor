@@ -3,17 +3,24 @@
 // branch picker (the status bar's branch). The panel shows the repository the open file or the
 // folder in Folders is in: its branch, fetch / pull / push with Git's progress, a commit box
 // (amend too), the changes staged and not staged (stage or unstage each, or all), what is in
-// the middle of a merge or rebase, and the stash. Every command goes through
+// the middle of a merge or rebase, and the stash. Files are picked several at a time (their
+// boxes, Shift for a range, Ctrl/Cmd+click, Ctrl+A in a list, a right-click) for the bar's and
+// the menu's actions: stage or unstage, stash, discard, ignore (in .gitignore, shared, or
+// .git/info/exclude, this computer only), keep my changes out (skip-worktree), stop tracking
+// (gitFiles.js). "Kept out on this computer" lists what only this computer leaves out.
+// Every command goes through
 // actions.gitRun (the main process's git:act), which also says when unsaved tabs are in the way.
 // A server not connected says so (Connect); Git missing there offers the command that installs
 // it, typed into that place's terminal (never run by itself).
 import { html, useEffect, useRef, useState } from '../../vendor/preact-htm.js';
+import { ignoreChoices, ignorePattern, namesList, pickActions, pickAfterClick, pickedWords, tidyPicked } from '../gitFiles.js';
 import { GIT_LABELS, branchNameProblem, canCommit, mergeRequestLink } from '../gitStatus.js';
 import { server } from '../servers.js';
 import { connLabel, isRemotePath, remoteParts } from '../where.js';
 import { Modal } from './components.js';
 import { FileIcon } from './fileIcon.js';
 import { Icon } from './icons.js';
+import { Menu, MenuButton } from './menu.js';
 import { ConflictsSection } from './conflicts.js';
 
 const baseName = (p) => String(p).split(/[\\/]/).pop();
@@ -53,11 +60,17 @@ const folderOfRel = (rel) => (rel.includes('/') ? rel.slice(0, rel.lastIndexOf('
 export const fullPath = (root, rel) => (/^[A-Za-z]:|\\/.test(root) ? `${root.replace(/[\\/]+$/, '')}\\${rel.replace(/\//g, '\\')}` : `${root.replace(/\/+$/, '')}/${rel}`);
 const firstLine = (text) => String(text).split('\n').find((l) => l.trim()) ?? '';
 
-function FileRow({ rel, code, root, staged, busy, actions, onStage }) {
+function FileRow({ rel, code, root, staged, busy, actions, onStage, picked, onPick, onMenu }) {
   const path = fullPath(root, rel);
   const gone = code === 'D';
-  return html`<div class=${`git-file code-${code}`}>
-    <button type="button" class="git-file-name" disabled=${gone} title=${`${rel} · ${GIT_LABELS[code] ?? code}${gone ? '' : ' · click to open'}`} onClick=${() => actions.openDiskPath(path)}>
+  return html`<div class=${`git-file code-${code} ${picked ? 'picked' : ''}`} onContextMenu=${(e) => onMenu(rel, e)}>
+    <input type="checkbox" class="git-check" checked=${picked} aria-label=${`Pick ${rel}`} title="Pick it (Shift: the ones between, Ctrl+A: all of them)"
+      onClick=${(e) => onPick(rel, { shift: e.shiftKey })} />
+    <button type="button" class="git-file-name" title=${`${rel} · ${GIT_LABELS[code] ?? code}${gone ? '' : ' · click to open (Ctrl+click or Shift+click picks)'}`}
+      onClick=${(e) => {
+        if (e.ctrlKey || e.metaKey || e.shiftKey) return onPick(rel, { shift: e.shiftKey });
+        if (!gone) actions.openDiskPath(path);
+      }}>
       <${FileIcon} name=${baseName(rel)} size=${14} />
       <span class="git-file-base">${baseName(rel)}</span>
       <span class="git-file-dir muted small">${folderOfRel(rel)}</span>
@@ -68,6 +81,74 @@ function FileRow({ rel, code, root, staged, busy, actions, onStage }) {
     </button>
     <span class=${`git-badge git-${code}`} title=${GIT_LABELS[code] ?? code}>${code}</span>
   </div>`;
+}
+
+/** Stashing (all changes, or the picked files: `paths`): a name, and whether new files go too. */
+function StashForm({ stashing, setStashing, busy, onStash }) {
+  const input = useRef(null);
+  useEffect(() => input.current?.focus(), []);
+  return html`<form class="git-stash-form" onSubmit=${(e) => (e.preventDefault(), onStash())}>
+    ${stashing.paths && html`<span class="small git-stash-what">Stash ${pickedWords(stashing.paths)}:</span>`}
+    <input ref=${input} value=${stashing.message} placeholder="What it is (optional)" aria-label="Stash message" onInput=${(e) => setStashing({ ...stashing, message: e.currentTarget.value })}
+      onKeyDown=${(e) => e.key === 'Escape' && (e.preventDefault(), e.stopPropagation(), setStashing(null))} />
+    ${!stashing.paths && html`<label class="small"><input type="checkbox" checked=${stashing.untracked} onChange=${(e) => setStashing({ ...stashing, untracked: e.currentTarget.checked })} />New files too</label>`}
+    <span class="git-stash-buttons"><button type="submit" class="btn sm primary" disabled=${busy}>Stash</button><button type="button" class="btn sm ghost" onClick=${() => setStashing(null)}>Cancel</button></span>
+  </form>`;
+}
+
+/**
+ * Staged or Changes: the files with their boxes, a box for them all in the head, and while some
+ * are picked the bar of what can be done with them (`items(entries)` makes its menu).
+ */
+function FileSection({ id, title, entries, empty, headButton, picked, setPicked, anchor, busy, root, actions, onStage, items, quick, stashForm }) {
+  const rels = entries.map(([r]) => r);
+  const chosen = entries.filter(([r]) => picked.has(r));
+  const [menu, setMenu] = useState(null); // { at, entries }
+  const all = rels.length > 0 && chosen.length === rels.length;
+  const onPick = (rel, { shift = false } = {}) => {
+    setPicked(pickAfterClick(picked, rels, rel, { shift, anchor: anchor.current }));
+    if (!shift) anchor.current = rel;
+  };
+  const onMenu = (rel, e) => {
+    e.preventDefault();
+    // A row not picked: it alone, as file managers do.
+    const these = picked.has(rel) ? chosen : entries.filter(([r]) => r === rel);
+    if (!picked.has(rel)) {
+      setPicked(new Set([rel]));
+      anchor.current = rel;
+    }
+    setMenu({ at: { x: e.clientX, y: e.clientY }, entries: these });
+  };
+  return html`<section class=${`git-section git-files-${id}`}
+    onKeyDown=${(e) => {
+      // Ctrl+A picks them all, unless it is selecting text in a field (the stash's name).
+      const typing = e.target.tagName === 'TEXTAREA' || (e.target.tagName === 'INPUT' && e.target.type !== 'checkbox');
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a' && !typing) {
+        e.preventDefault();
+        setPicked(new Set(rels));
+      } else if (e.key === 'Escape' && picked.size) {
+        e.preventDefault();
+        e.stopPropagation();
+        setPicked(new Set());
+      }
+    }}>
+    <h3 class="git-section-head">
+      ${rels.length > 0 && html`<input type="checkbox" class="git-check" checked=${all} indeterminate=${chosen.length > 0 && !all} aria-label=${`Pick all of ${title}`} title=${all ? 'Pick none' : 'Pick them all'} onClick=${() => setPicked(all ? new Set() : new Set(rels))} />`}
+      ${title}<span class="muted small">${rels.length || ''}</span><span class="spacer" />${headButton}
+    </h3>
+    ${chosen.length > 0 &&
+    html`<div class="git-pickbar" role="toolbar" aria-label=${`The picked files of ${title}`}>
+      <span class="small git-pick-count">${chosen.length} picked</span>
+      ${quick(chosen)}
+      <${MenuButton} label="More for the picked files" className="icon-btn sm" items=${() => items(chosen)} />
+      <button type="button" class="icon-btn sm git-pick-none" aria-label="Pick none" title="Pick none (Esc)" onClick=${() => setPicked(new Set())}><${Icon} name="x" size=${14} /></button>
+    </div>`}
+    ${stashForm}
+    ${entries.length
+      ? entries.map(([rel, code]) => html`<${FileRow} key=${`${id}:${rel}`} rel=${rel} code=${code} root=${root} staged=${id === 'staged'} busy=${busy} actions=${actions} onStage=${onStage} picked=${picked.has(rel)} onPick=${onPick} onMenu=${onMenu} />`)
+      : html`<p class="muted small git-empty">${empty}</p>`}
+    ${menu && html`<${Menu} items=${items(menu.entries)} at=${menu.at} label="Picked files" className="git-file-menu" onClose=${() => setMenu(null)} />`}
+  </section>`;
 }
 
 /**
@@ -88,6 +169,9 @@ export function GitPanel({ dir, tick, actions, onClose }) {
   const [writing, setWriting] = useState(null); // an AbortController while the model writes the message
   const [none, setNone] = useState(null); // not a repository: { installed, root, defaultBranch, install, unsupported } (git:info)
   const [offline, setOffline] = useState(false); // a server or place not connected now
+  const [picked, setPickedAll] = useState(() => ({ staged: new Set(), changes: new Set() })); // the files picked, by section
+  const anchors = { staged: useRef(null), changes: useRef(null) }; // the last one clicked (Shift picks from it)
+  const [kept, setKept] = useState(null); // what only this computer leaves out: { skipped, patterns }
   const box = useRef(null);
   const conn = connOf(dir);
 
@@ -112,13 +196,22 @@ export function GitPanel({ dir, tick, actions, onClose }) {
       }
     }
     setStatus(s);
-    const [st, ip] = await Promise.all([bridge.act(dir, { op: 'stashes' }), bridge.act(dir, { op: 'in-progress' })]);
+    const [st, ip, ko] = await Promise.all([bridge.act(dir, { op: 'stashes' }), bridge.act(dir, { op: 'in-progress' }), bridge.act(dir, { op: 'kept-out' })]);
     setStashes(st?.ok ? st.result : []);
     setInProgress(ip?.ok ? ip.result : null);
+    setKept(ko?.ok ? ko.result : null);
   };
   useEffect(() => {
     load();
   }, [dir, tick]);
+  // Files no longer listed (staged, committed, stashed…) are no longer picked.
+  useEffect(() => {
+    setPickedAll((p) => {
+      const staged = tidyPicked(p.staged, Object.keys(status?.staged ?? {}));
+      const changes = tidyPicked(p.changes, Object.keys(status?.unstaged ?? {}));
+      return staged === p.staged && changes === p.changes ? p : { staged, changes };
+    });
+  }, [status]);
   useEffect(() => bridge?.onProgress(({ root, line }) => status && root === status.root && setProgress(line)), [status?.root]);
 
   if (!bridge) return null;
@@ -138,6 +231,92 @@ export function GitPanel({ dir, tick, actions, onClose }) {
     return r;
   };
   const stageOne = (rel, on) => run({ op: on ? 'stage' : 'unstage', paths: [rel] }, on ? 'stage' : 'unstage');
+
+  // ---- The picked files: what the bar and the menu do with them ----
+  const setPicked = (section, set) => setPickedAll((p) => ({ ...p, [section]: set }));
+  /** Done: the files are no longer picked; `text` said, with Undo when there is one. */
+  const after = (section, r, text = '', undo = null) => {
+    if (!r.ok) return;
+    setPicked(section, new Set());
+    if (text) actions.toast(text, undo ? { action: { label: 'Undo', run: undo }, timeout: 10000 } : {});
+  };
+  const ignoreIn = async (section, patterns, where) => {
+    const r = await run({ op: 'ignore', patterns, where }, 'ignore');
+    const added = r.ok ? (r.result?.added ?? []) : [];
+    const list = added.join(', ') || 'it was there already';
+    after(section, r, where === 'local' ? `Ignored on this computer only (.git/info/exclude): ${list}` : `Added to .gitignore: ${list}`, added.length ? () => run({ op: 'unignore', patterns: added, where }, 'ignore') : null);
+  };
+  const discard = async (section, d) => {
+    const fresh = d.fresh ? `${d.fresh === 1 ? 'The new file' : `The ${d.fresh} new files`} (not in Git yet) will be deleted for good. ` : '';
+    if (!confirm(`Discard your changes to ${namesList(d.paths)}?\n\n${fresh}Changes not staged are lost; staged changes stay.`)) return;
+    after(section, await run({ op: 'discard', paths: d.paths }, 'discard'), `Discarded the changes to ${pickedWords(d.paths)}.`);
+  };
+  const keepOut = async (section, paths) => {
+    const r = await run({ op: 'skip', paths, on: true }, 'skip');
+    after(section, r, `Your changes to ${pickedWords(paths)} are kept out on this computer: see Kept out on this computer.`, () => run({ op: 'skip', paths, on: false }, 'skip'));
+  };
+  const untrack = async (section, paths, ignore) => {
+    const r = await run({ op: 'untrack', paths }, 'untrack');
+    const patterns = paths.map((x) => ignorePattern(x));
+    const ig = r.ok && ignore ? await run({ op: 'ignore', patterns }, 'ignore') : null;
+    const added = ig?.ok ? (ig.result?.added ?? []) : [];
+    after(section, r, `Git no longer tracks ${pickedWords(paths)} (kept on disk${ignore ? ', in .gitignore' : ''}). Commit to make it so for everyone.`, async () => {
+      await run({ op: 'unstage', paths }, 'unstage');
+      if (added.length) await run({ op: 'unignore', patterns: added }, 'ignore');
+    });
+  };
+  const startStash = (section, s) => setStashing({ message: '', untracked: s.untracked, paths: s.paths, section });
+  const stashNow = async () => {
+    const r = await run({ op: 'stash', message: stashing.message, untracked: stashing.untracked, ...(stashing.paths ? { paths: stashing.paths } : {}) }, 'stash');
+    if (!r.ok) return;
+    if (stashing.section) setPicked(stashing.section, new Set());
+    actions.toast(`Stashed ${stashing.paths ? pickedWords(stashing.paths) : 'your changes'}: Pop in Stash brings ${stashing.paths?.length === 1 ? 'it' : 'them'} back.`);
+    setStashing(null);
+  };
+  /** The ignore choices for new files (in .gitignore, or this computer only). */
+  const ignoreItems = (section, rels) => {
+    const ign = ignoreChoices(rels);
+    const kinds = ['files', 'folders', 'ext'].filter((k) => ign[k]);
+    return [
+      { heading: true, label: 'Ignore in .gitignore (shared)' },
+      ...kinds.map((k) => ({ key: `ig-${k}`, label: ign[k].label, icon: 'eyeOff', run: () => ignoreIn(section, ign[k].patterns, 'shared') })),
+      { heading: true, label: 'Ignore on this computer only' },
+      ...kinds.map((k) => ({ key: `il-${k}`, label: ign[k].label, icon: 'eyeOff', hint: '.git/info/exclude', run: () => ignoreIn(section, ign[k].patterns, 'local') })),
+    ];
+  };
+  /** The menu for picked files of a section (the bar's ⋯ and a right-click). */
+  const fileItems = (section, entries) => {
+    const a = pickActions(section, entries);
+    const rels = entries.map(([r]) => r);
+    const openable = entries.filter(([, c]) => c !== 'D').map(([r]) => r);
+    return [
+      openable.length > 0 && openable.length <= 10 && { key: 'open', label: openable.length === 1 ? 'Open' : `Open ${openable.length} files`, icon: 'file', run: () => openable.forEach((x) => actions.openDiskPath(fullPath(root, x))) },
+      a.compare && { key: 'compare', label: 'Compare with the last commit', icon: 'compare', run: () => actions.compareWithHead(fullPath(root, a.compare)) },
+      { separator: true },
+      a.stage && { key: 'stage', label: `Stage ${pickedWords(a.stage)}`, icon: 'plus', disabled: busy, run: () => run({ op: 'stage', paths: a.stage }, 'stage').then((r) => after(section, r)) },
+      a.unstage && { key: 'unstage', label: `Unstage ${pickedWords(a.unstage)}`, icon: 'undo', disabled: busy, run: () => run({ op: 'unstage', paths: a.unstage }, 'unstage').then((r) => after(section, r)) },
+      a.stash && { key: 'stash', label: `Stash ${pickedWords(a.stash.paths)}…`, icon: 'archive', hint: a.stash.left ? 'not the files in conflict' : '', disabled: busy, run: () => startStash(section, a.stash) },
+      a.discard && { key: 'discard', label: 'Discard changes…', icon: 'trash', danger: true, disabled: busy, hint: a.discard.left ? 'not the files in conflict' : '', run: () => discard(section, a.discard) },
+      a.ignore && { separator: true },
+      ...(a.ignore ? ignoreItems(section, a.ignore) : []),
+      (a.skip || a.untrack) && { separator: true },
+      (a.skip || a.untrack) && { heading: true, label: 'Files Git follows' },
+      a.skip && { key: 'skip', label: 'Keep my changes out, on this computer only', icon: 'eyeOff', hint: 'skip-worktree', run: () => keepOut(section, a.skip) },
+      a.untrack && { key: 'untrack', label: 'Stop tracking (keep the file)', icon: 'x', run: () => untrack(section, a.untrack, false) },
+      a.untrack && { key: 'untrack-ignore', label: 'Stop tracking and add to .gitignore', icon: 'x', run: () => untrack(section, a.untrack, true) },
+      { separator: true },
+      { key: 'copy', label: rels.length === 1 ? 'Copy its path' : 'Copy their paths', icon: 'copy', run: () => navigator.clipboard?.writeText(rels.join('\n')).then(() => actions.toast(rels.length === 1 ? 'Path copied' : `${rels.length} paths copied`)) },
+    ];
+  };
+  /** The bar's own buttons for the picked files. */
+  const quickFor = (section) => (entries) => {
+    const a = pickActions(section, entries);
+    return html`${a.stage && html`<button type="button" class="btn ghost xs" disabled=${busy} title="Take them into the next commit" onClick=${() => run({ op: 'stage', paths: a.stage }, 'stage').then((r) => after(section, r))}>Stage</button>`}
+      ${a.unstage && html`<button type="button" class="btn ghost xs" disabled=${busy} title="Leave them out of the next commit" onClick=${() => run({ op: 'unstage', paths: a.unstage }, 'unstage').then((r) => after(section, r))}>Unstage</button>`}
+      ${a.stash && html`<button type="button" class="btn ghost xs" disabled=${busy} title="Put their changes aside, to bring them back later" onClick=${() => startStash(section, a.stash)}>Stash…</button>`}
+      ${a.discard && html`<button type="button" class="btn ghost xs danger" disabled=${busy} title="Throw away their changes not staged (new files are deleted)" onClick=${() => discard(section, a.discard)}>Discard…</button>`}
+      ${a.ignore && html`<${MenuButton} label="Ignore: in .gitignore, or on this computer only" icon="eyeOff" className="icon-btn sm" items=${() => ignoreItems(section, a.ignore)} />`}`;
+  };
   const commit = async () => {
     const r = await run({ op: 'commit', message, amend }, 'commit');
     if (r.ok) {
@@ -266,31 +445,21 @@ export function GitPanel({ dir, tick, actions, onClose }) {
             </button>
           </div>
         </div>
-        <section class="git-section">
-          <h3 class="git-section-head">Staged<span class="muted small">${staged.length || ''}</span><span class="spacer" />
-            ${staged.length > 0 && html`<button type="button" class="btn ghost xs" disabled=${busy} onClick=${() => run({ op: 'unstage-all' }, 'unstage')}>Unstage all</button>`}
-          </h3>
-          ${staged.length ? staged.map(([rel, code]) => html`<${FileRow} key=${`s:${rel}`} rel=${rel} code=${code} root=${root} staged busy=${busy} actions=${actions} onStage=${stageOne} />`) : html`<p class="muted small git-empty">Nothing staged: stage files here, from Folders, or one change at a time from the bar next to the line numbers.</p>`}
-        </section>
-        <section class="git-section">
-          <h3 class="git-section-head">Changes<span class="muted small">${unstaged.length || ''}</span><span class="spacer" />
-            ${unstaged.length > 0 && html`<button type="button" class="btn ghost xs" disabled=${busy} onClick=${() => run({ op: 'stage-all' }, 'stage')}>Stage all</button>`}
-          </h3>
-          ${unstaged.length ? unstaged.map(([rel, code]) => html`<${FileRow} key=${`u:${rel}`} rel=${rel} code=${code} root=${root} busy=${busy} actions=${actions} onStage=${stageOne} />`) : html`<p class="muted small git-empty">No changes since the last commit.</p>`}
-        </section>
+        <${FileSection} id="staged" title="Staged" entries=${staged} picked=${picked.staged} setPicked=${(set) => setPicked('staged', set)} anchor=${anchors.staged}
+          busy=${busy} root=${root} actions=${actions} onStage=${stageOne} items=${(e) => fileItems('staged', e)} quick=${quickFor('staged')}
+          empty="Nothing staged: stage files here, from Folders, or one change at a time from the bar next to the line numbers."
+          headButton=${staged.length > 0 && html`<button type="button" class="btn ghost xs" disabled=${busy} onClick=${() => run({ op: 'unstage-all' }, 'unstage')}>Unstage all</button>`}
+          stashForm=${stashing?.section === 'staged' && html`<${StashForm} stashing=${stashing} setStashing=${setStashing} busy=${busy} onStash=${stashNow} />`} />
+        <${FileSection} id="changes" title="Changes" entries=${unstaged} picked=${picked.changes} setPicked=${(set) => setPicked('changes', set)} anchor=${anchors.changes}
+          busy=${busy} root=${root} actions=${actions} onStage=${stageOne} items=${(e) => fileItems('changes', e)} quick=${quickFor('changes')}
+          empty="No changes since the last commit."
+          headButton=${unstaged.length > 0 && html`<button type="button" class="btn ghost xs" disabled=${busy} onClick=${() => run({ op: 'stage-all' }, 'stage')}>Stage all</button>`}
+          stashForm=${stashing?.section === 'changes' && html`<${StashForm} stashing=${stashing} setStashing=${setStashing} busy=${busy} onStash=${stashNow} />`} />
         <details class="git-section git-stash" open=${stashes.length > 0}>
           <summary class="git-section-head">Stash<span class="muted small">${stashes.length || ''}</span></summary>
-          ${stashing
-            ? html`<form class="git-stash-form" onSubmit=${async (e) => {
-                e.preventDefault();
-                const r = await run({ op: 'stash', message: stashing.message, untracked: stashing.untracked }, 'stash');
-                if (r.ok) setStashing(null);
-              }}>
-                <input value=${stashing.message} placeholder="What it is (optional)" aria-label="Stash message" onInput=${(e) => setStashing({ ...stashing, message: e.currentTarget.value })} />
-                <label class="small"><input type="checkbox" checked=${stashing.untracked} onChange=${(e) => setStashing({ ...stashing, untracked: e.currentTarget.checked })} />New files too</label>
-                <span class="git-stash-buttons"><button type="submit" class="btn sm primary" disabled=${busy}>Stash</button><button type="button" class="btn sm ghost" onClick=${() => setStashing(null)}>Cancel</button></span>
-              </form>`
-            : html`<button type="button" class="btn sm git-stash-new" disabled=${busy || (!staged.length && !unstaged.length)} title="Put your changes aside (your files go back to the last commit), to bring them back later" onClick=${() => setStashing({ message: '', untracked: true })}><${Icon} name="archive" size=${14} />Stash changes…</button>`}
+          ${stashing && !stashing.section
+            ? html`<${StashForm} stashing=${stashing} setStashing=${setStashing} busy=${busy} onStash=${stashNow} />`
+            : html`<button type="button" class="btn sm git-stash-new" disabled=${busy || (!staged.length && !unstaged.length)} title="Put your changes aside (your files go back to the last commit), to bring them back later. To stash some files only, pick them above." onClick=${() => setStashing({ message: '', untracked: true })}><${Icon} name="archive" size=${14} />Stash changes…</button>`}
           ${stashes.map(
             (st) => html`<div class="git-stash-row" key=${st.ref}>
               <span class="git-stash-text" title=${`${st.ref} · ${st.message}`}>${st.message || st.ref}<span class="muted small"> · ${st.when}</span></span>
@@ -299,9 +468,39 @@ export function GitPanel({ dir, tick, actions, onClose }) {
               <button type="button" class="btn ghost xs danger" disabled=${busy} title="Throw it away" onClick=${() => confirm(`Throw away “${st.message || st.ref}”? Its changes are lost.`) && run({ op: 'stash-drop', ref: st.ref }, 'stash')}>Drop</button>
             </div>`,
           )}
-        </details>`}
+        </details>
+        <${KeptOut} kept=${kept} busy=${busy} run=${run} />`}
     </div>
   </aside>`;
+}
+
+/**
+ * What only this computer leaves out of Git, never shared: tracked files whose changes are kept
+ * out (skip-worktree: Git acts as if they were unchanged) and the patterns of .git/info/exclude.
+ * Each can be taken back.
+ */
+function KeptOut({ kept, busy, run }) {
+  if (!kept) return null;
+  const count = kept.skipped.length + kept.patterns.length;
+  return html`<details class="git-section git-kept" open=${count > 0}>
+    <summary class="git-section-head">Kept out on this computer<span class="muted small">${count || ''}</span></summary>
+    <p class="muted small git-kept-help">Only here, never committed or shared. Files whose changes you keep out look unchanged to Git; a pull that changes one of them stops until you follow it again.</p>
+    ${kept.skipped.map(
+      (rel) => html`<div class="git-kept-row" key=${`s:${rel}`}>
+        <${FileIcon} name=${baseName(rel)} size=${14} />
+        <span class="git-kept-text" title=${`${rel}: your changes are kept out (skip-worktree)`}>${baseName(rel)} <span class="muted small">${folderOfRel(rel)}</span></span>
+        <button type="button" class="btn ghost xs" disabled=${busy} title="Git sees your changes to it again" onClick=${() => run({ op: 'skip', paths: [rel], on: false }, 'skip')}>Follow again</button>
+      </div>`,
+    )}
+    ${kept.patterns.map(
+      (pattern) => html`<div class="git-kept-row" key=${`p:${pattern}`}>
+        <${Icon} name="eyeOff" size=${14} />
+        <code class="git-kept-text" title=${`${pattern} in .git/info/exclude`}>${pattern}</code>
+        <button type="button" class="btn ghost xs" disabled=${busy} title="Take it out of .git/info/exclude" onClick=${() => run({ op: 'unignore', patterns: [pattern], where: 'local' }, 'ignore')}>Stop ignoring</button>
+      </div>`,
+    )}
+    ${!count && html`<p class="muted small git-empty">Nothing yet. Pick new files and ignore them on this computer only, or changed files to keep your changes out.</p>`}
+  </details>`;
 }
 
 /**

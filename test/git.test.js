@@ -325,3 +325,131 @@ test('a commit for its card, and a file before and after it (renamed too)', asyn
   assert.equal(await g.fileAt(dir, first, 'b.txt'), null, 'not there then');
   await assert.rejects(g.fileAt(dir, first, '../x'), /Not a file/);
 });
+
+test('fetch, pull and push use the repository’s own core.sshCommand (Windows’ ssh and its agent), never asking', { skip: process.platform === 'win32' && 'a shell script stands in for ssh' }, async () => {
+  // Until 0.52 the editor always set GIT_SSH_COMMAND='ssh -o BatchMode=yes', which outranks
+  // core.sshCommand: on Windows Git's own ssh ran, without Windows' ssh-agent, and every pull
+  // said "Permission denied (publickey)" while the same pull worked in a terminal.
+  const { writeEnv, programOf } = require('../electron/git.cjs');
+  const dir = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'git-ssh-')));
+  const tools = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'git-ssh-tools-')));
+  const log = path.join(tools, 'calls.txt');
+  const git = (...args) => execFileSync('git', args, { cwd: dir, env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.org', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.org' } });
+  // A stand-in for ssh: says what it was given, then fails as an unreachable host does.
+  const fake = (name) => {
+    const file = path.join(tools, name);
+    writeFileSync(file, `#!/bin/sh\necho "${name} $*" >> "${log}"\necho "ssh: connect to host example.invalid: no route" >&2\nexit 255\n`, { mode: 0o755 });
+    return file;
+  };
+  const read = () => (execFileSync('cat', [log]).toString().trim().split('\n').pop() ?? '');
+  git('init', '-q', '-b', 'main');
+  writeFileSync(path.join(dir, 'a.txt'), 'a\n');
+  git('add', '.');
+  git('commit', '-q', '-m', 'first');
+  git('remote', 'add', 'origin', 'ssh://git@example.invalid:1022/team/repo.git');
+  const env = { ...process.env };
+  delete env.GIT_SSH_COMMAND;
+  delete env.GIT_SSH;
+  const saved = { cmd: process.env.GIT_SSH_COMMAND, ssh: process.env.GIT_SSH };
+  delete process.env.GIT_SSH_COMMAND;
+  delete process.env.GIT_SSH;
+  try {
+    const g = createGit({ parseStatus });
+    // OpenSSH set by the person (a path, as on Windows): it runs, with BatchMode added.
+    git('config', 'core.sshCommand', fake('ssh'));
+    await assert.rejects(g.act(dir, { op: 'fetch' }));
+    assert.match(read(), /^ssh -o BatchMode=yes .*example\.invalid/, 'the configured ssh ran, asking nothing');
+    await assert.rejects(g.act(dir, { op: 'pull' }));
+    assert.match(read(), /^ssh -o BatchMode=yes .*git-upload-pack/);
+    await assert.rejects(g.act(dir, { op: 'push' }));
+    assert.match(read(), /^ssh -o BatchMode=yes .*git-receive-pack/);
+    // Another program (plink, a wrapper): run as configured, nothing added.
+    git('config', 'core.sshCommand', fake('my-wrapper'));
+    await assert.rejects(g.act(dir, { op: 'fetch' }));
+    assert.match(read(), /^my-wrapper (?!-o BatchMode).*example\.invalid/);
+  } finally {
+    if (saved.cmd != null) process.env.GIT_SSH_COMMAND = saved.cmd;
+    if (saved.ssh != null) process.env.GIT_SSH = saved.ssh;
+  }
+
+  // The environment's choice still wins; with nothing set, plain ssh asking nothing.
+  assert.equal(writeEnv(env).GIT_SSH_COMMAND, 'ssh -o BatchMode=yes');
+  assert.equal(writeEnv({ ...env, GIT_SSH_COMMAND: 'mine' }, { sshCommand: 'ssh' }).GIT_SSH_COMMAND, 'mine');
+  assert.equal(writeEnv({ ...env, GIT_SSH: 'plink.exe' }, { sshCommand: 'ssh' }).GIT_SSH_COMMAND, undefined);
+  assert.equal(writeEnv(env, { sshCommand: '"C:/Program Files/OpenSSH/ssh.exe" -i key' }).GIT_SSH_COMMAND, '"C:/Program Files/OpenSSH/ssh.exe" -i key -o BatchMode=yes');
+  assert.equal(writeEnv(env, { sshCommand: 'ssh -o BatchMode=yes -v' }).GIT_SSH_COMMAND, undefined, 'already there: Git runs its own setting');
+  assert.equal(writeEnv(env, { sshCommand: 'C:\\\\tools\\\\plink.exe -batch' }).GIT_SSH_COMMAND, undefined);
+  assert.equal(programOf('C:/Windows/System32/OpenSSH/ssh.exe'), 'ssh');
+  assert.equal(programOf("'/usr/bin/ssh' -F cfg"), 'ssh');
+  assert.equal(programOf('TortoiseGitPlink.exe'), 'tortoisegitplink');
+});
+
+test('picked files (0.52): stash some, discard, ignore here only, keep my changes out, stop tracking', async () => {
+  const dir = realpathSync.native(mkdtempSync(path.join(tmpdir(), 'git-pick-')));
+  const git = (...args) => execFileSync('git', args, { cwd: dir, env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.org', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.org' } }).toString();
+  const { readFileSync, existsSync } = await import('node:fs');
+  const read = (rel) => readFileSync(path.join(dir, rel), 'utf8');
+  git('init', '-q', '-b', 'main');
+  writeFileSync(path.join(dir, 'a.txt'), 'a\n');
+  writeFileSync(path.join(dir, 'b.txt'), 'b\n');
+  writeFileSync(path.join(dir, 'config.json'), '{"db":"prod"}\n');
+  git('add', '.');
+  git('commit', '-q', '-m', 'first');
+  const g = createGit({ parseStatus });
+
+  // Stash two of three changed files (one new): the third stays as it is.
+  writeFileSync(path.join(dir, 'a.txt'), 'a changed\n');
+  writeFileSync(path.join(dir, 'b.txt'), 'b changed\n');
+  writeFileSync(path.join(dir, 'new.txt'), 'new\n');
+  await g.act(dir, { op: 'stash', paths: ['a.txt', 'new.txt'], untracked: true, message: 'two of them' });
+  assert.equal(read('a.txt'), 'a\n');
+  assert.equal(existsSync(path.join(dir, 'new.txt')), false);
+  assert.equal(read('b.txt'), 'b changed\n', 'not picked: left alone');
+  await g.act(dir, { op: 'stash-pop', ref: 'stash@{0}' });
+  assert.equal(read('a.txt'), 'a changed\n');
+  assert.equal(read('new.txt'), 'new\n');
+
+  // Discard: a tracked file goes back to what is staged, a new one is deleted; staged changes stay.
+  writeFileSync(path.join(dir, 'b.txt'), 'b staged\n');
+  git('add', 'b.txt');
+  writeFileSync(path.join(dir, 'b.txt'), 'b staged, then more\n');
+  const d = await g.act(dir, { op: 'discard', paths: ['b.txt', 'new.txt'] });
+  assert.deepEqual(d, { restored: 1, deleted: 1 });
+  assert.equal(read('b.txt'), 'b staged\n');
+  assert.equal(existsSync(path.join(dir, 'new.txt')), false);
+  assert.equal(git('diff', '--cached', '--name-only').trim(), 'b.txt');
+  await assert.rejects(g.act(dir, { op: 'discard', paths: ['../outside.txt'] }), /Not files of this repository/);
+
+  // Ignore on this computer only: .git/info/exclude, never .gitignore; then taken back.
+  writeFileSync(path.join(dir, 'scratch.log'), 'x\n');
+  const ig = await g.act(dir, { op: 'ignore', patterns: ['/scratch.log'], where: 'local' });
+  assert.deepEqual(ig.added, ['/scratch.log']);
+  assert.equal(existsSync(path.join(dir, '.gitignore')), false);
+  assert.match(read('.git/info/exclude'), /^\/scratch\.log$/m);
+  assert.equal((await g.status(dir)).files['scratch.log'], undefined, 'Git no longer lists it');
+  // Keep my changes out (skip-worktree): the file looks unchanged, and is listed as kept out.
+  writeFileSync(path.join(dir, 'config.json'), '{"db":"local"}\n');
+  await g.act(dir, { op: 'skip', paths: ['config.json'], on: true });
+  assert.equal((await g.status(dir)).files['config.json'], undefined);
+  const kept = await g.act(dir, { op: 'kept-out' });
+  assert.deepEqual(kept.skipped, ['config.json']);
+  assert.ok(kept.patterns.includes('/scratch.log'));
+  await g.act(dir, { op: 'skip', paths: ['config.json'], on: false });
+  assert.equal((await g.status(dir)).files['config.json'], 'M', 'followed again');
+  const un = await g.act(dir, { op: 'unignore', patterns: ['/scratch.log'], where: 'local' });
+  assert.equal(un.removed, 1);
+  assert.equal((await g.status(dir)).files['scratch.log'], 'U');
+  assert.deepEqual((await g.act(dir, { op: 'kept-out' })).skipped, []);
+
+  // Stop tracking and add to .gitignore: a deletion staged, the file kept on disk.
+  await g.act(dir, { op: 'untrack', paths: ['config.json'] });
+  await g.act(dir, { op: 'ignore', patterns: ['/config.json'] });
+  assert.equal(read('config.json'), '{"db":"local"}\n');
+  assert.match(git('diff', '--cached', '--name-status'), /^D\tconfig\.json$/m);
+  assert.match(read('.gitignore'), /^\/config\.json$/m);
+  // Undo: the deletion unstaged, the line out of .gitignore again.
+  await g.act(dir, { op: 'unstage', paths: ['config.json'] });
+  await g.act(dir, { op: 'unignore', patterns: ['/config.json'] });
+  assert.doesNotMatch(git('diff', '--cached', '--name-status'), /config\.json/);
+  assert.doesNotMatch(read('.gitignore'), /config\.json/);
+});
