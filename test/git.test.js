@@ -390,6 +390,8 @@ test('picked files (0.52): stash some, discard, ignore here only, keep my change
   const { readFileSync, existsSync } = await import('node:fs');
   const read = (rel) => readFileSync(path.join(dir, rel), 'utf8');
   git('init', '-q', '-b', 'main');
+  // Files as written, line endings too (Windows' Git converts them by default).
+  git('config', 'core.autocrlf', 'false');
   writeFileSync(path.join(dir, 'a.txt'), 'a\n');
   writeFileSync(path.join(dir, 'b.txt'), 'b\n');
   writeFileSync(path.join(dir, 'config.json'), '{"db":"prod"}\n');
