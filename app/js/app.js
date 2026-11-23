@@ -84,7 +84,7 @@ import { CompareFolderDialog } from './ui/compareFolderPick.js';
 import { SaveCompareDialog, SavedComparesDialog } from './ui/savedCompares.js';
 import { canSave, sameSides } from './compares.js';
 import { ComparePicker } from './ui/comparePicker.js';
-import { revealInFolders } from './ui/folders.js';
+import { binName, revealInFolders } from './ui/folders.js';
 import { HistoryPanel } from './ui/history.js';
 import { TrashDialog } from './ui/trash.js';
 import { LockedFile } from './ui/encryption.js';
@@ -115,6 +115,9 @@ import { snippetNameFrom } from './snippets.js';
 import { linkName, resolveLink } from './outline.js';
 import { prepareTyping, typingDelay } from './typing.js';
 import { isSealed } from './crypto.js';
+import { createLockedTabs, shownNameOf } from './lockedTabs.js';
+import { idleMinutesOf, innerName, isLockedName, isLockedText, lockedName, lockText } from './locked.js';
+import { ChangePasswordDialog, LockFileDialog, LockScreen, NewLockedDialog, RemoveLockDialog } from './ui/locked.js';
 import { decodeFor, encodeFor, lock, onVault, openText, setUpVault, unlock, vaultState } from './vault.js';
 import { ReadAloudBar } from './ui/readAloud.js';
 import { EditBar, LineMenu } from './ui/editBar.js';
@@ -134,6 +137,36 @@ import { commandOfEvent, isMacKeys, keyContext, shownKeys, startKeys } from './k
 
 /** Why the model panel does not open on an encrypted file: its text and name never go to the model. */
 const ENCRYPTED_NOT_SENT = 'This file is encrypted: its text and its name never go to the model.';
+const LOCKED_NOT_SENT = 'This file is locked with a password: its text and its name never go to the model.';
+
+// Files locked with a password (locked.js): the open ones' keys and texts, in this page's memory
+// only (lockedTabs.js), and the editor host they open in.
+let editorHost = null;
+const locks = createLockedTabs({
+  host: () => editorHost,
+  onChange: () => window.dispatchEvent(new Event('locked:change')),
+  onLost: (key, why) =>
+    toast(why === 'unlocked' ? `${tabName(key)} is not locked any more: its lock was taken off elsewhere.` : `${tabName(key)} changed elsewhere and is locked with another password now, so it locked here.`, { timeout: 9000 }),
+});
+/** Everything typed into open locked tabs sealed and in the store (main.js, before another tab takes over). */
+export const settleLocked = () => locks.settled().catch(() => {});
+/** Whether a disk tab's file is locked with a password: its text, or its name (".locked") says so. */
+const lockedDisk = (path) => isLockedName(path) || isLockedText(store.diskTab(path)?.text);
+/**
+ * Whether a tab's text and name stay in the editor (never to the model, a language server, Git's
+ * blame, an index): an encrypted note, or a file locked with a password, open here or not.
+ */
+const isPrivateKey = (key) => {
+  const k = parseKey(key ?? '');
+  if (k?.kind === 'file') {
+    const f = store.get(k.id);
+    return Boolean(f?.encrypted || store.isSealed(k.id) || store.isLocked(k.id) || locks.isOpen(key));
+  }
+  if (k?.kind === 'disk') return lockedDisk(k.path) || locks.isOpen(key);
+  return false;
+};
+/** Why a private tab's text does not go to the model. */
+const notSentWhy = (key) => (locks.isLocked(key) || (parseKey(key ?? '')?.kind === 'disk' && lockedDisk(parseKey(key).path)) ? LOCKED_NOT_SENT : ENCRYPTED_NOT_SENT);
 
 const isNarrow = () => matchMedia('(max-width: 860px)').matches;
 
@@ -235,12 +268,16 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       const k = parseKey(key);
       if (!k) return null;
       hostRef.current?.flushAll();
+      // A file locked with a password: its text as the editor has it while it is open here ('' while locked; `locked`).
+      const lockedText = () => (locks.isOpen(key) ? (hostRef.current?.stateOf(key)?.doc.toString() ?? locks.plainOf(key) ?? '') : '');
       if (k.kind === 'file') {
         const f = store.get(k.id);
+        if (f && locks.isLocked(key)) return { key, kind: 'file', id: f.id, name: f.name, language: f.language, project: f.project, tags: f.tags, dirty: f.dirty, text: lockedText(), locked: true };
         return f && { key, kind: 'file', id: f.id, name: f.name, language: f.language, project: f.project, tags: f.tags, dirty: f.dirty, text: store.text(f.id) };
       }
       if (k.kind === 'disk') {
         const d = store.diskTab(k.path);
+        if (d && locks.isLocked(key)) return { key, kind: 'disk', path: k.path, name: innerName(d.name), language: '', project: '', tags: [], dirty: d.dirty, text: lockedText(), locked: true };
         return d && { key, kind: 'disk', path: k.path, name: d.name, language: '', project: '', tags: [], dirty: d.dirty, text: d.text };
       }
       const tab = store.repoTab(k.path);
@@ -347,8 +384,10 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       closeMany(keys) {
         for (const key of keys) actions.close(key);
       },
-      close(key, { discard = false } = {}) {
+      close(key, { discard = false, settled = false } = {}) {
         const k = parseKey(key);
+        // A locked file on disk: what was typed is sealed and in its tab first, so "not saved" is known.
+        if (k?.kind === 'disk' && locks.isOpen(key) && !settled) return void locks.settled(key).then(() => actions.close(key, { discard, settled: true }));
         // The open tab closed in a view: its neighbor in the view comes next, not one from elsewhere.
         const vs = store.session.active === key && store.session.view ? tabViewState() : null;
         const shown = vs ? [...vs.keys, ...vs.guests].filter((x) => !store.session.panes.includes(x)) : [];
@@ -361,6 +400,8 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
           unwatchDisk(k.path);
         }
         hostRef.current?.drop(key);
+        // A locked file's key goes with its tab (what was typed was passed on as the editor let go of it).
+        locks.forget(key);
         if (getReaderState().key === key) stopReading();
         store.close(key);
         if (vs) {
@@ -368,8 +409,8 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
           const next = rest[Math.min(Math.max(shown.indexOf(key), 0), rest.length - 1)] ?? null;
           if (store.session.active !== next) store.setTabView(store.session.view, next, viewKey);
         }
-        // Empty untitled tabs are not worth keeping.
-        if (file && /^new \d+$/.test(file.name) && !store.text(file.id).trim() && !file.sha) store.remove(file.id);
+        // Empty untitled tabs are not worth keeping (a locked one is not empty).
+        if (file && /^new \d+$/.test(file.name) && !store.text(file.id).trim() && !store.isLocked(file.id) && !file.sha) store.remove(file.id);
       },
       reopenClosed: () => store.reopenClosed() || toast('No closed tabs to reopen'),
       // Ctrl+Tab: through the tabs the bar shows.
@@ -536,7 +577,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         if (!now) return;
         const disk = now.kind === 'disk' ? store.diskTab(now.path) : null;
         if (diskReadOnly(disk)) return toast(disk.readOnly ? 'This file is read-only here: the app it came from does not let it be saved.' : 'This tab is read-only (followed, or the end of a large file).');
-        if (now.kind === 'file' && store.isSealed(now.id)) return;
+        if ((now.kind === 'file' && store.isSealed(now.id)) || locks.isClosed(now.key)) return;
         const sel = hostRef.current?.selectionInfo();
         const part = sel && sel.key === now.key && sel.from !== sel.to ? sel : null;
         const source = part ? part.text : now.text;
@@ -611,8 +652,10 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       async saveCopy() {
         const key = parseKey(store.session.active);
         if (!key) return;
-        const name = key.kind === 'file' ? store.get(key.id)?.name : store.repoTab(key.path)?.name;
-        const text = key.kind === 'file' ? store.text(key.id) : store.repoTab(key.path)?.text;
+        // A locked note's copy stays locked: its locked text, as "<name>.locked".
+        const locked = key.kind === 'file' && store.isLocked(key.id);
+        const name = key.kind === 'file' ? (locked ? lockedName(store.get(key.id)?.name ?? 'file') : store.get(key.id)?.name) : store.repoTab(key.path)?.name;
+        const text = key.kind === 'file' ? (locked ? store.lockedText(key.id) : store.text(key.id)) : store.repoTab(key.path)?.text;
         if (window.desktop?.saveFile) {
           const saved = await window.desktop.saveFile(name, text);
           if (saved) toast(`Saved a copy to ${saved}`);
@@ -625,6 +668,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       async suggestFiling() {
         const now = activeInfo();
         if (now?.kind !== 'file') return;
+        if (isPrivateKey(now.key)) return toast(notSentWhy(now.key));
         const { llm } = getSettings();
         if (!llm.enabled || !llm.chatModel) return toast('Turn on the model in Settings first.', { kind: 'error' });
         if (!now.text.trim()) return toast('Write something first: the model files a note by what it says.');
@@ -653,7 +697,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         if (!sel) return toast('Open a file first.'), null;
         const k = parseKey(sel.key);
         const file = k.kind === 'file' ? store.get(k.id) : null;
-        if (file?.encrypted) return toast(ENCRYPTED_NOT_SENT), null;
+        if (isPrivateKey(sel.key)) return toast(notSentWhy(sel.key)), null;
         const name = file?.name ?? (k.kind === 'disk' ? store.diskTab(k.path) : store.repoTab(k.path))?.name ?? '';
         const language = findLanguage(name, file?.language)?.name ?? '';
         const whole = sel.from === sel.to;
@@ -666,7 +710,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         const k = parseKey(store.session.active ?? '');
         if (!k) return null;
         const file = k.kind === 'file' ? store.get(k.id) : null;
-        if (file?.encrypted) return null;
+        if (isPrivateKey(store.session.active)) return null;
         const name = file?.name ?? (k.kind === 'disk' ? store.diskTab(k.path) : store.repoTab(k.path))?.name ?? '';
         return name ? { name, language: findLanguage(name, file?.language)?.name ?? '' } : null;
       },
@@ -746,6 +790,8 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       },
       async saveDisk(path, { force = false } = {}) {
         hostRef.current?.flushAll();
+        // A locked file: what was typed is sealed first (the file gets only its locked text).
+        await locks.settled(diskKey(path));
         try {
           const result = await saveDiskTab(path, { force });
           // A test file: its tests' marks follow what was saved.
@@ -777,6 +823,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       followDisk(path, on) {
         const tab = store.diskTab(path);
         if (!tab) return;
+        if (on && lockedDisk(path)) return toast('A file locked with a password is not followed.');
         if (on && tab.dirty) return toast('Save or reload the file first: following shows the file as it is on disk.');
         store.diskPatch(path, { follow: on });
         hostRef.current?.setReadOnly(diskKey(path), on || tab.truncated || tab.readOnly);
@@ -787,6 +834,13 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         hostRef.current?.flushAll();
         const tab = store.diskTab(path);
         if (!tab) return;
+        // A locked file is not shown side by side: keep yours (save over it) or take the one on disk.
+        if (lockedDisk(path)) {
+          return toast(`${tab.name} changed on disk while you edited it here. It is locked, so the two are not compared: reload it, or keep yours and save over it.`, {
+            timeout: 12000,
+            action: { label: 'Keep mine and save', run: () => actions.saveDisk(path, { force: true }) },
+          });
+        }
         let onDisk;
         try {
           onDisk = (await window.desktop.disk.read(path)).text;
@@ -1012,6 +1066,8 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         for (const tab of store.diskTabs()) {
           const to = moves.map((m) => remapPath(tab.path, m.from, m.to)).find(Boolean);
           if (!to || !store.renameDiskTab(tab.path, to)) continue;
+          // A locked file open here stays open: its key goes with its tab (and what was typed, to where it is now).
+          locks.rename(diskKey(tab.path), diskKey(to));
           // The tab's editor state is made again under its new path (its unsaved text is kept).
           hostRef.current?.drop(diskKey(tab.path));
           unwatchDisk(tab.path);
@@ -1125,10 +1181,13 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         const k = parseKey(key);
         if (k?.kind === 'file') {
           const f = store.get(k.id);
+          // A locked note: its locked text, under the name a locked file has on disk.
+          if (f && store.isLocked(k.id)) return { name: lockedName(f.name), text: store.lockedText(k.id), locked: true };
           return f && !store.isSealed(k.id) ? { name: f.name, text: store.text(k.id), encrypted: f.encrypted } : null;
         }
         if (k?.kind === 'disk') {
           const d = store.diskTab(k.path);
+          if (d && lockedDisk(k.path)) return { name: d.name, text: d.text, path: d.missing || isRemotePath(d.path) || isContentPath(d.path) ? '' : d.path, dirty: d.dirty, locked: true };
           // A file on a server, or from another Android app, goes as a copy (its address is no path others can use).
           return d && { name: d.name, text: d.text, path: d.missing || isRemotePath(d.path) || isContentPath(d.path) ? '' : d.path, dirty: d.dirty };
         }
@@ -1154,6 +1213,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       async copyForClaude(key) {
         const c = actions.tabContent(key);
         if (!c) return;
+        if (c.locked) return toast('A file locked with a password is not copied for Claude: its text and name stay here.');
         try {
           await navigator.clipboard.writeText(claudeText(c));
           toast(c.path ? 'The path is on the clipboard: paste it into Claude' : `${c.name} is on the clipboard, name and text: paste it into Claude`);
@@ -1213,7 +1273,8 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         if (mode === 'inbox') {
           hostRef.current?.flushAll();
           const inbox = findInbox(store.live());
-          if (inbox && !store.isSealed(inbox.id)) {
+          // Never into a locked Inbox: its text is not here to add to (a note of its own instead).
+          if (inbox && !store.isSealed(inbox.id) && !store.isLocked(inbox.id)) {
             const next = appendToInbox(store.text(inbox.id), text, when);
             store.setText(inbox.id, next, { urgent: true });
             hostRef.current?.replaceText(fileKey(inbox.id), next);
@@ -1223,7 +1284,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
             const id = store.create({ name: INBOX_NAME, text: appendToInbox('', text, when), open: false });
             return toast(`Added to a new ${INBOX_NAME}`, { action: { label: 'Open', run: () => actions.openFile(id) } });
           }
-          // An Inbox locked on this device: kept as a note of its own instead.
+          // An Inbox locked on this device, or with a password: kept as a note of its own instead.
         }
         const id = store.create({ text: `${text.replace(/\s+$/, '')}\n`, open: false });
         toast('Captured as a new note', { action: { label: 'Open', run: () => actions.openFile(id) } });
@@ -1303,6 +1364,8 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       setEncrypted(id, on) {
         const file = store.get(id);
         if (!file) return;
+        // A note locked with its own password is encrypted by it (the vault's passphrase has no part in it).
+        if (store.isLocked(id)) return toast(`“${file.name}” is locked with its own password: it is stored encrypted already.`);
         const { exists, unlocked } = vaultState();
         if (!unlocked) {
           toast(exists ? 'Unlock encryption with your passphrase first.' : 'Set a passphrase first: Settings, Encryption.', { action: { label: 'Settings', run: () => setView('settings') } });
@@ -1364,6 +1427,15 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         if (!now || now.key !== target.key) return;
         const text = loaded.text;
         const when = `${formatDateTime(version.date)}${version.who ? ` · ${version.who}` : ''}`;
+        // A file locked with a password: its versions are not shown side by side (a locked one stays
+        // locked; one from before it was locked is plain): it can come back as a file of its own.
+        if (now.locked || isLockedText(text)) {
+          const name = versionName(loaded.name || now.name, version.date);
+          return toast(`That version${isLockedText(text) ? ' is locked: it opens with the password it had then' : ' is from before the file was locked'}. Open it as a file of its own to see it.`, {
+            timeout: 10000,
+            action: { label: 'Open as a new file', run: () => actions.newFile({ name, text, project: now.project, tags: now.tags }) },
+          });
+        }
         // On a phone the panel covers the comparison.
         if (matchMedia('(max-width: 860px)').matches) setPanel(null);
         setCompare({
@@ -1391,6 +1463,8 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       /** Two files compared in a tab: sides { key } (a file) or { text, label, detail }. */
       compareFiles(left, right) {
         hostRef.current?.flushAll();
+        const locked = [left, right].find((side) => side?.key && isPrivateKey(side.key) && (locks.isLocked(side.key) || parseKey(side.key)?.kind === 'disk'));
+        if (locked) return toast(`${tabName(locked.key)} is locked with a password: it is not compared.`);
         store.openCompare({ mode: 'files', left, right });
         setView('editor');
       },
@@ -1441,6 +1515,8 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         // A text taken once (the clipboard, a browsed file), or history (a commit's file: read-only).
         if (side.text != null) return { text: side.text, readOnly: Boolean(side.readOnly), savable: false };
         const k = parseKey(side.key);
+        // A file locked with a password is never shown beside another one (its text would stay there when it locks again).
+        if (locks.isLocked(side.key) || (k?.kind === 'disk' && lockedDisk(k.path))) throw new Error(`${tabName(side.key)} is locked with a password: it is not compared.`);
         if (k?.kind === 'file') {
           const f = store.get(k.id);
           if (!f || f.deleted) throw new Error('That file is not in my files any more.');
@@ -1460,6 +1536,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
           if (tab && !tab.stale && !tab.doc) return { text: hostRef.current?.stateOf(side.key)?.doc.toString() ?? tab.text, readOnly: diskReadOnly(tab), savable: true, info: { open: true }, saveLabel: isRemotePath(k.path) ? 'to the server' : 'to disk' };
           const info = await window.desktop.disk.read(k.path);
           if (info.doc) throw new Error(`${k.path.split(/[\\/]/).pop()} is a document (shown as it looks), not text to compare.`);
+          if (isLockedText(info.text)) throw new Error(`${k.path.split(/[\\/]/).pop()} is locked with a password: it is not compared.`);
           return { text: info.text, readOnly: Boolean(info.truncated), savable: !info.truncated, info, saveLabel: isRemotePath(k.path) ? 'to the server' : 'to disk' };
         }
         throw new Error('That file cannot be read here.');
@@ -1635,6 +1712,9 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       },
       share() {
         hostRef.current?.flushAll();
+        // A file locked with a password is not handed to other apps (copy the part you mean to share).
+        const k = parseKey(store.session.active ?? '');
+        if (k && (locks.isLocked(store.session.active) || (k.kind === 'disk' && lockedDisk(k.path)))) return toast('A file locked with a password is not shared: copy the part you want to share instead.');
         setDialog({ type: 'share' });
       },
       // Opens the local model panel and summarizes the active file.
@@ -1738,14 +1818,13 @@ export function App() {
   /**
    * Suggestions as you type (inlineSuggest.js asks): the model's /completions with the text
    * after the cursor (fill in the middle), or, for servers and models without it, a chat.
-   * Never for encrypted files.
+   * Never for encrypted files, nor files locked with a password.
    */
   actions.suggestText = async ({ prefix, suffix, language, name, signal, key }) => {
     const s = getSettings();
     const model = s.llm.completeModel || s.llm.chatModel;
     if (!s.inlineSuggest || !s.llm.enabled || s.llm.provider === 'async' || !model) return '';
-    const k = parseKey(key);
-    if (k?.kind === 'file' && store.get(k.id)?.encrypted) return '';
+    if (isPrivateKey(key)) return '';
     const client = llmClient(s);
     const where = `${s.llm.baseUrl}|${model}`;
     if (fillsMiddle.get(where) !== false) {
@@ -1763,13 +1842,13 @@ export function App() {
   /**
    * Next-edit suggestions (nextEditView.js asks): the edits just made, the cursor and the file go to
    * the suggestions model (else the chat model); its answer, or '' when not asked. Never for
-   * encrypted files or services that answer later.
+   * encrypted or locked files, nor services that answer later.
    */
   actions.nextEdits = async ({ key, signal, ...request }) => {
     const s = getSettings();
     const model = s.llm.completeModel || s.llm.chatModel;
     const k = parseKey(key);
-    if (!s.nextEdits || !s.llm.enabled || s.llm.provider === 'async' || !model || !k || (k.kind === 'file' && store.get(k.id)?.encrypted)) return '';
+    if (!s.nextEdits || !s.llm.enabled || s.llm.provider === 'async' || !model || !k || isPrivateKey(key)) return '';
     return llmClient(s).chat({ model, messages: nextEditMessages(request), purpose: 'complete', signal, temperature: 0 });
   };
   /**
@@ -1784,7 +1863,7 @@ export function App() {
     const k = key ? parseKey(key) : null;
     const lsp = s.languageServers !== false ? lspRef.current : null;
     const state = key ? hostRef.current?.stateOf(key) : null;
-    if (s.symbolContext === false || !k || !state || !lsp?.has(key) || (k.kind === 'file' && store.get(k.id)?.encrypted)) return null;
+    if (s.symbolContext === false || !k || !state || !lsp?.has(key) || isPrivateKey(key)) return null;
     const file = k.kind === 'file' ? store.get(k.id) : null;
     const name = context.name ?? file?.name ?? (k.kind === 'disk' ? store.diskTab(k.path) : store.repoTab(k.path))?.name ?? '';
     const selected = context.whole === false && context.to > context.from;
@@ -1821,6 +1900,11 @@ export function App() {
   }, []);
   useEffect(() => onSettings(setSettings), []);
   useEffect(() => onVault(rerender), []);
+  // Files locked with a password: a tab opened or locked again shows so.
+  useEffect(() => {
+    window.addEventListener('locked:change', rerender);
+    return () => window.removeEventListener('locked:change', rerender);
+  }, []);
   // Reading aloud highlights the passage in the editor; problems become a message.
   useEffect(() => {
     setReaderHighlighter((key, range) => hostRef.current?.highlightReading(key, range));
@@ -2006,6 +2090,10 @@ export function App() {
       },
       onChange(key, text, { urgent } = {}) {
         const k = parseKey(key);
+        // A file locked with a password: sealed before it reaches the store (lockedTabs.js); one
+        // not open here never takes a plain text (its lock is not undone by an editor's leftovers).
+        if (locks.isOpen(key)) return void locks.write(key, text);
+        if (locks.isLocked(key)) return;
         if (k?.kind === 'repo') return store.setRepoText(k.path, text, { urgent });
         if (k?.kind === 'disk') return store.setDiskText(k.path, text, { urgent });
         const file = store.get(k.id);
@@ -2040,6 +2128,8 @@ export function App() {
         return true;
       },
     });
+    // Texts from elsewhere (synced, reloaded) reach a locked tab through its key (lockedTabs.js).
+    editorHost = locks.guard(hostRef.current);
     // A conflict bar's Compare, merge view and model's merge (conflictView.js).
     hostRef.current.setConflictHandler(({ key, action, index }) => (action === 'compare' ? actions.compareConflict(key, index) : action === 'merge-view' ? actions.openMergeView(key, index) : actions.mergeConflictWithModel(key, index)));
     lspRef.current = createLanguageServers({
@@ -2168,15 +2258,24 @@ export function App() {
   // A comparison in its tab (two files or two folders) takes the editor's place.
   const activeCompare = active?.kind === 'compare' ? store.compare(active.id) : null;
   const activeName = activeFile?.name ?? activeRepo?.name ?? activeDisk?.name ?? '';
-  // The text of the open tab, whatever its kind.
-  const activeText = () => (activeFile ? store.text(activeFile.id) : (activeRepo ?? activeDisk)?.text ?? '');
-  const languageName = activeKey && !activeCompare ? (findLanguage(activeName, activeFile?.language)?.name ?? PLAIN_TEXT) : '';
-  const previewType = activeKey ? previewKind(activeName, languageName) : '';
+  // A file locked with a password (locked.js): open here (its text in memory) or not (its lock
+  // screen shows in the editor's place, as for an encrypted file not unlocked).
+  const activeLocked = Boolean(activeKey && !activeCompare && locks.isLocked(activeKey));
+  const lockOpen = activeLocked && locks.isOpen(activeKey);
+  const lockShown = activeLocked && !lockOpen && view === 'editor' && !compare;
+  // The name its text has inside ("notes.md.locked" → "notes.md"), for its language and preview.
+  const shownName = activeLocked ? shownNameOf(activeName, locks.headerOf(activeKey)) : activeName;
+  // The text of the open tab, whatever its kind (a locked one's while it is open here, else nothing).
+  const activeText = () => (activeLocked ? (locks.plainOf(activeKey) ?? '') : activeFile ? store.text(activeFile.id) : ((activeRepo ?? activeDisk)?.text ?? ''));
+  const languageName = activeKey && !activeCompare ? (findLanguage(shownName, activeFile?.language || (activeLocked ? locks.headerOf(activeKey)?.language : ''))?.name ?? PLAIN_TEXT) : '';
+  const previewType = activeKey ? previewKind(shownName, languageName) : '';
   // An encrypted file this device cannot read yet shows a lock instead of the editor.
   const activeSealed = Boolean(activeFile && store.isSealed(activeFile.id));
   // Its text and its name never go to the model: no bubble, and the panel offers help with the editor only.
-  const activeEncrypted = Boolean(activeFile?.encrypted);
-  const showPreview = Boolean(previewType) && preview.has(activeKey) && !compare && !activeSealed;
+  const activeEncrypted = Boolean(activeFile?.encrypted) || isPrivateKey(activeKey);
+  // What hides the editor's text: an encrypted file not unlocked, a locked one not open.
+  const textGone = activeSealed || lockShown;
+  const showPreview = Boolean(previewType) && preview.has(activeKey) && !compare && !textGone;
   // A document (PDF, e-book, Word…) shows as it looks, in the editor's place, unless "As text".
   const docShown = Boolean(((activeDisk?.doc && !activeDisk.asText) || activeRepo?.doc) && view === 'editor' && !compare);
   // A comparison belongs to its tab.
@@ -2187,14 +2286,14 @@ export function App() {
   useLayoutEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    if (!activeKey || view !== 'editor' || (!activeFile && !activeRepo && !activeDisk) || activeSealed || docShown) {
+    if (!activeKey || view !== 'editor' || (!activeFile && !activeRepo && !activeDisk) || activeSealed || docShown || (activeLocked && !lockOpen)) {
       host.hide();
       return;
     }
     host.show(activeKey, {
       text: activeText(),
-      name: activeName,
-      language: activeFile?.language ?? '',
+      name: shownName,
+      language: activeFile?.language || (activeLocked ? (locks.headerOf(activeKey)?.language ?? '') : ''),
     });
     // A followed file, or the tail of a huge one, is read-only.
     if (activeDisk) host.setReadOnly(activeKey, diskReadOnly(activeDisk));
@@ -2202,7 +2301,7 @@ export function App() {
     // Code gets its language server (started when needed).
     attachLanguageServer(activeKey);
     if (!isNarrow()) host.focus();
-  }, [activeKey, view, Boolean(activeFile || activeRepo || activeDisk), activeSealed, docShown]);
+  }, [activeKey, view, Boolean(activeFile || activeRepo || activeDisk), activeSealed, docShown, activeLocked, lockOpen]);
 
   /**
    * The language server of a tab shown: a disk tab's on this computer, or on its SSH server
@@ -2215,6 +2314,8 @@ export function App() {
     const s = getSettings();
     if (!lsp || !key || s.languageServers === false || hostRef.current?.isBig(key)) return;
     const k = parseKey(key);
+    // A file locked with a password: never to a server (one it had is let go).
+    if (isPrivateKey(key) && k?.kind === 'disk') return lsp.detach(key);
     if (k?.kind === 'disk') {
       const disk = store.diskTab(k.path);
       if (!disk || disk.doc) return;
@@ -2225,8 +2326,8 @@ export function App() {
     if (s.languageServersNotes === false) return;
     if (k?.kind === 'file') {
       const f = store.get(k.id);
-      // Encrypted text never goes to a server (one it had is let go).
-      if (!f || f.encrypted || store.isSealed(f.id)) return lsp.detach(key);
+      // Encrypted or locked text never goes to a server (one it had is let go).
+      if (!f || isPrivateKey(key)) return lsp.detach(key);
       return lsp.attachNote(key, f.name);
     }
     if (k?.kind === 'repo') {
@@ -2725,6 +2826,8 @@ export function App() {
     return conn ? { kind: conn.protocol === 'sftp' ? 'ssh' : conn.protocol, name: conn.name } : null;
   };
   const lookUpGit = (key) => {
+    // A file locked with a password: no bar of changed lines, no blame (its text never goes to Git).
+    if (key?.startsWith('d:') && lockedDisk(key.slice(2))) return void (hostRef.current?.setGitBase(key, null), hostRef.current?.setBlame(key, null));
     if (!key?.startsWith('d:') || !gitWorksAt(key.slice(2)) || !window.desktop?.git || store.diskTab(key.slice(2))?.doc) return;
     window.desktop.git.head(key.slice(2)).then(
       (head) => {
@@ -2749,7 +2852,7 @@ export function App() {
   const lookUpBlame = (key) => {
     const bridge = window.desktop?.git;
     const host = hostRef.current;
-    if (!bridge?.blame || !host || !key?.startsWith('d:') || !gitWorksAt(key.slice(2))) return;
+    if (!bridge?.blame || !host || !key?.startsWith('d:') || !gitWorksAt(key.slice(2)) || lockedDisk(key.slice(2))) return;
     const tab = store.diskTab(key.slice(2));
     const state = host.stateOf(key);
     if (!tab || tab.doc || !state || host.isBig(key)) return;
@@ -3339,9 +3442,248 @@ export function App() {
     const k = parseKey(key);
     if (!k || k.kind === 'compare') return 'A comparison shows in the main pane only.';
     if (k.kind === 'file' && store.isSealed(k.id)) return 'Unlock the encrypted file first.';
+    if (locks.isLocked(key) || (k.kind === 'disk' && lockedDisk(k.path))) return 'A file locked with a password shows in the main pane only.';
     if ((k.kind === 'disk' && store.diskTab(k.path)?.doc && !store.diskTab(k.path)?.asText) || (k.kind === 'repo' && store.repoTab(k.path)?.doc)) return 'A document shows in the main pane only.';
     return null;
   };
+
+  // ---- Files locked with a password (locked.js, lockedTabs.js, ui/locked.js) ----
+  // A locked tab's key and text are in this page's memory only while it is open here; they go when
+  // it locks again: Lock now, Alt+Shift+L (all of them), its tab left when it asks each time it is
+  // come back to, `lockedIdleMinutes` without use, the app hidden (`lockedWhenHidden`), its tab closed.
+
+  /** Locks an open locked tab again: what was typed is sealed and written, then its key and text go. */
+  actions.lockNow = async (key = store.session.active, { quiet = false } = {}) => {
+    if (!locks.isOpen(key)) return quiet || toast(locks.isLocked(key) ? 'It is locked.' : 'This file has no password.');
+    await locks.lock(key);
+    // Nothing of its text stays on screen: its problems, the cursor's place, a comparison, menus, reading aloud.
+    setProblems((all) => (all[key] ? (({ [key]: _gone, ...rest }) => rest)(all) : all));
+    setCursor((c) => (c?.key === key ? null : c));
+    setCompare((c) => (c?.key === key ? null : c));
+    setTextMenu((m) => (m?.key === key ? null : m));
+    setLineMenu((m) => (m?.key === key ? null : m));
+    setGitMenu((m) => (m?.key === key ? null : m));
+    if (store.session.active === key) setUsagesOf(null);
+    if (getReaderState().key === key) stopReading();
+    if (!quiet) toast(`${tabName(key)} is locked.`);
+  };
+  actions.lockAllNow = async () => {
+    const keys = locks.openKeys();
+    for (const key of keys) await actions.lockNow(key, { quiet: true });
+    toast(keys.length ? `Locked ${keys.length === 1 ? tabName(keys[0]) : `${keys.length} files`}.` : 'No file locked with a password is open.');
+  };
+  /** The lock screen's password: the tab opens (or the error says why not). */
+  actions.unlockTab = async (key, password, { relock } = {}) => {
+    await locks.unlock(key, password);
+    if (relock !== undefined && relock !== Boolean(locks.headerOf(key)?.relock)) await actions.setRelock(key, relock, { quiet: true });
+  };
+  /** Whether the open locked tab asks for its password each time it is come back to (written in the file). */
+  actions.setRelock = async (key = store.session.active, on = !locks.headerOf(key)?.relock, { quiet = false } = {}) => {
+    if (!locks.isOpen(key)) return toast('Open it with its password first.');
+    const k = parseKey(key);
+    // A file on disk with nothing else unsaved is saved with its new setting.
+    const clean = k?.kind === 'disk' && !store.diskTab(k.path)?.dirty;
+    await locks.rewrite(key, { relock: Boolean(on) });
+    if (clean) await actions.saveDisk(k.path);
+    if (!quiet) toast(on ? 'It asks for its password each time you come back to its tab.' : 'It asks for its password when it opens, and again after a while without use.');
+  };
+  /** Where a file can be locked in place: a synced note, or a text file in a folder on this computer (the Android app's too). */
+  const lockableDisk = (path) => !isRemotePath(path) && !isContentPath(path) && Boolean(window.desktop?.folders);
+  /** "Lock with a password…" for a tab (its key), or a file on this computer (`{ path }`, from Folders). */
+  actions.lockFile = (target = store.session.active) => {
+    const k = typeof target === 'string' ? parseKey(target) : null;
+    const path = target?.path ?? (k?.kind === 'disk' ? k.path : null);
+    const key = k ? target : path ? diskKey(path) : null;
+    if (key && locks.isOpen(key)) return actions.lockNow(key);
+    if ((key && locks.isLocked(key)) || (path && lockedDisk(path))) return toast('It is locked with a password already.');
+    if (k?.kind === 'file') {
+      const f = store.get(k.id);
+      if (!f) return;
+      if (store.isSealed(k.id)) return toast('Unlock the encrypted file first.');
+      return setDialog({ type: 'lockFile', key, name: f.name, kind: 'note' });
+    }
+    if (!path) return toast('Notes in My files and files on this computer can be locked with a password.');
+    if (!lockableDisk(path)) return toast('Files on servers are not locked in place: make a new locked file there and paste the text into it.', { timeout: 9000 });
+    if (store.diskTab(path)?.doc) return toast('Documents (PDF, Word…) are not locked here.');
+    setDialog({ type: 'lockFile', key: diskKey(path), path, name: baseName(path), kind: 'disk' });
+  };
+  /** Locks a file that is plain now (the dialog's password): a note in place; a file on disk as "<name>.locked", the plain one to the bin. */
+  actions.lockExisting = async ({ key, path, password, relock }) => {
+    hostRef.current?.flushAll();
+    const k = parseKey(key);
+    if (k?.kind === 'file') {
+      const f = store.get(k.id);
+      if (!f) throw new Error('That file is not in my files any more.');
+      const plain = hostRef.current?.stateOf(key)?.doc.toString() ?? store.text(k.id);
+      const made = await lockText(plain, password, { name: f.name, language: f.language, relock });
+      // The lock replaces the vault's encryption (the text is encrypted already); the plain state,
+      // with its undo history, goes: the tab opens again on the locked text, with this password.
+      if (f.encrypted) store.patch(k.id, { encrypted: false });
+      hostRef.current?.drop(key, { save: false });
+      store.setText(k.id, made.text, { urgent: true });
+      locks.adopt(key, { key: made.key, header: made.header, plain, text: made.text });
+      setDialog(null);
+      return toast(`${f.name} is locked: it asks for its password every time it opens.`, { timeout: 8000, action: { label: 'Lock now', run: () => actions.lockNow(key) } });
+    }
+    const tab = store.diskTab(path);
+    let plain = tab && !tab.stale ? (hostRef.current?.stateOf(diskKey(path))?.doc.toString() ?? tab.text) : null;
+    if (plain == null) {
+      const info = await window.desktop.disk.read(path);
+      if (info.doc || info.truncated) throw new Error('Only text files are locked here.');
+      plain = info.text;
+    }
+    const name = baseName(path);
+    const made = await lockText(plain, password, { name, relock });
+    // The locked file beside it (never over one that is there), then the plain one goes to the bin.
+    const lockedPath = await window.desktop.folders.newFile(parentDir(path), lockedName(name), { text: made.text });
+    try {
+      await window.desktop.folders.trash([path]);
+    } catch (err) {
+      toast(`${name} is locked as ${baseName(lockedPath)}, but the plain file could not be moved to the bin: ${ipcMessage(err)}`, { kind: 'error', timeout: 12000 });
+    }
+    // Its tab closes (its edits are in the locked file); the locked one opens, with this password.
+    if (tab) {
+      hostRef.current?.drop(diskKey(path), { save: false });
+      actions.close(diskKey(path), { discard: true });
+    }
+    locks.adopt(diskKey(lockedPath), { key: made.key, header: made.header, plain, text: made.text });
+    await actions.openDiskPath(lockedPath);
+    setDialog(null);
+    toast(`${name} is locked as ${baseName(lockedPath)}${isAndroidApp() ? '; the plain file was deleted.' : `; the plain file is in ${binName()}.`}`, { timeout: 9000 });
+  };
+  /** New locked file: in a folder (`dir`), or in My files. */
+  actions.newLockedFile = (dir = null) => setDialog({ type: 'newLocked', dir: typeof dir === 'string' ? dir : null });
+  actions.createLocked = async ({ dir, name, password, relock }) => {
+    const inner = innerName(name.trim());
+    if (!inner) throw new Error('Give it a name.');
+    const made = await lockText('', password, { name: inner, language: dir ? '' : (findLanguage(inner)?.name ?? ''), relock });
+    if (dir) {
+      const path = await window.desktop.folders.newFile(dir, lockedName(inner), { text: made.text });
+      locks.adopt(diskKey(path), { key: made.key, header: made.header, plain: '', text: made.text });
+      await actions.openDiskPath(path);
+    } else {
+      const id = store.create({ name: safeName(inner), text: made.text });
+      locks.adopt(fileKey(id), { key: made.key, header: made.header, plain: '', text: made.text });
+      setView('editor');
+    }
+    setDialog(null);
+    toast('Locked: it asks for its password every time it opens.', { timeout: 6000 });
+  };
+  /** Change the password… of the open locked tab: the current password first. */
+  actions.changeLockPassword = (key = store.session.active) => {
+    if (!locks.isLocked(key)) return toast('This file has no password.');
+    if (!locks.isOpen(key)) return toast('Open it with its password first.');
+    setDialog({ type: 'lockPassword', key });
+  };
+  actions.rewriteLockPassword = async (key, { current, password }) => {
+    await locks.check(key, current);
+    const k = parseKey(key);
+    const clean = k?.kind === 'disk' && !store.diskTab(k.path)?.dirty;
+    await locks.rewrite(key, { password });
+    if (clean) await actions.saveDisk(k.path);
+    setDialog(null);
+    toast(`${tabName(key)} has its new password${k?.kind === 'disk' && !clean ? ' (save it to keep it)' : ''}.`);
+  };
+  /** Remove the lock… of the open locked tab: its password, then the text is stored plain. */
+  actions.removeLock = (key = store.session.active) => {
+    if (!locks.isLocked(key)) return toast('This file has no password.');
+    if (!locks.isOpen(key)) return toast('Open it with its password first.');
+    const k = parseKey(key);
+    if (k?.kind === 'disk' && !lockableDisk(k.path)) return toast('The lock of a file on a server is not taken off here: its plain text would be written there.');
+    setDialog({ type: 'lockRemove', key });
+  };
+  actions.takeLockOff = async (key, { password }) => {
+    await locks.check(key, password);
+    const k = parseKey(key);
+    if (k?.kind === 'file') {
+      const plain = await locks.release(key);
+      store.setText(k.id, plain, { urgent: true });
+      setDialog(null);
+      return toast(`${tabName(key)} is not locked any more: it is kept${isLocal() ? '' : ' and synced'} as plain text.`);
+    }
+    await locks.settled(key);
+    const locked = baseName(k.path);
+    const name = innerName(locked);
+    const plain = locks.plainOf(key) ?? '';
+    // The plain file beside it (never over one that is there), then the locked one goes to the bin.
+    const plainPath = await window.desktop.folders.newFile(parentDir(k.path), name === locked ? `${name}.txt` : name, { text: plain });
+    await locks.release(key);
+    hostRef.current?.drop(key, { save: false });
+    if (store.diskTab(k.path)) actions.close(key, { discard: true });
+    await window.desktop.folders.trash([k.path]).catch((err) => toast(`The locked file could not be moved to the bin: ${ipcMessage(err)}`, { kind: 'error' }));
+    await actions.openDiskPath(plainPath);
+    setDialog(null);
+    toast(`${baseName(plainPath)} is plain text again.`);
+  };
+  /** Whether a tab's file is locked with a password (open here or not). */
+  actions.isLockedTab = (key) => locks.isLocked(key) || (parseKey(key ?? '')?.kind === 'disk' && lockedDisk(parseKey(key).path));
+  /** The tab menu's and the file bar's items for a file that can have a password (none for others). */
+  actions.lockItems = (key) => {
+    const k = parseKey(key ?? '');
+    if (!k || k.kind === 'repo' || k.kind === 'compare') return [];
+    if (locks.isOpen(key)) {
+      const relock = Boolean(locks.headerOf(key)?.relock);
+      return [
+        { label: 'Lock now', icon: 'lock', run: () => actions.lockNow(key) },
+        { label: `Ask for the password each time I come back: ${relock ? 'on' : 'off'}`, icon: relock ? 'check' : 'clock', hint: relock ? 'Switching tabs locks it again' : 'It locks after a while without use', run: () => actions.setRelock(key, !relock) },
+        { label: 'Change the password…', icon: 'lock', run: () => actions.changeLockPassword(key) },
+        { label: 'Remove the lock…', icon: 'unlock', run: () => actions.removeLock(key) },
+      ];
+    }
+    if (locks.isLocked(key) || (k.kind === 'disk' && lockedDisk(k.path))) return [];
+    if (k.kind === 'file' && (store.isSealed(k.id) || !store.get(k.id))) return [];
+    if (k.kind === 'disk' && (!lockableDisk(k.path) || store.diskTab(k.path)?.doc)) return [];
+    return [{ label: 'Lock with a password…', icon: 'lock', run: () => actions.lockFile(key) }];
+  };
+
+  // When open locked tabs lock again: the tab (or pane) left, when it asks each time it is come back
+  // to; after a while without use; when the app is hidden; a tab not open any more.
+  const lockWas = useRef({ active: activeKey, cursor: null });
+  useEffect(() => {
+    const was = lockWas.current;
+    const now = { active: activeKey, cursor: cursor?.key ?? null };
+    lockWas.current = now;
+    const left = [];
+    if (was.active && was.active !== now.active) left.push(was.active);
+    // A pane beside it clicked or typed in: the main pane's tab was left too.
+    if (was.cursor && now.cursor && was.cursor !== now.cursor) left.push(was.cursor);
+    for (const l of left) for (const key of locks.due({ left: l })) actions.lockNow(key, { quiet: true });
+    locks.touch(activeKey);
+  }, [activeKey, cursor?.key]);
+  useEffect(() => {
+    const touch = () => locks.touch(store.session.active);
+    const tick = () => {
+      for (const key of locks.openKeys()) if (!store.session.open.includes(key)) actions.lockNow(key, { quiet: true });
+      for (const key of locks.due({ idleMinutes: idleMinutesOf(getSettings().lockedIdleMinutes) })) actions.lockNow(key, { quiet: true });
+    };
+    const hidden = () => {
+      if (document.visibilityState !== 'hidden' || getSettings().lockedWhenHidden === false) return;
+      for (const key of locks.due({ hidden: true })) actions.lockNow(key, { quiet: true });
+    };
+    const timer = setInterval(tick, 15000);
+    window.addEventListener('keydown', touch, true);
+    window.addEventListener('pointerdown', touch, true);
+    document.addEventListener('visibilitychange', hidden);
+    // Going away: what was typed into locked tabs is sealed and written first.
+    const flushLocked = () => locks.settled().catch(() => {});
+    window.addEventListener('editor:flush', flushLocked);
+    // Copied from an open locked file: the desktop's clipboard history does not keep it.
+    const copied = (e) => {
+      if (locks.isOpen(store.session.active) && e.target?.closest?.('.editor-host')) window.desktop?.clipboardHistory?.skipNext?.().catch(() => {});
+    };
+    document.addEventListener('copy', copied, true);
+    document.addEventListener('cut', copied, true);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('keydown', touch, true);
+      window.removeEventListener('pointerdown', touch, true);
+      document.removeEventListener('visibilitychange', hidden);
+      window.removeEventListener('editor:flush', flushLocked);
+      document.removeEventListener('copy', copied, true);
+      document.removeEventListener('cut', copied, true);
+    };
+  }, []);
+
   /**
    * Shows `key` in pane `target` (0: the main one; 1–3 beside it; 'new': one more, four at most).
    * A tab shown elsewhere swaps places with the target's.
@@ -3438,6 +3780,8 @@ export function App() {
     }
     const clip = host.clipText();
     if (!clip?.text) return;
+    // From an open locked file: the desktop's clipboard history does not keep it.
+    if (locks.isOpen(store.session.active)) await window.desktop?.clipboardHistory?.skipNext?.().catch(() => {});
     try {
       await navigator.clipboard.writeText(clip.text);
     } catch {
@@ -3472,7 +3816,7 @@ export function App() {
     const k = parseKey(key ?? '');
     if (!k || k.kind === 'compare') return null;
     const file = k.kind === 'file' ? store.get(k.id) : null;
-    if (file?.encrypted) return null;
+    if (isPrivateKey(key)) return null;
     const name = file?.name ?? (k.kind === 'disk' ? (store.diskTab(k.path)?.name ?? baseName(k.path)) : (store.repoTab(k.path)?.name ?? baseName(k.path)));
     const group = chatGroupOf({ key });
     const folder = k.kind === 'disk' ? (group?.folder && isWithin(k.path, group.folder) ? group.folder : parentDir(k.path)) : null;
@@ -3540,13 +3884,17 @@ export function App() {
     setView('editor');
     setFilesAssist({ target, start: question ? { question } : resume ? { resume } : null, id: Date.now() });
   };
-  actions.filesWork = (target) => createFilesWork({ ...target, host: () => hostRef.current, actions });
+  // Never in a file locked with a password (its folder's other files are fine: open the folder instead).
+  actions.filesWork = (target) =>
+    target?.key && isPrivateKey(target.key) && parseKey(target.key)?.kind === 'disk' && (locks.isLocked(target.key) || lockedDisk(parseKey(target.key).path))
+      ? { unavailable: 'The model never reads or changes files locked with a password: open their folder in Folders to work on the others.' }
+      : createFilesWork({ ...target, host: () => hostRef.current, actions });
   /** A tab's whole text as the model panel's context (the file it is about); null for an encrypted file, which never goes to the model. */
   const wholeFile = (key) => {
     hostRef.current?.flushAll();
     const k = parseKey(key);
     const file = k?.kind === 'file' ? store.get(k.id) : null;
-    if (file?.encrypted) return toast(ENCRYPTED_NOT_SENT), null;
+    if (isPrivateKey(key)) return toast(notSentWhy(key)), null;
     const tab = k?.kind === 'disk' ? store.diskTab(k.path) : k?.kind === 'repo' ? store.repoTab(k.path) : null;
     const text = file ? store.text(file.id) : (tab?.text ?? '');
     const name = file?.name ?? tab?.name ?? '';
@@ -3602,7 +3950,7 @@ export function App() {
   actions.openInClaude = async ({ action, context, prompt: ready = '' }) => {
     const k = parseKey(context?.key ?? '');
     const file = k?.kind === 'file' ? store.get(k.id) : null;
-    if (file?.encrypted) return toast('Encrypted files are not sent anywhere: copy the part you want to ask about instead.');
+    if (isPrivateKey(context?.key)) return toast(`${locks.isLocked(context.key) || lockedDisk(k?.path ?? '') ? 'Files locked with a password' : 'Encrypted files'} are not sent anywhere: copy the part you want to ask about instead.`);
     const prompt = ready || claudeAppPrompt({ action, context, editorFile: file?.name ?? '' });
     await navigator.clipboard.writeText(prompt).catch(() => {});
     window.open(claudeAppUrl(prompt), '_blank', 'noopener');
@@ -3622,7 +3970,7 @@ export function App() {
     // Into the open tab when it can be edited, else a new note.
     const k = parseKey(store.session.active);
     const disk = k?.kind === 'disk' ? store.diskTab(k.path) : null;
-    const editable = k && view === 'editor' && !(k.kind === 'file' && store.isSealed(k.id)) && !diskReadOnly(disk);
+    const editable = k && view === 'editor' && !(k.kind === 'file' && store.isSealed(k.id)) && !locks.isClosed(store.session.active) && !diskReadOnly(disk);
     setDictating(editable ? store.session.active : fileKey(actions.newFile({ focus: false })));
   };
   actions.voiceNote = () => setDictating(fileKey(actions.newFile({ focus: false })));
@@ -3676,7 +4024,9 @@ export function App() {
     setAskRun({ id, question, phase: 'planning', notes: [] });
     setPanel('ask');
     hostRef.current?.flushAll();
-    const files = store.live();
+    // A note locked with a password counts as encrypted here: found by name only, its text never
+    // read, its name never sent to the model.
+    const files = store.live().map((f) => (store.isLocked(f.id) && !f.encrypted ? { ...f, encrypted: true } : f));
     const docs = store.docs();
     const items = store.trackerItems().filter((i) => !i.deleted);
     const roots = folderRoots(s);
@@ -3792,9 +4142,10 @@ export function App() {
     const sources = [];
     for (const r of list) {
       let text = '';
-      if (r.id.startsWith('f:')) text = store.get(r.id.slice(2))?.encrypted ? '' : store.text(r.id.slice(2));
+      if (r.id.startsWith('f:')) text = isPrivateKey(r.id) ? '' : store.text(r.id.slice(2));
       else if (r.id.startsWith('r:')) text = store.docText(r.id.slice(2)) ?? '';
-      else if (r.id.startsWith('d:')) text = (await window.desktop?.disk?.read(r.id.slice(2)).catch(() => null))?.text ?? '';
+      else if (r.id.startsWith('d:')) text = isPrivateKey(r.id) ? '' : (await window.desktop?.disk?.read(r.id.slice(2)).catch(() => null))?.text ?? '';
+      if (isLockedText(text)) text = '';
       else if (r.kind === 'item') text = itemSources(store.trackerItems().filter((i) => i.id === r.itemId))[0]?.text ?? '';
       if (text) sources.push({ id: r.id, name: r.name, project: r.project ?? '', text: text.slice(0, 200_000) });
     }
@@ -4013,6 +4364,7 @@ export function App() {
     if (!terminalsAvailable()) return toast('Running files works in the desktop app.', { kind: 'error' });
     const k = parseKey(typeof key === 'string' ? key : store.session.active);
     if (k?.kind !== 'disk') return toast('Run works on files in a folder, on this computer or on a server: open one from Folders (or save this one there).');
+    if (lockedDisk(k.path)) return toast('A file locked with a password is not run: what is on disk is its ciphertext.');
     const remote = isRemotePath(k.path);
     const conn = remote ? server(remoteParts(k.path).id) : null;
     if (remote && !hasShell(conn)) return toast(`${conn?.name ?? 'That server'} has no terminal: running files needs SSH (SFTP).`, { kind: 'error' });
@@ -4090,13 +4442,14 @@ export function App() {
   actions.previewRun = (key) => {
     if (isAndroidApp()) return null;
     const k = parseKey(key);
-    const encrypted = k?.kind === 'file' && (store.get(k.id)?.encrypted || store.isSealed(k.id));
+    // An encrypted or locked file's text never goes to the preview server (the main process).
+    const encrypted = isPrivateKey(key);
     const serve = !window.desktop?.preview || encrypted ? null : k?.kind === 'disk' && !isRemotePath(k.path) ? { path: k.path } : { key };
     const chosen = getSettings().previewScripts ?? [];
     return {
       on: Boolean(serve) && chosen.includes(key),
       serve,
-      why: window.desktop?.preview ? 'An encrypted file does not run its scripts here.' : 'Scripts run in the desktop app, which serves the page from your computer. Here they stay off.',
+      why: window.desktop?.preview ? `${locks.isLocked(key) ? 'A file locked with a password' : 'An encrypted file'} does not run its scripts here.` : 'Scripts run in the desktop app, which serves the page from your computer. Here they stay off.',
       // Remembered per file (the last 300).
       toggle: () => saveSettings({ previewScripts: chosen.includes(key) ? chosen.filter((x) => x !== key) : [...chosen, key].slice(-300) }),
     };
@@ -4118,7 +4471,7 @@ export function App() {
   const testContext = async (key, { fresh = false } = {}) => {
     const k = parseKey(key);
     const bridge = testsBridge();
-    if (!bridge || k?.kind !== 'disk' || isContentPath(k.path) || store.diskTab(k.path)?.doc) return null;
+    if (!bridge || k?.kind !== 'disk' || isContentPath(k.path) || store.diskTab(k.path)?.doc || lockedDisk(k.path)) return null;
     const name = k.path.split(/[\\/]/).pop();
     if (!testLanguage(name)) return null;
     const text = hostRef.current?.stateOf(key)?.doc.toString() ?? store.diskTab(k.path)?.text ?? '';
@@ -4443,6 +4796,7 @@ export function App() {
     key = key ?? store.session.active;
     const k = parseKey(key);
     if (k?.kind !== 'disk' || isRemotePath(k.path) || isContentPath(k.path)) return toast('Debugging works for files on this computer: open a Python, JavaScript or TypeScript file from Folders.');
+    if (lockedDisk(k.path)) return toast('A file locked with a password is not debugged.');
     if (!debugAdapterFor(k.path)) return toast(`${baseName(k.path)} cannot be debugged: Python, JavaScript and TypeScript files can (.py, .js, .mjs, .cjs, .ts, .mts, .cts).`);
     hostRef.current?.flushAll();
     if (store.diskTab(k.path)?.dirty && (await actions.saveDisk(k.path)) !== 'saved') return;
@@ -4483,7 +4837,8 @@ export function App() {
   const runInfo = (key = store.session.active) => {
     const k = parseKey(key);
     const disk = k?.kind === 'disk' ? store.diskTab(k.path) : null;
-    if (!isDesktopApp() || !disk || disk.doc || isContentPath(k.path) || !terminalsAvailable()) return null;
+    // A file locked with a password is neither run nor tested (what is on disk is its ciphertext).
+    if (!isDesktopApp() || !disk || disk.doc || isContentPath(k.path) || !terminalsAvailable() || lockedDisk(k.path)) return null;
     const remote = isRemotePath(k.path);
     if (remote && !hasShell(server(remoteParts(k.path).id))) return null;
     const name = baseName(k.path);
@@ -4564,8 +4919,10 @@ export function App() {
       runs: Boolean(run?.runs),
       debugs: Boolean(run?.debugs),
       tests: Boolean(run?.tests),
+      // Encrypted and locked files: no Ask the model (the panel would offer help with the editor only).
+      model: !isPrivateKey(key),
       // The model changes files in a tab's folder, or a note's project (not tracker documents, never encrypted notes).
-      files: askReady() && ((k?.kind === 'disk' && !isContentPath(k.path) && !store.diskTab(k.path)?.doc) || Boolean(file && !file.encrypted)),
+      files: askReady() && !isPrivateKey(key) && ((k?.kind === 'disk' && !isContentPath(k.path) && !store.diskTab(k.path)?.doc) || Boolean(file && !file.encrypted)),
     });
     const RUN = {
       definition: () => actions.goToDefinition(),
@@ -4912,8 +5269,8 @@ export function App() {
     const nameIt = async (id) => {
       const file = store.get(id);
       const settings = getSettings();
-      // An encrypted file's text never goes to the model (a heading names it below only without one).
-      if (!file || done.has(id) || file.encrypted) return;
+      // An encrypted or locked file's text never goes to the model (a heading names it below only without one).
+      if (!file || done.has(id) || isPrivateKey(fileKey(id))) return;
       const model = settings.llm.enabled && settings.llm.chatModel;
       const wantName = settings.autoName && isUntitled(file.name);
       const wantFiling = Boolean(model && settings.autoFile && created.has(id) && !file.project && !file.tags.length);
@@ -5137,6 +5494,12 @@ export function App() {
       new: () => actions.newFile(),
       'open-disk': () => actions.openFromDisk(),
       'save-copy': () => actions.saveCopy(),
+      'locked-new': () => actions.newLockedFile(),
+      'locked-lock': () => actions.lockFile(),
+      'locked-lock-all': () => actions.lockAllNow(),
+      'locked-relock': () => actions.setRelock(),
+      'locked-password': () => actions.changeLockPassword(),
+      'locked-remove': () => actions.removeLock(),
       'close-tab': () => store.session.active && actions.close(store.session.active),
       'reopen-tab': () => actions.reopenClosed(),
       'next-tab': () => actions.cycleTab(1),
@@ -5478,19 +5841,19 @@ export function App() {
       ${view === 'settings' && html`<${SettingsView} settings=${settings} sync=${sync} actions=${actions} />`}
       <div class="editor-view" hidden=${view === 'settings'}>
         <${TabBar} session=${store.session} projects=${projects} settings=${settings} actions=${actions} />
-        ${activeKey && !activeCompare && html`<${FileBar} file=${activeFile} repo=${activeRepo} disk=${activeDisk} sealed=${activeSealed} projects=${projects} language=${languageName} sync=${sync}
+        ${activeKey && !activeCompare && html`<${FileBar} file=${activeFile} repo=${activeRepo} disk=${activeDisk} sealed=${activeSealed} locked=${activeLocked ? { open: lockOpen } : null} projects=${projects} language=${languageName} sync=${sync}
           canPreview=${Boolean(previewType)} preview=${showPreview} settings=${settings} run=${runInfo()} actions=${actions} />`}
-        ${activeKey && filterKeys.has(activeKey) && !compare && !activeSealed &&
+        ${activeKey && filterKeys.has(activeKey) && !compare && !textGone &&
         html`<${FilterBar} key=${activeKey} tabKey=${activeKey} actions=${actions} onClose=${actions.toggleFilter} />`}
         ${dictating && dictating === activeKey && html`<${DictationBar} lang=${settings.dictationLang} onPhrase=${actions.dictate} onStop=${actions.stopDictation} />`}
         ${typingJob && html`<${TypeOutPanel} job=${typingJob} onStop=${() => window.desktop?.typing?.stop()} />`}
         <div class="editor-area ${showPreview ? 'split' : ''} ${showPreview && previewFull ? 'preview-full' : ''} ${shownPanes.length ? 'panes-split' : ''} ${compare ? 'comparing' : ''} ${settings.whereFrame && activeKey ? 'framed' : ''}"
           data-kind=${kindOfKey(activeKey) ?? undefined} ref=${areaEl} style=${{ '--split': `${((settings.splitRatio || 0.5) * 100).toFixed(2)}%` }} onDragOver=${overArea}>
           <div class="editor-host ${paneDrop === 0 ? 'drop-here' : ''}" ref=${editorEl} style=${shownPanes.length ? { flex: `${paneShares[0]} 1 0px` } : undefined} ...${shownPanes.length || tabOver ? paneDropProps(0) : {}} />
-          ${assist && !gitAssist && !filesAssist && ((activeKey && !activeCompare) || assistStart) && view === 'editor' && !compare && !activeSealed && html`<${AssistPanel} key=${`${activeKey}:${assistStart?.id ?? 0}`} scope=${assistScope} start=${assistStart} hasFile=${Boolean(activeKey) && !activeEncrypted} chatKey=${activeKey && !activeEncrypted && !activeCompare ? activeKey : null} actions=${actions} onClose=${() => (setAssist(false), setAssistStart(null), hostRef.current?.focus())} />`}
+          ${assist && !gitAssist && !filesAssist && ((activeKey && !activeCompare) || assistStart) && view === 'editor' && !compare && !textGone && html`<${AssistPanel} key=${`${activeKey}:${assistStart?.id ?? 0}`} scope=${assistScope} start=${assistStart} hasFile=${Boolean(activeKey) && !activeEncrypted} chatKey=${activeKey && !activeEncrypted && !activeCompare ? activeKey : null} actions=${actions} onClose=${() => (setAssist(false), setAssistStart(null), hostRef.current?.focus())} />`}
           ${gitAssist && view === 'editor' && html`<${GitAssist} key=${gitAssist.id} dir=${gitAssist.dir} start=${gitAssist.start} actions=${actions} onClose=${() => (setGitAssist(null), hostRef.current?.focus())} />`}
           ${filesAssist && !gitAssist && view === 'editor' && html`<${FilesAssist} key=${filesAssist.id} target=${filesAssist.target} start=${filesAssist.start} actions=${actions} onClose=${() => (setFilesAssist(null), hostRef.current?.focus())} />`}
-          ${!assist && !gitAssist && !filesAssist && modelReady && settings.assistBubble && activeKey && !activeCompare && !compare && !activeSealed && !activeEncrypted && !docShown && !typingJob && html`<${AssistBubble} onOpen=${() => setAssist(true)} />`}
+          ${!assist && !gitAssist && !filesAssist && modelReady && settings.assistBubble && activeKey && !activeCompare && !compare && !textGone && !activeEncrypted && !docShown && !typingJob && html`<${AssistBubble} onOpen=${() => setAssist(true)} />`}
           ${shownPanes.flatMap((p, i) => [paneHandle(i), paneView(p, i)])}
           ${tabOver && panesOn && store.session.panes.length < MAX_EXTRA &&
           html`<div class="pane-drop-new ${paneDrop === 'new' ? 'on' : ''}" ...${paneDropProps('new')}><${Icon} name="columns" size=${16} /><span>New pane</span></div>`}
@@ -5501,6 +5864,8 @@ export function App() {
             full=${previewFull} onFull=${isNarrow() ? undefined : () => setPreviewFull(!previewFull)} onClose=${actions.togglePreview}
             readKey=${`preview:${activeKey}`} textHidden=${previewFull || isNarrow()} onReader=${(r) => (previewReader = r)}
             onToggle=${(next) => {
+              // A locked file's text goes through its editor (sealed before it is stored).
+              if (activeLocked) return void hostRef.current?.setTextAsEdit(activeKey, next);
               if (activeFile) store.setText(activeFile.id, next);
               else if (activeDisk) store.setDiskText(activeDisk.path, next, { urgent: true });
               else store.setRepoText(activeRepo.path, next);
@@ -5511,6 +5876,9 @@ export function App() {
               setTimeout(() => hostRef.current?.reveal(line, column, 1), 60);
             }} />`}
           ${activeSealed && html`<${LockedFile} file=${activeFile} actions=${actions} />`}
+          ${lockShown &&
+          html`<${LockScreen} key=${activeKey} name=${activeFile ? activeName : innerName(activeName)} where=${placeOfKey(activeKey)} relock=${Boolean(locks.headerOf(activeKey)?.relock)}
+            onUnlock=${(password, opts) => actions.unlockTab(activeKey, password, opts)} onClose=${() => actions.close(activeKey)} />`}
           ${activeCompare && view === 'editor' && html`<${CompareTab} key=${activeKey} id=${active.id} record=${activeCompare} settings=${settings} actions=${actions} />`}
           ${docShown &&
           activeRepo?.doc &&
@@ -5525,9 +5893,9 @@ export function App() {
         </div>
         ${terminalShown && html`<${TerminalPanel} settings=${settings} actions=${actions} onHide=${() => (setTerminalShown(false), hostRef.current?.focus())} />`}
         <${ReadAloudBar} />
-        ${editing && activeKey && !activeSealed && !compare && !activeCompare && hostRef.current
+        ${editing && activeKey && !textGone && !compare && !activeCompare && hostRef.current
           ? html`<${EditBar} host=${hostRef.current} actions=${actions} save=${activeDisk ? 'Save' : isLocal(settings) ? null : 'Sync'} />`
-          : html`<${StatusBar} recording=${recording} big=${big && Boolean(activeKey) && !docShown} cursor=${activeKey && !docShown && !activeCompare ? cursor : null} language=${languageName} file=${activeFile} repo=${activeRepo} disk=${activeDisk} settings=${settings} sync=${sync} actions=${actions} group=${activeGroup} terminals=${terminalsAvailable() ? { count: terminalCount, shown: terminalShown } : null}
+          : html`<${StatusBar} recording=${recording} big=${big && Boolean(activeKey) && !docShown} cursor=${activeKey && !docShown && !activeCompare && !lockShown ? cursor : null} language=${languageName} file=${activeFile} repo=${activeRepo} disk=${activeDisk} settings=${settings} sync=${sync} actions=${actions} group=${activeGroup} terminals=${terminalsAvailable() ? { count: terminalCount, shown: terminalShown } : null}
           problems=${settings.problems !== false && activeKey ? problems[activeKey] : null} problemsOpen=${panel === 'problems'}
           lsp=${activeKey && settings.languageServers !== false ? lspRef.current?.statusOf(activeKey) : null} lspOpen=${panel === 'servers'}
           git=${activeKey && gitHeads[activeKey] ? { ...gitHeads[activeKey], changes: hostRef.current?.gitChanges(activeKey)?.changes ?? null } : null}
@@ -5540,15 +5908,15 @@ export function App() {
     ${panel === 'folderSearch' && folderSearchDir && window.desktop?.folders && html`<${FolderSearchPanel} key=${folderSearchDir} dir=${folderSearchDir} actions=${actions} onClose=${() => setPanel(null)} />`}
     ${panel === 'servers' && lspRef.current && html`<${LanguageServersPanel} lsp=${lspRef.current} tick=${lspTick} actions=${actions} onClose=${() => setPanel(null)} />`}
     ${panel === 'references' && refs && html`<${ReferencesPanel} refs=${refs} actions=${actions} onClose=${() => setPanel(null)} />`}
-    ${panel === 'usages' && usagesOf && activeKey && !activeSealed && html`<${UsagesPanel} word=${usagesOf.word} name=${activeName} fileKey=${activeKey} text=${activeText()} actions=${actions} onClose=${() => setPanel(null)} />`}
+    ${panel === 'usages' && usagesOf && activeKey && !textGone && html`<${UsagesPanel} word=${usagesOf.word} name=${activeName} fileKey=${activeKey} text=${activeText()} actions=${actions} onClose=${() => setPanel(null)} />`}
     ${panel === 'tests' && html`<${TestsPanel} run=${testRun} actions=${actions} onClose=${() => setPanel(null)} />`}
     ${panel === 'debug' && debugRef.current && html`<${DebugPanel} dbg=${debugRef.current} tick=${debugTick} settings=${settings} actions=${actions} onClose=${() => setPanel(null)} />`}
-    ${panel === 'problems' && activeKey && !activeSealed && html`<${ProblemsPanel} name=${activeName} fileKey=${activeKey} problems=${settings.problems !== false ? problems[activeKey] : null} actions=${actions} onClose=${() => setPanel(null)} />`}
+    ${panel === 'problems' && activeKey && !textGone && html`<${ProblemsPanel} name=${activeName} fileKey=${activeKey} problems=${settings.problems !== false ? problems[activeKey] : null} actions=${actions} onClose=${() => setPanel(null)} />`}
     ${panel === 'search' && html`<${SearchPanel} key=${searchSeed?.at ?? 0} seed=${searchSeed} files=${scoped} docs=${scopedDocs} allFiles=${store.live()} allDocs=${docs} openKeys=${store.session.open} settings=${settings} actions=${actions} onClose=${() => setPanel(null)} />`}
     ${panel === 'history' && activeKey && (activeFile || activeRepo) && html`<${HistoryPanel} key=${activeKey} selected=${compare?.sha}
       target=${{ key: activeKey, kind: activeFile ? 'file' : 'repo', id: activeFile?.id, path: activeRepo?.path, name: activeName, dirty: activeFile?.dirty || activeRepo?.dirty }}
       actions=${actions} onClose=${() => setPanel(null)} />`}
-    ${panel === 'outline' && activeKey && (activeFile || activeRepo || activeDisk) && !activeSealed &&
+    ${panel === 'outline' && activeKey && (activeFile || activeRepo || activeDisk) && !textGone &&
     html`<${OutlinePanel} name=${activeName} text=${activeText()} language=${languageName} fileId=${activeFile?.id}
       cursorLine=${cursor?.line} actions=${actions} onClose=${() => setPanel(null)} />`}
     ${panel === 'assistant' && html`<${AssistantPanel} key=${`${assistantFound?.at ?? 0}:${libraryChat?.at ?? 0}`} files=${scoped} docs=${scopedDocs} activeFile=${activeFile} activeRepo=${activeRepo} asked=${assistantFound} resume=${libraryChat?.id ?? null} settings=${settings} actions=${actions} onClose=${() => (setPanel(null), setLibraryChat(null))} />`}
@@ -5645,6 +6013,17 @@ export function App() {
         setDialog(null);
         if ((await actions.saveDisk(parseKey(dialog.key).path)) === 'saved') actions.close(dialog.key, { discard: true });
       }} />`}
+    ${dialog?.type === 'newLocked' &&
+    html`<${NewLockedDialog} where=${dialog.dir ? 'folder' : 'notes'} place=${dialog.dir ? placeOfPath(`${dialog.dir}/x`) : ''} onCreate=${(o) => actions.createLocked({ ...o, dir: dialog.dir })} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'lockFile' &&
+    html`<${LockFileDialog} name=${dialog.name} kind=${dialog.kind} binName=${binName()} forGood=${isAndroidApp()} onLock=${(o) => actions.lockExisting({ ...o, key: dialog.key, path: dialog.path })} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'lockPassword' &&
+    html`<${ChangePasswordDialog} name=${tabName(dialog.key)} onChange=${(o) => actions.rewriteLockPassword(dialog.key, o)} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'lockRemove' &&
+    html`<${RemoveLockDialog} name=${tabName(dialog.key)} onRemove=${(o) => actions.takeLockOff(dialog.key, o)} onClose=${() => setDialog(null)}
+      what=${parseKey(dialog.key)?.kind === 'file'
+        ? `Its text is kept${isLocal() ? '' : ' and synced'} as plain text from now on.`
+        : `Its text is written as plain text to ${innerName(tabName(dialog.key))}, beside it, and the locked file goes to ${isAndroidApp() ? 'nowhere: it is deleted' : binName()}.`} />`}
     ${dialog?.type === 'reloadDisk' && store.diskTab(dialog.path) &&
     html`<${ReloadDiskDialog} tab=${store.diskTab(dialog.path)} onClose=${() => setDialog(null)} onReload=${() => (setDialog(null), actions.reloadDisk(dialog.path))} />`}
     ${diskAvailable() && html`<${TransfersCard} onShow=${actions.showFolder} />`}

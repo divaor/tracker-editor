@@ -74,10 +74,12 @@ export function FileDialog({ file, projects, actions, onClose }) {
     <dl class="props file-props">
       <div><dt>Edited</dt><dd>${formatDateTime(file.modifiedAt)}${file.modifiedBy ? ` on ${file.modifiedBy}` : ''}</dd></div>
       <div><dt>Created</dt><dd>${formatDateTime(file.createdAt)}</dd></div>
-      <div><dt>Size</dt><dd>${formatBytes(new TextEncoder().encode(store.text(file.id)).length)}</dd></div>
+      <div><dt>Size</dt><dd>${formatBytes(new TextEncoder().encode(store.lockedText(file.id) ?? store.text(file.id)).length)}</dd></div>
       <div><dt>${isLocal() ? 'Stored as' : 'In the repo'}</dt><dd><code>${file.sha ? contentPath(file) : isLocal() ? 'Saving…' : 'Not synced yet'}</code></dd></div>
-      <div><dt>Encryption</dt><dd>${file.encrypted ? (isLocal() ? 'The text is stored encrypted' : 'The text is encrypted in your data repo') : 'Not encrypted'}
-        <button type="button" class="btn link" onClick=${() => (onClose(), actions.setEncrypted(file.id, !file.encrypted))}>${file.encrypted ? 'Stop encrypting' : 'Encrypt'}</button></dd></div>
+      ${store.isLocked(file.id)
+        ? html`<div><dt>Encryption</dt><dd>Locked with its own password: stored${isLocal() ? '' : ' and synced'} encrypted, asked for every time it opens</dd></div>`
+        : html`<div><dt>Encryption</dt><dd>${file.encrypted ? (isLocal() ? 'The text is stored encrypted' : 'The text is encrypted in your data repo') : 'Not encrypted'}
+        <button type="button" class="btn link" onClick=${() => (onClose(), actions.setEncrypted(file.id, !file.encrypted))}>${file.encrypted ? 'Stop encrypting' : 'Encrypt'}</button></dd></div>`}
       <div class="span-2"><dt>Link</dt><dd class="copy-row"><code>${link}</code>
         <button type="button" class="btn sm" onClick=${async () => {
           try {

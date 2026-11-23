@@ -1988,7 +1988,8 @@ ipcMain.handle('folder:find', guard(async (event, searchId, dir, query, opts = {
       read: onServer ? (p) => remote.readBytes(p, 2 * 1024 * 1024) : (p) => fs.promises.readFile(p),
       decode: (bytes) => disk.decode(bytes).text,
       match: matcher.match,
-      isText: names.opensInEditor,
+      // Text files, but not locked ones (their text is ciphertext).
+      isText: names.searchesText,
       relative: (p) => (onServer ? path.posix.relative(root, remoteFiles.parseUri(p).path) : path.relative(dir, p)),
       onFound: (file) => send('folder:found', { file }),
       onProgress: (stats) => send('folder:find-progress', { stats }),
@@ -2119,7 +2120,8 @@ ipcMain.handle('ask:folders', guard(async (_e, searchId, dirs, plan, opts = {}) 
       list: anyList,
       read: anyRead,
       decode: anyDecode,
-      isText: names.opensInEditor,
+      // Text files, but not locked ones (their text is ciphertext).
+      isText: names.searchesText,
       measure: worker.measure,
       projectOf: (root) => (typeof projects[root] === 'string' ? projects[root].slice(0, 200) : ''),
       relative: (root, p) => (isRemote(root) ? path.posix.relative(remoteFiles.parseUri(root).path, remoteFiles.parseUri(p).path) : path.relative(root, p).split(path.sep).join('/')),
@@ -3146,6 +3148,10 @@ async function concealedNow() {
   return false;
 }
 
+// A copy from a file locked with a password: the page says so as it copies (clip:skip-next), and
+// the next change of the clipboard within a few seconds is not kept.
+let clipSkipUntil = 0;
+
 async function checkClipboard() {
   let text;
   try {
@@ -3155,6 +3161,10 @@ async function checkClipboard() {
   }
   if (text === lastClip || !prefs.clipboard.enabled) return;
   lastClip = text;
+  if (Date.now() < clipSkipUntil) {
+    clipSkipUntil = 0;
+    return;
+  }
   if (!(await concealedNow())) setClips(clips.addClip(clipList, text, { max: prefs.clipboard.max }));
 }
 
@@ -3190,6 +3200,9 @@ ipcMain.handle('clip:copy', guard(async (_e, id) => {
 ipcMain.handle('clip:remove', guard((_e, id) => setClips(clips.removeClip(clipList, id))));
 ipcMain.handle('clip:pin', guard((_e, id, on) => setClips(clips.pinClip(clipList, id, on))));
 ipcMain.handle('clip:clear', guard(() => setClips(clips.clearClips(clipList))));
+ipcMain.handle('clip:skip-next', guard(() => {
+  clipSkipUntil = Date.now() + 3000;
+}));
 
 // ---- Closing: let the app save and sync first --------------------------------
 
@@ -3393,6 +3406,7 @@ function buildMenu() {
       label: 'File',
       submenu: [
         item('New File', 'CmdOrCtrl+N', 'new'),
+        item('New Locked File…', undefined, 'locked-new'),
         item('Open a File…', 'CmdOrCtrl+P', 'quick-open'),
         item('Open File (Edit in Place)…', 'CmdOrCtrl+O', 'disk-open'),
         item('Open Folder…', undefined, 'folder-open'),
@@ -3404,6 +3418,9 @@ function buildMenu() {
         item('Import Files…', undefined, 'open-disk'),
         item('Save a Copy to Disk…', 'CmdOrCtrl+Shift+S', 'save-copy'),
         item('Trash…', undefined, 'trash'),
+        { type: 'separator' },
+        item('Lock with a Password…', undefined, 'locked-lock'),
+        shown('Lock All Locked Files Now', 'Alt+Shift+L', 'locked-lock-all'),
         { type: 'separator' },
         item('Close Tab', 'CmdOrCtrl+W', 'close-tab'),
         item('Reopen Closed Tab', 'CmdOrCtrl+Shift+T', 'reopen-tab'),

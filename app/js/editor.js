@@ -2206,12 +2206,24 @@ export function createEditorHost(parent, { onChange, onCursor, onShortcut, onOpe
       return changes.length;
     },
 
-    drop(key) {
-      flush(key);
+    /**
+     * Forgets a tab's state (its text and undo history). `save: false` lets go of edits still
+     * waiting to be passed on (a locked file whose text came back from elsewhere).
+     */
+    drop(key, { save = true } = {}) {
+      if (save) flush(key);
+      else {
+        clearTimeout(pending.get(key));
+        pending.delete(key);
+      }
       bigKeys.delete(key);
       indents.delete(key);
-      // hide() keeps the active tab's state, so hide first, then forget it.
-      if (key === active) this.hide();
+      // hide() keeps the active tab's state, so hide first, then forget it; the view keeps
+      // nothing of it either (a locked file's text is let go of when it locks again).
+      if (key === active) {
+        this.hide();
+        view.setState(EditorState.create({ doc: '' }));
+      }
       takeOut(key, { keep: false });
       states.delete(key);
       scroll.delete(key);

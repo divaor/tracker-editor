@@ -1,6 +1,6 @@
 import { html, useEffect, useLayoutEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import { canDragOut, draggedPaths, draggedTab, dropped, isOwnDrop, onDragOutEnd, startDragOut } from '../dragOut.js';
-import { baseName, breadcrumbs, folderLabel, placeLabel, FOLDER_SORTS, isImageName, modeString, moveSectionTo, nameMatcher, opensHere, opensInEditor, parentOf, peekKind, pushRecent, quotePath, rangeOf, renameRange, replaceSection, rootOf, selectionSummary, sortsUp, toggleFavorite, topmost, treeRows, withCurrent } from '../folders.js';
+import { baseName, breadcrumbs, folderLabel, placeLabel, FOLDER_SORTS, isImageName, isLockedName, modeString, moveSectionTo, nameMatcher, opensHere, opensInEditor, parentOf, peekKind, pushRecent, quotePath, rangeOf, renameRange, replaceSection, rootOf, selectionSummary, sortsUp, toggleFavorite, topmost, treeRows, withCurrent } from '../folders.js';
 import { formatBytes, timeAgo } from '../format.js';
 import { getSettings, isLocal, saveSettings } from '../settings.js';
 import { diskKey } from '../store.js';
@@ -1053,6 +1053,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   const backgroundItems = () => [
     { label: 'New file', icon: 'filePlus', run: () => startCreating('file') },
     { label: 'New folder (Ctrl+Shift+N)', icon: 'folderPlus', run: () => startCreating('folder') },
+    { label: 'New locked file…', icon: 'lock', hint: 'Encrypted with a password, asked for every time it opens', run: () => actions.newLockedFile(workDir()) },
     { label: 'Paste (Ctrl+V)', icon: 'clipboard', run: paste },
     { label: 'Find in this folder… (Ctrl+Shift+F)', icon: 'search', run: () => actions.findInFolder(dir) },
     { label: 'Ask the model about this folder…', icon: 'sparkle', hint: 'It can make and change files here; each change waits for your Apply', run: () => actions.assistFiles({ folder: dir }) },
@@ -1093,11 +1094,14 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       { label: one?.dir ? 'Open' : 'Open (Enter)', icon: one?.dir ? 'folderOpen' : 'file', run: openSelected },
       one && !one.dir && { label: 'View it large (Space)', icon: 'fullscreen', run: () => setViewing(one.path) },
       one && !one.dir && { label: 'Open with its program', icon: 'external', run: () => openOutside(one) },
-      one && !one.dir && ['M', 'R'].includes(gitOn(one.path)) && opensInEditor(one.name) && { label: 'Compare with the last commit (Git)', icon: 'branch', run: () => actions.compareWithHead(one.path) },
+      one && !one.dir && ['M', 'R'].includes(gitOn(one.path)) && opensInEditor(one.name) && !isLockedName(one.name) && { label: 'Compare with the last commit (Git)', icon: 'branch', run: () => actions.compareWithHead(one.path) },
+      // A text file here: locked with a password (written again encrypted as "<name>.locked"); a folder: a new locked file in it.
+      one && !one.dir && !remote && opensInEditor(one.name) && !isLockedName(one.name) && { label: 'Lock with a password…', icon: 'lock', hint: 'Written again encrypted; it asks for the password every time it opens', run: () => actions.lockFile({ path: one.path }) },
+      one?.dir && { label: 'New locked file in it…', icon: 'lock', hint: 'Encrypted with a password, asked for every time it opens', run: () => actions.newLockedFile(one.path) },
       toStage.length > 0 && { label: toStage.length === 1 ? 'Stage (Git)' : `Stage ${toStage.length} files (Git)`, icon: 'plus', hint: 'Take into the next commit', run: () => stageFiles(toStage, 'stage') },
       toUnstage.length > 0 && { label: toUnstage.length === 1 ? 'Unstage (Git)' : `Unstage ${toUnstage.length} files (Git)`, icon: 'undo', hint: 'Leave out of the next commit', run: () => stageFiles(toUnstage, 'unstage') },
       images.length && images.length === items.length && { label: `Text from ${images.length === 1 ? 'the image' : `${images.length} images`}…`, icon: 'scan', run: () => actions.readImageFiles(images.map((e) => e.path), folderOf(images)) },
-      files.length === 2 && items.length === 2 && files.every((e) => opensInEditor(e.name)) && { label: 'Compare the two', icon: 'compare', run: () => actions.compareDiskFiles(files[0].path, files[1].path) },
+      files.length === 2 && items.length === 2 && files.every((e) => opensInEditor(e.name) && !isLockedName(e.name)) && { label: 'Compare the two', icon: 'compare', run: () => actions.compareDiskFiles(files[0].path, files[1].path) },
       one?.dir && gitHere(one.path) && !gitOf(rootOf(one.path, live) ?? dir) && { label: 'Make it a Git repository…', icon: 'branch', hint: 'git init: Git starts keeping its history', run: () => actions.gitInit(one.path) },
       one && gitHere(one.path) && gitOf(rootOf(one.path, live) ?? dir) && gitOn(one.path) !== 'U' && { label: one.dir ? 'History of this folder (Git)' : 'History of this file (Git)', icon: 'history', hint: one.dir ? 'The commits that changed it' : 'Its commits, through its renames', run: () => (one.dir ? actions.gitHistory(one.path, { folder: one.path }) : actions.fileHistory(one.path)) },
       one?.dir && !remote && dockerItem(one.path),
@@ -1119,7 +1123,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       !remote && { label: one ? `Compress to ${one.dir ? one.name : one.name.replace(/\.[^.]+$/, '') || one.name}.zip` : `Compress ${count(items.length, 'item')} to a zip`, icon: 'archive', run: () => zipSelected(items) },
       !remote && one && !one.dir && /\.zip$/i.test(one.name) && { label: 'Extract into a new folder', icon: 'archive', run: () => extract(one) },
       { label: one ? 'Copy path' : 'Copy paths', icon: 'copy', run: () => (one ? actions.copyPath(one.path) : navigator.clipboard.writeText(items.map((e) => e.path).join('\n')).then(() => toast('Paths copied'))) },
-      !remote && { label: one ? 'Copy for Claude (the path)' : 'Copy for Claude (the paths)', icon: 'claude', run: () => navigator.clipboard.writeText(items.map((e) => quotePath(e.path)).join(' ')).then(() => toast('On the clipboard: paste it into Claude')) },
+      !remote && !items.some((e) => isLockedName(e.name)) && { label: one ? 'Copy for Claude (the path)' : 'Copy for Claude (the paths)', icon: 'claude', run: () => navigator.clipboard.writeText(items.map((e) => quotePath(e.path)).join(' ')).then(() => toast('On the clipboard: paste it into Claude')) },
       files.length && files.length === items.length && files.every((e) => opensInEditor(e.name)) && { label: isLocal() ? 'Copy into my files' : 'Copy into my files (synced)', icon: 'filePlus', run: () => files.forEach((e) => actions.copyToFiles(e.path)) },
       one && !remote && window.desktop?.disk?.show && { label: 'Show in the file explorer', icon: 'external', run: () => actions.showOnDisk(one.path) },
       one && { label: 'Properties (Alt+Enter)', icon: 'info', run: () => actions.showProperties(one.path) },
@@ -1185,6 +1189,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       { label: 'Refresh', icon: 'rotate', run: () => load(s) },
       { label: 'New file here', icon: 'filePlus', run: () => (expandFor(), setCreating({ kind: 'file', name: 'New file.txt', in: s })) },
       { label: 'New folder here', icon: 'folderPlus', run: () => (expandFor(), setCreating({ kind: 'folder', name: 'New folder', in: s })) },
+      { label: 'New locked file here…', icon: 'lock', hint: 'Encrypted with a password, asked for every time it opens', run: () => actions.newLockedFile(s) },
       { label: 'Paste here', icon: 'clipboard', disabled: !clip, run: () => clip && pasteInto(s, {}) },
       { label: 'Find in this folder…', icon: 'search', run: () => actions.findInFolder(s) },
       { label: 'Ask the model about this folder…', icon: 'sparkle', hint: 'It can make and change files here; each change waits for your Apply', run: () => actions.assistFiles({ folder: s }) },

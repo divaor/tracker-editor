@@ -428,6 +428,8 @@ contextBridge.exposeInMainWorld('desktop', {
     remove: (id) => ipcRenderer.invoke('clip:remove', id),
     pin: (id, on) => ipcRenderer.invoke('clip:pin', id, on),
     clear: () => ipcRenderer.invoke('clip:clear'),
+    // The next copy (from a file locked with a password) stays out of the history.
+    skipNext: () => ipcRenderer.invoke('clip:skip-next'),
     onChanged(callback) {
       const listener = () => callback();
       ipcRenderer.on('clip:changed', listener);

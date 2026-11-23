@@ -28,6 +28,7 @@ import { KINDS } from '../where.js';
 import { COLOR_MODES } from './tabViews.js';
 import { looksLikeVisionModel } from '../ocr.js';
 import { isAndroidApp, isDesktopApp } from '../platform.js';
+import { idleMinutesOf } from '../locked.js';
 import { useChats } from './chats.js';
 import { chats } from '../chatStore.js';
 import { minimapShown } from '../minimapLayout.js';
@@ -589,6 +590,36 @@ function DesktopCard({ settings, actions }) {
   </${Card}>`;
 }
 
+// Files locked with a password (locked.js): when the open ones lock again.
+const IDLE_CHOICES = [
+  { value: 1, label: 'After 1 minute without use' },
+  { value: 5, label: 'After 5 minutes' },
+  { value: 10, label: 'After 10 minutes' },
+  { value: 30, label: 'After 30 minutes' },
+  { value: 60, label: 'After an hour' },
+  { value: 0, label: 'Never by itself' },
+];
+
+function LockedCard({ settings, actions }) {
+  const idle = idleMinutesOf(settings.lockedIdleMinutes);
+  return html`<${Card} title="Files with a password" icon="lock" id="locked">
+    <p class="muted small">A file locked with a password asks for it every time it opens, and is kept encrypted wherever it is (${isDesktopApp() || isAndroidApp() ? 'on disk as “name.locked”, and ' : ''}in My files). While it is open its text is in the app’s memory only; these lock it again. Its own menu (⋯) has “Ask for the password each time I come back”.</p>
+    <div class="field-grid">
+      <${Field} label="Lock again">
+        <select value=${String(idle)} onChange=${(e) => saveSettings({ lockedIdleMinutes: Number(e.currentTarget.value) })}>
+          ${IDLE_CHOICES.map((c) => html`<option key=${c.value} value=${String(c.value)}>${c.label}</option>`)}
+        </select>
+      </${Field}>
+    </div>
+    <${Check} checked=${settings.lockedWhenHidden !== false} label="Lock them when the app is hidden or minimized" hint="Another app in front, the window minimized, the phone locked" onChange=${(v) => saveSettings({ lockedWhenHidden: v })} />
+    <div class="card-actions">
+      <button type="button" class="btn sm" onClick=${() => actions.command('locked-new')}><${Icon} name="lock" size=${15} />New locked file…</button>
+      <button type="button" class="btn sm" onClick=${() => actions.command('locked-lock-all')}><${Icon} name="lock" size=${15} />Lock all now</button>
+    </div>
+    <p class="muted small">A forgotten password cannot be recovered. Help (F1) → Files with a password says what it protects against and what not.</p>
+  </${Card}>`;
+}
+
 function DictationCard({ settings }) {
   return html`<${Card} title="Voice notes" icon="mic">
     <p class="muted small">The microphone button at the top dictates into the open file, or a new note. Your browser's speech service turns speech into text (on Android, Google's). Say “new line” or “new paragraph” (“nueva línea”, “nuevo párrafo”, “punto y aparte” in Spanish) for line breaks.</p>
@@ -1094,6 +1125,7 @@ export function SettingsView({ settings, sync, actions }) {
     ${window.desktop?.prefs && html`<${DesktopCard} settings=${settings} actions=${actions} />`}
     ${dictationSupported() && html`<${DictationCard} settings=${settings} />`}
     <${EncryptionCard} actions=${actions} />
+    <${LockedCard} settings=${settings} actions=${actions} />
     <${DataCard} actions=${actions} />
     <p class="muted small about">Tracker Editor ${APP_VERSION} · ${isAndroidApp() ? 'Android app' : window.desktop ? `Desktop app (Electron ${window.desktop.versions?.electron ?? ''})` : 'Web app'} · <a href="https://github.com/divaor/tracker-editor" target="_blank" rel="noopener">Source</a></p>
     ${window.desktop?.android?.sendLog &&

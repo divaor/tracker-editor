@@ -22,7 +22,7 @@ function tagCounts(rows) {
 }
 
 // One list for the editor's files and the tracker's documents.
-const fileRow = (f) => ({ key: fileKey(f.id), name: f.name, project: f.project, tags: f.tags, modifiedAt: f.modifiedAt, updatedAt: f.updatedAt, unsynced: f.dirty || f.pending, id: f.id, encrypted: f.encrypted, snippet: f.snippet, language: f.language });
+const fileRow = (f) => ({ key: fileKey(f.id), name: f.name, project: f.project, tags: f.tags, modifiedAt: f.modifiedAt, updatedAt: f.updatedAt, unsynced: f.dirty || f.pending, id: f.id, encrypted: f.encrypted || store.isLocked(f.id), snippet: f.snippet, language: f.language });
 const docRow = (d) => ({ key: repoKey(d.path), name: d.name, project: d.project, tags: d.tags, modifiedAt: d.modifiedAt, updatedAt: d.modifiedAt, unsynced: store.repoTab(d.path)?.dirty, id: `r:${d.path}`, item: d.item.title });
 
 const MODES = [
@@ -132,6 +132,7 @@ function FileSidebar({ files, docs, projects, settings, activeKey, actions }) {
     </div>
     <div class="sidebar-foot">
       <button type="button" class="btn sm" onClick=${() => actions.newFile()}><${Icon} name="plus" size=${15} />New</button>
+      <button type="button" class="btn sm" aria-label="New locked file" title="New file locked with a password: asked for every time it opens" onClick=${() => actions.newLockedFile()}><${Icon} name="lock" size=${15} /></button>
       <button type="button" class="btn sm" onClick=${() => actions.openFromDisk()}><${Icon} name="upload" size=${15} />Import</button>
       <button type="button" class="btn sm trash-btn" aria-label="Trash" title="Deleted files: restore them" onClick=${() => actions.openDialog({ type: 'trash' })}>
         <${Icon} name="trash" size=${15} />${trashCount > 0 && html`<span class="count">${trashCount}</span>`}

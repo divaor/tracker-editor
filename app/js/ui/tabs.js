@@ -28,6 +28,7 @@ import { compareName, compareTitle } from '../compares.js';
 import { COMMAND_LIST } from '../commands.js';
 import { shownKeys } from '../keys.js';
 import { projectStatus } from '../project.js';
+import { isLockedName, isLockedText } from '../locked.js';
 
 /** The server of a file on one ({ conn, status }), or null. */
 const serverOf = (path) => {
@@ -45,7 +46,9 @@ function tabInfo(key) {
   if (k?.kind === 'file') {
     const f = store.get(k.id);
     // In local mode there is nothing to wait for: no dot.
-    return f && { kind, name: f.name, project: f.project, encrypted: f.encrypted, snippet: f.snippet, unsynced: !isLocal() && (f.dirty || f.pending), dotTitle: 'Not synced yet', title: `${isLocal() ? 'My files' : 'My files (synced)'}: ${[f.project, f.name].filter(Boolean).join(' / ')}${f.encrypted ? ' · encrypted' : ''}` };
+    // A lock on encrypted notes and on notes locked with a password (locked.js).
+    const locked = f && store.isLocked(f.id);
+    return f && { kind, name: f.name, project: f.project, encrypted: f.encrypted || locked, snippet: f.snippet, unsynced: !isLocal() && (f.dirty || f.pending), dotTitle: 'Not synced yet', title: `${isLocal() ? 'My files' : 'My files (synced)'}: ${[f.project, f.name].filter(Boolean).join(' / ')}${locked ? ' · locked with a password' : f.encrypted ? ' · encrypted' : ''}` };
   }
   if (k?.kind === 'disk') {
     const d = store.diskTab(k.path);
@@ -56,7 +59,8 @@ function tabInfo(key) {
       const there = isPlace(conn) ? 'there' : 'to the server';
       return { kind, icon: isPlace(conn) ? connIcon(conn) : undefined, name: d.name, project: '', unsynced: d.dirty, follow: d.follow, offline: d.offline, dotTitle: `Not saved ${there}`, title: `On ${conn ? connLabel(conn) : 'a server'}: ${remoteAddress(d.path, conn)}${d.dirty ? ` · not saved ${there}` : ''}` };
     }
-    return { kind, name: d.name, project: '', unsynced: d.dirty, follow: d.follow, dotTitle: 'Not saved', title: `On ${KINDS.disk.label.toLowerCase()}: ${d.path}${d.dirty ? ' · not saved' : ''}` };
+    const locked = isLockedName(d.path) || isLockedText(d.text);
+    return { kind, name: d.name, project: '', encrypted: locked, unsynced: d.dirty, follow: d.follow, dotTitle: 'Not saved', title: `On ${KINDS.disk.label.toLowerCase()}: ${d.path}${locked ? ' · locked with a password' : ''}${d.dirty ? ' · not saved' : ''}` };
   }
   const t = k && store.repoTab(k.path);
   return t && { kind, name: t.name, project: store.doc(k.path)?.project ?? '', unsynced: !isLocal() && t.dirty, dotTitle: 'Not synced yet', title: `Tracker document: ${t.path}` };
@@ -238,16 +242,20 @@ export function TabBar({ session, projects, settings, actions }) {
     const others = closable(inBar.filter((k) => k !== key));
     const right = closable(inBar.slice(at + 1));
     const isCompare = parseKey(key)?.kind === 'compare';
+    // A file locked with a password: Lock now and its options (or Lock with a password… for a plain one).
+    const lockItems = isCompare ? [] : (actions.lockItems?.(key) ?? []);
+    const locked = !isCompare && Boolean(actions.isLockedTab?.(key));
     return [
       { label: isPinned ? 'Unpin' : 'Pin', icon: 'pin', run: () => store.pin(key, !isPinned) },
+      ...lockItems,
       isCompare && { label: 'Save this comparison…', icon: 'star', disabled: !actions.canSaveCompare(key), run: () => actions.saveCompare(key) },
       ...(!isCompare && !narrowScreen() ? paneItems(key) : []),
       !isCompare && parseKey(key)?.kind !== 'disk' && { label: 'History', icon: 'history', run: () => (actions.showInMain(key), actions.showHistory()) },
       parseKey(key)?.kind === 'disk' && actions.gitWorksAt?.(parseKey(key).path) && { label: 'History (Git)', icon: 'history', hint: 'Its commits, through its renames', run: () => actions.fileHistory(parseKey(key).path) },
-      !isCompare && { label: 'Compare with…', icon: 'columns', run: () => (actions.showInMain(key), actions.compareWith()) },
-      !isCompare && { label: 'Compare with clipboard', icon: 'copy', run: () => (actions.showInMain(key), actions.compareWithClipboard()) },
+      !isCompare && !locked && { label: 'Compare with…', icon: 'columns', run: () => (actions.showInMain(key), actions.compareWith()) },
+      !isCompare && !locked && { label: 'Compare with clipboard', icon: 'copy', run: () => (actions.showInMain(key), actions.compareWithClipboard()) },
       { separator: true },
-      !isCompare && { label: 'Copy for Claude', icon: 'claude', run: () => actions.copyForClaude(key) },
+      !isCompare && !locked && { label: 'Copy for Claude', icon: 'claude', run: () => actions.copyForClaude(key) },
       parseKey(key)?.kind === 'disk' && !isContentPath(parseKey(key).path) && { label: 'Copy path', icon: 'copy', run: () => actions.copyPath(parseKey(key).path) },
       parseKey(key)?.kind === 'disk' && inFolders(parseKey(key).path) && { label: 'Show its folder in Folders', icon: 'folderOpen', run: () => actions.showFolderOf(parseKey(key).path) },
       parseKey(key)?.kind === 'disk' && !isRemotePath(parseKey(key).path) && window.desktop?.disk?.show && { label: 'Show in the file explorer', icon: 'external', run: () => actions.showOnDisk(parseKey(key).path) },
@@ -528,7 +536,7 @@ export function RunGroup({ run, actions }) {
 }
 
 /** The bar of a file on disk (or on a server) edited in place: saving, reloading, following it as it grows. */
-function DiskBar({ disk, buttons, moreItems, actions }) {
+function DiskBar({ disk, buttons, moreItems, locked = false, actions }) {
   const { path, dirty, follow, conflict, missing, truncated, offline } = disk;
   const remote = isRemotePath(path);
   const srv = remote ? serverOf(path) : null;
@@ -559,7 +567,7 @@ function DiskBar({ disk, buttons, moreItems, actions }) {
         title=${disk.asText ? 'Show it as it looks again' : 'Its text in the editor: to select, search (Ctrl+F) and copy'} onClick=${() => actions.documentAsText(path, !disk.asText)}>
         <${Icon} name=${disk.asText ? 'eye' : 'file'} size=${15} /><span class="label">${disk.asText ? 'As it looks' : 'As text'}</span>
       </button>`}
-      ${!disk.doc &&
+      ${!disk.doc && !locked &&
       html`<button type="button" class="btn ghost sm ${follow ? 'on' : ''}" aria-pressed=${follow} disabled=${missing}
         title=${follow ? 'Stop following (the file becomes editable)' : 'Follow the file as it grows, like tail -f (read-only meanwhile)'} onClick=${() => actions.followDisk(path, !follow)}>
         <${Icon} name="follow" size=${15} /><span class="label">Follow</span>
@@ -596,7 +604,12 @@ function DiskBar({ disk, buttons, moreItems, actions }) {
   </div>`;
 }
 
-export function FileBar({ file, repo, disk, sealed, projects, canPreview, preview, settings, sync, run = null, actions }) {
+/**
+ * The bar over the text. `locked`: a file locked with a password ({ open }): while it is not open
+ * here only what needs no text; open, a Lock button and its options, and nothing that sends its
+ * text or name elsewhere (the model, Claude, other apps, comparisons).
+ */
+export function FileBar({ file, repo, disk, sealed, locked = null, projects, canPreview, preview, settings, sync, run = null, actions }) {
   const previewButton =
     canPreview &&
     html`<button type="button" class="btn ghost sm ${preview ? 'on' : ''}" aria-pressed=${preview} title="Show a reading view next to the text" onClick=${actions.togglePreview}><${Icon} name="eye" size=${15} /><span class="label">Preview</span></button>`;
@@ -614,7 +627,26 @@ export function FileBar({ file, repo, disk, sealed, projects, canPreview, previe
     { label: disk && !isRemotePath(disk.path) && !isContentPath(disk.path) ? 'Copy for Claude (the path)' : 'Copy for Claude (name and text)', icon: 'claude', run: () => actions.copyForClaude(store.session.active) },
     settings.llm.enabled && disk.asText && { label: 'Ask the model… (Ctrl+K)', icon: 'sparkle', run: actions.askSelection },
   ];
+  const lockButton =
+    locked?.open &&
+    html`<button type="button" class="btn ghost sm" title=${`Lock it now: its password opens it again (all of them: ${shownKeys('locked-lock-all') || 'Alt+Shift+L'})`} onClick=${() => actions.lockNow()}><${Icon} name="lock" size=${15} /><span class="label">Lock</span></button>`;
+  const lockItems = () => {
+    const items = actions.lockItems?.(store.session.active) ?? [];
+    return items.length ? [...items, { separator: true }] : [];
+  };
+  // A locked file not open here: what needs none of its text.
+  const lockedItems = () => [
+    disk && inFolders(disk.path) && { label: 'Show its folder in Folders', icon: 'folderOpen', run: () => actions.showFolderOf(disk.path) },
+    disk && !isRemotePath(disk.path) && window.desktop?.disk?.show && { label: 'Show in the file explorer', icon: 'external', run: () => actions.showOnDisk(disk.path) },
+    disk && !isContentPath(disk.path) && { label: 'Copy path', icon: 'copy', run: () => actions.copyPath(disk.path) },
+    disk && inFolders(disk.path) && { label: 'Properties', icon: 'info', run: () => actions.showProperties(disk.path) },
+    file && { label: 'Details…', icon: 'tag', run: () => actions.openDialog({ type: 'file', id: file.id }) },
+    file && { label: 'History', icon: 'history', run: actions.showHistory },
+    file && { separator: true },
+    file && { label: 'Move to trash', icon: 'trash', danger: true, run: () => actions.remove(file.id) },
+  ];
   const moreItems = (id) => [
+    ...(locked ? lockItems() : []),
     disk && inFolders(disk.path) && { label: 'Show its folder in Folders', icon: 'folderOpen', run: () => actions.showFolderOf(disk.path) },
     disk && !isRemotePath(disk.path) && window.desktop?.disk?.show && { label: 'Show in the file explorer', icon: 'external', run: () => actions.showOnDisk(disk.path) },
     disk && isContentPath(disk.path) && window.desktop?.android && { label: 'Open with another app…', icon: 'external', run: () => actions.openWithApp(disk.path) },
@@ -632,24 +664,28 @@ export function FileBar({ file, repo, disk, sealed, projects, canPreview, previe
     { label: 'Run the macro…', icon: 'skipForward', run: actions.runMacro },
     !disk && { label: 'History', icon: 'history', run: actions.showHistory },
     disk && actions.gitWorksAt?.(disk.path) && { label: 'History (Git)', icon: 'history', hint: 'Its commits, through its renames', run: () => actions.fileHistory(disk.path) },
-    { label: 'Compare with…', icon: 'columns', run: actions.compareWith },
-    { label: 'Compare with clipboard', icon: 'copy', run: actions.compareWithClipboard },
+    !locked && { label: 'Compare with…', icon: 'columns', run: actions.compareWith },
+    !locked && { label: 'Compare with clipboard', icon: 'copy', run: actions.compareWithClipboard },
     { label: 'Text from an image…', icon: 'scan', run: actions.imageToText },
     dictationSupported() && !disk?.follow && { label: 'Dictate', icon: 'mic', run: actions.startDictation },
     window.desktop?.ocr && { label: 'Text from a screenshot…', icon: 'scan', run: actions.screenshotToText },
     id && { label: 'Send checklist to tracker…', icon: 'checklist', run: actions.sendChecklist },
     window.desktop?.typing && { label: 'Type into another window', icon: 'keyboard', run: () => actions.typeOut() },
-    { label: disk && !isRemotePath(disk.path) && !isContentPath(disk.path) ? 'Copy for Claude (the path)' : 'Copy for Claude (name and text)', icon: 'claude', run: () => actions.copyForClaude(store.session.active) },
-    settings.llm.enabled && { label: 'Ask the model… (Ctrl+K)', icon: 'sparkle', run: actions.askSelection },
+    !locked && { label: disk && !isRemotePath(disk.path) && !isContentPath(disk.path) ? 'Copy for Claude (the path)' : 'Copy for Claude (name and text)', icon: 'claude', run: () => actions.copyForClaude(store.session.active) },
+    settings.llm.enabled && !locked && { label: 'Ask the model… (Ctrl+K)', icon: 'sparkle', run: actions.askSelection },
     { label: 'Insert snippet…', icon: 'snippet', run: actions.openSnippets },
     id && { label: 'Save as snippet', icon: 'snippet', run: actions.saveSnippet },
     id && { label: store.get(id)?.snippet ? 'Not a snippet' : 'Use as a snippet', icon: 'snippet', run: () => actions.toggleSnippet(id) },
-    id && settings.llm.enabled && { label: 'Suggest project and tags', icon: 'sparkle', run: actions.suggestFiling },
-    id && { label: store.get(id)?.encrypted ? 'Stop encrypting' : 'Encrypt', icon: store.get(id)?.encrypted ? 'unlock' : 'lock', run: () => actions.setEncrypted(id, !store.get(id)?.encrypted) },
+    id && settings.llm.enabled && !locked && !store.get(id)?.encrypted && { label: 'Suggest project and tags', icon: 'sparkle', run: actions.suggestFiling },
+    // A locked note is encrypted by its own password (not the vault's passphrase).
+    id && !locked && { label: store.get(id)?.encrypted ? 'Stop encrypting' : 'Encrypt', icon: store.get(id)?.encrypted ? 'unlock' : 'lock', run: () => actions.setEncrypted(id, !store.get(id)?.encrypted) },
+    id && !locked && actions.lockItems && { label: 'Lock with a password…', icon: 'lock', hint: 'Its own password, asked every time it opens', run: () => actions.lockFile(fileKey(id)) },
     id && { separator: true },
     id && { label: 'Move to trash', icon: 'trash', danger: true, run: () => actions.remove(id) },
   ];
   if (disk?.doc) return html`<${DiskBar} disk=${disk} buttons=${[(disk.asText || readsAloud(disk.doc)) && listenButton, shareButton]} moreItems=${docItems} actions=${actions} />`;
+  if (disk && locked && !locked.open) return html`<${DiskBar} disk=${disk} locked buttons=${[]} moreItems=${lockedItems} actions=${actions} />`;
+  if (disk && locked) return html`<${DiskBar} disk=${disk} locked buttons=${[lockButton, previewButton, listenButton]} moreItems=${() => moreItems()} actions=${actions} />`;
   if (disk) return html`<${DiskBar} disk=${disk} buttons=${[run && html`<${RunGroup} run=${run} actions=${actions} />`, previewButton, listenButton, shareButton]} moreItems=${() => moreItems()} actions=${actions} />`;
   if (repo) {
     // A tracker document: its item's title and project; the path is in the tooltip.
@@ -677,6 +713,29 @@ export function FileBar({ file, repo, disk, sealed, projects, canPreview, previe
       <span class="filebar-note"><${Icon} name="lock" size=${14} />Encrypted · locked on this device</span>
       <span class="spacer" />
       <${MenuButton} label="More" items=${() => [{ label: 'Move to trash', icon: 'trash', danger: true, run: () => actions.remove(file.id) }]} />
+    </div>`;
+  }
+  if (locked && !locked.open) {
+    return html`<div class="filebar">
+      ${synced}
+      ${file.project && html`<${ProjectChip} project=${project} name=${file.project} />`}
+      <span class="filebar-note"><${Icon} name="lock" size=${14} />Locked with a password</span>
+      <span class="spacer" />
+      <${MenuButton} label="More" items=${lockedItems} />
+    </div>`;
+  }
+  if (locked) {
+    return html`<div class="filebar">
+      ${synced}
+      ${file.project
+        ? html`<${ProjectChip} project=${project} name=${file.project} onClick=${() => actions.openDialog({ type: 'file', id: file.id })} />`
+        : html`<button type="button" class="btn ghost sm add-project" onClick=${() => actions.openDialog({ type: 'file', id: file.id })}><${Icon} name="folder" size=${14} />Add project</button>`}
+      <span class="filebar-note"><${Icon} name="unlock" size=${14} />Locked with a password · open</span>
+      <span class="spacer" />
+      ${lockButton}
+      ${previewButton}
+      ${listenButton}
+      <${MenuButton} label="More" items=${() => moreItems(file.id)} />
     </div>`;
   }
   const linked = store.trackerItems().filter((i) => !i.deleted && i.url?.includes(`#/file/${encodeURIComponent(file.id)}`));

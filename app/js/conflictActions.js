@@ -9,6 +9,7 @@ import { conflictLabels } from './conflictView.js';
 import { findConflicts, mergedFromReply, mergeMessages } from './gitConflicts.js';
 import { diskKey, parseKey, store } from './store.js';
 import { isContentPath } from './where.js';
+import { isLockedName, isLockedText } from './locked.js';
 import { dismissToast } from './ui/components.js';
 
 const NOT_HERE = 'Put the cursor in a conflict block first: the lines from <<<<<<< to >>>>>>>.';
@@ -38,12 +39,13 @@ export function createConflictActions({ host, actions, toast, setCompare, setVie
     const k = parseKey(key ?? '');
     if (k?.kind === 'file') {
       const f = store.get(k.id);
-      return f ? { name: f.name, language: findLanguage(f.name, f.language)?.name ?? '', encrypted: Boolean(f.encrypted) || store.isSealed(k.id), path: null } : null;
+      return f ? { name: f.name, language: findLanguage(f.name, f.language)?.name ?? '', encrypted: Boolean(f.encrypted) || store.isSealed(k.id) || store.isLocked(k.id), path: null } : null;
     }
     if (k?.kind === 'disk') {
       const t = store.diskTab(k.path);
       const name = t?.name ?? baseName(k.path);
-      return { name, language: findLanguage(name)?.name ?? '', encrypted: false, path: k.path, doc: Boolean(t?.doc) };
+      // A file locked with a password counts as encrypted: the model never merges it.
+      return { name, language: findLanguage(name)?.name ?? '', encrypted: isLockedName(k.path) || isLockedText(t?.text), path: k.path, doc: Boolean(t?.doc) };
     }
     if (k?.kind === 'repo') {
       const name = store.repoTab(k.path)?.name ?? baseName(k.path);

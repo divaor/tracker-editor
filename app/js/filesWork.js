@@ -367,10 +367,11 @@ function folderWork(base, { file, host, actions }) {
 function notesWork(id, { host, actions }) {
   const note = store.get(id);
   if (!note || note.deleted) return { unavailable: 'That file is not here any more.' };
-  if (note.encrypted || store.isSealed?.(id)) return { unavailable: 'The model never reads or changes encrypted files.' };
+  if (note.encrypted || store.isSealed?.(id) || store.isLocked?.(id)) return { unavailable: 'The model never reads or changes encrypted files, nor files locked with a password.' };
   const project = note.project ?? '';
   const name = project ? `My files · ${project}` : 'My files';
-  const usable = (f) => f && !f.deleted && !f.encrypted && !store.isSealed?.(f.id) && (f.project ?? '') === project;
+  // Notes locked with a password (locked.js) are left out like encrypted ones: not even named.
+  const usable = (f) => f && !f.deleted && !f.encrypted && !store.isSealed?.(f.id) && !store.isLocked?.(f.id) && (f.project ?? '') === project;
   const files = () => store.live().filter(usable);
   // Two notes may share a name: the one the panel is about first, else the one changed last.
   const byName = (rel) => {

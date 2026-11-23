@@ -2,6 +2,7 @@
 // tracker, and pending changes to tracker.json — kept in memory and saved to
 // IndexedDB as you type. Sync (syncManager.js) takes changes to GitHub.
 import { isSealed } from './crypto.js';
+import { isLockedText } from './locked.js';
 import { kvDelete, kvGet, kvSet } from './kv.js';
 import { getSettings } from './settings.js';
 import { documentKind } from './docTypes.js';
@@ -266,7 +267,12 @@ export const store = {
     const f = files.get(id);
     return f && !f.deleted ? f : undefined;
   },
-  text: (id) => texts.get(id) ?? '',
+  // A file locked with its own password (locked.js) holds only its locked text here: '' for what
+  // reads texts (search, the model, the outline…); `lockedText` gives it to what opens it.
+  text: (id) => {
+    const t = texts.get(id) ?? '';
+    return isLockedText(t) ? '' : t;
+  },
   texts: () => texts,
   projects: () => projects,
   trackerItems: () => trackerItems,
@@ -379,6 +385,13 @@ export const store = {
     [...files.values()].filter((f) => f.deleted && (f.sha || trashed.has(f.id))).sort((a, b) => (b.updatedAt > a.updatedAt ? 1 : -1)),
   /** The text this device kept for a deleted file, or null. */
   trashText: async (id) => (trashed.has(id) ? ((await kvGet(`trash:${id}`)) ?? null) : null),
+
+  // ---- Files locked with a password (locked.js) ----
+
+  /** True when the file's text is locked with a password of its own. */
+  isLocked: (id) => isLockedText(texts.get(id)),
+  /** A locked file's text (the ciphertext, as stored and synced), or null when it is not locked. */
+  lockedText: (id) => (isLockedText(texts.get(id)) ? texts.get(id) : null),
 
   // ---- Encrypted files ----
 

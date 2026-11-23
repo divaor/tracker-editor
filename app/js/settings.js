@@ -94,6 +94,10 @@ export const DEFAULT_SETTINGS = {
   // 'line', or 'off'; null = on.
   gitBlame: null,
   fileIcons: true,
+  // Files locked with a password (locked.js): they lock again after this many minutes without use
+  // (0 = never), and when the app is hidden or minimized (`lockedWhenHidden`).
+  lockedIdleMinutes: 10,
+  lockedWhenHidden: true,
   // Format document: 'server' (a language server's formatter first) or 'builtin' (Prettier and the editor's own first).
   formatter: 'server',
   // Tabs gathered by group (project, folder, notes) in the tab bar, each group foldable.
