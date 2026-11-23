@@ -252,11 +252,18 @@ const BINARY = new Set(
 const IMAGES = new Set('png jpg jpeg gif bmp webp tif tiff'.split(' '));
 
 const PEEK_IMAGES = new Set('png jpg jpeg gif bmp webp ico avif'.split(' '));
-/** What the folders view's preview shows for a file: 'image', 'doc' (a document shown as it looks: PDF, e-book…), 'archive' (what it holds), 'text' (read as text) or 'none'. */
-export const peekKind = (name) => (PEEK_IMAGES.has(extOf(name)) ? 'image' : isDocumentName(name) ? 'doc' : isArchiveName(name) ? 'archive' : BINARY.has(extOf(name)) ? 'none' : 'text');
+/** What the folders view's preview shows for a file: 'image', 'doc' (a document shown as it looks: PDF, e-book…), 'archive' (what it holds), 'locked' (a file locked with a password: not read), 'text' (read as text) or 'none'. */
+export const peekKind = (name) => (isLockedName(name) ? 'locked' : PEEK_IMAGES.has(extOf(name)) ? 'image' : isDocumentName(name) ? 'doc' : isArchiveName(name) ? 'archive' : BINARY.has(extOf(name)) ? 'none' : 'text');
 
 /** Whether a file opens in the editor as text; the others open with their own program, or as documents (opensHere). Unknown types are tried as text. */
 export const opensInEditor = (name) => !BINARY.has(extOf(name)) && !isDocumentName(name) && !isArchiveName(name);
+/**
+ * A file locked with a password ("notes.md.locked": locked.js keeps the same rule): it opens in the
+ * editor, which asks for its password; its text is ciphertext, never searched or read for the model.
+ */
+export const isLockedName = (name) => typeof name === 'string' && /.\.locked$/i.test(name.split(/[\\/]/).pop());
+/** What Find in a folder and Find by asking read: text files, but not locked ones. */
+export const searchesText = (name) => opensInEditor(name) && !isLockedName(name);
 /** Whether a file opens in a tab here: as text, or as a document shown as it looks. */
 export const opensHere = (name) => opensInEditor(name) || isDocumentName(name);
 /** Images whose text can be read (OCR). */

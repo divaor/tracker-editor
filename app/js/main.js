@@ -1,5 +1,5 @@
 import { html, render } from '../vendor/preact-htm.js';
-import { App } from './app.js';
+import { App, settleLocked } from './app.js';
 import { requestPersistence } from './kv.js';
 import { applyTheme, getSettings, onSettings } from './settings.js';
 import { closeStore, flush, store } from './store.js';
@@ -27,6 +27,8 @@ function showInactive() {
 // A newer tab took over: hand over the latest text and stop for good.
 async function stepDown({ saved }) {
   window.dispatchEvent(new Event('editor:flush'));
+  // Files locked with a password: what was typed is sealed before the store closes.
+  await settleLocked();
   await chats.flush().catch(() => {});
   await stopSync();
   await closeStore({ save: saved });

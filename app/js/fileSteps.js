@@ -31,7 +31,8 @@ export function isSecretName(name) {
   const n = String(name ?? '').split(/[\\/]/).pop().toLowerCase();
   if (!n) return false;
   if (/^\.env(\..+)?$/.test(n)) return !/\.(example|sample|template|dist|defaults?)$/.test(n);
-  if (/\.(pem|key|p12|pfx|jks|keystore|kdbx|ppk|asc|gpg)$/.test(n)) return true;
+  // A file locked with a password (locked.js) is ciphertext, and stays the person's: never read or changed.
+  if (/\.(pem|key|p12|pfx|jks|keystore|kdbx|ppk|asc|gpg|locked)$/.test(n)) return true;
   if (/^id_(rsa|dsa|ecdsa|ed25519)(\.pub)?$/.test(n) && !n.endsWith('.pub')) return true;
   return ['.npmrc', '.pypirc', '.netrc', '_netrc', '.git-credentials', '.htpasswd', 'credentials', 'credentials.json', 'secrets.json', 'secrets.yaml', 'secrets.yml', '.dockercfg', 'service-account.json'].includes(n);
 }

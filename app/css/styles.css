@@ -7894,6 +7894,30 @@ svg.up {
   overflow-wrap: anywhere;
 }
 
+/* Files locked with a password (ui/locked.js): the lock screen in the editor's place, and the dialogs. */
+.locked-screen .welcome-card { display: grid; gap: 10px; }
+.locked-screen .welcome-card > p { margin: 0; }
+.locked-screen .welcome-actions { margin: 4px 0; }
+.locked-form { display: grid; gap: 12px; }
+.locked-form > p { margin: 0; }
+.locked-new-password { display: grid; gap: 10px; }
+.field > .locked-password,
+.locked-password {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: inherit;
+  font-size: inherit;
+  font-weight: normal;
+}
+.locked-password input { flex: 1 1 auto; min-width: 0; }
+.locked-strength { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-2); }
+.locked-strength .bar { flex: 0 0 120px; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
+.locked-strength .bar > span { display: block; height: 100%; background: var(--danger); }
+.locked-strength.s2 .bar > span { background: var(--warn); }
+.locked-strength.s3 .bar > span,
+.locked-strength.s4 .bar > span { background: var(--done); }
+
 .tab .tab-lock {
   flex-shrink: 0;
   color: var(--text-3);

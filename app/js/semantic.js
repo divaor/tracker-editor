@@ -19,9 +19,10 @@ export function llmClient(settings = getSettings()) {
 }
 
 // What the model reads: { id, name, project, text }. Tracker documents have
-// the id "r:<path>" and are left out until they are downloaded. Encrypted files
-// never: not embedded, not asked about, not even named.
-export const fileSources = (files) => files.filter((f) => !f.encrypted).map((f) => ({ id: f.id, name: f.name, project: f.project, text: store.text(f.id) }));
+// the id "r:<path>" and are left out until they are downloaded. Encrypted files, and
+// files locked with a password (locked.js), never: not embedded, not asked about, not even named.
+const isPrivate = (id) => Boolean(store.get(id)?.encrypted || store.isLocked?.(id));
+export const fileSources = (files) => files.filter((f) => !f.encrypted && !store.isLocked?.(f.id)).map((f) => ({ id: f.id, name: f.name, project: f.project, text: store.text(f.id) }));
 export const docSources = (docs) =>
   docs.map((d) => ({ id: `r:${d.path}`, name: d.name, project: d.project, text: store.docText(d.path) })).filter((d) => d.text !== null);
 /** The editor's files and the tracker's documents. */
@@ -31,8 +32,8 @@ let index = null; // source id → { id, hash, model, chunks: [{ from, to, text,
 async function load() {
   if (!index) {
     index = new Map(((await kvGet('vectors')) ?? []).map((e) => [e.id, e]));
-    // Chunks of files encrypted since (or indexed before 0.46, which took them in) go now.
-    const sealed = [...index.keys()].filter((id) => store.get(id)?.encrypted);
+    // Chunks of files encrypted or locked since (or indexed before 0.46, which took them in) go now.
+    const sealed = [...index.keys()].filter(isPrivate);
     for (const id of sealed) index.delete(id);
     if (sealed.length) await kvSet('vectors', [...index.values()]);
   }

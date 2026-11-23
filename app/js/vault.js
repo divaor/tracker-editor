@@ -4,6 +4,7 @@
 // sha stays the same and it is not uploaded again.
 import { createVault, isSealed, parseVault, seal, serializeVault, textHash, unlockVault, unseal, VAULT_PATH } from './crypto.js';
 import { kvDelete, kvGet, kvSet } from './kv.js';
+import { isLockedText } from './locked.js';
 
 let vault = null; // vault.json, parsed
 let key = null; // CryptoKey while unlocked
@@ -78,7 +79,8 @@ export async function lock() {
 
 /** What to store in the repo for a file's text: its ciphertext when it is encrypted. */
 export async function encodeFor(file, text) {
-  if (!file?.encrypted || isSealed(text)) return text;
+  // A file locked with its own password is ciphertext already (locked.js): it goes as it is.
+  if (!file?.encrypted || isSealed(text) || isLockedText(text)) return text;
   if (!key) throw new Error('Unlock encryption in Settings to sync your encrypted files.');
   const hash = await textHash(text);
   const known = cache.get(file.id);

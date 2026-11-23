@@ -1,6 +1,7 @@
 import { html, useEffect, useLayoutEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import { documentKind } from '../docTypes.js';
 import { peekKind } from '../folders.js';
+import { isLockedText } from '../locked.js';
 import { formatBytes, timeAgo } from '../format.js';
 import { previewKind } from '../previews.js';
 import { Icon } from './icons.js';
@@ -25,8 +26,8 @@ function usePeek(entry) {
     setPeek(null);
     if (!entry || entry.dir) return;
     const kind = peekKind(entry.name);
-    if (kind === 'none') return setPeek({ kind });
-    if (kind === 'doc') return setPeek({ kind });
+    // A file locked with a password is not read: its preview says so.
+    if (kind === 'none' || kind === 'doc' || kind === 'locked') return setPeek({ kind });
     // Archives on this computer only (7-Zip runs here).
     if (kind === 'archive') return setPeek(window.desktop.folders.archiveList && !entry.path.startsWith('remote://') ? { kind } : { kind: 'none' });
     let url = '';
@@ -37,7 +38,8 @@ function usePeek(entry) {
         if (kind === 'text') {
           const got = await bridge.peekText(entry.path);
           if (got.archive) markArchive(entry.path);
-          if (!stale) setPeek(got.archive ? { kind: 'archive' } : { kind, ...got });
+          // Locked, under another name: not shown either.
+          if (!stale) setPeek(got.archive ? { kind: 'archive' } : isLockedText(got?.text) ? { kind: 'locked' } : { kind, ...got });
           return;
         }
         const bytes = new Uint8Array(await bridge.peekBytes(entry.path));
@@ -79,6 +81,15 @@ export function FilePeek({ entry, big = false, onOpen, onOpenOutside, onExtract 
         : peekKind(entry.name) === 'text'
           ? html`<button type="button" class="btn sm" onClick=${() => onOpen(entry)}><${Icon} name="edit" size=${15} />Open it</button>`
           : html`<button type="button" class="btn sm" onClick=${() => onOpenOutside(entry)}><${Icon} name="external" size=${15} />Open with its program</button>`}
+    </div>`;
+  }
+  if (peek?.kind === 'locked') {
+    return html`<div class="peek-card peek-locked">
+      <${Icon} name="lock" size=${big ? 64 : 36} />
+      <strong class="peek-name">${entry.name}</strong>
+      <${Facts} entry=${entry} extra="Locked with a password" />
+      <p class="muted small">Its text is encrypted: open it and type its password to read it.</p>
+      <button type="button" class="btn sm" onClick=${() => onOpen(entry)}><${Icon} name="unlock" size=${15} />Open it</button>
     </div>`;
   }
   if (!peek) return html`<div class="peek-empty muted small">Loading ${entry.name}…</div>`;
@@ -153,12 +164,12 @@ export function FileViewer({ entries, path, onPath, onOpen, onOpenOutside, onRea
     return () => document.removeEventListener('keydown', onKey, true);
   });
   if (!entry) return null;
-  const inApp = ['text', 'doc'].includes(peekKind(entry.name));
+  const inApp = ['text', 'doc', 'locked'].includes(peekKind(entry.name));
   const openLabel = inApp ? 'Open' : 'Open with its program';
   return html`<div class="viewer-backdrop" role="dialog" aria-modal="true" aria-label=${`Viewing ${entry.name}`} onPointerDown=${(e) => e.target === e.currentTarget && onClose()}>
     <div class="viewer">
       <div class="viewer-head">
-        <${Icon} name=${peekKind(entry.name) === 'image' ? 'image' : peekKind(entry.name) === 'archive' ? 'archive' : 'file'} size=${16} />
+        <${Icon} name=${peekKind(entry.name) === 'image' ? 'image' : peekKind(entry.name) === 'archive' ? 'archive' : peekKind(entry.name) === 'locked' ? 'lock' : 'file'} size=${16} />
         <strong class="viewer-name" title=${entry.path}>${entry.name}</strong>
         <span class="muted small viewer-count">${index + 1} of ${entries.length}<span class="viewer-size"> · ${formatBytes(entry.size)}</span></span>
         <span class="spacer" />

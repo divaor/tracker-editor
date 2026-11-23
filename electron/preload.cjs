@@ -11,6 +11,12 @@ if (process.platform !== 'darwin') {
 
 contextBridge.exposeInMainWorld('desktop', {
   platform: process.platform,
+  // The window minimized or hidden in the tray, or the computer locked or asleep (files locked with a password lock).
+  onWindowAway(callback) {
+    const listener = () => callback();
+    ipcRenderer.on('window:away', listener);
+    return () => ipcRenderer.removeListener('window:away', listener);
+  },
   versions: { electron: process.versions.electron, chrome: process.versions.chrome },
   secrets: {
     get: (key) => ipcRenderer.invoke('secret:get', key),
@@ -438,6 +444,8 @@ contextBridge.exposeInMainWorld('desktop', {
     remove: (id) => ipcRenderer.invoke('clip:remove', id),
     pin: (id, on) => ipcRenderer.invoke('clip:pin', id, on),
     clear: () => ipcRenderer.invoke('clip:clear'),
+    // The next copy (from a file locked with a password) stays out of the history.
+    skipNext: () => ipcRenderer.invoke('clip:skip-next'),
     onChanged(callback) {
       const listener = () => callback();
       ipcRenderer.on('clip:changed', listener);

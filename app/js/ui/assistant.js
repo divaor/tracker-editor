@@ -53,8 +53,8 @@ function Sources({ passages, actions }) {
 export function AssistantPanel({ files, docs, activeFile, activeRepo, asked = null, resume = null, settings, actions, onClose }) {
   const { llm } = settings;
   // The open tab: one of the editor's files or a tracker document.
-  // An encrypted file is never one of them: its text and name never go to the model.
-  const current = activeFile && !activeFile.encrypted
+  // An encrypted file, or one locked with a password, is never one of them: its text and name never go to the model.
+  const current = activeFile && !activeFile.encrypted && !store.isLocked(activeFile.id)
     ? { id: activeFile.id, name: activeFile.name, project: activeFile.project, text: store.text(activeFile.id) }
     : activeRepo ? { id: `r:${activeRepo.path}`, name: activeRepo.name, project: '', text: activeRepo.text } : null;
   const [mode, setMode] = useState('ask');
@@ -185,7 +185,7 @@ export function AssistantPanel({ files, docs, activeFile, activeRepo, asked = nu
   const summarize = (selectionOnly = false) =>
     run(async (signal) => {
       setMode('summary');
-      if (activeFile?.encrypted) throw new Error('Encrypted files are not sent to the model.');
+      if (activeFile?.encrypted || (activeFile && store.isLocked(activeFile.id))) throw new Error('Encrypted files and files locked with a password are not sent to the model.');
       const name = current?.name;
       const full = current?.text ?? '';
       const selected = actions.selectionText();
