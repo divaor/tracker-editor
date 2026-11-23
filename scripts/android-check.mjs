@@ -469,6 +469,28 @@ try {
     check('two panes: one at a time, with the switch', panes.one && panes.shown === 1 && /cmp-a/.test(panes.tabs ?? '') && /cmp-b/.test(panes.tabs ?? ''), panes);
   });
 
+  // Archives on the phone: 7-Zip in WebAssembly in a worker thread of the app's Node.js (Download
+  // was picked above). A 7z with its names hidden made, listed with and without its password,
+  // and extracted into a new folder.
+  await part('archives on the phone', async () => {
+    const base = '/storage/emulated/0/Download';
+    adb('shell', `rm -rf ${base}/arc-src ${base}/arc-out ${base}/arc.7z; mkdir -p ${base}/arc-src/sub && echo from the phone > ${base}/arc-src/sub/a.txt`);
+    const got = await page.evaluate(async (b) => {
+      const f = window.desktop.folders;
+      try {
+        const made = await f.archiveCompress('check-1', [`${b}/arc-src`], b, { name: 'arc', format: '7z', password: 'pw 1', hideNames: true });
+        const hidden = await f.archiveList(made.made[0]);
+        const listed = await f.archiveList(made.made[0], { password: 'pw 1' });
+        const out = await f.archiveExtract('check-2', made.made[0], { to: 'folder', name: 'arc-out', password: 'pw 1' });
+        return { made: made.made, hidden, files: listed.files, folder: out.folder };
+      } catch (err) {
+        return { error: err.message };
+      }
+    }, base);
+    check('a 7z made, its names hidden without the password', !got.error && got.made?.[0] === `${base}/arc.7z` && got.hidden?.needsPassword === true && got.files === 1, got);
+    check('…and extracted into a new folder', got.folder === `${base}/arc-out` && adb('shell', `cat ${base}/arc-out/arc-src/sub/a.txt`).trim() === 'from the phone', got);
+  });
+
   // The screen as Android shows it (a page screenshot fails on some older WebViews).
   screencap('app.png');
   check('no page errors', errors.length === 0, errors.join(' | '));
