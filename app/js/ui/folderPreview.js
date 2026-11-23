@@ -5,6 +5,7 @@ import { formatBytes, timeAgo } from '../format.js';
 import { previewKind } from '../previews.js';
 import { Icon } from './icons.js';
 import { DocumentView } from './documentView.js';
+import { ArchivePeek, markArchive } from './archives.js';
 import { PreviewBody } from './preview.js';
 
 const MIME = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', bmp: 'image/bmp', webp: 'image/webp', ico: 'image/x-icon', avif: 'image/avif' };
@@ -15,7 +16,8 @@ const message = (err) => String(err?.message ?? err).replace(/^Error invoking re
  * What a file holds, read for a preview (a moment after it is picked, so moving
  * through a list stays quick): { kind, url } for pictures (a blob URL, revoked when
  * it changes), { kind: 'text', text, more } for text, { kind: 'doc' } for documents
- * (their view reads them), or { error }.
+ * and { kind: 'archive' } for archives (their views read them), or { error }. A file read as
+ * text that turns out to hold an archive (a zip under another name) is an archive.
  */
 function usePeek(entry) {
   const [peek, setPeek] = useState(null);
@@ -25,6 +27,8 @@ function usePeek(entry) {
     const kind = peekKind(entry.name);
     if (kind === 'none') return setPeek({ kind });
     if (kind === 'doc') return setPeek({ kind });
+    // Archives on this computer only (7-Zip runs here).
+    if (kind === 'archive') return setPeek(window.desktop.folders.archiveList && !entry.path.startsWith('remote://') ? { kind } : { kind: 'none' });
     let url = '';
     let stale = false;
     const timer = setTimeout(async () => {
@@ -32,7 +36,8 @@ function usePeek(entry) {
         const bridge = window.desktop.folders;
         if (kind === 'text') {
           const got = await bridge.peekText(entry.path);
-          if (!stale) setPeek({ kind, ...got });
+          if (got.archive) markArchive(entry.path);
+          if (!stale) setPeek(got.archive ? { kind: 'archive' } : { kind, ...got });
           return;
         }
         const bytes = new Uint8Array(await bridge.peekBytes(entry.path));
@@ -57,12 +62,12 @@ const Facts = ({ entry, extra = '' }) =>
   html`<p class="peek-facts muted small">${entry.dir ? 'Folder' : formatBytes(entry.size)}${entry.mtimeMs ? ` · ${timeAgo(new Date(entry.mtimeMs).toISOString())}` : ''}${extra ? ` · ${extra}` : ''}</p>`;
 
 /** A file's preview: the picture, the document (PDF, e-book, Word…), the rendered Markdown (HTML, CSV, JSON…) or the start of its text. */
-export function FilePeek({ entry, big = false, onOpen, onOpenOutside }) {
+export function FilePeek({ entry, big = false, onOpen, onOpenOutside, onExtract }) {
   const peek = usePeek(entry);
   const [size, setSize] = useState('');
   useEffect(() => setSize(''), [entry?.path]);
   if (!entry) return html`<div class="peek-empty muted small">Pick a file to see it here.</div>`;
-  const icon = entry.dir ? 'folder' : peekKind(entry.name) === 'image' ? 'image' : 'file';
+  const icon = entry.dir ? 'folder' : peekKind(entry.name) === 'image' ? 'image' : peekKind(entry.name) === 'archive' ? 'archive' : 'file';
   if (entry.dir || peek?.kind === 'none') {
     return html`<div class="peek-card">
       <${Icon} name=${icon} size=${big ? 64 : 36} />
@@ -83,6 +88,7 @@ export function FilePeek({ entry, big = false, onOpen, onOpenOutside }) {
       ${!big && html`<${Facts} entry=${entry} extra=${size} />`}
     </div>`;
   }
+  if (peek.kind === 'archive') return html`<${ArchivePeek} key=${entry.path} entry=${entry} big=${big} onExtract=${onExtract} />`;
   if (peek.kind === 'doc') {
     return html`<${DocumentView} key=${entry.path} name=${entry.name} kind=${documentKind(entry.name)} version=${entry.mtimeMs} compact=${!big}
       load=${() => window.desktop.disk.readBytes(entry.path)} onOpenOutside=${big ? undefined : () => onOpenOutside(entry)} bookmarkKey=${big ? entry.path : undefined}
@@ -96,7 +102,7 @@ export function FilePeek({ entry, big = false, onOpen, onOpenOutside }) {
 }
 
 /** The preview at the bottom of the folders view, for the file picked in the list. */
-export function PeekPane({ entry, height, onOpen, onOpenOutside, onExpand, onReadText, onClose }) {
+export function PeekPane({ entry, height, onOpen, onOpenOutside, onExpand, onReadText, onExtract, onClose }) {
   return html`<section class="peek-pane" style=${{ height: `${height}px` }} aria-label="Preview">
     <div class="peek-head">
       <${Icon} name="eye" size=${14} />
@@ -107,7 +113,7 @@ export function PeekPane({ entry, height, onOpen, onOpenOutside, onExpand, onRea
       <button type="button" class="icon-btn sm" aria-label="Hide the preview" title="Hide the preview" onClick=${onClose}><${Icon} name="x" size=${15} /></button>
     </div>
     <div class="peek-body">
-      <${FilePeek} entry=${entry} onOpen=${onOpen} onOpenOutside=${onOpenOutside} />
+      <${FilePeek} entry=${entry} onOpen=${onOpen} onOpenOutside=${onOpenOutside} onExtract=${onExtract} />
     </div>
   </section>`;
 }
@@ -119,7 +125,7 @@ const ReadTextButton = ({ entry, onReadText }) =>
  * Files viewed large over the window, one at a time (like Quick Look): the arrow
  * keys go to the previous and next file of the folder, Space or Escape close it.
  */
-export function FileViewer({ entries, path, onPath, onOpen, onOpenOutside, onReadText, onClose }) {
+export function FileViewer({ entries, path, onPath, onOpen, onOpenOutside, onReadText, onExtract, onClose }) {
   const index = Math.max(0, entries.findIndex((e) => e.path === path));
   const entry = entries[index];
   // Where it is now, ahead of the next render (keys pressed quickly in a row each count).
@@ -152,7 +158,7 @@ export function FileViewer({ entries, path, onPath, onOpen, onOpenOutside, onRea
   return html`<div class="viewer-backdrop" role="dialog" aria-modal="true" aria-label=${`Viewing ${entry.name}`} onPointerDown=${(e) => e.target === e.currentTarget && onClose()}>
     <div class="viewer">
       <div class="viewer-head">
-        <${Icon} name=${peekKind(entry.name) === 'image' ? 'image' : 'file'} size=${16} />
+        <${Icon} name=${peekKind(entry.name) === 'image' ? 'image' : peekKind(entry.name) === 'archive' ? 'archive' : 'file'} size=${16} />
         <strong class="viewer-name" title=${entry.path}>${entry.name}</strong>
         <span class="muted small viewer-count">${index + 1} of ${entries.length}<span class="viewer-size"> · ${formatBytes(entry.size)}</span></span>
         <span class="spacer" />
@@ -163,7 +169,7 @@ export function FileViewer({ entries, path, onPath, onOpen, onOpenOutside, onRea
         <button type="button" class="icon-btn sm" aria-label="Close (Esc)" title="Close (Esc)" onClick=${onClose}><${Icon} name="x" size=${17} /></button>
       </div>
       <div class="viewer-body">
-        <${FilePeek} key=${entry.path} entry=${entry} big onOpen=${onOpen} onOpenOutside=${onOpenOutside} />
+        <${FilePeek} key=${entry.path} entry=${entry} big onOpen=${onOpen} onOpenOutside=${onOpenOutside} onExtract=${onExtract} />
       </div>
     </div>
   </div>`;

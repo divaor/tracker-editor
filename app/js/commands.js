@@ -204,6 +204,8 @@ export const COMMAND_LIST = [
   { id: 'clipboard-history', group: 'Tools', label: 'Clipboard history', keys: 'Mod+Shift+V', only: 'desktop' },
   { id: 'compare-with', group: 'Tools', label: 'Compare with another file…', hint: 'An open tab (the ones next to it first), a file in your folders, my files, or Browse…' },
   { id: 'compare-clipboard', group: 'Tools', label: 'Compare with the clipboard' },
+  { id: 'archive-extract', group: 'Folders view', label: 'Extract the archive picked in Folders…', only: 'desktop', android: true, hint: 'zip, 7z, rar, tar, tar.gz, gz, cab, iso…: here, or into a new folder; asks for its password. Also in its menu: Extract here, Extract to “name/”, Show what’s inside' },
+  { id: 'archive-compress', group: 'Folders view', label: 'Compress what is picked in Folders…', only: 'desktop', android: true, hint: 'zip, 7z, tar, tar.gz, tar.xz or tar.bz2; a level, a password (AES-256), volumes, folders left out. Also in their menu' },
   { id: 'compare-folders', group: 'Tools', label: 'Compare two folders…', only: 'desktop', android: true, hint: 'The folder open in Folders with another one (here or on a server); or a folder’s menu → Compare with another folder…' },
   { id: 'two-panes', group: 'Tools', label: 'Two panes: two folders side by side…', only: 'desktop', android: true, hint: 'The folder open in Folders and another one (here or on a server), to copy and move files between them, like WinSCP' },
   { id: 'two-panes-keys', group: 'Tools', label: 'In two panes: copy / move to the other side, new folder, delete, the other side', keys: 'F5 / F6 / F7 / F8 / Tab', run: false },
