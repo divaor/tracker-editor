@@ -383,7 +383,7 @@ Above the text, for the open file:
 - **Share**: WhatsApp, Teams, email, Quick Share or any app on the phone, as text or as a file; on a computer email, WhatsApp, Teams, copy the text, copy a link that opens the file in the editor, or save a copy.
 - **Summarize** (with the model on).
 - **Send to tracker**: makes the file a task, idea or doc on the tracker, linked to it. *On tracker* shows when it already is.
-- **⋯ More**: Details…, Outline and links, Filter lines, macros, History, Compare with…, Compare with clipboard, Text from an image…, Text from a screenshot… (desktop), Dictate (phone), Send checklist to tracker, Type into another window (desktop), Copy for Claude, Ask the model (`Ctrl+K`), Insert snippet / Save as snippet / Use as a snippet, Suggest project and tags (model on), Encrypt / Stop encrypting, Move to trash. Files opened from disk or from a server have their own bar: see 10 and 11.
+- **⋯ More**: Details…, Outline and links, Filter lines, macros, History, Compare with…, Compare with clipboard, Text from an image…, Text from a screenshot… (desktop), Dictate (phone), Send checklist to tracker, Type into another window (desktop), Copy for Claude, Ask the model (`Ctrl+K`), Insert snippet / Save as snippet / Use as a snippet, Suggest project and tags (model on), Encrypt / Stop encrypting, Lock with a password… (see [Files with a password](#files-with-a-password)), Move to trash. Files opened from disk or from a server have their own bar: see 10 and 11.
 
 ---
 
@@ -652,6 +652,28 @@ For files whose text should not be readable in the GitHub repo:
 - The Claude connector lists encrypted files but cannot read or change them.
 - **The model never gets them**: not their text, not their names. On an encrypted file there is no ✦ bubble, `Ctrl+K` offers help with the editor only, and asking about your files, summaries, suggestions, naming and filing new notes all leave encrypted files out.
 - **Stop encrypting** stores the text in the clear again from the next sync.
+
+### Files with a password
+
+A file can have a password of its own, asked for **every time it opens**. It is kept encrypted wherever it lives: a file on this computer is written to disk encrypted, and a note in My files is stored on this device and synced encrypted. This is apart from the passphrase above: each locked file has its own password, and nothing is unlocked once per device.
+
+- **Make one**: in Folders, a folder's menu → **New locked file…** (on disk it is `name.locked`, for example `notes.md.locked`, so the name inside still gives its colors); for My files, **File → New Locked File…**, the 🔒 next to **New** in the sidebar, or the command **New file locked with a password** (`Ctrl+Shift+P`). Give it a name and a password twice; the bar under the password says how hard it is to guess (longer is better: four or five words you will remember).
+- **Lock a file you have**: its tab's menu, the file bar's ⋯, or (Folders) its menu → **Lock with a password…**. A file on this computer is written again encrypted as `name.locked` beside it, and the plain one goes to the Recycle Bin or Trash: **empty it** to remove the plain text for good (in the Android app it is deleted at once). Files on servers are not locked in place (the plain one would stay there): make a new locked file there and paste the text into it. A note in My files is locked in place; earlier versions in the history stay as they were (plain).
+- **Opening it** shows its lock in the editor's place: type the password and press **Open**. A wrong password says so. The text then shows as usual: edit, search in it (`Ctrl+F`), preview it, save it (`Ctrl+S` for a file on disk). Every save encrypts it again.
+- **It locks again**:
+  - **Lock now**: the **Lock** button in the file bar; **Lock all files locked with a password now** is `Alt+Shift+L` (also in the File menu).
+  - **Ask for the password each time I come back to this tab**: a box in the lock screen, and an item in the file's menu. With it on, switching to another tab (or pane) locks it. It is kept in the file, so it holds on every device.
+  - **After a while without use**: 10 minutes by default; **Settings → Files with a password → Lock again** (1 minute to an hour, or never).
+  - **When the app is hidden** (minimized, another app in front, the phone locked): on by default, in the same place.
+  - Closing its tab, or the app.
+- **Change the password…** and **Remove the lock…** are in its menu while it is open; both ask for the password first. Removing the lock writes the text plain again (a file on disk as `name` beside it, the locked one to the Recycle Bin).
+- **A forgotten password cannot be recovered**: nobody, not even this app, can open the file without it. Write it down somewhere safe.
+
+**What it protects against**: someone who gets the file itself (a copy of the disk, a backup, the synced data repo, a lost laptop that was off) cannot read it without the password: it is AES-256-GCM with a key made from the password (PBKDF2-SHA256, 600,000 rounds), and a file changed by hand does not open. While a file is locked, the app keeps only its encrypted text: nothing plain on disk, in the app's storage or in the sync.
+
+**What it does not protect against**: someone at your computer while the file is open (lock it, or let it lock itself); a program on your computer that reads what you type or what is in memory (a keylogger); a weak password, which can be guessed; the file's name, which is not hidden; the plain file you locked, until you empty the bin; and what you copy out of it, paste elsewhere or share yourself. The desktop's clipboard history does not keep what you copy from a locked file.
+
+**It stays in the editor**: like encrypted files, a locked file never goes to the model (not its text; for a note, not its name either), nor to a language server, Git's blame and bar of changed lines, Find in a folder, Find by asking, Copy for Claude, comparisons or the Claude app. It is not run, tested or debugged. Its key is kept only in the app's memory while it is open (never stored) and goes when it locks again.
 
 ---
 
@@ -1023,6 +1045,7 @@ These are the editor's own keys. Any of them can be changed, and VS Code's or No
 | Keys | Action |
 | --- | --- |
 | `Alt+N` (desktop `Ctrl+N`) | New file |
+| `Alt+Shift+L` | Lock all files locked with a password now (their password opens each again) |
 | `Ctrl+P` | Open a file by name; type a question (or `?` first) to find by asking |
 | `Alt+V` | Which tabs show: a project, a folder, Notes, Other files, several, or all |
 | `Ctrl+Alt+PageDown` / `Ctrl+Alt+PageUp` / `Ctrl+Alt+Home` | The next / previous group of tabs / all tabs |
