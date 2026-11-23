@@ -150,10 +150,15 @@ export function writeFormat(info, text, fallback = null) {
   return format;
 }
 
-/** The tab converted to `to` (an EOLS one, or 'keep': a mixed file's lines each keep theirs): the fields to change. */
+/** The tab converted to `to` (an EOLS one, or 'keep': a mixed file's lines each keep theirs, new ones the most common): the fields to change. */
 export function convertEndings(tab, to) {
-  if (to === 'keep') return { eol: tab.eol, eolChosen: undefined, eolChoice: 'keep' };
+  if (to === 'keep') return { eol: tab.mixed ? mostCommon(tab.mixed) : tab.eol, eolChosen: undefined, eolChoice: 'keep' };
   return { eol: to, eolChosen: true };
+}
+
+/** The kind most breaks are ({ crlf, lf, cr }; a tie: CRLF, then LF), as diskFiles.cjs decides a file's. */
+export function mostCommon({ crlf = 0, lf = 0, cr = 0 } = {}) {
+  return crlf > 0 && crlf >= lf && crlf >= cr ? 'crlf' : cr > lf ? 'cr' : 'lf';
 }
 
 /** 'crlf' / 'lf' / 'cr' when every break of `letters` is the same kind (or there are none: null), else null. */
@@ -229,6 +234,8 @@ export function eolStatus(tab) {
   if (now === 'mixed') {
     if (!ends) return { text: 'Mixed', tone: 'warn', title: `Mixed line endings: ${counts}. Saving asks how to save them; click to choose now.` };
     if (ends.why === 'keep') return { text: 'Mixed', tone: '', title: `Mixed line endings (${counts}): saving keeps each line's own; new lines get ${EOL_NAMES[tab.eol]}. Click to change.` };
+    // The end of a large file, read-only: as it is.
+    if (!ends.why) return { text: 'Mixed', tone: '', title: `Mixed line endings (${counts}).` };
     return { text: `Mixed → ${EOL_SHORT[ends.eol]}${ends.why === 'editorconfig' ? ' · .editorconfig' : ''}`, tone: '', title: `Mixed line endings (${counts}): saving makes every line ${EOL_NAMES[ends.eol]}${ends.why === 'editorconfig' ? ', as the .editorconfig says' : ''}. Click to change.` };
   }
   if (ends && ends.eol !== now) {

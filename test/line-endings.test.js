@@ -121,6 +121,9 @@ test('a mixed file: undecided asks; keep each line\'s own (lines changed and new
   assert.equal(after.eolBase, tab.text);
   assert.deepEqual(after.mixed, { crlf: 4, lf: 1, cr: 0 });
   assert.equal(eolUndecided({ ...tab, ...after }), false);
+  // Converted by hand, then back to keeping: new lines get the file's most common again.
+  const back = { ...tab, ...convertEndings(tab, 'lf') };
+  assert.equal({ ...back, ...convertEndings(back, 'keep') }.eol, 'crlf');
   // All one kind instead.
   const all = { ...tab, ...eolFields(read), ...convertEndings(tab, 'lf') };
   assert.equal(endingsChanged(all), true);
