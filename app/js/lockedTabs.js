@@ -171,7 +171,7 @@ export function createLockedTabs({ host, onChange = () => {}, onLost = () => {},
       return queue(s, async () => {
         const plain = s.last.plain;
         if (password != null) {
-          const made = await lockText(plain, password, { name: patch.name ?? s.header.name, language: patch.language ?? s.header.language, relock: patch.relock ?? s.header.relock });
+          const made = await lockText(plain, password, { name: patch.name ?? s.header.name, language: patch.language ?? s.header.language, relock: patch.relock ?? s.header.relock, eol: patch.eol ?? s.header.eol });
           s.key = made.key;
           s.header = made.header;
           s.base = s.last = { plain, text: made.text };

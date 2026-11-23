@@ -75,7 +75,11 @@ async function readFile(uri) {
   const { data } = await call('read', big ? { uri, offset: info.size - TAIL, length: TAIL } : { uri });
   const bytes = fromBase64(data);
   const decoded = decodeText(bytes);
-  if (big) decoded.text = fromWholeLine(decoded.text);
+  if (big) {
+    // The tail is read-only: its breaks' letters (a mixed file) are not kept.
+    decoded.text = fromWholeLine(decoded.text);
+    delete decoded.eols;
+  }
   return { path: uri, name: info.name, ...decoded, mtimeMs: info.mtimeMs, size: info.size >= 0 ? info.size : bytes.length, truncated: big, readOnly: !info.writable };
 }
 
@@ -89,12 +93,12 @@ export function changedSince(now, { expectedMtime, expectedSize }) {
   return false;
 }
 
-async function writeFile(uri, text, { eol, bom, encoding, expectedMtime, expectedSize, force = false } = {}) {
+async function writeFile(uri, text, { eol, bom, encoding, eols, expectedMtime, expectedSize, force = false } = {}) {
   if (!force) {
     const now = await call('stat', { uri });
     if (changedSince(now, { expectedMtime, expectedSize })) return { conflict: true, mtimeMs: now.mtimeMs };
   }
-  const info = await call('write', { uri, data: toBase64(encodeText(text, { eol, bom, encoding })) });
+  const info = await call('write', { uri, data: toBase64(encodeText(text, { eol, bom, encoding, eols })) });
   return { mtimeMs: info.mtimeMs, size: info.size };
 }
 
@@ -460,6 +464,11 @@ function foldersBridge() {
     index: inv('folder:index'),
     replace: inv('folder:replace'),
     replaceUndo: inv('folder:replace-undo'),
+    eolScan: inv('folder:eol-scan'),
+    eolConvert: inv('folder:eol-convert'),
+    eolUndo: inv('folder:eol-undo'),
+    eolStop: inv('folder:eol-stop'),
+    onEolProgress: (cb) => nodeOn('folder:eol-progress', cb),
     onFound(cb) {
       const a = nodeOn('folder:found', (data) => cb({ type: 'found', ...data }));
       const b = nodeOn('folder:find-progress', (data) => cb({ type: 'progress', ...data }));
@@ -557,9 +566,9 @@ function install() {
       }
       return out;
     },
-    // Save a copy: the system asks where.
-    async saveFile(name, text) {
-      const saved = await call('saveAs', { name, mime: mimeOf(name), data: toBase64(new TextEncoder().encode(text)) });
+    // Save a copy: the system asks where (with the line endings the page chose: `eol`).
+    async saveFile(name, text, opts = {}) {
+      const saved = await call('saveAs', { name, mime: mimeOf(name), data: toBase64(encodeText(text, { eol: opts?.eol ?? 'lf' })) });
       return saved.canceled ? null : saved.name;
     },
     disk: {

@@ -12,6 +12,7 @@ import { server } from './servers.js';
 import { getSettings } from './settings.js';
 import { diskKey, fileKey, parseKey, store } from './store.js';
 import { hasShell, isRemotePath, remoteParts } from './where.js';
+import { newTextFile } from './newText.js';
 
 const message = (err) => String(err?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
 const baseName = (p) => String(p).replace(/[\\/]+$/, '').split(/[\\/]/).pop() || String(p);
@@ -347,7 +348,7 @@ function folderWork(base, { file, host, actions }) {
               : async () => {
                   if (await exists(path)) return `${s.path} is there again`;
                   await ensureFolders(relDir(s.path));
-                  await window.desktop.folders.newFile(parentOf(path), baseName(path), { text: kept });
+                  await newTextFile(parentOf(path), baseName(path), { text: kept });
                   return '';
                 },
         };

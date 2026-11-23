@@ -36,6 +36,10 @@ const stoppedError = () => Object.assign(new Error('Stopped.'), { stopped: true 
 const isRemote = (p) => typeof p === 'string' && p.startsWith(SCHEME);
 // A name a server lists that cannot be a file's own name (it would lead elsewhere): left out.
 const listable = (name) => Boolean(name) && name !== '.' && name !== '..' && !/[/\u0000]/.test(name);
+// Which system a server runs, for the line endings of new files there: an SFTP server gives a
+// Windows server's paths as /C:/… (its home), an FTP server names it in its SYST answer.
+const systemOfHome = (home) => (/^\/[A-Za-z]:/.test(String(home)) ? 'windows' : 'unix');
+const ftpSystem = (message) => (/windows/i.test(String(message)) ? 'windows' : 'unix');
 /** A path under `root` here for a relative path from a server, refused when it would lead outside. */
 function localUnder(root, rel) {
   const parts = rel.split('/');
@@ -331,6 +335,12 @@ class SftpSession {
   /** A connection to `host:port` made by the server (for a server reached through this one). */
   forward(host, port) {
     return new Promise((resolve, reject) => this.client.forwardOut('127.0.0.1', 0, host, port, (err, stream) => (err ? reject(err) : resolve(stream))));
+  }
+
+  /** 'windows' or 'unix' (SFTP gives a Windows server's paths as /C:/…), or null when it could not tell. */
+  async system() {
+    const home = await this.home().catch(() => null);
+    return home === null ? null : systemOfHome(home);
   }
 
   /** Whether the server runs Windows (SFTP gives its paths as /C:/…). */
@@ -852,6 +862,12 @@ class FtpSession {
     return this.run((c) => c.pwd());
   }
 
+  /** 'windows' when SYST names Windows (IIS: "215 Windows_NT"), else 'unix'; null when it would not say. */
+  async system() {
+    const answer = await this.run((c) => c.send('SYST')).catch(() => null);
+    return answer ? ftpSystem(answer.message) : null;
+  }
+
   async stat(p) {
     if (p === '/') return { dir: true, size: 0, mtimeMs: 0 };
     const listing = await this.run((c) => c.list(posix.dirname(p))).catch((err) => {
@@ -996,10 +1012,20 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
     if (!conn) throw new Error('That server is not set up here any more.');
     return conn;
   };
+  // `system`: 'windows' or 'unix' as the server said the last time it connected (kept in remote.json's
+  // `systems`), so the page knows before connecting again: new files there get its line endings.
   const status = (id) => {
     const l = live.get(id);
-    return { id, state: l?.state ?? 'disconnected', error: l?.error ?? '' };
+    return { id, state: l?.state ?? 'disconnected', error: l?.error ?? '', system: data.systems?.[id] ?? null };
   };
+  /** Asks a server that just connected which system it runs (not places: they are Linux), and keeps it. */
+  async function learnSystem(id, s) {
+    const system = await s.system?.().catch(() => null);
+    if (!system || data.systems?.[id] === system || live.get(id)?.session !== s) return;
+    data.systems = { ...data.systems, [id]: system };
+    save();
+    onStatus(status(id));
+  }
   const setState = (id, state, error = '') => {
     const l = live.get(id) ?? {};
     live.set(id, { ...l, state, error });
@@ -1145,7 +1171,8 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
           throw new Error('Disconnected.');
         }
         live.set(id, { session: s, state: 'connected', error: '' });
-        onStatus({ id, state: 'connected', error: '' });
+        onStatus({ id, state: 'connected', error: '', system: data.systems?.[id] ?? null });
+        learnSystem(id, s);
         return s;
       },
       (err) => {
@@ -1248,8 +1275,12 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
     saveConnection(input, { password, passphrase } = {}) {
       const existing = input.id ? data.connections.find((c) => c.id === input.id) : null;
       const conn = clean(input, existing);
-      // Connection details changed: the old session goes.
+      // Connection details changed: the old session goes (and what it runs is asked again).
       api.disconnect(conn.id);
+      if (existing && (existing.host !== conn.host || existing.port !== conn.port || existing.protocol !== conn.protocol) && data.systems?.[conn.id]) {
+        const { [conn.id]: _gone, ...rest } = data.systems;
+        data.systems = rest;
+      }
       data.connections = existing ? data.connections.map((c) => (c.id === conn.id ? conn : c)) : [...data.connections, conn];
       save();
       if (typeof password === 'string') secrets.set(conn.id, 'password', password);
@@ -1263,6 +1294,7 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
       const conn = data.connections.find((c) => c.id === id);
       data.connections = data.connections.filter((c) => c.id !== id);
       if (conn && !data.connections.some((c) => c.host === conn.host && c.port === conn.port)) delete data.knownHosts[`[${conn.host}]:${conn.port}`];
+      if (data.systems?.[id]) delete data.systems[id];
       save();
       secrets.set(id, 'password', '');
       secrets.set(id, 'passphrase', '');
@@ -1504,8 +1536,7 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
         // A place reads the file and its stat in one command.
         if (s.readFile && !disk.documentKind(posix.basename(p))) {
           const got = await s.readFile(p, { max: disk.MAX_FULL, keep: disk.TAIL });
-          const decoded = disk.decode(got.bytes);
-          if (got.truncated) decoded.text = decoded.text.slice(decoded.text.indexOf('\n') + 1);
+          const decoded = got.truncated ? disk.fromWholeLine(disk.decode(got.bytes)) : disk.decode(got.bytes);
           return { path: uri, name: posix.basename(p), ...decoded, mtimeMs: got.st.mtimeMs, size: got.st.size, truncated: got.truncated };
         }
         const st = await s.stat(p);
@@ -1514,20 +1545,19 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
         if (disk.documentKind(posix.basename(p))) return disk.documentInfo(uri, posix.basename(p), st);
         const truncated = st.size > disk.MAX_FULL;
         const buf = truncated ? await s.readRange(p, st.size - disk.TAIL, disk.TAIL) : await s.read(p);
-        const decoded = disk.decode(buf);
-        if (truncated) decoded.text = decoded.text.slice(decoded.text.indexOf('\n') + 1);
+        const decoded = truncated ? disk.fromWholeLine(disk.decode(buf)) : disk.decode(buf);
         return { path: uri, name: posix.basename(p), ...decoded, mtimeMs: st.mtimeMs, size: st.size, truncated };
       }, { again: true }),
-    write: (uri, text, { eol, bom, encoding, expectedMtime, expectedSize, force = false } = {}) =>
+    write: (uri, text, { eol, bom, encoding, eols, expectedMtime, expectedSize, force = false } = {}) =>
       withPath(uri, async (s, p) => {
         // A place checks and writes in one command (through a .part file there).
-        if (s.writeChecked) return s.writeChecked(p, disk.encode(text, { eol, bom, encoding }), force || expectedMtime === undefined ? {} : { expectedMtime, expectedSize });
+        if (s.writeChecked) return s.writeChecked(p, disk.encode(text, { eol, bom, encoding, eols }), force || expectedMtime === undefined ? {} : { expectedMtime, expectedSize });
         if (!force && expectedMtime !== undefined) {
           const now = await s.stat(p);
           // Changed on the server since it was read here (FTP servers may not give a time: the size then).
           if (now && (Math.abs(now.mtimeMs - expectedMtime) > 1 || (expectedSize !== undefined && now.size !== expectedSize))) return { conflict: true, mtimeMs: now.mtimeMs };
         }
-        await s.write(p, disk.encode(text, { eol, bom, encoding }));
+        await s.write(p, disk.encode(text, { eol, bom, encoding, eols }));
         const st = await s.stat(p);
         return { mtimeMs: st?.mtimeMs ?? Date.now(), size: st?.size ?? 0 };
       }),
@@ -1535,6 +1565,12 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
       withPath(uri, async (s, p) => {
         const st = await s.stat(p);
         return st && { mtimeMs: st.mtimeMs, size: st.size };
+      }, { again: true }),
+    /** A file or folder picked in Folders: { dir, size }, or null when it is not there. */
+    entry: (uri) =>
+      withPath(uri, async (s, p) => {
+        const st = await s.stat(p);
+        return st && { dir: Boolean(st.dir), size: st.size ?? 0 };
       }, { again: true }),
     readAppended: (uri, offset, { encoding = 'utf-8' } = {}) =>
       withPath(uri, async (s, p) => {
@@ -1544,8 +1580,7 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
         const length = Math.min(st.size - offset, 2 * 1024 * 1024);
         const start = st.size - length;
         const buf = length ? await s.readRange(p, start, length) : Buffer.alloc(0);
-        const text = (encoding === 'latin1' ? buf.toString('latin1') : buf.toString('utf8')).replace(/\r\n?/g, '\n');
-        return { text, size: st.size, mtimeMs: st.mtimeMs, skipped: start - offset };
+        return { text: disk.decodeAppended(buf, encoding), size: st.size, mtimeMs: st.mtimeMs, skipped: start - offset };
       }),
     readBytes: (uri, max) =>
       withPath(uri, async (s, p) => {
@@ -1567,12 +1602,13 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
         const entries = await s.list(p);
         return { dir: uri, entries: entries.map((e) => ({ ...e, path: toUri(id, e.path), hidden: e.name.startsWith('.') })), truncated: false };
       }, { again: true }),
-    newFile: (dirUri, name, { text = '', unique = false } = {}) =>
+    // `eol` (the page's choice for the place and the kind: lf, crlf or cr): the text's line breaks become those.
+    newFile: (dirUri, name, { text = '', unique = false, eol } = {}) =>
       withPath(dirUri, async (s, dir, id) => {
         const clean = checkName(name);
         const target = unique ? await freeRemotePath(s, dir, clean) : posix.join(dir, clean);
         if (!unique && (await s.stat(target))) throw new Error(`${clean} already exists here.`);
-        await s.write(target, Buffer.from(text, 'utf8'));
+        await s.write(target, Buffer.from(disk.newFileText(text, eol), 'utf8'));
         return toUri(id, target);
       }),
     newFolder: (dirUri, name) =>
@@ -1867,4 +1903,4 @@ function tempCopyPath(uri) {
   return nodePath.join(dir, posix.basename(parseUri(uri).path));
 }
 
-module.exports = { createRemote, isRemote, parseUri, toUri, fingerprintOf, friendlyError, tempCopyPath, localUnder, listedTime, SCHEME, PROTOCOLS, SHELL_PROTOCOLS, DEFAULT_PORT };
+module.exports = { createRemote, isRemote, parseUri, toUri, fingerprintOf, friendlyError, tempCopyPath, localUnder, listedTime, systemOfHome, ftpSystem, SCHEME, PROTOCOLS, SHELL_PROTOCOLS, DEFAULT_PORT };

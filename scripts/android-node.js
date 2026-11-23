@@ -17,7 +17,7 @@ const ABIS = ['arm64-v8a'];
 const LIBNODE = path.join(ROOT, 'android', 'app', 'libnode');
 const ASSETS = path.join(ROOT, 'android', 'app', 'src', 'main', 'assets', 'nodejs');
 // The modules electron/main.cjs imports from the page (app/js), and what those import.
-const PAGE_MODULES = ['search.js', 'folders.js', 'docTypes.js', 'archives.js', 'indent.js', 'codeNav.js', 'outline.js', 'gitStatus.js', 'replace.js', 'askFind.js', 'debugTools.js'];
+const PAGE_MODULES = ['search.js', 'folders.js', 'docTypes.js', 'archives.js', 'indent.js', 'codeNav.js', 'outline.js', 'gitStatus.js', 'replace.js', 'askFind.js', 'debugTools.js', 'lineEndings.js'];
 // Packages the main process needs on a phone (not node-pty, Electron or the build tools). 7z-wasm:
 // 7-Zip in WebAssembly for archives (archives.cjs), its glue and .wasm read by the main process.
 const PACKAGES = ['ssh2', 'basic-ftp', '7z-wasm'];

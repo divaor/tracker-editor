@@ -4,6 +4,8 @@
 // (electron/diskFiles.cjs) for the files picked in its open dialog.
 import { diskKey, store } from './store.js';
 import { isRemotePath, remoteParts } from './where.js';
+import { saveEndings, eolUndecided } from './lineEndings.js';
+import { cannotHold } from './textBytes.js';
 
 const bridge = () => globalThis.window?.desktop?.disk;
 export const diskAvailable = () => Boolean(bridge());
@@ -27,16 +29,45 @@ export async function openDiskFiles() {
 // A file on a server that could not be reached (rather than one that is not there).
 const unreachable = (path, err) => isRemotePath(path) && !/Not found/i.test(err?.message ?? '');
 
-/** Writes the tab's text: 'saved', or 'conflict' when the file changed on disk or on the server (unless `force`). */
-export async function saveDiskTab(path, { force = false } = {}) {
-  const tab = store.diskTab(path);
+/**
+ * What must be asked before a tab is saved, or null: { mixed } (a file with mixed line endings
+ * nobody decided on: each line's own, or all one kind), { unencodable: [characters] } (a
+ * Windows-1252 file given characters it cannot hold: as UTF-8 instead, or not saved).
+ */
+export function saveQuestions(tab) {
+  const unencodable = cannotHold(tab.text, tab.encoding ?? 'utf-8');
+  const mixed = eolUndecided(tab);
+  return mixed || unencodable.length ? { mixed, unencodable } : null;
+}
+// The app asks them (dialogs): (path, questions) → true to go on (having set the tab's choices), false not to save.
+let ask = null;
+export const setSaveQuestions = (fn) => {
+  ask = fn;
+};
+
+/**
+ * Writes the tab's text: 'saved', or 'conflict' when the file changed on disk or on the server
+ * (unless `force`), 'cancelled' when a question before it was answered so, 'undecided' when one is
+ * needed and `quiet` (saving by itself) says not to ask.
+ */
+export async function saveDiskTab(path, { force = false, quiet = false } = {}) {
+  let tab = store.diskTab(path);
   if (!tab) return 'missing';
+  const questions = saveQuestions(tab);
+  if (questions) {
+    if (quiet || !ask) return 'undecided';
+    if (!(await ask(path, questions))) return 'cancelled';
+    tab = store.diskTab(path);
+    if (!tab) return 'missing';
+    if (saveQuestions(tab)) return 'cancelled';
+  }
   const text = tab.text;
+  const ends = saveEndings(tab) ?? { eol: tab.eol };
   store.diskPatch(path, { saving: true });
   let result;
   try {
     // The size too: some FTP servers give no exact time.
-    result = await bridge().write(path, text, { eol: tab.eol, bom: tab.bom, encoding: tab.encoding, expectedMtime: tab.mtimeMs, expectedSize: tab.size, force });
+    result = await bridge().write(path, text, { eol: ends.eol, eols: ends.eols, bom: tab.bom, encoding: tab.encoding, expectedMtime: tab.mtimeMs, expectedSize: tab.size, force });
   } catch (err) {
     store.diskPatch(path, { saving: false, ...(unreachable(path, err) ? { offline: true } : {}) });
     throw err;
@@ -45,7 +76,7 @@ export async function saveDiskTab(path, { force = false } = {}) {
     store.diskPatch(path, { conflict: true, saving: false, offline: false });
     return 'conflict';
   }
-  store.diskSaved(path, { text, ...result });
+  store.diskSaved(path, { text, ...result, ends });
   store.diskPatch(path, { saving: false, offline: false });
   return 'saved';
 }

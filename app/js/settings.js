@@ -48,6 +48,10 @@ export const DEFAULT_SETTINGS = {
   // `tabSize` is for files that do not say. The ones picked in the status bar: key → { tabs, size }.
   detectIndent: true,
   indentChosen: {},
+  // The line endings of files Tinta makes (new files, copies saved or dragged out): 'auto' those of
+  // the place's system (Windows: CRLF; Linux, macOS, Android, Docker, WSL: LF; a server's own), or
+  // 'crlf' / 'lf' for all. Batch files are always CRLF and shell scripts LF; an .editorconfig wins.
+  lineEndings: 'auto',
   // Problems as you type (JSON, YAML, XML, HTML, code), a guide at each indentation level,
   // brackets colored by how deep they are, and the enclosing function or section kept at the top.
   problems: true,

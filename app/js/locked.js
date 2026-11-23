@@ -6,6 +6,10 @@
 //   {"v":1,"kdf":"PBKDF2-SHA256","iter":600000,"salt":"…","cipher":"AES-256-GCM","iv":"…","check":"…","name":"notes.md","language":"","relock":false}
 //   <the ciphertext in base64, 76 characters a line>
 //
+// A file that had line endings of its own when it was locked keeps them in an optional "eol"
+// ("crlf", "lf" or "cr", after "relock"), so taking the lock off writes it back with them; files
+// without one (made new, or by 0.53 before it) get those of the place they are in.
+//
 // The key comes from the password (NFC) by PBKDF2-SHA256 with the header's salt; the text is
 // AES-256-GCM with a fresh IV on every save, and the mark and the header line are its additional
 // data, so neither can be changed without the file failing to open. `check` (a known text sealed
@@ -24,6 +28,7 @@ export const MAX_ITERATIONS = 10000000;
 export const MIN_PASSWORD = 8;
 const CHECK_TEXT = 'locked file check';
 const LINE = 76;
+const EOLS = ['crlf', 'lf', 'cr'];
 
 const subtle = () => globalThis.crypto.subtle;
 const utf8 = new TextEncoder();
@@ -84,7 +89,8 @@ function readHeader(line) {
   if (h.name != null && (typeof h.name !== 'string' || h.name.length > 255)) return null;
   if (h.language != null && (typeof h.language !== 'string' || h.language.length > 60)) return null;
   if (h.relock != null && typeof h.relock !== 'boolean') return null;
-  return { v: 1, kdf: h.kdf, iter: h.iter, salt: h.salt, cipher: h.cipher, iv: h.iv, check: h.check, name: h.name ?? '', language: h.language ?? '', relock: Boolean(h.relock) };
+  if (h.eol != null && !EOLS.includes(h.eol)) return null;
+  return { v: 1, kdf: h.kdf, iter: h.iter, salt: h.salt, cipher: h.cipher, iv: h.iv, check: h.check, name: h.name ?? '', language: h.language ?? '', relock: Boolean(h.relock), ...(h.eol ? { eol: h.eol } : {}) };
 }
 
 /**
@@ -108,10 +114,11 @@ export function parseLocked(text) {
   return { header, headerLine: lines[1], data };
 }
 
-/** The header of a locked text (its options: name, language, relock), or null. */
+/** The header of a locked text (its options: name, language, relock, eol), or null. */
 export const lockedHeader = (text) => parseLocked(text)?.header ?? null;
 
-const headerLine = (h) => JSON.stringify({ v: 1, kdf: h.kdf, iter: h.iter, salt: h.salt, cipher: h.cipher, iv: h.iv, check: h.check, name: h.name ?? '', language: h.language ?? '', relock: Boolean(h.relock) });
+const headerLine = (h) =>
+  JSON.stringify({ v: 1, kdf: h.kdf, iter: h.iter, salt: h.salt, cipher: h.cipher, iv: h.iv, check: h.check, name: h.name ?? '', language: h.language ?? '', relock: Boolean(h.relock), ...(EOLS.includes(h.eol) ? { eol: h.eol } : {}) });
 // The mark and the header are the ciphertext's additional data: changing either breaks the file.
 const additional = (line) => utf8.encode(`${LOCKED_MARK}\n${line}`);
 const wrap = (b64) => (b64.match(new RegExp(`.{1,${LINE}}`, 'g')) ?? []).join('\n');
@@ -146,15 +153,16 @@ async function keyFits(key, check) {
 
 /**
  * A new lock for `password`: { key, header } (a fresh salt; `header` without an IV yet). The
- * options go in the header: `name` and `language` (what the text is, for its highlighting) and
- * `relock` (ask for the password again each time its tab is come back to).
+ * options go in the header: `name` and `language` (what the text is, for its highlighting),
+ * `relock` (ask for the password again each time its tab is come back to) and `eol` (the line
+ * endings the file had, given back when the lock is taken off).
  */
-export async function createLock(password, { iterations = ITERATIONS, name = '', language = '', relock = false } = {}) {
+export async function createLock(password, { iterations = ITERATIONS, name = '', language = '', relock = false, eol = null } = {}) {
   if (!Number.isInteger(iterations) || iterations < MIN_ITERATIONS || iterations > MAX_ITERATIONS) throw new RangeError(`iterations: ${MIN_ITERATIONS} to ${MAX_ITERATIONS}`);
   const salt = globalThis.crypto.getRandomValues(new Uint8Array(16));
   const key = await deriveKey(password, salt, iterations);
   const check = await encrypt(key, utf8.encode(CHECK_TEXT));
-  const header = { v: 1, kdf: 'PBKDF2-SHA256', iter: iterations, salt: toBase64(salt), cipher: 'AES-256-GCM', iv: '', check: toBase64(concat(check.iv, check.data)), name, language, relock: Boolean(relock) };
+  const header = { v: 1, kdf: 'PBKDF2-SHA256', iter: iterations, salt: toBase64(salt), cipher: 'AES-256-GCM', iv: '', check: toBase64(concat(check.iv, check.data)), name, language, relock: Boolean(relock), ...(EOLS.includes(eol) ? { eol } : {}) };
   return { key, header };
 }
 
@@ -179,7 +187,7 @@ export async function sealLocked(key, header, plain, patch = {}) {
   return { text: `${LOCKED_MARK}\n${line}\n${wrap(toBase64(data))}\n`, header: readHeader(line) };
 }
 
-const pick = (patch) => Object.fromEntries(Object.entries(patch ?? {}).filter(([k, v]) => ['name', 'language', 'relock'].includes(k) && v !== undefined));
+const pick = (patch) => Object.fromEntries(Object.entries(patch ?? {}).filter(([k, v]) => ['name', 'language', 'relock', 'eol'].includes(k) && v !== undefined));
 
 /** `plain` locked with a new password: { text, key, header }. */
 export async function lockText(plain, password, options = {}) {

@@ -16,8 +16,11 @@ import { FORMATTABLE, formatText, formatterFor, guessFormatter } from './formatt
 import { getReaderState, onReaderState, setReaderHighlighter, startReading, stopReading, toggleReading } from './reader.js';
 import { getSettings, isLocal, isSyncConfigured, onSettings, resolvedTheme, saveSettings } from './settings.js';
 import { cleanEntries, entryLabel, entryOf, MAX_SESSION, notOpen, sessionOf, sessionSummary, withRecent } from './terminalSessions.js';
-import { diskKey, fileKey, flush, parseKey, repoKey, store } from './store.js';
-import { diskAvailable, diskReadOnly, openDiskFiles, recheckServerTabs, reloadDiskTab, saveDiskTab, unwatchDisk, watchDiskTabs } from './diskTabs.js';
+import { diskKey, fileKey, flush, parseKey, repoKey, setEolFallback, store } from './store.js';
+import { diskAvailable, diskReadOnly, openDiskFiles, recheckServerTabs, reloadDiskTab, saveDiskTab, setSaveQuestions, unwatchDisk, watchDiskTabs } from './diskTabs.js';
+import { convertEndings, eolChoices, EOL_NAMES, fileEolOf, keepEols, mixedWords, saveTarget, writeFormat } from './lineEndings.js';
+import { defaultEol, hereEol, newTextFile } from './newText.js';
+import { withEols } from './textBytes.js';
 import { connIcon, hasShell, isContentPath, isRemotePath, KINDS, kindOfKey, remoteAddress, remoteParts, remoteRoot, toRemoteUri } from './where.js';
 import { onServers, placeKinds, refreshPlaceKinds, server, watchServers } from './servers.js';
 import { HostKeyDialog, PromptDialog, ServerDialog, SshImportDialog } from './ui/servers.js';
@@ -85,6 +88,7 @@ import { SaveCompareDialog, SavedComparesDialog } from './ui/savedCompares.js';
 import { canSave, sameSides } from './compares.js';
 import { ComparePicker } from './ui/comparePicker.js';
 import { binName, revealInFolders, runInFolders } from './ui/folders.js';
+import { ConvertEolDialog, EncodingSaveDialog, MixedSaveDialog } from './ui/lineEndings.js';
 import { HistoryPanel } from './ui/history.js';
 import { TrashDialog } from './ui/trash.js';
 import { LockedFile } from './ui/encryption.js';
@@ -150,6 +154,14 @@ const locks = createLockedTabs({
 });
 /** Everything typed into open locked tabs sealed and in the store (main.js, before another tab takes over). */
 export const settleLocked = () => locks.settled().catch(() => {});
+// A file with no line break yet gets the line endings of its place and kind (newText.js).
+setEolFallback((path, text) => defaultEol(path, text).eol);
+/** The line endings of a tab's copy written out: a file's own, else those for its kind on this computer (or at `path`). */
+const copyEol = (key, c, path = null) => {
+  const k = parseKey(key);
+  const d = k?.kind === 'disk' ? store.diskTab(k.path) : null;
+  return d ? (saveTarget(d)?.eol ?? d.eol ?? 'lf') : defaultEol(path ?? c.name, c.text).eol;
+};
 /** Whether a disk tab's file is locked with a password: its text, or its name (".locked") says so. */
 const lockedDisk = (path) => isLockedName(path) || isLockedText(store.diskTab(path)?.text);
 /**
@@ -656,10 +668,11 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         const locked = key.kind === 'file' && store.isLocked(key.id);
         const name = key.kind === 'file' ? (locked ? lockedName(store.get(key.id)?.name ?? 'file') : store.get(key.id)?.name) : store.repoTab(key.path)?.name;
         const text = key.kind === 'file' ? (locked ? store.lockedText(key.id) : store.text(key.id)) : store.repoTab(key.path)?.text;
+        // With this computer's line endings (a locked note's stays as it is: its text is the locked one).
         if (window.desktop?.saveFile) {
-          const saved = await window.desktop.saveFile(name, text);
+          const saved = await window.desktop.saveFile(name, text, { eol: locked ? 'lf' : hereEol() });
           if (saved) toast(`Saved a copy to ${saved}`);
-        } else download(name, text);
+        } else download(name, locked ? text : withEols(text, defaultEol(name, text).eol));
       },
       activeFile,
       activeInfo,
@@ -808,6 +821,16 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
           if (!store.diskTab(path)?.offline) toast(ipcMessage(err), { kind: 'error', timeout: 8000 });
           return 'error';
         }
+      },
+      /** Files written elsewhere (Folders' Line endings): their open tabs without unsaved edits read them again. */
+      reloadCleanDiskTabs(paths) {
+        for (const p of paths ?? []) if (store.diskTab(p) && !store.diskTab(p).dirty) actions.reloadDisk(p);
+      },
+      /** Folders' Line endings: the picked files and folders counted, then converted to `eol` ('crlf' or 'lf'). */
+      convertEolIn(paths, eol) {
+        if (!window.desktop?.folders?.eolScan) return toast('Converting the line endings of files in a folder works in the desktop app.');
+        if (!paths?.length) return;
+        setDialog({ type: 'convertEol', paths, eol });
       },
       async reloadDisk(path) {
         try {
@@ -1096,7 +1119,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       /** Text kept as a new file in a folder (a free name), opened as a file on disk. */
       async saveTextInFolder(dir, name, text) {
         try {
-          const file = await window.desktop.folders.newFile(dir, name, { text, unique: true });
+          const file = await newTextFile(dir, name, { text, unique: true });
           await actions.openDiskPath(file);
           toast(`Saved as ${file.split(/[\\/]/).pop()}`);
         } catch (err) {
@@ -1215,7 +1238,13 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
           if (c.dirty) toast('Not saved: the file on disk does not have your latest edits.', { timeout: 6000 });
           return { path: c.path };
         }
-        return { name: c.name, text: c.text };
+        // A copy: a file's own line endings (one on a server), else this computer's for its kind; a locked text as it is.
+        return { name: c.name, text: c.text, ...(c.locked ? {} : { eol: copyEol(key, c) }) };
+      },
+      /** The line endings of a tab's copy dropped into a folder (`path`: where it goes), or null to leave it. */
+      copyEolIn(key, path) {
+        const c = actions.tabContent(key);
+        return !c || c.locked ? null : copyEol(key, c, path);
       },
       /** The path of a file on disk for Claude Code, or the name and text of the others. */
       async copyForClaude(key) {
@@ -1582,7 +1611,7 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
               toast(`Saved ${name}.`);
               return { open: true };
             }
-            const format = { eol: info?.eol, bom: info?.bom, encoding: info?.encoding };
+            const format = writeFormat(info, text, defaultEol(k.path, text).eol);
             const w = await window.desktop.disk.write(k.path, text, { ...format, expectedMtime: info?.mtimeMs, expectedSize: info?.size });
             if (w.conflict) {
               toast(`${name} changed ${isRemotePath(k.path) ? 'on the server' : 'on disk'} since it was read: read both again (⋯) and copy your changes over.`, { kind: 'error', timeout: 10000 });
@@ -2022,6 +2051,7 @@ export function App() {
   // Files on servers set to save automatically: a moment after the last edit.
   useEffect(() => {
     const timers = new Map();
+    const undecided = new Set();
     return store.subscribe((reason, detail) => {
       if (reason !== 'disk' || !detail?.text || !isRemotePath(detail.path) || !server(remoteParts(detail.path).id)?.autoSave) return;
       clearTimeout(timers.get(detail.path));
@@ -2032,8 +2062,13 @@ export function App() {
           if (!tab?.dirty || tab.conflict || tab.saving || tab.follow) return;
           hostRef.current?.flushAll();
           // Not reached: the tab says so, and the edits wait on this device.
-          const result = await saveDiskTab(detail.path).catch(() => null);
+          const result = await saveDiskTab(detail.path, { quiet: true }).catch(() => null);
           if (result === 'conflict') toast(`${tab.name} changed on the server, so it was not saved. Compare, reload, or keep yours.`, { kind: 'error', timeout: 10000 });
+          // Saving would ask (mixed line endings, characters Windows-1252 cannot hold): Ctrl+S asks, once.
+          if (result === 'undecided' && !undecided.has(detail.path)) {
+            undecided.add(detail.path);
+            toast(`${tab.name} is not saved automatically until you choose how: press Ctrl+S.`, { timeout: 10000 });
+          }
         }, 1500),
       );
     });
@@ -2574,15 +2609,16 @@ export function App() {
           undo.push({ kind: 'stored', path: e.path, before: e.base, after: e.next });
         } else if (e.kind === 'new') {
           const dir = e.path.replace(/[\\/][^\\/]*$/, '');
-          await window.desktop.folders.newFile(dir, e.path.slice(dir.length + 1), { text: e.next });
+          await newTextFile(dir, e.path.slice(dir.length + 1), { text: e.next });
           made.push(e.path);
           undo.push({ kind: 'new', path: e.path, text: e.next });
         } else {
-          const format = { eol: e.info.eol, bom: e.info.bom, encoding: e.info.encoding };
+          // A file with mixed line endings keeps each line's own.
+          const format = writeFormat(e.info, e.next, defaultEol(e.path, e.next).eol);
           const w = await window.desktop.disk.write(e.path, e.next, { ...format, expectedMtime: e.info.mtimeMs });
           if (w.conflict) throw new Error('it changed on disk meanwhile');
           written.push(e.path);
-          undo.push({ kind: 'disk', path: e.path, before: e.base, format, mtimeMs: w.mtimeMs });
+          undo.push({ kind: 'disk', path: e.path, before: e.base, format: writeFormat(e.info, e.base), mtimeMs: w.mtimeMs });
         }
         places += e.edits.length;
       } catch (err) {
@@ -2803,19 +2839,85 @@ export function App() {
     rememberIndent(key, { tabs: toTabs, size: host.indentation(key).size });
     toast(changed ? `${changed.toLocaleString()} line${changed === 1 ? '' : 's'} now indented with ${toTabs ? 'tabs' : 'spaces'}` : `It is indented with ${toTabs ? 'tabs' : 'spaces'} already`);
   };
-  // Files on disk and on servers: the indentation their .editorconfig gives them (looked up
-  // once per file; given again to a tab opened anew).
-  const editorConfigs = useRef(new Map()); // key → Promise of { tabs, size } or null
+  // Files on disk and on servers: the indentation and line endings their .editorconfig gives them
+  // (looked up once per file; given again to a tab opened anew).
+  const editorConfigs = useRef(new Map()); // key → Promise of { indent: { tabs, size } | null, eol } or null
   const lookUpEditorConfig = (key) => {
     if (!key?.startsWith('d:') || !window.desktop?.disk?.editorConfig) return;
     if (!editorConfigs.current.has(key)) editorConfigs.current.set(key, window.desktop.disk.editorConfig(key.slice(2)).catch(() => null));
     editorConfigs.current.get(key).then((found) => {
+      // Line endings: Save gives the file those (the status bar says so first); a file with no line
+      // break yet simply has them.
+      const path = key.slice(2);
+      const tab = store.diskTab(path);
+      const ecEol = found?.eol ?? undefined;
+      if (tab && !tab.doc && tab.ecEol !== ecEol) store.diskPatch(path, { ecEol, ...(ecEol && tab.breaks === 0 && !tab.eolChosen ? { eol: ecEol, fileEol: ecEol } : {}) });
       const host = hostRef.current;
       const now = host?.indentation(key);
-      if (!found || !now || now.source === 'chosen' || now.source === 'editorconfig') return;
-      host.setIndentation(key, { tabs: found.tabs ?? now.tabs, size: found.size ?? now.size, source: 'editorconfig' });
+      const indent = found?.indent;
+      if (!indent || !now || now.source === 'chosen' || now.source === 'editorconfig') return;
+      host.setIndentation(key, { tabs: indent.tabs ?? now.tabs, size: indent.size ?? now.size, source: 'editorconfig' });
     });
   };
+  // ---- Line endings of a file on disk (lineEndings.js): the status bar's menu converts them ----
+  const [eolMenu, setEolMenu] = useState(null); // { path, at }
+  /** The menu of the open disk tab's line endings, at `at` (else at the status bar's item, else under the file bar). */
+  actions.lineEndingsMenu = (at = null) => {
+    const k = parseKey(store.session.active);
+    const tab = k?.kind === 'disk' ? store.diskTab(k.path) : null;
+    if (!tab || tab.doc) return toast('Line endings are a file’s: open a file from Folders or the disk. My files and tracker documents keep their lines as they are.');
+    if (diskReadOnly(tab) || actions.isLockedTab(store.session.active)) return toast(`${tab.name} cannot be changed here, so its line endings stay as they are.`);
+    if (!at) {
+      const el = [document.querySelector('.status-eol'), document.querySelector('.filebar [aria-label="More"]'), document.querySelector('.filebar')].find((e) => e && e.getBoundingClientRect().width > 0);
+      const r = el?.getBoundingClientRect();
+      at = !r ? { x: innerWidth / 2, y: innerHeight / 3 } : el.classList.contains('status-eol') ? { x: r.right, y: r.top - 4, right: true, above: true } : { x: r.right, y: r.bottom + 4, right: true };
+    }
+    setEolMenu({ path: k.path, at });
+  };
+  /**
+   * Converts a disk tab's line endings (`to`: 'crlf', 'lf', 'cr', or 'keep' for a mixed file's lines
+   * each keeping theirs): the tab is unsaved until saved, and the toast's Undo takes it back.
+   */
+  actions.setLineEndings = (path, to) => {
+    const tab = store.diskTab(path);
+    if (!tab || diskReadOnly(tab)) return;
+    const before = { eol: tab.eol, eolChosen: tab.eolChosen, eolChoice: tab.eolChoice };
+    const already = to !== 'keep' && to === fileEolOf(tab) && !tab.ecEol && !tab.eolChosen;
+    store.setDiskEol(path, convertEndings(tab, to));
+    if (already) return toast(`${tab.name} has ${EOL_NAMES[to]} line endings already.`);
+    const now = store.diskTab(path);
+    toast(to === 'keep' ? `${tab.name}: saving keeps each line’s own ending; new lines get ${EOL_NAMES[now.eol]}.` : `${tab.name}: ${EOL_NAMES[to]} line endings${now.dirty ? ' when saved (Ctrl+S)' : ''}.`, {
+      timeout: 8000,
+      action: { label: 'Undo', run: () => store.setDiskEol(path, before) },
+    });
+  };
+  const eolItems = (path) => {
+    const tab = store.diskTab(path);
+    if (!tab) return [];
+    const now = fileEolOf(tab);
+    return [
+      { heading: true, label: now === 'mixed' ? `Now mixed: ${mixedWords(tab.mixed)}` : `Now ${EOL_NAMES[now] ?? EOL_NAMES.lf}` },
+      ...eolChoices(tab).map((c) => ({ label: c.label, hint: c.hint, checked: c.checked, run: () => actions.setLineEndings(path, c.id) })),
+    ];
+  };
+  // Saving asks first when it must: a mixed file's endings nobody chose, characters a Windows-1252
+  // file cannot hold (diskTabs.js saveQuestions). Each answer is a dialog; Cancel saves nothing.
+  const askDialog = (d) => new Promise((resolve) => setDialog({ ...d, resolve }));
+  useEffect(() => {
+    setSaveQuestions(async (path, q) => {
+      if (q.unencodable.length) {
+        if (!(await askDialog({ type: 'encodingSave', path, chars: q.unencodable }))) return false;
+        store.diskPatch(path, { encoding: 'utf-8' });
+      }
+      if (q.mixed) {
+        const choice = await askDialog({ type: 'mixedSave', path });
+        if (!choice) return false;
+        store.setDiskEol(path, convertEndings(store.diskTab(path), choice));
+      }
+      return true;
+    });
+    return () => setSaveQuestions(null);
+  }, []);
   useEffect(() => lookUpEditorConfig(activeKey), [activeKey]);
   // ---- Git: files in a repository, here, on SSH servers and in places (Docker, WSL) ----
   // The text at the last commit gives the editor its bar of changed lines; the branch goes
@@ -2883,7 +2985,9 @@ export function App() {
       asks.set(key, { ...at, ...patch, busy: false, again: false });
       if (at.again) lookUpBlame(key);
     };
-    bridge.blame(key.slice(2), text, { format: { eol: tab.eol, bom: tab.bom, encoding: tab.encoding }, known: now && entry.data ? entry.known : null }).then(
+    // The text as the file would be written: a mixed file's lines with their own endings (else Git sees every other line changed).
+    const mixedEols = fileEolOf(tab) === 'mixed' && typeof tab.eols === 'string' ? { eols: keepEols(tab.eolBase ?? text, tab.eols, text, tab.eol) } : {};
+    bridge.blame(key.slice(2), text, { format: { eol: tab.eol, bom: tab.bom, encoding: tab.encoding, ...mixedEols }, known: now && entry.data ? entry.known : null }).then(
       (r) => {
         const at = asks.get(key);
         const h = hostRef.current;
@@ -3535,13 +3639,16 @@ export function App() {
     }
     const tab = store.diskTab(path);
     let plain = tab && !tab.stale ? (hostRef.current?.stateOf(diskKey(path))?.doc.toString() ?? tab.text) : null;
+    // Its line endings go in the header, so taking the lock off gives them back.
+    let eol = tab && !tab.stale ? (saveTarget(tab)?.eol ?? tab.eol) : null;
     if (plain == null) {
       const info = await window.desktop.disk.read(path);
       if (info.doc || info.truncated) throw new Error('Only text files are locked here.');
       plain = info.text;
+      eol = info.breaks === 0 ? null : info.eol;
     }
     const name = baseName(path);
-    const made = await lockText(plain, password, { name, relock });
+    const made = await lockText(plain, password, { name, relock, eol: tab?.breaks === 0 && !tab.eolChosen ? null : eol });
     // The locked file beside it (never over one that is there), then the plain one goes to the bin.
     const lockedPath = await window.desktop.folders.newFile(parentDir(path), lockedName(name), { text: made.text });
     try {
@@ -3613,8 +3720,11 @@ export function App() {
     const locked = baseName(k.path);
     const name = innerName(locked);
     const plain = locks.plainOf(key) ?? '';
-    // The plain file beside it (never over one that is there), then the locked one goes to the bin.
-    const plainPath = await window.desktop.folders.newFile(parentDir(k.path), name === locked ? `${name}.txt` : name, { text: plain });
+    // The plain file beside it (never over one that is there), with the line endings it had when it
+    // was locked (else its place's), then the locked one goes to the bin.
+    const eol = locks.headerOf(key)?.eol;
+    const plainName = name === locked ? `${name}.txt` : name;
+    const plainPath = eol ? await window.desktop.folders.newFile(parentDir(k.path), plainName, { text: plain, eol }) : await newTextFile(parentDir(k.path), plainName, { text: plain });
     await locks.release(key);
     hostRef.current?.drop(key, { save: false });
     if (store.diskTab(k.path)) actions.close(key, { discard: true });
@@ -5061,7 +5171,7 @@ export function App() {
     if (!info) return toast('Its folder could not be read here: open it from Folders.', { kind: 'error' });
     if (info.path) return actions.openDiskPath(info.path);
     try {
-      const file = await window.desktop.folders.newFile(info.root, PROJECT_FILE, { text: PROJECT_TEMPLATE });
+      const file = await newTextFile(info.root, PROJECT_FILE, { text: PROJECT_TEMPLATE });
       projectFiles.stale();
       await projectFiles.get(file, { fresh: true });
       await actions.openDiskPath(file);
@@ -5507,6 +5617,7 @@ export function App() {
       new: () => actions.newFile(),
       'open-disk': () => actions.openFromDisk(),
       'save-copy': () => actions.saveCopy(),
+      'line-endings': () => actions.lineEndingsMenu(),
       'locked-new': () => actions.newLockedFile(),
       'locked-lock': () => actions.lockFile(),
       'locked-lock-all': () => actions.lockAllNow(),
@@ -5981,6 +6092,7 @@ export function App() {
         requestAnimationFrame(() => (document.activeElement === document.body || !document.activeElement) && owner?.isConnected && owner.focus());
       }} />`}
     ${bpMenu && html`<${Menu} label="Breakpoint" at=${{ x: bpMenu.x, y: bpMenu.y }} onClose=${() => setBpMenu(null)} items=${breakpointMenu(bpMenu)} />`}
+    ${eolMenu && store.diskTab(eolMenu.path) && html`<${Menu} label="Line endings" className="eol-menu" at=${eolMenu.at} onClose=${() => setEolMenu(null)} items=${eolItems(eolMenu.path)} />`}
     ${textMenu && hostRef.current?.stateOf(textMenu.key) &&
     html`<${Menu} key=${`${textMenu.key}:${textMenu.x}:${textMenu.y}`} className="text-menu" label="Text actions" at=${{ x: textMenu.x, y: textMenu.y }} items=${textMenuItems(textMenu)}
       onClose=${() => {
@@ -6039,6 +6151,13 @@ export function App() {
       what=${parseKey(dialog.key)?.kind === 'file'
         ? `Its text is kept${isLocal() ? '' : ' and synced'} as plain text from now on.`
         : `Its text is written as plain text to ${innerName(tabName(dialog.key))}, beside it, and the locked file goes to ${isAndroidApp() ? 'nowhere: it is deleted' : binName()}.`} />`}
+    ${dialog?.type === 'mixedSave' && store.diskTab(dialog.path) &&
+    html`<${MixedSaveDialog} tab=${store.diskTab(dialog.path)} onChoose=${(choice) => (setDialog(null), dialog.resolve(choice))} onClose=${() => (setDialog(null), dialog.resolve(null))} />`}
+    ${dialog?.type === 'encodingSave' && store.diskTab(dialog.path) &&
+    html`<${EncodingSaveDialog} tab=${store.diskTab(dialog.path)} chars=${dialog.chars} onSave=${() => (setDialog(null), dialog.resolve(true))} onClose=${() => (setDialog(null), dialog.resolve(false))} />`}
+    ${dialog?.type === 'convertEol' &&
+    html`<${ConvertEolDialog} paths=${dialog.paths} initial=${dialog.eol} hidden=${Boolean(settings.showHidden)} skip=${store.diskTabs().filter((t) => t.dirty).map((t) => t.path)}
+      onDone=${(paths) => actions.reloadCleanDiskTabs(paths)} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'reloadDisk' && store.diskTab(dialog.path) &&
     html`<${ReloadDiskDialog} tab=${store.diskTab(dialog.path)} onClose=${() => setDialog(null)} onReload=${() => (setDialog(null), actions.reloadDisk(dialog.path))} />`}
     ${diskAvailable() && html`<${TransfersCard} onShow=${actions.showFolder} />`}

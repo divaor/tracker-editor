@@ -108,6 +108,8 @@ const PATHS = {
   bookmark: () => html`<path d="M6 4h12v16l-6-4.5L6 20z" />`,
   xCircle: () => html`<circle cx="12" cy="12" r="9" /><path d="m15 9-6 6M9 9l6 6" />`,
   indent: () => html`<path d="M3 5h18M11 10h10M11 15h10M3 20h18M3 9.5l3 2.5-3 2.5" />`,
+  // A line break (↵): line endings.
+  eol: () => html`<path d="M20 5v7a3 3 0 0 1-3 3H6" /><path d="m10 11-4 4 4 4" />`,
   grip: () => html`<path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01" stroke-width="3" />`,
   branch: () => html`<circle cx="6" cy="5" r="2" /><circle cx="6" cy="19" r="2" /><circle cx="18" cy="7" r="2" /><path d="M6 7v10M18 9c0 5-5 4-11 9" />`,
   bug: () => html`<path d="M9 7.5a3 3 0 0 1 6 0" /><rect x="7" y="8" width="10" height="12" rx="5" /><path d="M12 12v8M3 12h4M17 12h4M4.5 6.5 7 9M19.5 6.5 17 9M4.5 19.5 7 17M19.5 19.5 17 17" />`,

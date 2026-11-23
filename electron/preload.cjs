@@ -23,7 +23,8 @@ contextBridge.exposeInMainWorld('desktop', {
     set: (key, value) => ipcRenderer.invoke('secret:set', key, value),
   },
   openFiles: () => ipcRenderer.invoke('files:open'),
-  saveFile: (name, text) => ipcRenderer.invoke('files:save', name, text),
+  // opts: { eol } the line endings for this computer (a name picked whose kind needs others gets those).
+  saveFile: (name, text, opts) => ipcRenderer.invoke('files:save', name, text, opts),
   llm: {
     request: (id, url, init) => ipcRenderer.invoke('llm:request', id, url, init),
     abort: (id) => ipcRenderer.send('llm:abort', id),
@@ -112,6 +113,17 @@ contextBridge.exposeInMainWorld('desktop', {
     index: (dir, opts) => ipcRenderer.invoke('folder:index', dir, opts),
     replace: (dir, query, opts, replacement, paths) => ipcRenderer.invoke('folder:replace', dir, query, opts, replacement, paths),
     replaceUndo: (id) => ipcRenderer.invoke('folder:replace-undo', id),
+    // Line endings of many files: counted (each file's), converted (the scan's list), undone, stopped;
+    // progress ({ id, done, total }) for the page's job id.
+    eolScan: (id, paths, opts) => ipcRenderer.invoke('folder:eol-scan', id, paths, opts),
+    eolConvert: (id, jobId, eol, opts) => ipcRenderer.invoke('folder:eol-convert', id, jobId, eol, opts),
+    eolUndo: (undoId) => ipcRenderer.invoke('folder:eol-undo', undoId),
+    eolStop: (id) => ipcRenderer.invoke('folder:eol-stop', id),
+    onEolProgress(callback) {
+      const listener = (_event, progress) => callback(progress);
+      ipcRenderer.on('folder:eol-progress', listener);
+      return () => ipcRenderer.removeListener('folder:eol-progress', listener);
+    },
     onFound(callback) {
       const found = (_event, data) => callback({ type: 'found', ...data });
       const progress = (_event, data) => callback({ type: 'progress', ...data });

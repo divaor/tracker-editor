@@ -16,6 +16,7 @@ import { FileViewer } from './folderPreview.js';
 import { Icon } from './icons.js';
 import { Menu, MenuButton } from './menu.js';
 import { SidewaysButton, usePhoneLayout } from './phone.js';
+import { newTextFile } from '../newText.js';
 
 const message = (err) => String(err?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
 const fail = (err) => toast(message(err), { kind: 'error', timeout: 8000 });
@@ -121,7 +122,7 @@ function Pane({ side, path, root, active, settings, actions, handle, sort, onSor
   const create = async ({ kind, name }) => {
     setCreating(null);
     try {
-      const made = kind === 'folder' ? await bridge.newFolder(path, name) : await bridge.newFile(path, name, { text: '' });
+      const made = kind === 'folder' ? await bridge.newFolder(path, name) : await newTextFile(path, name, { text: '' });
       await load();
       select([made]);
       window.dispatchEvent(new CustomEvent('folders:reload'));

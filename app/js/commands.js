@@ -89,6 +89,7 @@ export const COMMAND_LIST = [
   { id: 'indent-to-spaces', group: 'Edit and text', label: 'Convert the indentation to spaces' },
   { id: 'indent-to-tabs', group: 'Edit and text', label: 'Convert the indentation to tabs' },
   { id: 'indent-detect', group: 'Edit and text', label: 'Indentation from the text again (detect it)', hint: 'Or from the .editorconfig of a file on disk' },
+  { id: 'line-endings', group: 'Edit and text', label: 'Line endings: Windows (CRLF) or Unix (LF)…', only: 'desktop', android: true, hint: 'Converts a file on disk; or click “CRLF” / “LF” in the status bar' },
 
   { id: 'goto-definition', group: 'Code', label: 'Go to where the name at the cursor is declared', keys: 'F12', hint: 'In this file, else your other files and the folders open in Folders. On the declaration itself: its usages' },
   { id: 'find-usages', group: 'Code', label: 'Find usages of the name at the cursor', keys: 'Shift+F12', hint: 'In this file (the panel can look in all files); across the project with a language server' },

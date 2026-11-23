@@ -55,6 +55,8 @@ export function watchServers({ onConnected = () => {} } = {}) {
   return bridge().onStatus((s) => {
     const before = status.get(s.id)?.state;
     status.set(s.id, { state: s.state, error: s.error });
+    // Which system it runs ('windows' or 'unix'), said when it connects: new files there get its line endings.
+    if (s.system) list = list.map((c) => (c.id === s.id && c.system !== s.system ? { ...c, system: s.system } : c));
     emit();
     if (s.state === 'connected' && before !== 'connected') onConnected(s.id);
   });

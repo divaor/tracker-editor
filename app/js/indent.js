@@ -67,11 +67,11 @@ export function convertIndent(text, { toTabs, size }) {
 }
 
 /**
- * The indentation an .editorconfig gives a file: its sections from the folder nearest
- * the file first (each { text, dir }: the file's text and the folder it is in), the
- * file's path inside the system ("/" between folders). { tabs, size } or null.
+ * The properties .editorconfig files give a file: their texts from the folder nearest the file
+ * first (each { text, dir }: the file's text and the folder it is in), the file's path inside the
+ * system ("/" between folders). { indent_style: 'space', end_of_line: 'crlf', … } (lower case).
  */
-export function editorConfigIndent(configs, file) {
+export function editorConfigProps(configs, file) {
   const props = {};
   // Nearest last, so it wins; a root = true stops the ones above it.
   const chain = [];
@@ -95,6 +95,12 @@ export function editorConfigIndent(configs, file) {
       props[kv[1].trim().toLowerCase()] = kv[2].trim().toLowerCase();
     }
   }
+  return props;
+}
+
+/** The indentation an .editorconfig gives a file (editorConfigProps' arguments): { tabs, size } or null. */
+export function editorConfigIndent(configs, file) {
+  const props = editorConfigProps(configs, file);
   const style = props.indent_style;
   // A tab is tab_width wide; indent_size is the step (or "tab": a tab's width).
   const tabWidth = Number(props.tab_width) || null;
@@ -102,6 +108,19 @@ export function editorConfigIndent(configs, file) {
   const size = (style === 'tab' ? tabWidth || step : step || tabWidth) || null;
   if (style !== 'tab' && style !== 'space' && !size) return null;
   return { tabs: style === 'tab' ? true : style === 'space' ? false : null, size };
+}
+
+/** The line endings an .editorconfig gives a file (end_of_line): 'lf', 'crlf', 'cr', or null (unset, or "unset"). */
+export function editorConfigEol(configs, file) {
+  const eol = editorConfigProps(configs, file).end_of_line;
+  return ['lf', 'crlf', 'cr'].includes(eol) ? eol : null;
+}
+
+/** What an .editorconfig gives a file: { indent: { tabs, size } | null, eol: 'lf' | 'crlf' | 'cr' | null }, or null for neither. */
+export function editorConfigFor(configs, file) {
+  const indent = editorConfigIndent(configs, file);
+  const eol = editorConfigEol(configs, file);
+  return indent || eol ? { indent, eol } : null;
 }
 
 // An .editorconfig section glob: "*", "*.py", "{*.js,*.ts}", "lib/**.js", "[Mm]akefile".

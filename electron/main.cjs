@@ -20,6 +20,7 @@ const folders = require('./folders.cjs');
 const os = require('node:os');
 const clips = require('./clipHistory.cjs');
 const archives = require('./archives.cjs');
+const { eolFiles, eolScan, eolConvert, eolUndo } = require('./eolConvert.cjs');
 const shellIntegration = require('./shellIntegration.cjs');
 
 const APP_DIR = path.join(__dirname, '..', 'app');
@@ -128,11 +129,15 @@ ipcMain.handle('files:open', guard(async () => {
   return out;
 }));
 
-ipcMain.handle('files:save', guard(async (_e, name, text) => {
+// Save a copy: `eol` is the page's line endings for this computer (the setting, or its system's);
+// a name picked in the dialog whose kind needs others (.bat CRLF, .sh LF) gets those.
+ipcMain.handle('files:save', guard(async (_e, name, text, opts = {}) => {
   if (typeof name !== 'string' || typeof text !== 'string') throw new Error('Not allowed');
   const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, { title: 'Save a copy', defaultPath: path.join(app.getPath('documents'), path.basename(name)) });
   if (canceled || !filePath) return null;
-  fs.writeFileSync(filePath, text, 'utf8');
+  const { lineEndings } = await loadAppModules();
+  const eol = lineEndings.kindEol(path.basename(filePath), text) ?? (lineEndings.EOLS.includes(opts?.eol) ? opts.eol : null);
+  fs.writeFileSync(filePath, disk.newFileText(text, eol), 'utf8');
   return filePath;
 }));
 
@@ -1130,9 +1135,9 @@ ipcMain.handle('disk:read-bytes', guard(async (_e, file) => {
   if (fs.statSync(file).size > MAX_DOCUMENT) throw new Error(`${path.basename(file)} is larger than 200 MB.`);
   return fs.readFileSync(file);
 }));
-// The indentation the .editorconfig files above a file give it ({ tabs, size } or null):
-// its folder's and the ones above (on a server, the nearest few), up to one with root = true.
-// The page gets only that, never their text.
+// What the .editorconfig files above a file give it: { indent: { tabs, size } | null, eol } or
+// null: its folder's and the ones above (on a server, the nearest few), up to one with root =
+// true. The page gets only that, never their text. The file need not exist yet (a new one).
 ipcMain.handle('disk:editorconfig', guard(async (_e, file) => {
   const configs = [];
   const isRoot = (text) => /^\s*root\s*=\s*true\s*$/im.test(text.split(/^\s*\[/m)[0]);
@@ -1171,7 +1176,7 @@ ipcMain.handle('disk:editorconfig', guard(async (_e, file) => {
   }
   if (!configs.length) return null;
   const { indent } = await loadAppModules();
-  return indent.editorConfigIndent(configs, target);
+  return indent.editorConfigFor(configs, target);
 }));
 ipcMain.handle('disk:read-appended', guard((_e, file, offset, opts) =>
   isRemote(file) ? remote.readAppended(file, Number(offset) || 0, opts) : disk.readAppended(checkFile(file), Number(offset) || 0, opts),
@@ -1285,15 +1290,17 @@ const checkList = (paths) => {
   if (!Array.isArray(paths) || !paths.length || paths.length > 5000) throw new Error('Nothing to do.');
   return paths;
 };
-// `text` fills the new file; `unique` picks a free name ("name (2).txt") instead of refusing one that exists.
-ipcMain.handle('folder:new-file', guard((_e, dir, name, { text = '', unique = false } = {}) => {
-  if (isRemote(dir)) return remote.newFile(dir, name, { text: typeof text === 'string' ? text : '', unique });
+// `text` fills the new file; `unique` picks a free name ("name (2).txt") instead of refusing one that
+// exists; `eol` ('lf', 'crlf' or 'cr': the page's choice for the place and the kind of file,
+// lineEndings.js newFileEol) makes the text's line breaks those (without one, written as given).
+ipcMain.handle('folder:new-file', guard((_e, dir, name, { text = '', unique = false, eol } = {}) => {
+  if (isRemote(dir)) return remote.newFile(dir, name, { text: typeof text === 'string' ? text : '', unique, eol });
   const clean = folders.checkName(name);
   checkDir(dir);
   const file = unique ? folders.freePath(dir, clean) : path.join(dir, clean);
   checkFile(file);
   if (fs.existsSync(file)) throw new Error(`${clean} already exists here.`);
-  fs.writeFileSync(file, typeof text === 'string' ? text : '', { flag: 'wx' });
+  fs.writeFileSync(file, disk.newFileText(typeof text === 'string' ? text : '', eol), { flag: 'wx' });
   return file;
 }));
 ipcMain.handle('folder:new-folder', guard((_e, dir, name) => {
@@ -1534,10 +1541,22 @@ ipcMain.handle('folder:copy', guard(async (_e, paths, dir, opts = {}) => {
 // Files pasted or dropped from another app: the preload takes their paths from the
 // File objects (webUtils), so the page cannot name other files. They are copied in;
 // they do not become reachable themselves.
+// `eol`: a tab dragged out and dropped on a folder (its copy in the temporary folder) takes the line
+// endings the page chose for that folder's place (a server's may differ from this computer's).
 ipcMain.handle('folder:copy-in', guard(async (_e, paths, dir, opts = {}) => {
   const sources = (Array.isArray(paths) ? paths : []).filter((p) => typeof p === 'string' && path.isAbsolute(p) && fs.existsSync(p));
   if (!sources.length) throw new Error('Those files are not on disk.');
   checkList(sources);
+  if (['lf', 'crlf', 'cr'].includes(opts?.eol)) {
+    for (const src of sources.filter((p) => folders.isInside(path.resolve(DRAG_DIR), path.resolve(p)) && fs.statSync(p).isFile())) {
+      try {
+        const read = disk.decode(fs.readFileSync(src));
+        fs.writeFileSync(src, disk.encode(read.text, { ...read, eols: '', eol: opts.eol }));
+      } catch {
+        // not text: copied as it is
+      }
+    }
+  }
   if (!isRemote(dir)) checkDir(dir);
   if (!isRemote(dir)) return placeWithExisting(sources, dir, opts?.onExists, (list) => folders.copyInto(list, dir));
   return startTransfer({ op: 'copy-in', kind: 'upload', paths: sources, dir }, (job) => placeWithExisting(sources, dir, opts?.onExists, (list) => remote.copyInto(list, dir, { job })));
@@ -1969,6 +1988,7 @@ const loadAppModules = async () =>
     gitStatus: await import(pathToFileURL(path.join(APP_DIR, 'js', 'gitStatus.js')).href),
     replace: await import(pathToFileURL(path.join(APP_DIR, 'js', 'replace.js')).href),
     askFind: await import(pathToFileURL(path.join(APP_DIR, 'js', 'askFind.js')).href),
+    lineEndings: await import(pathToFileURL(path.join(APP_DIR, 'js', 'lineEndings.js')).href),
   });
 // The matching runs in a worker thread, so a pattern that takes very long (or a huge
 // minified file) never freezes the window; Stop, or 15 s on one file, ends the worker.
@@ -2292,7 +2312,7 @@ ipcMain.handle('folder:replace', guard(async (_e, dir, query, opts = {}, replace
   if (typeof query !== 'string' || !query) throw new Error('Type what to find.');
   if (typeof replacement !== 'string') throw new Error('Type what to put instead.');
   checkList(paths);
-  const { replace } = await loadAppModules();
+  const { replace, lineEndings } = await loadAppModules();
   const options = { caseSensitive: Boolean(opts.caseSensitive), wholeWord: Boolean(opts.wholeWord), regex: Boolean(opts.regex) };
   if (!isRemote(dir)) checkDir(dir);
   const done = [];
@@ -2308,13 +2328,14 @@ ipcMain.handle('folder:replace', guard(async (_e, dir, query, opts = {}, replace
       }
       const { text, count } = replace.replaceAll(read.text, query, options, replacement);
       if (!count) continue;
-      const format = { eol: read.eol, bom: read.bom, encoding: read.encoding };
+      // A file with mixed line endings keeps each line's own (new lines get its most common).
+      const format = { eol: read.eol, bom: read.bom, encoding: read.encoding, eols: read.eols ? lineEndings.keepEols(read.text, read.eols, text, read.eol) : '' };
       const written = isRemote(p) ? await remote.write(p, text, { ...format, expectedMtime: read.mtimeMs, expectedSize: read.size }) : disk.writeTextFile(p, text, { ...format, expectedMtime: read.mtimeMs });
       if (written.conflict) {
         skipped.push({ path: p, reason: 'changed meanwhile' });
         continue;
       }
-      undo.push({ path: p, before: { text: read.text, ...format }, mtimeMs: written.mtimeMs, size: written.size });
+      undo.push({ path: p, before: { text: read.text, ...format, eols: read.eols ?? '' }, mtimeMs: written.mtimeMs, size: written.size });
       done.push({ path: p, count });
     } catch (err) {
       skipped.push({ path: p, reason: err.message });
@@ -2344,6 +2365,103 @@ ipcMain.handle('folder:replace-undo', guard(async (_e, id) => {
     }
   }
   return { restored, skipped };
+}));
+
+// ---- Line endings of many files (Folders → Line endings: Windows (CRLF) / Unix (LF)) ----
+// The page names files and folders it shows (checked here; a server's through remote.cjs) and a
+// job id; the scan (a dry run: each text file's line endings) is kept here by that id, and the
+// conversion works on its list, so the page never names the files to write. Each file is written
+// only if unchanged since read; what it held is kept for Undo (the last few), which writes back
+// only over what it wrote. Open tabs with unsaved edits (`skip`) are left out.
+const eolScans = new Map(); // job id → { files: [{ path, eol, size }] } (the last few)
+const eolUndos = new Map(); // undo id → [{ path, before, mtimeMs, size }]
+const eolJobs = new Map(); // job id → AbortController
+const eolSkip = (skip) => new Set((Array.isArray(skip) ? skip : []).filter((p) => typeof p === 'string'));
+const eolRead = (p) => (isRemote(p) ? remote.read(p) : disk.readTextFile(checkFile(p)));
+const eolWrite = (p, text, opts) => (isRemote(p) ? remote.write(p, text, opts) : disk.writeTextFile(checkFile(p), text, opts));
+function eolJob(event, id) {
+  if (typeof id !== 'string' || !/^[\w-]{1,40}$/.test(id) || eolJobs.has(id)) throw new Error('Not allowed');
+  const controller = new AbortController();
+  eolJobs.set(id, controller);
+  const sender = event.sender;
+  let last = 0;
+  const onProgress = ({ done, total }) => {
+    const now = Date.now();
+    if (now - last < 200 && done < total) return;
+    last = now;
+    if (!sender.isDestroyed()) sender.send('folder:eol-progress', { id, done, total });
+  };
+  return { signal: controller.signal, onProgress, end: () => eolJobs.delete(id) };
+}
+ipcMain.handle('folder:eol-scan', guard(async (event, id, paths, opts = {}) => {
+  checkList(paths);
+  const onServer = isRemote(paths[0]);
+  if (paths.some((p) => typeof p !== 'string' || isRemote(p) !== onServer)) throw new Error('Pick files in one place at a time.');
+  if (!onServer) paths.forEach(checkFile);
+  const { folders: names } = await loadAppModules();
+  const job = eolJob(event, id);
+  try {
+    const found = await eolFiles({
+      paths,
+      stat: onServer
+        ? (p) => remote.entry(p)
+        : (p) => {
+            const st = fs.lstatSync(p);
+            return { dir: st.isDirectory(), size: st.size, link: st.isSymbolicLink() };
+          },
+      // Links are not followed, so the walk stays inside what was picked.
+      list: onServer
+        ? async (d) => (await remote.list(d)).entries
+        : async (d) =>
+            (await fs.promises.readdir(d, { withFileTypes: true }))
+              .filter((e) => !e.isSymbolicLink() && (e.isDirectory() || e.isFile()))
+              .map((e) => ({ name: e.name, path: path.join(d, e.name), dir: e.isDirectory(), size: e.isFile() ? fs.statSync(path.join(d, e.name)).size : 0 })),
+      // Text files the editor opens, but not locked ones (their text is ciphertext).
+      isText: names.searchesText,
+      skip: [...eolSkip(opts?.skip)],
+      hidden: Boolean(opts?.hidden),
+      maxFiles: onServer ? 2000 : 20000,
+      maxSize: onServer ? 2 * 1024 * 1024 : 5 * 1024 * 1024,
+      signal: job.signal,
+      concurrency: onServer ? remote.concurrency(paths[0]) : 8,
+    });
+    const scan = await eolScan({ files: found.files, read: eolRead, signal: job.signal, onProgress: job.onProgress, concurrency: onServer ? remote.concurrency(paths[0]) : 8 });
+    eolScans.set(id, { files: scan.files });
+    while (eolScans.size > 5) eolScans.delete(eolScans.keys().next().value);
+    return { files: scan.files, skipped: { ...found.skipped, ...scan.skipped }, truncated: found.truncated, stopped: found.stopped || scan.stopped };
+  } finally {
+    job.end();
+  }
+}));
+// `id` the scan's; `jobId` this conversion's (progress and Stop).
+ipcMain.handle('folder:eol-convert', guard(async (event, id, jobId, eol, opts = {}) => {
+  const scan = eolScans.get(id);
+  if (!scan) throw new Error('Count the files again first.');
+  const skip = eolSkip(opts?.skip);
+  const files = scan.files.filter((f) => f.eol !== eol && f.eol !== 'none' && !skip.has(f.path));
+  const job = eolJob(event, jobId);
+  try {
+    const result = await eolConvert({ files, eol, read: eolRead, write: eolWrite, signal: job.signal, onProgress: job.onProgress });
+    const undoId = result.undo.length ? `e${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}` : null;
+    if (undoId) eolUndos.set(undoId, result.undo);
+    while (eolUndos.size > 10) eolUndos.delete(eolUndos.keys().next().value);
+    eolScans.delete(id);
+    // Pages served from those folders reload (Run's browser page, the preview with its scripts).
+    for (const p of result.done) if (!isRemote(p)) previewHost?.changed(p);
+    return { undoId, done: result.done, right: result.right, skipped: [...result.skipped, ...[...skip].filter((p) => scan.files.some((f) => f.path === p && f.eol !== eol && f.eol !== 'none')).map((p) => ({ path: p, reason: 'open with unsaved edits' }))], undoable: result.undoable, stopped: result.stopped };
+  } finally {
+    job.end();
+  }
+}));
+ipcMain.handle('folder:eol-undo', guard(async (_e, undoId) => {
+  const undo = eolUndos.get(undoId);
+  if (!undo) throw new Error('That can no longer be undone.');
+  eolUndos.delete(undoId);
+  return eolUndo({ undo, write: eolWrite });
+}));
+ipcMain.handle('folder:eol-stop', guard((_e, id) => {
+  eolJobs.get(id)?.abort();
+  return true;
 }));
 
 // ---- Git: folders on this computer, on SSH servers and in places (Docker, WSL) ----
@@ -2474,8 +2592,10 @@ ipcMain.handle('git:stage-text', guard(async (_e, file, text) => {
 // endings and encoding (`format`: the tab's, else the file's on disk), so Git compares like with
 // like. `known` ({ hash, head } of the answer before) gives { same } while nothing changed.
 const textFormat = (format, file) => {
-  const ok = format && ['lf', 'crlf'].includes(format.eol) && ['utf-8', 'latin1'].includes(format.encoding ?? 'utf-8');
-  if (ok) return { eol: format.eol, bom: Boolean(format.bom), encoding: format.encoding ?? 'utf-8' };
+  const ok = format && ['lf', 'crlf', 'cr'].includes(format.eol) && ['utf-8', 'latin1'].includes(format.encoding ?? 'utf-8');
+  // `eols`: a mixed file's line endings, a letter per line break (diskFiles.cjs).
+  const eols = typeof format?.eols === 'string' && /^[CLR]*$/.test(format.eols) ? format.eols : '';
+  if (ok) return { eol: format.eol, bom: Boolean(format.bom), encoding: format.encoding ?? 'utf-8', eols };
   try {
     return disk.decode(fs.readFileSync(file));
   } catch {
@@ -2674,9 +2794,10 @@ ipcMain.on('drag:start', (event, item = {}) => {
   if (!fromApp(event)) return;
   let files;
   try {
-    // { paths } several files and folders on disk, { path } one, or { name, text } for a copy.
+    // { paths } several files and folders on disk, { path } one, or { name, text, eol } for a copy
+    // (eol: the line endings the page chose for it on this computer).
     if (Array.isArray(item.paths) && item.paths.length) files = item.paths.slice(0, 1000).map(checkFile);
-    else files = [item.path ? checkFile(item.path) : folders.writeExport(DRAG_DIR, item.name, String(item.text ?? ''))];
+    else files = [item.path ? checkFile(item.path) : folders.writeExport(DRAG_DIR, item.name, disk.newFileText(String(item.text ?? ''), item.eol))];
   } catch (err) {
     event.sender.send('drag:end', { error: err.message });
     return;

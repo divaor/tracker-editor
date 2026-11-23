@@ -24,12 +24,15 @@ try {
   // terminals without it: a plain shell
 }
 
-/** Answers REALPATH and STAT; the rest is not supported (the tests only open the session). */
-function miniSftp(sftp, home) {
+/**
+ * Answers REALPATH and STAT; the rest is not supported (the tests only open the session).
+ * `realHome`: what REALPATH of the home folder says (a Windows OpenSSH server's "/C:/Users/me").
+ */
+function miniSftp(sftp, home, realHome = null) {
   const { STATUS_CODE } = utils.sftp;
   const resolve = (p) => path.posix.resolve(home, p || '.');
   sftp.on('REALPATH', (id, p) => {
-    const full = resolve(p);
+    const full = realHome && (!p || p === '.') ? realHome : resolve(p);
     sftp.name(id, [{ filename: full, longname: full, attrs: {} }]);
   });
   for (const op of ['STAT', 'LSTAT']) {
@@ -65,7 +68,7 @@ function hostKeyPair() {
  * gets (`PATH` replaces the usual one); `shell` is the user's login shell. Resolves { port, user,
  * password, execs, close(), dropAll() }.
  */
-function startSshServer({ port = 0, user = 'tester', password = 'secret', shell = '/bin/sh', home = os.homedir(), env = {}, sftpServer = SFTP_SERVERS.find((p) => fs.existsSync(p)) ?? null } = {}) {
+function startSshServer({ port = 0, user = 'tester', password = 'secret', shell = '/bin/sh', home = os.homedir(), env = {}, sftpServer = SFTP_SERVERS.find((p) => fs.existsSync(p)) ?? null, realHome = null } = {}) {
   const hostKey = hostKeyPair();
   const execs = [];
   const clients = new Set();
@@ -154,7 +157,7 @@ function startSshServer({ port = 0, user = 'tester', password = 'secret', shell 
             channel.on('close', () => child.kill());
           });
         } else {
-          session.on('sftp', (ok) => miniSftp(ok(), home));
+          session.on('sftp', (ok) => miniSftp(ok(), home, realHome));
         }
       });
     });

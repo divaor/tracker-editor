@@ -3198,6 +3198,48 @@ button.folder-col:hover {
   padding-left: 20px;
 }
 
+/* Line endings: what saving asks, and converting the files of a folder. */
+.eol-dialog .modal-foot {
+  flex-wrap: wrap;
+}
+
+.eol-targets {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.eol-target {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.eol-target.on {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.eol-counts {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+
+@media (max-width: 640px) {
+  .eol-targets {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .btn.primary.danger {
   border-color: var(--danger);
   background: var(--danger);
@@ -5089,6 +5131,16 @@ body:is(.resizing-x, .resizing-y) iframe {
   .statusbar .status-problems:not(.has-errors, .has-warnings, [aria-pressed='true']) {
     display: none;
   }
+
+  /* A file with mixed line endings still says so, without its encoding. */
+  .statusbar .status-eol .status-eol-enc {
+    display: none;
+  }
+}
+
+/* Line endings: mixed ones nobody chose yet (saving asks). */
+.status-eol.tone-warn {
+  color: var(--warn);
 }
 
 .welcome {

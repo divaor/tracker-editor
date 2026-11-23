@@ -1,6 +1,7 @@
 // Editor data model: file records, the index document in the data repo,
 // names and paths. Pure and DOM-free so the Node tests can import it.
 import { bumpTime, cleanProjectName, cleanTags, isTextAttachment, newId, nowIso } from './tracker-model.js';
+import { endingsChanged } from './lineEndings.js';
 
 export { bumpTime, cleanTags, newId, nowIso };
 
@@ -175,11 +176,12 @@ export const isMarked = (mark, text) => Boolean(mark) && mark.length === String(
  * A file tab (store.js's disk tabs) edited to `text`: { text, dirty, saved }. A tab with no unsaved
  * edits holds what the file holds, so its mark is taken before the first edit; edits that come
  * back to it (undone) leave the tab saved again (before 0.48.1 it stayed "Not saved"). A tab kept
- * unsaved by an older version has no mark and stays unsaved.
+ * unsaved by an older version has no mark and stays unsaved. Line endings converted here (not yet
+ * saved) keep it unsaved whatever the text: the mark is of the text only.
  */
 export function afterDiskEdit(tab, text) {
   const saved = tab.dirty ? tab.saved : textMark(tab.text);
-  const dirty = !isMarked(saved, text);
+  const dirty = !isMarked(saved, text) || endingsChanged(tab);
   return { text, dirty, saved: dirty ? saved : undefined };
 }
 

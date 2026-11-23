@@ -1,7 +1,7 @@
 // Each file's indentation: detected from its text, converted, or given by .editorconfig.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { convertIndent, detectIndent, editorConfigIndent, indentLabel } from '../app/js/indent.js';
+import { convertIndent, detectIndent, editorConfigEol, editorConfigFor, editorConfigIndent, indentLabel } from '../app/js/indent.js';
 
 test('detecting tabs or spaces, and how many', () => {
   assert.deepEqual(detectIndent('a\n\tb\n\t\tc\n\td\n'), { tabs: true, size: null });
@@ -43,4 +43,19 @@ test('.editorconfig: the nearest wins, root stops, globs by file', () => {
   assert.deepEqual(editorConfigIndent([nested], '/w/lib/x/y.js'), { tabs: null, size: 3 });
   assert.equal(editorConfigIndent([nested], '/w/src/y.js'), null);
   assert.equal(editorConfigIndent([{ dir: '/w', text: '[*.md]\ntrim_trailing_whitespace = false\n' }], '/w/a.md'), null);
+});
+
+test('.editorconfig end_of_line: lf, crlf, cr per file; unset or nonsense is none', () => {
+  const root = { dir: '/w', text: 'root = true\n\n[*]\nend_of_line = lf\n\n[*.{bat,cmd}]\nend_of_line = CRLF\n\n[legacy/**]\nend_of_line = cr\n' };
+  assert.equal(editorConfigEol([root], '/w/src/a.js'), 'lf');
+  assert.equal(editorConfigEol([root], '/w/build.bat'), 'crlf', 'case does not matter');
+  assert.equal(editorConfigEol([root], '/w/legacy/x/old.txt'), 'cr');
+  const unset = { dir: '/w/vendor', text: '[*]\nend_of_line = unset\n' };
+  assert.equal(editorConfigEol([unset, root], '/w/vendor/a.js'), null);
+  assert.equal(editorConfigEol([{ dir: '/w', text: '[*]\nend_of_line = native\n' }], '/w/a'), null);
+  // Both at once, or each alone; nothing: null.
+  const both = { dir: '/w', text: '[*]\nindent_style = space\nindent_size = 2\nend_of_line = crlf\n' };
+  assert.deepEqual(editorConfigFor([both], '/w/a.txt'), { indent: { tabs: false, size: 2 }, eol: 'crlf' });
+  assert.deepEqual(editorConfigFor([root], '/w/a.txt'), { indent: null, eol: 'lf' });
+  assert.equal(editorConfigFor([{ dir: '/w', text: '[*.md]\ncharset = utf-8\n' }], '/w/a.md'), null);
 });

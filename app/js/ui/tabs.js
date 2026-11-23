@@ -29,6 +29,7 @@ import { COMMAND_LIST } from '../commands.js';
 import { shownKeys } from '../keys.js';
 import { projectStatus } from '../project.js';
 import { isLockedName, isLockedText } from '../locked.js';
+import { EOL_NAMES, eolStatus, fileEolOf } from '../lineEndings.js';
 
 /** The server of a file on one ({ conn, status }), or null. */
 const serverOf = (path) => {
@@ -547,7 +548,8 @@ function DiskBar({ disk, buttons, moreItems, locked = false, actions }) {
   const content = isContentPath(path);
   const folder = content ? contentPlace(path) : location.slice(0, location.length - disk.name.length - 1) || location;
   const where = remote ? `${placeHint(srv.conn)}\n${connDetail(srv.conn)} · ${remoteAddress(path, srv.conn)}` : `${KINDS.disk.hint}\n${content ? folder : path}`;
-  const encoding = `${disk.eol === 'crlf' ? 'Windows (CRLF)' : 'Unix (LF)'} line endings · ${disk.encoding === 'latin1' ? 'Windows-1252' : 'UTF-8'}${disk.bom ? ' with BOM' : ''}, kept when saving`;
+  const now = fileEolOf(disk);
+  const encoding = `${now === 'mixed' ? 'Mixed' : (EOL_NAMES[now] ?? EOL_NAMES.lf)} line endings · ${disk.encoding === 'latin1' ? 'Windows-1252' : 'UTF-8'}${disk.bom ? ' with BOM' : ''}`;
   const elsewhere = !remote ? 'on disk' : srv?.conn?.protocol === 'docker' ? 'in the container' : srv?.conn?.protocol === 'wsl' ? 'in WSL' : 'on the server';
   // In a mirrored folder: also kept on the other side.
   const mirrored = mirrorOf(path);
@@ -654,6 +656,7 @@ export function FileBar({ file, repo, disk, sealed, locked = null, projects, can
     disk && { label: isLocal() ? 'Copy into my files' : 'Copy into my files (synced)', icon: 'filePlus', run: () => actions.copyToFiles(disk.path) },
     disk && inFolders(disk.path) && { label: 'Properties', icon: 'info', run: () => actions.showProperties(disk.path) },
     disk && canTerminal(disk.path) && { label: 'Open a terminal in its folder', icon: 'terminal', run: () => actions.terminalHere(parentOfPath(disk.path)) },
+    disk && !locked && !diskReadOnly(disk) && { label: 'Line endings…', icon: 'eol', hint: `${eolStatus(disk).text}: Windows (CRLF) or Unix (LF)`, run: () => actions.lineEndingsMenu() },
     disk && { separator: true },
     id && { label: 'Details…', icon: 'tag', run: () => actions.openDialog({ type: 'file', id }) },
     !disk?.follow && { label: 'Format document (Shift+Alt+F)', icon: 'code', run: () => actions.formatDocument() },
@@ -869,6 +872,27 @@ function IndentButton({ indent, actions }) {
     ${at && html`<${Menu} items=${items()} at=${at} label="Indentation" owner=${button} onClose=${() => setAt(null)} />`}`;
 }
 
+/**
+ * A file's encoding and line endings: "UTF-8 · CRLF", "Windows-1252 · LF → CRLF · .editorconfig",
+ * "Mixed" (a warning, also in narrow windows). A click: the menu that converts them (not for files
+ * that cannot be saved here, nor locked ones: their text is the locked one).
+ */
+function EolButton({ disk, actions }) {
+  const s = eolStatus(disk);
+  const enc = `${disk.encoding === 'latin1' ? 'Windows-1252' : 'UTF-8'}${disk.bom ? ' BOM' : ''}`;
+  const fixed = diskReadOnly(disk) || actions.isLockedTab?.(store.session.active);
+  const encTitle = disk.encoding === 'latin1' ? 'Windows-1252 (Windows Western), kept when saving' : `UTF-8${disk.bom ? ' with a BOM' : ''}, kept when saving`;
+  if (fixed) return html`<span class="status-item status-eol hide-narrow" title=${`${encTitle}\n${s.title.replace(/ Click to.*$/, '')}`}>${enc} · ${s.text}</span>`;
+  return html`<button type="button" class=${`status-item status-btn-text status-eol ${s.tone === 'warn' ? 'tone-warn' : 'hide-narrow'}`} aria-haspopup="menu"
+    title=${`${encTitle}\n${s.title}`}
+    onClick=${(e) => {
+      const r = e.currentTarget.getBoundingClientRect();
+      actions.lineEndingsMenu({ x: r.right, y: r.top - 4, right: true, above: true });
+    }}>
+    ${s.tone === 'warn' && html`<${Icon} name="alert" size=${13} />`}<span class="status-eol-enc">${enc} · </span><span>${s.text}</span>
+  </button>`;
+}
+
 // "5 lines changed" from the editor's Git changes.
 const changedLines = (changes) => (changes ?? []).reduce((n, c) => n + (c.kind === 'deleted' ? 1 : c.to - c.from + 1), 0);
 
@@ -981,10 +1005,6 @@ export function StatusBar({ recording, big, cursor, language, file, repo, disk, 
           aria-label=${disk ? 'Open a terminal in this file’s folder' : 'Open a terminal'} onClick=${actions.terminalForFile}>
           <${Icon} name="terminal" size=${14} /><span class="hide-narrow">Terminal</span>
         </button>`)}
-    ${disk?.doc
-      ? null
-      : disk
-      ? html`<span class="status-item hide-narrow" title="The file's encoding and line endings, kept when saving">${disk.encoding === 'latin1' ? 'Windows-1252' : 'UTF-8'}${disk.bom ? ' BOM' : ''} · ${disk.eol === 'crlf' ? 'CRLF' : 'LF'}</span>`
-      : html`<span class="status-item hide-narrow">UTF-8 · LF</span>`}
+    ${disk && !disk.doc && html`<${EolButton} disk=${disk} actions=${actions} />`}
   </footer>`;
 }

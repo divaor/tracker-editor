@@ -6,7 +6,8 @@ import { isLockedText } from './locked.js';
 import { kvDelete, kvGet, kvSet } from './kv.js';
 import { getSettings } from './settings.js';
 import { documentKind } from './docTypes.js';
-import { afterDiskEdit, applyFilePatch, createFile, nowIso, textMark, tombstone, trackerDocs, untitledName } from './model.js';
+import { afterDiskEdit, applyFilePatch, createFile, isMarked, nowIso, textMark, tombstone, trackerDocs, untitledName } from './model.js';
+import { endingsChanged, eolFields, savedEolFields } from './lineEndings.js';
 import { isTextAttachment, newId } from './tracker-model.js';
 import { closePane, migratePanes, moveTab, placeTab, tidyPanes } from './paneLayout.js';
 
@@ -35,8 +36,14 @@ let repoTabs = new Map(); // path → { path, name, text, baseSha, dirty }
 // Files on disk edited in place (desktop), never synced: path → { path, name, text,
 // eol, bom, encoding, mtimeMs, size, truncated, dirty, follow, conflict, missing,
 // stale (text not read yet after a restart), saved (while dirty: textMark of the text the
-// file holds, so edits undone back to it leave the tab saved again) }.
+// file holds, so edits undone back to it leave the tab saved again), and its line endings (lineEndings.js:
+// fileEol, breaks, mixed, eols, eolBase, eolChoice, eolChosen, ecEol) }.
 let diskTabs = new Map();
+// The line endings a file with no line break gets (its place's and kind's: set by the app).
+let eolFallback = () => 'lf';
+export const setEolFallback = (fn) => {
+  eolFallback = fn;
+};
 let docTexts = new Map(); // blob sha → text of a tracker document (for search and offline reading)
 // Comparisons in tabs of their own (c:<id>): id → { id, mode: 'files' | 'folders', left, right,
 // savedId?, show? }. A side of folders is { path }; of files { key } (a tab key: f:, r:, d:) or
@@ -88,7 +95,7 @@ function later(key, fn, ms = 250) {
 }
 // A disk tab's text is kept only while it has unsaved edits; otherwise it is read from disk again.
 // `saving` and `offline` are for now only (a server that was not reached may be reachable after a restart).
-const savedDiskTabs = () => [...diskTabs.values()].map(({ saving, offline, ...t }) => (t.dirty ? t : { ...t, text: '', stale: true }));
+const savedDiskTabs = () => [...diskTabs.values()].map(({ saving, offline, ...t }) => (t.dirty ? t : { ...t, text: '', eolBase: undefined, stale: true }));
 
 const persist = {
   files: (ms) => later('files', () => kvSet('files', [...files.values()]), ms),
@@ -616,10 +623,10 @@ export const store = {
   openDiskFile(info) {
     const existing = diskTabs.get(info.path);
     if (!existing?.dirty) {
-      const { path, name, text, eol, bom, encoding, mtimeMs, size, truncated } = info;
+      const { path, name, text, bom, encoding, mtimeMs, size, truncated } = info;
       // `readOnly`: the app that gave the file (Android) does not let it be saved. `doc`: a
       // document shown as it looks (docTypes.js), its text read by the page (`asText` shows that).
-      diskTabs.set(path, { path, name, text, eol, bom, encoding, mtimeMs, size, truncated, readOnly: Boolean(info.readOnly), doc: info.doc ?? null, asText: existing?.asText ?? false, dirty: false, follow: existing?.follow ?? false, conflict: false, missing: false });
+      diskTabs.set(path, { path, name, text, ...eolFields(info, eolFallback(path, text)), bom, encoding, mtimeMs, size, truncated, readOnly: Boolean(info.readOnly), doc: info.doc ?? null, asText: existing?.asText ?? false, dirty: false, follow: existing?.follow ?? false, conflict: false, missing: false });
     }
     persist.disk(0);
     store.open(diskKey(info.path));
@@ -634,12 +641,28 @@ export const store = {
     emit('disk', { path, text: true });
   },
 
-  /** Saved to disk: `text` is what was written. Edits made since stay unsaved. */
-  diskSaved(path, { text, mtimeMs, size }) {
+  /** Saved to disk: `text` is what was written, with `ends` (lineEndings.js saveEndings'). Edits made since stay unsaved. */
+  diskSaved(path, { text, mtimeMs, size, ends = null }) {
     const tab = diskTabs.get(path);
     if (!tab) return;
     const dirty = tab.text !== text;
-    diskTabs.set(path, { ...tab, mtimeMs, size, dirty, saved: dirty ? textMark(text) : undefined, conflict: false, missing: false });
+    diskTabs.set(path, { ...tab, ...(ends ? savedEolFields(text, ends) : {}), mtimeMs, size, dirty, saved: dirty ? textMark(text) : undefined, conflict: false, missing: false });
+    persist.disk(0);
+    emit('disk', { path });
+  },
+
+  /**
+   * A disk tab's line endings changed here (converted, or a mixed file's kept): `patch` of
+   * lineEndings.js's fields. Converted ones keep it unsaved until saved; back to the file's, saved
+   * again when the text is too.
+   */
+  setDiskEol(path, patch) {
+    const tab = diskTabs.get(path);
+    if (!tab) return;
+    const next = { ...tab, ...patch };
+    const saved = tab.dirty ? tab.saved : textMark(tab.text);
+    const dirty = !isMarked(saved, next.text) || endingsChanged(next);
+    diskTabs.set(path, { ...next, dirty, saved: dirty ? saved : undefined });
     persist.disk(0);
     emit('disk', { path });
   },
@@ -648,10 +671,10 @@ export const store = {
   diskReloaded(path, info) {
     const tab = diskTabs.get(path);
     if (!tab) return;
-    const { text, eol, bom, encoding, mtimeMs, size, truncated } = info;
+    const { text, bom, encoding, mtimeMs, size, truncated } = info;
     // A document keeps the text its view read until it reads the file again.
     const keep = info.doc && tab.doc && Math.abs(mtimeMs - tab.mtimeMs) <= 1 ? tab.text : text;
-    diskTabs.set(path, { ...tab, text: keep, eol, bom, encoding, mtimeMs, size, truncated, readOnly: Boolean(info.readOnly), doc: info.doc ?? null, dirty: false, saved: undefined, conflict: false, missing: false, stale: false });
+    diskTabs.set(path, { ...tab, text: keep, ...eolFields(info, eolFallback(path, text)), bom, encoding, mtimeMs, size, truncated, readOnly: Boolean(info.readOnly), doc: info.doc ?? null, dirty: false, saved: undefined, conflict: false, missing: false, stale: false });
     persist.disk();
     emit('disk', { path });
   },

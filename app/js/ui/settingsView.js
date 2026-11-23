@@ -34,6 +34,8 @@ import { chats } from '../chatStore.js';
 import { minimapShown } from '../minimapLayout.js';
 import { isMacKeys } from '../keys.js';
 import { projectStatus } from '../project.js';
+import { placeEol } from '../lineEndings.js';
+import { systemAt } from '../newText.js';
 
 const SYNC_FIELDS = ['owner', 'repo', 'branch', 'trackerPath', 'device'];
 const pick = (obj, keys) => Object.fromEntries(keys.map((k) => [k, obj[k] ?? '']));
@@ -201,6 +203,13 @@ function EditorCard({ settings, actions }) {
       </${Field}>
       <${Check} checked=${settings.detectIndent !== false} label="Each file's indentation from its text or its .editorconfig" hint="Tabs or spaces, and how many: the status bar shows it and changes it"
         onChange=${(v) => saveSettings({ detectIndent: v })} />
+      <${Field} label="Line endings of new files" hint=${`Of files Tinta makes. Like the system: Windows CRLF, Linux, macOS and phones LF (here: ${placeEol('auto', systemAt('')) === 'crlf' ? 'CRLF' : 'LF'}), a server its own. .bat and .cmd always CRLF, shell scripts LF; an .editorconfig wins.`}>
+        <select value=${settings.lineEndings ?? 'auto'} onChange=${(e) => saveSettings({ lineEndings: e.currentTarget.value })}>
+          <option value="auto">Like the system of where the file is</option>
+          <option value="crlf">Windows (CRLF) everywhere</option>
+          <option value="lf">Unix (LF) everywhere</option>
+        </select>
+      </${Field}>
       <${Check} checked=${settings.problems !== false} label="Show problems as you type" hint="JSON, YAML, XML, HTML, CSS and code: Ctrl+Shift+M lists them, F8 goes to the next"
         onChange=${(v) => saveSettings({ problems: v })} />
       <${Check} checked=${settings.emmet !== false} label="Emmet: Tab expands abbreviations in HTML, XML and JSX" hint="ul>li*3, div.card, a[href], ! for a page"

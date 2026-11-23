@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { decodeAppended, decodeText, encodeText, fromBase64, fromWholeLine, toBase64 } from '../app/js/textBytes.js';
+import { cannotHold, CP1252_HIGH, decodeAppended, decodeText, encodeText, fromBase64, fromWholeLine, toBase64 } from '../app/js/textBytes.js';
 import { changedSince, routeOfLink, sendQueue, sortLaunch } from '../app/js/androidApp.js';
 import { contentPlace, isContentPath } from '../app/js/where.js';
 
@@ -19,7 +19,11 @@ test('text from bytes: the same as the desktop app reads it', () => {
     Buffer.from('mixed\r\nmostly\nunix\nlines\n'),
     Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('with a BOM: café\n')]),
     Buffer.from('ñandú, Windows-1252\n', 'latin1'),
+    Buffer.from([0x80, 0x93, 0x94, 0x96, 0x81, 0x9d, 0x0d, 0x0a]),
     Buffer.from('emoji 🎉 and accents àé\n'),
+    Buffer.from('old\rmac\rlines'),
+    Buffer.from('mixed\r\nends\nhere\rand\r\n'),
+    Buffer.from('no line break'),
     Buffer.from(''),
   ];
   for (const buf of samples) assert.deepEqual(decodeText(new Uint8Array(buf)), disk.decode(buf), JSON.stringify(buf.toString('latin1')));
@@ -39,13 +43,24 @@ test('bytes for the text: line endings, BOM and encoding put back', () => {
     assert.equal(back.text, text);
     assert.equal(back.bom, Boolean(opts.bom));
   }
-  // A character a Latin-1 file cannot hold becomes "?" (rather than a wrong byte).
-  assert.deepEqual([...encodeText('a€', { encoding: 'latin1' })], [0x61, 0x3f]);
+  // Windows-1252: € is 0x80 (it was "?" before 0.53); a character it cannot hold is refused (the page asks first).
+  assert.deepEqual([...encodeText('a€”', { encoding: 'latin1' })], [0x61, 0x80, 0x94]);
+  assert.throws(() => encodeText('a😀', { encoding: 'latin1' }), /cannot hold/);
+  assert.deepEqual(cannotHold('a😀€ő', 'latin1'), disk.cannotHold('a😀€ő', 'latin1'));
+  assert.deepEqual(CP1252_HIGH, disk.CP1252_HIGH, 'the same table as the desktop');
+  // Line endings: each line's own, a lone CR.
+  for (const opts of [{ eol: 'cr' }, { eol: 'crlf', eols: 'LCR' }, { eol: 'lf', eols: 'C' }]) {
+    assert.deepEqual(Buffer.from(encodeText('a\nb\nc\nd', opts)), disk.encode('a\nb\nc\nd', opts), JSON.stringify(opts));
+  }
+  const all = new Uint8Array(255).map((_, i) => i + 1);
+  const back = decodeText(all);
+  assert.deepEqual(encodeText(back.text, back), all, 'every byte of a Windows-1252 file comes back');
 });
 
 test('followed files, large files and base64', () => {
   assert.equal(decodeAppended(new Uint8Array(Buffer.from('new\r\nlines'))), 'new\nlines');
   assert.equal(decodeAppended(new Uint8Array(Buffer.from('é', 'latin1')), 'latin1'), 'é');
+  assert.equal(decodeAppended(new Uint8Array([0x80, 0x0d]), 'latin1'), '€\n');
   assert.equal(fromWholeLine('rt of a line\nwhole\n'), 'whole\n');
   const all = new Uint8Array(70000).map((_, i) => i % 256);
   assert.deepEqual(fromBase64(toBase64(all)), all);

@@ -22,6 +22,7 @@ import { looksLikeProject } from '../dockerize.js';
 import { folderGroupOf } from '../tabViews.js';
 import { extractedMessage, isArchiveName, laterVolume, stemOf, topsToAsk } from '../archives.js';
 import { ArchivePasswordDialog, CompressDialog, ExtractDialog, isKnownArchive } from './archives.js';
+import { childOf, newTextFile } from '../newText.js';
 
 // "Git: branch main, 2 ahead … · 3 changed files" for a folder's branch chip.
 const branchTitle = (g) => {
@@ -680,7 +681,8 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     setCreating(null);
     const since = picks.current;
     try {
-      const path = kind === 'folder' ? await bridge.newFolder(where, name) : await bridge.newFile(where, name, { text: text ?? '' });
+      // A file gets the line endings of its place and kind (and its folder's .editorconfig).
+      const path = kind === 'folder' ? await bridge.newFolder(where, name) : await newTextFile(where, name, { text: text ?? '' });
       await load();
       lookAgain();
       const still = picks.current === since;
@@ -723,7 +725,8 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     for (const e of items) byFolder.set(dirOf(e.path), [...(byFolder.get(dirOf(e.path)) ?? []), e.path]);
     for (const [folder, paths] of byFolder) await copyNow(paths, folder, 'keep');
   };
-  const copyIn = (files, target) => askExisting([...files].map((f) => f.name).filter(Boolean), target, (onExists) => copyInNow(files, target, onExists));
+  // `eol`: a tab's copy takes the line endings of the folder's place.
+  const copyIn = (files, target, eol) => askExisting([...files].map((f) => f.name).filter(Boolean), target, (onExists) => copyInNow(files, target, onExists, eol));
   const moveNow = async (paths, target, onExists) => {
     const since = picks.current;
     try {
@@ -753,10 +756,10 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       fail(err);
     }
   };
-  const copyInNow = async (files, target, onExists) => {
+  const copyInNow = async (files, target, onExists, eol) => {
     const since = picks.current;
     try {
-      const copies = await bridge.copyIn(files, target, { onExists });
+      const copies = await bridge.copyIn(files, target, { onExists, ...(eol ? { eol } : {}) });
       if (copies.transfer) return;
       if (!copies.length) return toast('Nothing was added: those are there already.');
       await after({ made: copies.map((c) => c.to), since }, `Added ${count(copies.length, 'item')}${target === dir ? '' : ` to ${baseName(target)}`}`, () =>
@@ -1021,8 +1024,8 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       const tab = draggedTab();
       const paths = draggedPaths();
       dropped();
-      // A tab: a copy of it is saved here. Files from this view: moved (Ctrl: copied).
-      if (tab) return copyIn(files, target);
+      // A tab: a copy of it is saved here (with this folder's line endings). Files from this view: moved (Ctrl: copied).
+      if (tab) return copyIn(files, target, files[0] && actions.copyEolIn?.(tab, childOf(target, files[0].name)));
       if (paths.includes(target)) return;
       return ev.ctrlKey ? copyTo(paths, target) : moveTo(paths, target);
     }
@@ -1138,6 +1141,15 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     const listed = listings.get(d)?.entries ?? children.get(d);
     return dockerHere(d) && Array.isArray(listed) && looksLikeProject(listed.map((e) => e.name)) && { label: 'Dockerize this project…', icon: 'container', hint: 'Run it anywhere, offline too', run: () => actions.dockerize(d) };
   };
+  // Line endings (0.53): the text files picked, and those in the folders picked, counted, then
+  // converted to Windows' (CRLF) or Unix's (LF). Not for locked files (their text is ciphertext).
+  const eolItems = (paths, names = []) =>
+    bridge.eolScan && paths.length && !names.some((n) => isLockedName(n))
+      ? [
+          { label: 'Line endings → Windows (CRLF)…', icon: 'eol', hint: 'Counts the files first; Undo after', run: () => actions.convertEolIn(paths, 'crlf') },
+          { label: 'Line endings → Unix (LF)…', icon: 'eol', hint: 'Counts the files first; Undo after', run: () => actions.convertEolIn(paths, 'lf') },
+        ]
+      : [];
   const backgroundItems = () => [
     { label: 'New file', icon: 'filePlus', run: () => startCreating('file') },
     { label: 'New folder (Ctrl+Shift+N)', icon: 'folderPlus', run: () => startCreating('folder') },
@@ -1145,6 +1157,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     { label: 'Paste (Ctrl+V)', icon: 'clipboard', run: paste },
     { label: 'Find in this folder… (Ctrl+Shift+F)', icon: 'search', run: () => actions.findInFolder(dir) },
     { label: 'Ask the model about this folder…', icon: 'sparkle', hint: 'It can make and change files here; each change waits for your Apply', run: () => actions.assistFiles({ folder: dir }) },
+    ...eolItems([dir]),
     gitItem(dir),
     historyItem(dir),
     dockerItem(dir),
@@ -1216,6 +1229,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       !one && files.length > 1 && files.length === items.length && files.every(isArchive) && { label: `Extract the ${files.length} archives, each into its own folder`, icon: 'archive', run: () => extractEach(files) },
       !remote && bridge.archiveCompress && { label: one ? `Compress to ${one.dir ? one.name : one.name.replace(/\.[^.]+$/, '') || one.name}.zip` : `Compress ${count(items.length, 'item')} to a zip`, icon: 'archive', run: () => compressItems(items) },
       !remote && bridge.archiveCompress && { label: 'Compress…', icon: 'archive', hint: 'zip, 7z or tar; a password, volumes, what to leave out', run: () => setArchiveDialog({ kind: 'compress', items }) },
+      ...(items.every((e) => e.dir || opensInEditor(e.name)) && new Set(items.map((e) => (isRemotePath(e.path) ? remoteParts(e.path).id : ''))).size === 1 ? eolItems(items.map((e) => e.path), items.map((e) => e.name)) : []),
       { label: one ? 'Copy path' : 'Copy paths', icon: 'copy', run: () => (one ? actions.copyPath(one.path) : navigator.clipboard.writeText(items.map((e) => e.path).join('\n')).then(() => toast('Paths copied'))) },
       !remote && !items.some((e) => isLockedName(e.name)) && { label: one ? 'Copy for Claude (the path)' : 'Copy for Claude (the paths)', icon: 'claude', run: () => navigator.clipboard.writeText(items.map((e) => quotePath(e.path)).join(' ')).then(() => toast('On the clipboard: paste it into Claude')) },
       files.length && files.length === items.length && files.every((e) => opensInEditor(e.name)) && { label: isLocal() ? 'Copy into my files' : 'Copy into my files (synced)', icon: 'filePlus', run: () => files.forEach((e) => actions.copyToFiles(e.path)) },
@@ -1287,6 +1301,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       { label: 'Paste here', icon: 'clipboard', disabled: !clip, run: () => clip && pasteInto(s, {}) },
       { label: 'Find in this folder…', icon: 'search', run: () => actions.findInFolder(s) },
       { label: 'Ask the model about this folder…', icon: 'sparkle', hint: 'It can make and change files here; each change waits for your Apply', run: () => actions.assistFiles({ folder: s }) },
+      ...eolItems([s]),
       gitItem(s),
       historyItem(s),
       dockerItem(s),
