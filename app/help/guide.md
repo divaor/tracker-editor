@@ -720,7 +720,7 @@ It types real key presses into whichever window has the focus when the countdown
 
 ## 10. Logs, files on disk and folders (desktop, Android app)
 
-- **File → Open File (Edit in Place)** (`Ctrl+O`): edit a file where it is (a config file, a script, a log). It is not synced. `Ctrl+S` saves it back with its line endings (CRLF/LF), BOM and encoding, shown in the status bar.
+- **File → Open File (Edit in Place)** (`Ctrl+O`): edit a file where it is (a config file, a script, a log). It is not synced. `Ctrl+S` saves it back with its line endings (CRLF/LF), BOM and encoding, shown in the status bar (see *Line endings and encodings* below).
 - **Changed elsewhere**: with no unsaved edits it reloads by itself. With edits, a yellow notice offers **Compare**, **Reload (lose my edits)** or **Keep mine and save over it**. Saving never silently overwrites another program's change.
 - **Follow** (like `tail -f`): new lines appear as they are written and the view stays at the end; the tab is read-only meanwhile. A rotated log is read again.
 - **Huge files** (over 20 MB) open by their last 5 MB, read-only.
@@ -728,6 +728,19 @@ It types real key presses into whichever window has the focus when the countdown
 - **Paste a file to open it**: copy a file in Explorer or Finder (`Ctrl+C`) and paste it here (`Ctrl+V`, in a file or anywhere in the window): it opens where it is, as a tab of its own (a guest in a view of one group), not as a copy. Pictures are read as text instead (see 13). A folder pasted opens in Folders.
 - **Paste a path**: paste `C:\folder\file.txt` (Explorer's **Copy as path** too, with its quotes) or `/home/me/file.txt` into a file and it is pasted as text, with **Open** in the message to open that file. Or paste it into `Ctrl+P` and press `Enter`. Outside a file (no tab open), pasting a path opens it at once. A file or folder not opened here before is asked about first, in a window of your system.
 - ⋯ → **Show its folder in Folders**, **Show in the file explorer**, **Copy path**, **Copy into my files** (a synced copy). Closing a tab with unsaved edits asks first.
+
+### Line endings and encodings
+
+Windows ends lines with CRLF, Linux and macOS with LF (very old Macs with CR alone). A file you open keeps its own when saved; the status bar shows them with the encoding (`UTF-8 · CRLF`).
+
+- **New files follow the system of where they are**: in Folders (**New file**), files the model makes, a project's `.tracker-editor.json`, **Save a copy**, a tab dragged out or dropped on a folder, a file whose lock is taken off. On Windows CRLF; on Linux, macOS and phones LF; on a server, its own (a Windows server: CRLF; it says so when it connects); Docker containers and WSL are Linux. **Settings → Editor → Line endings of new files** can make them all CRLF or all LF instead.
+- **By kind, whatever the setting**: `.bat`, `.cmd` (and `.btm`) are always CRLF (Windows' cmd misreads them otherwise); shell scripts (`.sh`, `.bash`, `.zsh`, `.ksh`, `.fish`, and any file starting with `#!`) always LF (with CRLF they fail on Linux: "bad interpreter: ^M").
+- **An `.editorconfig`'s `end_of_line`** (lf, crlf, cr) wins over all of that for the files it covers. A file that has other endings says so in the status bar (`LF → CRLF · .editorconfig`), and saving it converts them.
+- **A file with no line break yet** (empty, or one line) gets the endings of its place, so the lines you add are right.
+- **Convert one file**: click the line endings in the status bar (or ⋯ → **Line endings…**, or **Line endings** in `Ctrl+Shift+P`) and pick **Windows (CRLF)** or **Unix (LF)** (**Classic Mac (CR)** for a file that has it). The tab is unsaved until you save it; **Undo** in the message takes it back.
+- **Mixed line endings** (some lines CRLF, others LF): the status bar says **Mixed** (its tooltip has the counts). Nothing is changed silently: the first save asks whether to **keep each line's own** (lines you did not change keep theirs; new and changed lines get the most common), or make them all **Windows (CRLF)** or all **Unix (LF)**. Files saved automatically on a server wait for `Ctrl+S` to ask.
+- **Convert many files** (Folders, desktop and the Android app; here, on servers and in containers): right-click files or folders → **Line endings → Windows (CRLF)…** or **→ Unix (LF)…**. It first counts the text files inside (not `.git`, `node_modules` and such; links not followed; pictures, archives and large files left out): how many would change, how many are right already. **Convert** writes each one (its encoding and BOM kept) only if it did not change since it was read; **Stop** stops it; **Undo** in the message puts them back. Files open with unsaved edits are left out; open ones without edits read again.
+- **Encodings**: a file that is not UTF-8 is read as **Windows-1252** (Windows' Western one: `€ “ ” – é`), and saved back byte for byte. If you type a character it cannot hold (an emoji, Greek, Polish ł), saving asks to save the file as UTF-8 instead; Cancel saves nothing.
 
 ### A terminal, and running a file
 
@@ -1157,6 +1170,7 @@ Settings → **Keys** (also **Help → Keys…** on the desktop, or **Keys** in 
 - **Obtainium says the app cannot be updated ("signatures do not match")**: an APK built elsewhere (or a test build) is installed. Uninstall Tinta and install it again from Obtainium (sync with GitHub first, or your files on the phone go with it).
 - **Android app: Open a folder does nothing**: it needs **All files access**. Allow it in Android's settings (Apps → Tinta → Permissions, or the screen it opened), come back and tap **Open a folder…** again.
 - **Git in the editor says "Permission denied (publickey)" but `ssh -T` works in PowerShell (Windows)**: Git for Windows uses its own ssh, which does not see Windows' ssh-agent where your key is loaded. Tell Git to use Windows' ssh: `git config --global core.sshCommand C:/Windows/System32/OpenSSH/ssh.exe`, then Pull again. Before 0.52 the editor's Fetch, Pull and Push did not follow that setting (they always ran Git's own ssh): update, or set a user environment variable `GIT_SSH_COMMAND` = `C:/Windows/System32/OpenSSH/ssh.exe -o BatchMode=yes` and open the editor again.
+- **Git or another editor says a file "was CRLF" or "needs converting"**: it was made with other line endings than the rest. Click the line endings in the status bar to convert it, or right-click its folder in Folders → **Line endings**. To have new files made one way everywhere, set **Settings → Editor → Line endings of new files**, or put `end_of_line = crlf` (or `lf`) in the project's `.editorconfig`.
 - **Android app: nothing responds, or it closes by itself**: long-press its icon → **Send a log** and send it to whoever helps you with it.
 - **Android app: "The app's file access did not start"**: Folders, servers and terminals need it; the rest of the editor works without it. **Send a log** (the message's reason is in it too).
 - **Android app: "The app's access to files and servers stopped"**: Android ended its file access while the app was in the background. Do it again: it starts again. Terminals on the phone and on servers end with it.

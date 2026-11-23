@@ -8,6 +8,7 @@ import { getSettings } from './settings.js';
 import { documentKind } from './docTypes.js';
 import { afterDiskEdit, applyFilePatch, createFile, isMarked, nowIso, textMark, tombstone, trackerDocs, untitledName } from './model.js';
 import { endingsChanged, eolFields, savedEolFields } from './lineEndings.js';
+import { CP1252_HIGH } from './textBytes.js';
 import { isTextAttachment, newId } from './tracker-model.js';
 import { closePane, migratePanes, moveTab, placeTab, tidyPanes } from './paneLayout.js';
 
@@ -39,6 +40,15 @@ let repoTabs = new Map(); // path → { path, name, text, baseSha, dirty }
 // file holds, so edits undone back to it leave the tab saved again), and its line endings (lineEndings.js:
 // fileEol, breaks, mixed, eols, eolBase, eolChoice, eolChosen, ecEol) }.
 let diskTabs = new Map();
+/**
+ * A tab kept unsaved by a version before 0.53, which read files that are not UTF-8 as Latin-1:
+ * their bytes 0x80–0x9F are Windows-1252's characters now (€ “ ” …), the same bytes when saved.
+ * Tabs from 0.53 on have `fileEol`.
+ */
+export function fromLatin1(tab) {
+  if (tab?.encoding !== 'latin1' || tab.fileEol || !tab.dirty || typeof tab.text !== 'string') return tab;
+  return { ...tab, text: tab.text.replace(/[\x80-\x9f]/g, (c) => String.fromCharCode(CP1252_HIGH[c.charCodeAt(0) - 0x80])) };
+}
 // The line endings a file with no line break gets (its place's and kind's: set by the app).
 let eolFallback = () => 'lf';
 export const setEolFallback = (fn) => {
@@ -233,7 +243,7 @@ export const store = {
     const savedRepo = (await kvGet('repoTabs')) ?? [];
     repoTabs = new Map(savedRepo.map(settleRepoTab).filter(Boolean).map((t) => [t.path, t]));
     if (savedRepo.some((t) => repoTabs.get(t.path) !== t)) persist.repo(0);
-    diskTabs = new Map(((await kvGet('diskTabs')) ?? []).map((t) => [t.path, t]));
+    diskTabs = new Map(((await kvGet('diskTabs')) ?? []).map((t) => [t.path, fromLatin1(t)]));
     // Edits in a comparison are not kept across a restart: nothing is unsaved there now.
     compares = new Map(((await kvGet('compares')) ?? []).map((c) => [c.id, { ...c, dirty: false }]));
     projects = (await kvGet('projects')) ?? [];
