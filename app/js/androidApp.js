@@ -472,8 +472,11 @@ function foldersBridge() {
     move: inv('folder:move'),
     copy: inv('folder:copy'),
     existing: inv('folder:existing'),
-    zip: inv('folder:zip'),
-    unzip: inv('folder:unzip'),
+    archiveList: inv('archive:list'),
+    archiveExtract: inv('archive:extract'),
+    archiveCompress: inv('archive:compress'),
+    archiveStop: inv('archive:stop'),
+    onArchiveProgress: (cb) => nodeOn('archive:progress', cb),
     // Files pasted from other apps by path: not on a phone.
     copyIn: async () => {
       throw new Error('Files from other apps cannot be pasted here on a phone: share them to Tinta instead.');

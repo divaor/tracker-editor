@@ -20,6 +20,8 @@ import { gitCodeOf, gitOf, onGitState, refreshGit, stageStateOf } from '../gitSt
 import { GIT_LABELS } from '../gitStatus.js';
 import { looksLikeProject } from '../dockerize.js';
 import { folderGroupOf } from '../tabViews.js';
+import { extractedMessage, isArchiveName, laterVolume, stemOf, topsToAsk } from '../archives.js';
+import { ArchivePasswordDialog, CompressDialog, ExtractDialog, isKnownArchive } from './archives.js';
 
 // "Git: branch main, 2 ahead … · 3 changed files" for a folder's branch chip.
 const branchTitle = (g) => {
@@ -121,6 +123,15 @@ export function NameField({ initial, dir = false, label, onDone, onCancel }) {
 // A file to show in the tree (revealInFolders), taken by the view when it shows or at once.
 let pendingReveal = null;
 
+// Folders views shown now: a command for the selection there (archive-extract, archive-compress) needs one.
+let shownViews = 0;
+/** Runs a command on what is picked in Folders ('extract', 'compress'); false when Folders is not shown. */
+export function runInFolders(id) {
+  if (!shownViews) return false;
+  window.dispatchEvent(new CustomEvent('folders:command', { detail: { id } }));
+  return true;
+}
+
 /** Shows the file at `path` in the folders view: the folders above it opened, the file picked. */
 export function revealInFolders(path) {
   pendingReveal = path;
@@ -152,6 +163,8 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   const [viewing, setViewing] = useState(null); // the file shown large (Space)
   const peekDrag = useRef({ start: 0, height: 0 });
   const [exists, setExists] = useState(null); // { names, target, run }: asked before a copy or move
+  // Extract…, Compress… and an archive's password: { kind: 'extract' | 'compress' | 'password', entry?, items?, opts?, wrong? }.
+  const [archiveDialog, setArchiveDialog] = useState(null);
   const [expanded, setExpanded] = useState(() => new Set());
   const [children, setChildren] = useState(() => new Map()); // folder → entries (or { error })
   const list = useRef(null);
@@ -814,36 +827,99 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     bridge.paste().catch(fail);
   };
 
-  now.current = { inList, targets, setClip, workDir, pasteInto };
+  now.current = { inList, targets, setClip, workDir, pasteInto, isArchive: (e) => isArchive(e) };
 
-  // ---- Zip, compare ----
+  // ---- Archives (folders on this computer: 7-Zip in the main process) ----
 
-  const zipSelected = async (items) => {
-    toast(`Compressing ${items.length === 1 ? items[0].name : count(items.length, 'item')}…`, { key: 'zip', timeout: 600000 });
-    const since = picks.current;
+  // A job with its progress in a toast (Stop ends it); `start(id)` calls the main process.
+  const archiveJob = async (label, start) => {
+    const id = `a${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+    const key = `archive-${id}`;
+    let stopping = false;
+    const show = (percent) =>
+      !stopping &&
+      toast(`${label}${percent == null ? '…' : ` ${percent}%`}`, {
+        key,
+        timeout: 24 * 3600 * 1000,
+        action: { label: 'Stop', run: () => ((stopping = true), bridge.archiveStop(id).catch(() => {})) },
+      });
+    show(null);
+    const off = bridge.onArchiveProgress?.((p) => p.id === id && p.total > 0 && show(Math.min(99, Math.floor((p.done / p.total) * 100))));
     try {
-      const made = await bridge.zip(items.map((e) => e.path), folderOf(items));
-      dismissToast('zip');
-      await after({ made: [made], since }, `Made ${baseName(made)}`, () => bridge.trash([made]).then(() => load(), fail));
-    } catch (err) {
-      dismissToast('zip');
-      fail(err);
+      return await start(id);
+    } finally {
+      off?.();
+      dismissToast(key);
     }
   };
-  const extract = async (e) => {
-    toast(`Extracting ${e.name}…`, { key: 'zip', timeout: 600000 });
+  const archiveFailed = (err, what) => (/Stopped/.test(message(err)) ? toast(`Stopped: ${what}`) : fail(err));
+  const isArchive = (e) => Boolean(e) && !e.dir && !isRemotePath(e.path) && Boolean(bridge.archiveList) && (isArchiveName(e.name) || isKnownArchive(e.path));
+  /**
+   * Extracts `e`: `opts.to` 'here' (its own folder: the names there already asked about first) or
+   * 'folder' (a new folder beside it, `opts.name`); a password asked for when it needs one.
+   */
+  const extractArchive = async (e, opts = {}) => {
+    const target = dirOf(e.path);
+    if (laterVolume(e.name)) return toast(`${e.name} is a later part: extract the first one (.001), with all the parts in the same folder.`, { kind: 'error', timeout: 8000 });
+    if (opts.to === 'here' && !opts.onExists) {
+      let info;
+      try {
+        info = await bridge.archiveList(e.path, opts.password ? { password: opts.password } : undefined);
+      } catch (err) {
+        return fail(err);
+      }
+      if (info.needsPassword || (info.encrypted && !opts.password)) return setArchiveDialog({ kind: 'password', entry: e, opts, wrong: Boolean(info.wrong) });
+      const names = topsToAsk(info);
+      const taken = names.length ? await bridge.existing(target, names).catch(() => []) : [];
+      if (taken.length) return setExists({ names: taken, target, run: (how) => extractArchive(e, { ...opts, onExists: how }) });
+      opts = { ...opts, onExists: 'keep' };
+    }
     const since = picks.current;
     try {
-      const got = await bridge.unzip(e.path);
-      dismissToast('zip');
-      await after({ made: [got.folder], since }, `Extracted ${count(got.files, 'file')} into ${baseName(got.folder)}${got.skipped.length ? ` (${count(got.skipped.length, 'unsafe name')} left out)` : ''}`, () =>
-        bridge.trash([got.folder]).then(() => load(), fail),
-      );
+      const got = await archiveJob(`Extracting ${e.name}`, (id) => bridge.archiveExtract(id, e.path, opts));
+      if (got.needsPassword) return setArchiveDialog({ kind: 'password', entry: e, opts, wrong: got.wrong });
+      // Undo takes back what came out (not what it replaced: that is in the Recycle Bin).
+      await after({ made: got.made, since }, extractedMessage(got, e.name), got.replaced || !got.made.length ? null : () => bridge.trash(got.made).then(() => load(), fail));
     } catch (err) {
-      dismissToast('zip');
-      fail(err);
+      archiveFailed(err, `nothing was extracted from ${e.name}.`);
     }
   };
+  const extractEach = async (items) => {
+    for (const e of items) await extractArchive(e, { to: 'folder' });
+  };
+  /** Compresses `items` into an archive in their folder: `opts` as Compress… makes it (zip, normal, nothing left out: the quick one). */
+  const compressItems = async (items, opts = { format: 'zip', exclude: [] }) => {
+    const since = picks.current;
+    const what = items.length === 1 ? items[0].name : count(items.length, 'item');
+    try {
+      const got = await archiveJob(`Compressing ${what}`, (id) => bridge.archiveCompress(id, items.map((e) => e.path), folderOf(items), opts));
+      const parts = got.made.length > 1 ? ` in ${got.made.length} parts` : '';
+      const out = got.leftOut?.length ? ` (${count(got.leftOut.length, got.leftOut.every((l) => l.why === 'link') ? 'link' : 'file')} left out)` : '';
+      await after({ made: got.made, since }, `Made ${baseName(got.made[0])}${parts}${out}`, () => bridge.trash(got.made).then(() => load(), fail));
+    } catch (err) {
+      archiveFailed(err, `${what} was not compressed.`);
+    }
+  };
+  // The command palette's Extract… and Compress… (app.js runInFolders), for what is picked here.
+  useEffect(() => {
+    shownViews += 1;
+    const onCommand = (ev) => {
+      const items = now.current.targets();
+      if (ev.detail?.id === 'compress') {
+        if (!items.length || items.some((e) => isRemotePath(e.path))) return toast('Pick files or folders on this device in Folders first, then Compress….');
+        return setArchiveDialog({ kind: 'compress', items });
+      }
+      if (ev.detail?.id === 'extract') {
+        if (items.length !== 1 || !now.current.isArchive(items[0])) return toast('Pick an archive in Folders first (zip, 7z, rar, tar…), then Extract….');
+        return setArchiveDialog({ kind: 'extract', entry: items[0] });
+      }
+    };
+    window.addEventListener('folders:command', onCommand);
+    return () => {
+      shownViews -= 1;
+      window.removeEventListener('folders:command', onCommand);
+    };
+  }, []);
 
   // ---- Dragging ----
 
@@ -994,6 +1070,18 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       return setSelected(next);
     }
     if (key === 'Enter' && ev.altKey) return handled(), targets().length === 1 && actions.showProperties(targets()[0].path);
+    // The menu key or Shift+F10: the menu of what is picked, at its row (else the folder's).
+    if (key === 'ContextMenu' || (key === 'F10' && ev.shiftKey)) {
+      handled();
+      const row = cursor && list.current?.querySelector(`[data-path="${CSS.escape(cursor)}"]`);
+      const r = (row ?? list.current)?.getBoundingClientRect();
+      const at = r ? { x: r.left + 24, y: row ? r.bottom : r.top + 8 } : { x: 40, y: 40 };
+      if (cursor && byPath.get(cursor)) {
+        if (!selected.has(cursor)) select([cursor]);
+        return setMenu({ entry: byPath.get(cursor), at });
+      }
+      return setMenu({ entry: null, at });
+    }
     // Space: the file large, over the window (arrows for the others), like Quick Look.
     if (key === ' ' && !mod && cursor && byPath.get(cursor) && !byPath.get(cursor).dir) return handled(), setViewing(cursor);
     if (key === 'Enter') return handled(), openSelected();
@@ -1116,8 +1204,14 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       one && { label: 'Rename (F2)', icon: 'edit', run: () => setRenaming(one.path) },
       { label: 'Delete (Del)', icon: 'trash', danger: true, run: () => setConfirm(items) },
       { separator: true },
-      !remote && { label: one ? `Compress to ${one.dir ? one.name : one.name.replace(/\.[^.]+$/, '') || one.name}.zip` : `Compress ${count(items.length, 'item')} to a zip`, icon: 'archive', run: () => zipSelected(items) },
-      !remote && one && !one.dir && /\.zip$/i.test(one.name) && { label: 'Extract into a new folder', icon: 'archive', run: () => extract(one) },
+      // Archives (on this device): what one holds, extracting it, compressing what is picked.
+      isArchive(one) && { label: 'Show what’s inside', icon: 'list', hint: 'Without extracting it (Space)', run: () => setViewing(one.path) },
+      isArchive(one) && { label: 'Extract here', icon: 'archive', hint: `Into ${baseName(dirOf(one.path))}; names already there are asked about`, run: () => extractArchive(one, { to: 'here' }) },
+      isArchive(one) && { label: `Extract to “${stemOf(one.name)}/”`, icon: 'folderPlus', hint: 'A new folder beside it', run: () => extractArchive(one, { to: 'folder' }) },
+      isArchive(one) && { label: 'Extract…', icon: 'archive', hint: 'Where, and its password', run: () => setArchiveDialog({ kind: 'extract', entry: one }) },
+      !one && files.length > 1 && files.length === items.length && files.every(isArchive) && { label: `Extract the ${files.length} archives, each into its own folder`, icon: 'archive', run: () => extractEach(files) },
+      !remote && bridge.archiveCompress && { label: one ? `Compress to ${one.dir ? one.name : one.name.replace(/\.[^.]+$/, '') || one.name}.zip` : `Compress ${count(items.length, 'item')} to a zip`, icon: 'archive', run: () => compressItems(items) },
+      !remote && bridge.archiveCompress && { label: 'Compress…', icon: 'archive', hint: 'zip, 7z or tar; a password, volumes, what to leave out', run: () => setArchiveDialog({ kind: 'compress', items }) },
       { label: one ? 'Copy path' : 'Copy paths', icon: 'copy', run: () => (one ? actions.copyPath(one.path) : navigator.clipboard.writeText(items.map((e) => e.path).join('\n')).then(() => toast('Paths copied'))) },
       !remote && { label: one ? 'Copy for Claude (the path)' : 'Copy for Claude (the paths)', icon: 'claude', run: () => navigator.clipboard.writeText(items.map((e) => quotePath(e.path)).join(' ')).then(() => toast('On the clipboard: paste it into Claude')) },
       files.length && files.length === items.length && files.every((e) => opensInEditor(e.name)) && { label: isLocal() ? 'Copy into my files' : 'Copy into my files (synced)', icon: 'filePlus', run: () => files.forEach((e) => actions.copyToFiles(e.path)) },
@@ -1521,13 +1615,14 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
         onEnd=${() => saveSettings({ folderPreviewHeight: peekDrag.current.height })}
         onReset=${() => saveSettings({ folderPreviewHeight: 260 })} />
       <${PeekPane} entry=${peekEntry} height=${peekHeight} onOpen=${(e) => openEntry(e)} onOpenOutside=${openOutside} onExpand=${(e) => setViewing(e.path)}
-        onReadText=${readText} onClose=${() => saveSettings({ folderPreview: false })} />`}
+        onReadText=${readText} onExtract=${(e) => setArchiveDialog({ kind: 'extract', entry: e })} onClose=${() => saveSettings({ folderPreview: false })} />`}
     ${viewing &&
     html`<${FileViewer} entries=${entries.filter((e) => !e.dir)} path=${viewing}
       onPath=${(p) => (setViewing(p), select([p]))}
       onOpen=${(e) => (setViewing(null), openEntry(e, { outside: peekKind(e.name) === 'image' }))}
       onOpenOutside=${openOutside}
       onReadText=${(e) => (setViewing(null), readText(e))}
+      onExtract=${(e) => (setViewing(null), setArchiveDialog({ kind: 'extract', entry: e }))}
       onClose=${() => (setViewing(null), list.current?.focus())} />`}
     <div class="sidebar-foot folders-foot">
       <span class="muted small folders-status" aria-live="polite">${selectionSummary(entries, selected, formatBytes)}</span>
@@ -1541,5 +1636,14 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       label=${menu.section ? placeName(menu.section) : menu.favorite ? placeName(menu.favorite) : (menu.entry?.name ?? (dir === root ? rootName(root) : baseName(dir)))} onClose=${() => setMenu(null)} />`}
     ${confirm && html`<${DeleteDialog} entries=${confirm} onConfirm=${() => remove(confirm)} onClose=${() => (setConfirm(null), list.current?.focus())} />`}
     ${exists && html`<${ExistsDialog} names=${exists.names} target=${exists.target} onChoose=${(how) => (setExists(null), exists.run(how))} onClose=${() => (setExists(null), list.current?.focus())} />`}
+    ${archiveDialog?.kind === 'extract' &&
+    html`<${ExtractDialog} entry=${archiveDialog.entry} folderName=${baseName(dirOf(archiveDialog.entry.path))}
+      onExtract=${(opts) => (setArchiveDialog(null), extractArchive(archiveDialog.entry, opts))} onClose=${() => (setArchiveDialog(null), list.current?.focus())} />`}
+    ${archiveDialog?.kind === 'compress' &&
+    html`<${CompressDialog} items=${archiveDialog.items} folderName=${baseName(folderOf(archiveDialog.items))}
+      onCompress=${(opts) => (setArchiveDialog(null), compressItems(archiveDialog.items, opts))} onClose=${() => (setArchiveDialog(null), list.current?.focus())} />`}
+    ${archiveDialog?.kind === 'password' &&
+    html`<${ArchivePasswordDialog} name=${archiveDialog.entry.name} wrong=${archiveDialog.wrong}
+      onSubmit=${(password) => (setArchiveDialog(null), extractArchive(archiveDialog.entry, { ...archiveDialog.opts, password }))} onClose=${() => (setArchiveDialog(null), list.current?.focus())} />`}
   `;
 }

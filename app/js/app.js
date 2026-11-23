@@ -84,7 +84,7 @@ import { CompareFolderDialog } from './ui/compareFolderPick.js';
 import { SaveCompareDialog, SavedComparesDialog } from './ui/savedCompares.js';
 import { canSave, sameSides } from './compares.js';
 import { ComparePicker } from './ui/comparePicker.js';
-import { revealInFolders } from './ui/folders.js';
+import { revealInFolders, runInFolders } from './ui/folders.js';
 import { HistoryPanel } from './ui/history.js';
 import { TrashDialog } from './ui/trash.js';
 import { LockedFile } from './ui/encryption.js';
@@ -1110,6 +1110,14 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         setSidebar(true);
       },
       /** Ctrl+Shift+E: the folders view (a folder is picked first when there is none yet). */
+      /** A command for what is picked in Folders (Extract…, Compress…): Folders shown first when it is not. */
+      async inFolders(id) {
+        if (!window.desktop?.folders?.archiveList) return toast('Archives work in the desktop app and the Android app.');
+        if (runInFolders(id)) return;
+        await actions.showFolders();
+        toast(id === 'extract' ? 'Pick an archive in Folders, then run Extract… again (or right-click it).' : 'Pick files or folders in Folders, then run Compress… again (or right-click them).');
+      },
+
       async showFolders() {
         if (!window.desktop?.folders) return;
         if (!(await window.desktop.folders.roots().catch(() => [])).length) return actions.openFolder();
@@ -5229,6 +5237,8 @@ export function App() {
       'git-panel': () => actions.toggleGit(),
       'git-init': () => actions.gitInit(),
       dockerize: () => actions.dockerize(),
+      'archive-extract': () => actions.inFolders('extract'),
+      'archive-compress': () => actions.inFolders('compress'),
       tasks: () => actions.showTasks(),
       'project-settings': () => actions.projectSettings(),
       'git-branch': () => actions.chooseBranch(),

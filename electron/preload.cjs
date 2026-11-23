@@ -127,9 +127,19 @@ contextBridge.exposeInMainWorld('desktop', {
     copy: (paths, dir, opts) => ipcRenderer.invoke('folder:copy', paths, dir, opts),
     // Which of these names are in `dir` already.
     existing: (dir, names) => ipcRenderer.invoke('folder:existing', dir, names),
-    // Zip archives: the paths compressed into a .zip in `dir` (returns its path); one extracted into a new folder.
-    zip: (paths, dir) => ipcRenderer.invoke('folder:zip', paths, dir),
-    unzip: (file) => ipcRenderer.invoke('folder:unzip', file),
+    // Archives on this computer (7-Zip): what one holds ({ entries, tops, … } or { needsPassword, wrong });
+    // extracting one (`opts`: { to: 'here' | 'folder', name, password, onExists }); compressing paths into
+    // one in `dir` (`opts`: { name, format, level, password, hideNames, volume, exclude }). `id` is the
+    // page's own, for archive:progress ({ id, done, total }) and Stop.
+    archiveList: (file, opts) => ipcRenderer.invoke('archive:list', file, opts),
+    archiveExtract: (id, file, opts) => ipcRenderer.invoke('archive:extract', id, file, opts),
+    archiveCompress: (id, paths, dir, opts) => ipcRenderer.invoke('archive:compress', id, paths, dir, opts),
+    archiveStop: (id) => ipcRenderer.invoke('archive:stop', id),
+    onArchiveProgress(callback) {
+      const listener = (_event, progress) => callback(progress);
+      ipcRenderer.on('archive:progress', listener);
+      return () => ipcRenderer.removeListener('archive:progress', listener);
+    },
     // Copied or cut files on the system clipboard for the file explorer; whether they are still there.
     clipFiles: (paths, op) => ipcRenderer.invoke('folder:clip-files', paths, op),
     clipOurs: () => ipcRenderer.invoke('folder:clip-ours'),

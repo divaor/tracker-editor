@@ -15811,3 +15811,195 @@ html[data-native='android'] body:has(.edit-bar) .toasts {
 .ghist.phone .ghist-details {
   padding: 8px 10px 12px;
 }
+
+/* ---- Archives in Folders (ui/archives.js): Extract…, Compress…, a password, what one holds ---- */
+.password-field,
+.archive-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.password-field input,
+.archive-name input {
+  flex: 1;
+  min-width: 0;
+}
+
+.archive-name > span {
+  flex-shrink: 0;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.password-again {
+  margin-top: 6px;
+}
+
+.archive-dialog .field-grid {
+  margin-top: 4px;
+}
+
+.archive-dialog .segmented.small button {
+  min-height: 28px;
+  padding: 4px 10px;
+  font-size: 13px;
+}
+
+.archive-dialog .field.checkbox {
+  padding-top: 4px;
+}
+
+.archive-summary {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.archive-leave-out {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 14px;
+  min-width: 0;
+  margin: 0;
+  padding: 8px 10px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.archive-leave-out legend {
+  padding: 0 4px;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.archive-leave-out > small {
+  grid-column: 1 / -1;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.archive-leave-out .field.checkbox small {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .archive-leave-out {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.archive-password form p {
+  margin: 0 0 10px;
+}
+
+.archive-password .field-error {
+  margin-top: 8px;
+}
+
+/* What an archive holds: in the preview under the list, and large in the viewer. */
+.archive-peek {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  padding: 8px 10px;
+}
+
+.archive-peek-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.archive-peek-head .icon {
+  vertical-align: -2px;
+}
+
+.archive-filter input {
+  min-height: 28px !important;
+  font-size: 13px;
+}
+
+.archive-entries {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+  font-size: 12.5px;
+}
+
+.archive-entries li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 3px 4px;
+  border-radius: 4px;
+}
+
+.archive-entries li:nth-child(even) {
+  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
+}
+
+.archive-entries li > .icon {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+
+.archive-entries li.dir > .icon {
+  color: var(--kind-disk, var(--text-3));
+}
+
+.archive-entry-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.archive-lock {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--warn);
+}
+
+.archive-entry-size,
+.archive-entry-packed {
+  flex-shrink: 0;
+  min-width: 64px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.archive-entry-date {
+  flex-shrink: 0;
+  min-width: 96px;
+  text-align: right;
+}
+
+.archive-peek.big {
+  padding: 12px 16px;
+}
+
+.archive-peek.big .archive-entries {
+  font-size: 13px;
+}
+
+.archive-locked input {
+  max-width: 260px;
+}
+
+@media (max-width: 640px) {
+  .archive-peek.big .archive-entry-packed,
+  .archive-peek.big .archive-entry-date {
+    display: none;
+  }
+}

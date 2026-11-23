@@ -262,6 +262,11 @@ test('what the preview shows for a file', () => {
   assert.equal(page.peekKind('Makefile'), 'text');
   assert.equal(page.peekKind('song.mp3'), 'none');
   assert.equal(page.peekKind('photo.heic'), 'none');
+  // Archives show what they hold (ui/archives.js ArchivePeek); they open with their program.
+  for (const name of ['site.zip', 'a.7z', 'b.RAR', 'c.tar.gz', 'd.tgz', 'e.tar.xz', 'f.gz', 'disc.iso', 'app.apk', 'g.7z.001']) {
+    assert.equal(page.peekKind(name), 'archive', name);
+    assert.equal(page.opensHere(name), false, name);
+  }
 });
 
 test('a folder selected with what is inside it counts once', () => {

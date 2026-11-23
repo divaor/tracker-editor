@@ -19,7 +19,7 @@ const disk = require('./diskFiles.cjs');
 const folders = require('./folders.cjs');
 const os = require('node:os');
 const clips = require('./clipHistory.cjs');
-const zipFiles = require('./zip.cjs');
+const archives = require('./archives.cjs');
 const shellIntegration = require('./shellIntegration.cjs');
 
 const APP_DIR = path.join(__dirname, '..', 'app');
@@ -1542,26 +1542,74 @@ ipcMain.handle('folder:copy-in', guard(async (_e, paths, dir, opts = {}) => {
   if (!isRemote(dir)) return placeWithExisting(sources, dir, opts?.onExists, (list) => folders.copyInto(list, dir));
   return startTransfer({ op: 'copy-in', kind: 'upload', paths: sources, dir }, (job) => placeWithExisting(sources, dir, opts?.onExists, (list) => remote.copyInto(list, dir, { job })));
 }));
-// Zip archives (folders on this computer): the selection compressed next to it, or an
-// archive extracted into a new folder beside it (zip.cjs: never outside it).
-ipcMain.handle('folder:zip', guard(async (_e, paths, dir) => {
+// Archives (folders on this computer; archives.cjs: 7-Zip in WebAssembly, in a worker behind a
+// jail): what one holds, extracting it (into its own folder, or a new folder beside it, through a
+// hidden staging folder), and compressing the selection into one. The page sends paths (checked
+// here), ids from fixed lists, a password and a volume size; never a switch. Long ones report
+// 'archive:progress' ({ id, done, total }) and stop with 'archive:stop'.
+const archiveJobs = new Map(); // job id (the page's) → AbortController
+const localArchive = (file) => {
+  if (typeof file !== 'string' || isRemote(file)) throw new Error('Archives work with folders on this computer.');
+  checkEntry(file);
+  if (!fs.statSync(file).isFile()) throw new Error(`${path.basename(file)} is not a file.`);
+  return file;
+};
+const archiveOpts = (opts) => (opts && typeof opts === 'object' ? opts : {});
+function archiveJob(event, id, run) {
+  if (typeof id !== 'string' || !/^[\w-]{1,40}$/.test(id) || archiveJobs.has(id)) throw new Error('Not allowed');
+  const controller = new AbortController();
+  archiveJobs.set(id, controller);
+  const sender = event.sender;
+  let last = 0;
+  const onProgress = ({ done, total }) => {
+    const now = Date.now();
+    if (now - last < 200) return;
+    last = now;
+    if (!sender.isDestroyed()) sender.send('archive:progress', { id, done, total });
+  };
+  return run({ signal: controller.signal, onProgress }).finally(() => archiveJobs.delete(id));
+}
+ipcMain.handle('archive:list', guard((_e, file, opts) => {
+  const { password } = archiveOpts(opts);
+  return archives.listArchive(localArchive(file), { password: typeof password === 'string' ? password : '' });
+}));
+ipcMain.handle('archive:extract', guard((event, id, file, opts) => {
+  const o = archiveOpts(opts);
+  localArchive(file);
+  // What comes out goes into the archive's folder (or a new one in it): that folder must be reachable.
+  checkDir(path.dirname(file));
+  const to = o.to === 'here' ? 'here' : 'folder';
+  const onExists = ['replace', 'keep', 'skip'].includes(o.onExists) ? o.onExists : 'keep';
+  return archiveJob(event, id, ({ signal, onProgress }) =>
+    archives.extractArchive(file, {
+      to,
+      name: typeof o.name === 'string' ? o.name : '',
+      password: typeof o.password === 'string' ? o.password : '',
+      onExists,
+      // Replaced ones go to the Recycle Bin (a phone has none: deleted).
+      trash: (p) => shell.trashItem(checkEntry(p)),
+      signal,
+      onProgress,
+    }),
+  );
+}));
+ipcMain.handle('archive:compress', guard((event, id, paths, dir, opts) => {
   checkList(paths);
-  if (isRemote(dir) || paths.some(isRemote)) throw new Error('Zip works with folders on this computer.');
+  if (typeof dir !== 'string' || isRemote(dir) || paths.some((p) => typeof p !== 'string' || isRemote(p))) throw new Error('Archives work with folders on this computer.');
   checkDir(dir);
   const sources = paths.map(checkEntry);
+  const o = archiveOpts(opts);
   const first = path.basename(sources[0]);
-  const stem = sources.length > 1 ? 'Archive' : fs.statSync(sources[0]).isDirectory() ? first : first.replace(/\.[^.]+$/, '') || first;
-  const out = folders.freePath(dir, `${stem}.zip`);
-  checkFile(out);
-  await zipFiles.zipPaths(sources, out);
-  return out;
+  const name = typeof o.name === 'string' && o.name.trim() ? o.name.trim() : sources.length > 1 ? 'Archive' : fs.statSync(sources[0]).isDirectory() ? first : first.replace(/\.[^.]+$/, '') || first;
+  const choices = { format: o.format, level: o.level, password: typeof o.password === 'string' ? o.password : '', hideNames: o.hideNames === true, volume: o.volume, exclude: o.exclude };
+  return archiveJob(event, id, (run) => archives.compressPaths(sources, dir, name, choices, run)).then((got) => {
+    for (const p of got.made) checkFile(p);
+    return got;
+  });
 }));
-ipcMain.handle('folder:unzip', guard(async (_e, file) => {
-  if (isRemote(file)) throw new Error('Extracting works with folders on this computer.');
-  checkEntry(file);
-  const dest = folders.freePath(path.dirname(file), path.basename(file).replace(/\.zip$/i, '') || 'Archive');
-  checkFile(dest);
-  return { ...(await zipFiles.unzipFile(file, dest)), folder: dest };
+ipcMain.handle('archive:stop', guard((_e, id) => {
+  archiveJobs.get(id)?.abort();
+  return true;
 }));
 // Copied or cut files on the system clipboard, so the file explorer (Explorer, Finder,
 // Files) can paste them, with their paths as text; `clipStamp` recognizes them when they
@@ -1810,7 +1858,12 @@ ipcMain.handle('folder:peek-bytes', guard(async (_e, file) => {
   return fs.readFileSync(file);
 }));
 ipcMain.handle('folder:peek-text', guard(async (_e, file) => {
-  if (!isRemote(file)) return disk.readHead(checkFile(file), 256 * 1024);
+  if (!isRemote(file)) {
+    checkFile(file);
+    // An archive under another name (or none): the page lists it instead (archive:list).
+    const archive = archives.sniffFile(file);
+    return archive ? { archive, text: '', more: false } : disk.readHead(file, 256 * 1024);
+  }
   // On a server the whole file comes over the network: only for files up to 2 MB.
   const st = await remote.stat(file);
   if (st?.size > 2 * 1024 * 1024) throw new Error('This file is too large to preview from the server. Open it to see it.');

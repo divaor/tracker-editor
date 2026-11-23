@@ -4,6 +4,7 @@
 // so the Node tests can import it.
 
 import { isDocumentName } from './docTypes.js';
+import { isArchiveName } from './archives.js';
 
 /** The folder under the temporary directory where dragged tabs are written (main.cjs DRAG_DIR). */
 export const DRAG_DIR_NAME = 'Tracker Editor drag';
@@ -251,11 +252,11 @@ const BINARY = new Set(
 const IMAGES = new Set('png jpg jpeg gif bmp webp tif tiff'.split(' '));
 
 const PEEK_IMAGES = new Set('png jpg jpeg gif bmp webp ico avif'.split(' '));
-/** What the folders view's preview shows for a file: 'image', 'doc' (a document shown as it looks: PDF, e-book…), 'text' (read as text) or 'none'. */
-export const peekKind = (name) => (PEEK_IMAGES.has(extOf(name)) ? 'image' : isDocumentName(name) ? 'doc' : BINARY.has(extOf(name)) ? 'none' : 'text');
+/** What the folders view's preview shows for a file: 'image', 'doc' (a document shown as it looks: PDF, e-book…), 'archive' (what it holds), 'text' (read as text) or 'none'. */
+export const peekKind = (name) => (PEEK_IMAGES.has(extOf(name)) ? 'image' : isDocumentName(name) ? 'doc' : isArchiveName(name) ? 'archive' : BINARY.has(extOf(name)) ? 'none' : 'text');
 
 /** Whether a file opens in the editor as text; the others open with their own program, or as documents (opensHere). Unknown types are tried as text. */
-export const opensInEditor = (name) => !BINARY.has(extOf(name)) && !isDocumentName(name);
+export const opensInEditor = (name) => !BINARY.has(extOf(name)) && !isDocumentName(name) && !isArchiveName(name);
 /** Whether a file opens in a tab here: as text, or as a document shown as it looks. */
 export const opensHere = (name) => opensInEditor(name) || isDocumentName(name);
 /** Images whose text can be read (OCR). */
