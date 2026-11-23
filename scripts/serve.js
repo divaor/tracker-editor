@@ -32,4 +32,4 @@ createServer(async (req, res) => {
   } catch {
     res.writeHead(404).end('Not found');
   }
-}).listen(port, host, () => console.log(`Tracker Editor web app: http://${host}:${port}`));
+}).listen(port, host, () => console.log(`Tinta web app: http://${host}:${port}`));

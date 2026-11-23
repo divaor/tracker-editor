@@ -69,7 +69,7 @@ android {
     }
     // Tracker-Editor-0.24.0.apk
     applicationVariants.all { variant ->
-        variant.outputs.all { outputFileName = "Tracker-Editor-${appVersion}${variant.buildType.name == 'release' ? '' : '-' + variant.buildType.name}.apk" }
+        variant.outputs.all { outputFileName = "Tinta-${appVersion}${variant.buildType.name == 'release' ? '' : '-' + variant.buildType.name}.apk" }
     }
 }
 

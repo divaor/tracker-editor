@@ -73,7 +73,7 @@ export function ShareDialog({ name, text, link, actions, onClose }) {
         }),
     },
     { id: 'copy', icon: 'copy', label: 'Copy text', hint: 'To paste anywhere', run: () => run(async () => (await copy(text), toast('Copied'))) },
-    link && { id: 'link', icon: 'link', label: 'Copy link', hint: 'Opens this file in Tracker Editor on your other devices', run: () => run(async () => (await copy(link), toast('Link copied'))) },
+    link && { id: 'link', icon: 'link', label: 'Copy link', hint: 'Opens this file in Tinta on your other devices', run: () => run(async () => (await copy(link), toast('Link copied'))) },
     { id: 'save', icon: 'download', label: 'Save a copy', hint: 'As a file on this device', run: () => run(() => actions.saveCopy()) },
   ].filter(Boolean);
   return html`<${Modal} title=${`Share ${name}`} onClose=${onClose} className="share-dialog">

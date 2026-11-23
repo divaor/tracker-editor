@@ -1,6 +1,8 @@
-# Tracker Editor guide
+# Tinta guide
 
-Tracker Editor is a Notepad++-style editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs. Everything is saved the moment you paste or type, on this computer with the tracker, or, once you turn on sync, in the same private GitHub data repo as the tracker, so your files are on your computers and your phone.
+Tinta was called Tracker Editor until version 0.53, and Rumbo, the app it works with, was Tracker. Only the names changed: your files, links and settings are the same.
+
+Tinta is a Notepad++-style editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs. Everything is saved the moment you paste or type, on this computer with the tracker, or, once you turn on sync, in the same private GitHub data repo as the tracker, so your files are on your computers and your phone.
 
 Version 0.41.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.41.0 · Web app: https://divaor.github.io/tracker-editor/
 
@@ -14,26 +16,26 @@ Download from **https://github.com/divaor/tracker-editor/releases/latest**:
 
 | System | File |
 | --- | --- |
-| Windows | `Tracker Editor Setup 0.39.0.exe` (installer) or `Tracker Editor-0.39.0-portable.exe` (no install, no admin rights) |
-| macOS | `Tracker Editor-0.39.0-arm64.dmg` |
-| Linux | `Tracker Editor-0.39.0.AppImage` |
+| Windows | `Tinta Setup 0.39.0.exe` (installer) or `Tinta-0.39.0-portable.exe` (no install, no admin rights) |
+| macOS | `Tinta-0.39.0-arm64.dmg` |
+| Linux | `Tinta-0.39.0.AppImage` |
 
 The builds are not code-signed, so the first launch warns you. On Windows, choose *More info → Run anyway*. On macOS, right-click the app → *Open*. Installing the desktop app also registers `tracker-editor://` links, so the tracker's **Open in editor** opens files straight in it.
 
-**Tracker Editor as your editor (Windows).** The installed app adds itself to Explorer: right-click a text or code file → **Open with → Tracker Editor** (it never becomes their default program unless you choose that), **Edit with Tracker Editor** on any file, and **Open in Tracker Editor** on folders (Windows 11: under **Show more options**). The file opens as a tab edited in place; a folder opens in Folders. Turn it on or off in **Settings → Desktop → Tracker Editor in Explorer** (the portable app starts with it off). To make it the default for a type: right-click a file → **Open with → Choose another app → Tracker Editor → Always**. On macOS it is in Finder's **Open With** for text and code files; a file given on the command line (`"Tracker Editor.exe" notes.txt`) opens too.
+**Tinta as your editor (Windows).** The installed app adds itself to Explorer: right-click a text or code file → **Open with → Tinta** (it never becomes their default program unless you choose that), **Edit with Tinta** on any file, and **Open in Tinta** on folders (Windows 11: under **Show more options**). The file opens as a tab edited in place; a folder opens in Folders. Turn it on or off in **Settings → Desktop → Tinta in Explorer** (the portable app starts with it off). To make it the default for a type: right-click a file → **Open with → Choose another app → Tinta → Always**. On macOS it is in Finder's **Open With** for text and code files; a file given on the command line (`"Tinta.exe" notes.txt`) opens too.
 
 ### Android: the app
 
 The editor as an Android app, with what a web page cannot do: **Open with** from other apps, **Folders** on the phone, **servers** and **terminals**. For Android 7 and later on 64-bit phones (nearly all from the last ten years).
 
 1. Install **Obtainium** (from https://github.com/ImranR98/Obtainium/releases or F-Droid). It installs apps from their GitHub releases and keeps them up to date.
-2. In Obtainium: **Add app**, paste `https://github.com/divaor/tracker-editor`, **Add**, then **Install** (the newest `Tracker-Editor-….apk`). The first time, Android asks to let Obtainium install apps: allow it.
+2. In Obtainium: **Add app**, paste `https://github.com/divaor/tracker-editor`, **Add**, then **Install** (the newest `Tinta-….apk`). The first time, Android asks to let Obtainium install apps: allow it.
 3. Obtainium tells you when there is a new version and installs it over the old one; your files and settings stay. (Or download the `.apk` from the releases page and open it; then updates are by hand.)
 
 What the app adds:
-- **Open with**: in Files, a file manager, Gmail or Drive, open a text or code file with **Tracker Editor**: it opens as a tab edited where it is, and **Save** writes it back (a file the other app only lets you read says **Read-only**). The tab's ⋯ → **Open with another app** hands it on. PDFs, e-books, Word, OpenDocument, RTF, spreadsheets and presentations open too, shown as they look (see [Documents](#documents-pdfs-e-books-word-and-more)).
-- **Share** text, links or files to **Tracker Editor**: they become new files. Select text in any app → ⋮ → **Tracker Editor**: a new note with it. Long-press the app's icon for **New note** and **Voice note**.
-- **Folders** (the sidebar's **Folders**): folders on the phone and its memory card, as on a computer (see [Folders](#folders-a-file-explorer)). **Open a folder…** asks the first time for **All files access** (Android's permission for file managers: allow it for Tracker Editor, then come back and tap it again; the editor only opens the folders you pick). Then choose **Phone storage**, **Documents**, **Download**, the memory card, or **Another folder…**. **Tap** a folder or a file to open it; a **long press** gives its menu, where **Select** lets you tap others to pick them too (**Done** when finished). **Delete** is for good here: Android has no Trash for these files.
+- **Open with**: in Files, a file manager, Gmail or Drive, open a text or code file with **Tinta**: it opens as a tab edited where it is, and **Save** writes it back (a file the other app only lets you read says **Read-only**). The tab's ⋯ → **Open with another app** hands it on. PDFs, e-books, Word, OpenDocument, RTF, spreadsheets and presentations open too, shown as they look (see [Documents](#documents-pdfs-e-books-word-and-more)).
+- **Share** text, links or files to **Tinta**: they become new files. Select text in any app → ⋮ → **Tinta**: a new note with it. Long-press the app's icon for **New note** and **Voice note**.
+- **Folders** (the sidebar's **Folders**): folders on the phone and its memory card, as on a computer (see [Folders](#folders-a-file-explorer)). **Open a folder…** asks the first time for **All files access** (Android's permission for file managers: allow it for Tinta, then come back and tap it again; the editor only opens the folders you pick). Then choose **Phone storage**, **Documents**, **Download**, the memory card, or **Another folder…**. **Tap** a folder or a file to open it; a **long press** gives its menu, where **Select** lets you tap others to pick them too (**Done** when finished). **Delete** is for good here: Android has no Trash for these files.
 - **Compare two folders** and **two panes** (a folder's long-press menu): on the phone, on a server or one of each, laid out for a phone, and **Sideways** turns the app to landscape for them (see [Comparisons on a phone](#comparisons-on-a-phone)).
 - **Servers**: SFTP, FTP and FTPS, their terminals, find in a folder, transfers and mirrors, as on a computer (see 11). Saved passwords are encrypted with a key kept in the phone's secure hardware.
 - **A terminal on the phone**: the status bar's **Terminal** opens Android's own shell in the open file's folder, with its basic commands (`ls`, `cat`, `grep`, `cp`, `mv`…). With an SSH server set up, **+** in the panel opens a terminal there.
@@ -48,11 +50,11 @@ The app keeps its own data, apart from the web app in the phone's browser: to ha
 
 1. Open https://divaor.github.io/tracker-editor/ on the phone.
 2. Install it: Android ⋮ → **Install app**; iPhone Share → **Add to Home Screen**.
-3. To send text or files from other apps to the editor (Android), use their **Share** button and pick **Tracker Editor**. If it isn't listed, remove the app from the home screen and install it again.
+3. To send text or files from other apps to the editor (Android), use their **Share** button and pick **Tinta**. If it isn't listed, remove the app from the home screen and install it again.
 
 ### Your data: on this computer, or synced with GitHub
 
-**A new install keeps everything on this computer**, with nothing about syncing shown. On the desktop that is a data folder, `Documents/Tracker data`, which **Tracker** on the same computer shares: its projects and tags are yours, its documents open here, and **Send to tracker** lands there at once. In the browser it is the browser's storage, shared with the tracker opened in the same browser. **Settings → Where your data is** says where (on the desktop, **Show the folder**; copying it is a backup). History is kept there too, for 180 days.
+**A new install keeps everything on this computer**, with nothing about syncing shown. On the desktop that is a data folder, `Documents/Tracker data`, which **Rumbo** on the same computer shares: its projects and tags are yours, its documents open here, and **Send to Rumbo** lands there at once. In the browser it is the browser's storage, shared with the tracker opened in the same browser. **Settings → Where your data is** says where (on the desktop, **Show the folder**; copying it is a backup). History is kept there too, for 180 days.
 
 **To sync across your devices** (phone, other computers, the Claude connector): **Settings → Where your data is → Sync across your devices with GitHub…**:
 
@@ -76,7 +78,7 @@ On an iPhone, apps added to the home screen each keep their own storage: the edi
   | Color | Where | The chip says |
   | --- | --- | --- |
   | Green | **My files**: synced to your data repo | Synced · Not synced yet · Not synced · offline |
-  | Blue | **Tracker**: a document attached to a tracker item | Synced · Not synced yet |
+  | Blue | **Rumbo**: a document attached to a tracker item | Synced · Not synced yet |
   | Amber | **This computer**: a file edited where it is, not synced | Saved · Not saved · Changed on disk · Following |
   | Pink | **A server** (SFTP, FTP): saved back to the server, not synced | Saved on the server · Not saved to the server · Saving… · Changed on the server · Not connected |
 
@@ -86,7 +88,7 @@ On an iPhone, apps added to the home screen each keep their own storage: the edi
 
 ### Finding things
 
-- `Ctrl+P` **Open a file**: type part of a name or project (fuzzy). Enter on a name that doesn't exist creates it. In the desktop app it also finds the files in the folders open in **Folders** (on this computer and on connected servers), by name or by path (`lib/util`); they show the folder they are in and open in place. With nothing typed it lists your open tabs, then the files changed last; as you type, the matches come under **My files**, **Tracker documents** and **In your folders** (the section with the best match first), each row with where the file is, its project and when it changed, the letters you typed marked. `↑` `↓` move (the list follows), `Page Up` / `Page Down` a page at a time, `Ctrl+Home` / `Ctrl+End` (or `Home` / `End` with nothing typed) the first and the last. The line at the bottom lists what else it does: `>` commands, `@` this file's functions and sections, `#` any file's, `?` ask (with a model on); click one to switch.
+- `Ctrl+P` **Open a file**: type part of a name or project (fuzzy). Enter on a name that doesn't exist creates it. In the desktop app it also finds the files in the folders open in **Folders** (on this computer and on connected servers), by name or by path (`lib/util`); they show the folder they are in and open in place. With nothing typed it lists your open tabs, then the files changed last; as you type, the matches come under **My files**, **Rumbo documents** and **In your folders** (the section with the best match first), each row with where the file is, its project and when it changed, the letters you typed marked. `↑` `↓` move (the list follows), `Page Up` / `Page Down` a page at a time, `Ctrl+Home` / `Ctrl+End` (or `Home` / `End` with nothing typed) the first and the last. The line at the bottom lists what else it does: `>` commands, `@` this file's functions and sections, `#` any file's, `?` ask (with a model on); click one to switch.
 - **Find by asking** (with a model on): type a question in `Ctrl+P`, or start with `?`. See [Find by asking](#find-by-asking) below.
 - `Ctrl+Shift+F` **Find in files**: in all files, the filtered ones or the open tabs, with case, whole word and regex options. Tick the files found and press **Open N selected**, or **Open all**: each opens at its first match, the first one in front. The ↗ button opens one file; the list button folds the results to file names. On a phone the panel closes so you see the file.
 - `Ctrl+F` **Find in this file**: a bar over the text. **Aa** (match case), **ab** (whole word) and **.\*** (regular expression) are toggles inside the field; next to it, how many matches there are and which one you are on ("3 of 12"). `Enter` / `Shift+Enter` (or ↓ / ↑) go to the next / previous one, the third button selects them all (`Alt+Enter`), × or `Escape` closes it.
@@ -100,7 +102,7 @@ When you don't remember a file's name or where you left it, ask in your own word
 
 - **How it works**: the model works out what to look for (words, other words with the same meaning, the shape of a command, a project, a time), the editor searches your files, the tracker's documents and items, and (desktop) the text files in the folders open in Folders, here and on connected servers, and the model picks the best ones, each with a line on why.
 - **The results** open in a panel: the file's name, where it is, why it fits and the line that matched. Click one to open it at that line. **Open all**, **Show only these** (the tab bar shows just these tabs, as a view called **Found: …**; **All tabs** in `Alt+V` brings the others back), **Ask about these** (the model's panel answers from just these files) and the ones that matched but were not picked, under **more**.
-- **Tracker items** show too, marked **Tracker**: clicking one opens it in the Tracker app (when it is installed on this computer), else in the tracker's web app.
+- **Rumbo items** show too, marked **Rumbo**: clicking one opens it in the Rumbo app (when it is installed on this computer), else in the tracker's web app.
 - **Encrypted files** (passwords, keys) are found by their name only, on this device, and shown apart: their contents never go to the model, nor their names. Ask for them (*search my encrypted files*, *password files*) and **Open all as a group** opens them together as the **Found** view.
 - **What goes to the model**: your question, the names of your projects, tags and folders, and the matching lines of the best candidates (never whole files). A model on your computer keeps it all there. **Settings → Editor → Find by asking: send the model only names** sends no lines at all. It needs a model that answers at once, not a service that answers later.
 
@@ -147,7 +149,7 @@ Not a full IDE, but enough to find your way in a code file (**Edit → Code** on
 - **Run it** (`F5`, desktop) in a terminal in its folder, and click the `file:line` an error prints to go there (see [A terminal, and running a file](#a-terminal-and-running-a-file)). **Suggestions as you type** from the model: see [6](#suggestions-as-you-type).
 - **Problems as you type**: mistakes are underlined, with a mark next to the line; hover one to read it. In JSON (comments are fine in `tsconfig.json`, `.jsonc` and other files that allow them), YAML (also a key written twice in the same place, tabs in the indentation, a quote left open), XML, HTML, CSS, and code: JavaScript, TypeScript, Python, Go, Java, PHP, C, C++, Rust. The status bar counts errors and warnings (on a phone the count shows once there is one); click it (or `Ctrl+Shift+M`) for the **Problems** list, click one to go there. `F8` goes to the next one, `Shift+F8` to the one before. With a model connected, it can explain them or fix them for you: see [Help with errors](#help-with-errors).
 - **Easier to read**: thin **guides** at each indentation level, **brackets colored** by how deep they are (strings and comments aside), and **sticky scroll**: when you scroll inside a long function, the lines that start it (and its class) stay at the top; click one to go there. Each can be turned off in **Settings → Editor** (or the **View** menu).
-- **Breadcrumbs**: a slim bar over the text says where you are: the folder open in **Folders** that holds the file and the folders inside it (on a server: the server's name, then the path; your own files: **My files** › the project; tracker documents: **Tracker** › the item), the file, then the class, function or section around the cursor (`site › src › store.js › Store › save`). Click one for what is next to it: a folder lists its folders (they open further in the same list, `..` goes back) and files, the file the other files in its folder, a function the others beside it (the one you are in ticked); the last one lists what is inside it too. Pick one to open it or go there. With the cursor outside every function, `…` lists the file's outline. From the keyboard: `Ctrl+Shift+.`, then `←` / `→` to move, `Enter` or `↓` to open, `Esc` to go back to the text. Long lists have a filter at the top. Each pane of the split view has its own. On by default, but not on phones; **View → Breadcrumbs** or **Settings → Editor** turns them on or off.
+- **Breadcrumbs**: a slim bar over the text says where you are: the folder open in **Folders** that holds the file and the folders inside it (on a server: the server's name, then the path; your own files: **My files** › the project; tracker documents: **Rumbo** › the item), the file, then the class, function or section around the cursor (`site › src › store.js › Store › save`). Click one for what is next to it: a folder lists its folders (they open further in the same list, `..` goes back) and files, the file the other files in its folder, a function the others beside it (the one you are in ticked); the last one lists what is inside it too. Pick one to open it or go there. With the cursor outside every function, `…` lists the file's outline. From the keyboard: `Ctrl+Shift+.`, then `←` / `→` to move, `Enter` or `↓` to open, `Esc` to go back to the text. Long lists have a filter at the top. Each pane of the split view has its own. On by default, but not on phones; **View → Breadcrumbs** or **Settings → Editor** turns them on or off.
 - **Minimap**: the file at a glance beside the scrollbar, colored like the text, with the part on screen as a box. Click somewhere to bring that part to the middle, drag the box to scroll, or turn the wheel over it. Its right edge marks the whole file's problems (red, amber), the lines changed since the last commit (green, blue, red) and, while the find bar is open, what it finds. On by default in the desktop app (not in the browser or on phones), and never in a pane narrower than about 500 pixels; **View → Minimap** or **Settings → Editor** turns it on or off.
 
 ### Language servers (desktop): code that knows its types
@@ -321,7 +323,7 @@ Every tab belongs to a **group**, worked out from where its file lives:
 | A tracker document | Its item's project, else Notes |
 | Any other file on this computer or a server | **Other files** |
 
-The **switcher at the left end of the tab bar** (it appears once there are two groups) says which tabs show: **All tabs** (on a phone just its ☰ icon), **● Tracker Editor**, **Notes + 2**… Click it, or press `Alt+V`:
+The **switcher at the left end of the tab bar** (it appears once there are two groups) says which tabs show: **All tabs** (on a phone just its ☰ icon), **● Tinta**, **Notes + 2**… Click it, or press `Alt+V`:
 
 - **Click a name** to show only that group. **Tick its box** to add it to the ones showing (two projects, Notes and Other files…). Type to find a group and press `Enter`.
 - `Ctrl+Alt+PageDown` / `Ctrl+Alt+PageUp` go to the next or previous group, and `Ctrl+Alt+Home` shows all tabs again.
@@ -332,7 +334,7 @@ The **switcher at the left end of the tab bar** (it appears once there are two g
 - **Pinned tabs show in every view** (turn it off in the switcher or Settings → Editor).
 - **Move a tab to another group**: right-click → **Move to group…** (for example a log while you work on a project).
 - **Colors**: each project has its color (as in the tracker) and each folder one of its own, which Folders uses on the folder's header. When tabs of two or more show, a line in their color runs under each tab (the top line still tells where the file lives). Change it in the switcher: *When 2+ groups show*, *Always* or *Off*.
-- **Link a folder to a project**: when a folder's name matches a project (`tracker-editor` and *Tracker Editor*), the editor offers it once. Any time: a folder's header menu in Folders → **Its tabs: link to a project, color…** (also in the switcher's **⋯** next to a folder).
+- **Link a folder to a project**: when a folder's name matches a project (`tracker-editor` and *Tinta*), the editor offers it once. Any time: a folder's header menu in Folders → **Its tabs: link to a project, color…** (also in the switcher's **⋯** next to a folder).
 - The switcher's **Group headers in the tab bar** gathers each group's tabs behind a header that folds them.
 
 ### The tab menu
@@ -382,7 +384,7 @@ Above the text, for the open file:
 - **Listen** (`Alt+R`): reads the file from the cursor, or the selection, highlighting the passage. Pause, skip, speed and voice in the bar that appears. The voice list shows each voice by name with what it is (accent, female or male, the model such as Kokoro or Piper, and whether it needs internet), the text's language first; type to find one. The Android app speaks with the phone's own voices and makes the next sentences ready while one plays, so slower, more natural voices read without stopping between sentences. Another engine you install (**VoxSherpa**, with Kokoro and Piper voices that work offline) can be chosen under **Engine** at the top of the voice list, without changing the phone's settings. For human-sounding voices on any device, connect a speech server in **Settings → Read aloud** (Kokoro on your computer, or OpenAI).
 - **Share**: WhatsApp, Teams, email, Quick Share or any app on the phone, as text or as a file; on a computer email, WhatsApp, Teams, copy the text, copy a link that opens the file in the editor, or save a copy.
 - **Summarize** (with the model on).
-- **Send to tracker**: makes the file a task, idea or doc on the tracker, linked to it. *On tracker* shows when it already is.
+- **Send to Rumbo**: makes the file a task, idea or doc on the tracker, linked to it. *In Rumbo* shows when it already is.
 - **⋯ More**: Details…, Outline and links, Filter lines, macros, History, Compare with…, Compare with clipboard, Text from an image…, Text from a screenshot… (desktop), Dictate (phone), Send checklist to tracker, Type into another window (desktop), Copy for Claude, Ask the model (`Ctrl+K`), Insert snippet / Save as snippet / Use as a snippet, Suggest project and tags (model on), Encrypt / Stop encrypting, Move to trash. Files opened from disk or from a server have their own bar: see 10 and 11.
 
 ---
@@ -405,7 +407,7 @@ History comes from your data repo, so it needs sync set up and shows only versio
 
 - **Open tabs** first, the tabs right next to this one at the top (marked **next to it**): put the two files side by side in the tab bar and the other one is the first row, so `Enter` compares them. Then the tabs further away, and the ones the tab bar's view hides.
 - **In your folders** (desktop), as you type: files in the folders open in Folders, like `Ctrl+P`.
-- **My files** and **Tracker documents**, the latest first.
+- **My files** and **Rumbo documents**, the latest first.
 
 Each row shows the whole name, the folder it is in under it in grey (for a file on disk, the full path; for my files, the project), and the color of its project or folder, as in the tab bar. Type to narrow every section down (part of the name, a folder, a project); `↑` `↓` and `Enter`. Nothing there? **Browse…** picks any file (on a computer, also when nothing matches: `Enter`).
 
@@ -618,7 +620,7 @@ Works everywhere, the phone included, without installing anything. **Settings �
 A Claude Pro or Max subscription cannot be connected to the editor: Anthropic allows signing in with it only in its own apps (Claude, Claude Code). The Claude API (option B) is billed separately, per use, with a key from the Claude Console. To use your subscription instead:
 
 - **Ask in the Claude app**: in the ✦ panel (also without a model connected), after an answer, or in Help (`F1`). It opens a new chat in Claude with the question and the text filled in, and copies them too: if the question is too long for a link, or the app opens instead of the browser, paste it. On the phone it opens Claude in the browser, or in the Claude app when the phone sends claude.ai links there.
-- **With the Tracker connector in Claude**: Claude can read your editor files and save a fixed version back (the question names the file). Say "fix it and save it to my editor": the fix comes back with the next sync.
+- **With the Rumbo connector in Claude**: Claude can read your editor files and save a fixed version back (the question names the file). Say "fix it and save it to my editor": the fix comes back with the next sync.
 - Encrypted files are never handed over.
 
 ### Option C: a model service that answers later
@@ -676,11 +678,11 @@ It types real key presses into whichever window has the focus when the countdown
 | Time to switch windows | 3, 5 or 10 seconds. |
 | Speed | Fast, Normal, or **Slow, for laggy connections** if characters go missing. |
 | The other editor indents new lines by itself | Turn it on when the window you type into indents new lines on its own (VS Code, Visual Studio, SSMS, Notepad++, most editors over a remote desktop): after each line break, whatever indentation it added is cleared and the text's own is typed, so YAML, Python and code keep exactly their indentation. Without it, such editors pile up the indentation. |
-| Minimize Tracker Editor while it types | The window behind it (often the remote desktop) gets the focus. |
+| Minimize Tinta while it types | The window behind it (often the remote desktop) gets the focus. |
 | Send characters instead of key presses (Windows) | If symbols come out wrong because your keyboard layout differs from the remote one. |
 
 - **Windows**: works as is.
-- **macOS**: the first time, allow Tracker Editor in **System Settings → Privacy & Security → Accessibility**.
+- **macOS**: the first time, allow Tinta in **System Settings → Privacy & Security → Accessibility**.
 - **Linux**: needs `xdotool` (X11) or `wtype` (Wayland).
 - If the other editor also **closes brackets and quotes** by itself (`(` becomes `()`), you may get doubles: turn that off there while typing, or type into a plain editor (Notepad) and copy from there.
 
@@ -771,7 +773,7 @@ Stop a program on a line and look inside it: **Python** (through **debugpy**) an
 
 ### Settings per project (desktop)
 
-A `.tracker-editor.json` file in a project's folder gives that project's files settings of their own, kept with the project (commit it, and the project brings them wherever it is opened in Tracker Editor).
+A `.tracker-editor.json` file in a project's folder gives that project's files settings of their own, kept with the project (commit it, and the project brings them wherever it is opened in Tinta).
 
 - **Open it, or make one**: the command **This project's settings** (`Ctrl+Shift+P`), **This project's settings…** in the Run group's **▾**, or **Settings → Editor → This project**. It opens the nearest one above the open file, or makes one where the project starts (its Git repository's top, else the folder with its `package.json`, `pyproject.toml`…) with every setting written out and commented: take out the `//` before what you need. It is JSON with comments and trailing commas.
 - **Which one counts**: the nearest from the open file's folder up to the folder you opened in Folders (or a Git repository's top, or 6 folders up). One in a folder inside the project counts for that folder's files instead; the two are not merged. On an SSH server, the project's own file there.
@@ -999,7 +1001,7 @@ Turn them on in **Settings → Desktop**.
 
 ## 13. Text from images and voice notes
 
-- **Text from an image**: paste an image into a file (`Ctrl+V` with a screenshot on the clipboard, e.g. after Win+Shift+S), drop one on the window, use **⋯ → Text from an image…** (on a phone: take a photo or pick one), right-click a picture in the Folders view, or **Share → Tracker Editor** from the gallery. The text is read **on the device**, in English and Spanish; the image is not sent anywhere. **With a model that reads images** (e.g. `llama3.2-vision`, `qwen2.5vl`, `gemma3`: **Settings → Model → Model for images**), the dialog's **Read by** can switch to it: often better for photos, handwriting and tables (kept as Markdown tables). The image then goes to your model server (a local one keeps it on your computer); the choice is remembered. Fix anything misread in the box, then **Insert at the cursor**, **New file** or **Copy** (from the Folders view also **Save as name.txt here**). The first time downloads about 9 MB from the editor's own site; after that it works offline (the Android app has it built in). It is a text-recognition tool (Tesseract), not a model: it needs no model, account or connection. Choosing one language (English or Spanish) can read better.
+- **Text from an image**: paste an image into a file (`Ctrl+V` with a screenshot on the clipboard, e.g. after Win+Shift+S), drop one on the window, use **⋯ → Text from an image…** (on a phone: take a photo or pick one), right-click a picture in the Folders view, or **Share → Tinta** from the gallery. The text is read **on the device**, in English and Spanish; the image is not sent anywhere. **With a model that reads images** (e.g. `llama3.2-vision`, `qwen2.5vl`, `gemma3`: **Settings → Model → Model for images**), the dialog's **Read by** can switch to it: often better for photos, handwriting and tables (kept as Markdown tables). The image then goes to your model server (a local one keeps it on your computer); the choice is remembered. Fix anything misread in the box, then **Insert at the cursor**, **New file** or **Copy** (from the Folders view also **Save as name.txt here**). The first time downloads about 9 MB from the editor's own site; after that it works offline (the Android app has it built in). It is a text-recognition tool (Tesseract), not a model: it needs no model, account or connection. Choosing one language (English or Spanish) can read better.
 - **Voice notes** (phone, and Chrome/Edge/Safari on a computer): the 🎤 button at the top dictates into the open file at the cursor, or a new note when none is open. What it hears shows in a bar; phrases go in with spaces and capitals. Say "new line" / "new paragraph" ("nueva línea", "nuevo párrafo", "punto y aparte"). **Stop** ends it. On Android, long-press the app's icon for **Voice note** to start one directly. Pick the language in **Settings → Voice notes**. It uses the browser's speech service (Google's on Android), so it needs a connection; the desktop app doesn't have it.
 
 ---
@@ -1009,7 +1011,7 @@ Turn them on in **Settings → Desktop**.
 - **The tracker's documents** (proposals, artifacts and other text attachments) are listed with your files under their item's name, downloaded on each sync so you can read and search them offline. Edits you make are saved back to the tracker; if Claude sent a new version meanwhile, yours is kept as a copy.
 - **Pictures, PDFs and other files attached in the tracker** are not downloaded here (they would be no use as text). In the tracker, a PDF, Word, Excel, PowerPoint or OpenDocument file's **Open in editor** shows it here as it looks, in a tab of its own (read-only, as documents are); pictures stay in the tracker.
 - In the tracker, items show **Open in editor** and text attachments **Edit in editor**.
-- **Send to tracker** turns a file into a task, idea or doc linked to it.
+- **Send to Rumbo** turns a file into a task, idea or doc linked to it.
 - **Claude** (through the tracker's connector) can list, search, read and save your editor files: "save this as a note in my editor", "what's in my deploy notes?". It can't read or change encrypted files.
 - **Asking Claude with your subscription**: **Ask in the Claude app** in the ✦ panel opens Claude with the question ready; with the connector, Claude can save its fix back to the file. See [Your Claude subscription](#your-claude-subscription).
 - **Giving a file to Claude yourself**: drag its tab (or files from the Folders view) into Claude Code's terminal (it gets the path) or the Claude app (it gets the file), or right-click → **Copy for Claude** and paste: the path of a file on disk, or the name and text of the others.
@@ -1109,8 +1111,8 @@ Settings → **Keys** (also **Help → Keys…** on the desktop, or **Keys** in 
 - **Typing drops or changes characters**: choose *Slow*, or on Windows *Send characters instead of key presses*.
 - **The model service test fails with 403**: check the API key and that it has access to the knowledge base or agent named in *Model or agent name*.
 - **Android says "already installed" but doesn't open**: remove it from the home screen and install again from the web address.
-- **Obtainium says the app cannot be updated ("signatures do not match")**: an APK built elsewhere (or a test build) is installed. Uninstall Tracker Editor and install it again from Obtainium (sync with GitHub first, or your files on the phone go with it).
-- **Android app: Open a folder does nothing**: it needs **All files access**. Allow it in Android's settings (Apps → Tracker Editor → Permissions, or the screen it opened), come back and tap **Open a folder…** again.
+- **Obtainium says the app cannot be updated ("signatures do not match")**: an APK built elsewhere (or a test build) is installed. Uninstall Tinta and install it again from Obtainium (sync with GitHub first, or your files on the phone go with it).
+- **Android app: Open a folder does nothing**: it needs **All files access**. Allow it in Android's settings (Apps → Tinta → Permissions, or the screen it opened), come back and tap **Open a folder…** again.
 - **Git in the editor says "Permission denied (publickey)" but `ssh -T` works in PowerShell (Windows)**: Git for Windows uses its own ssh, which does not see Windows' ssh-agent where your key is loaded. Tell Git to use Windows' ssh: `git config --global core.sshCommand C:/Windows/System32/OpenSSH/ssh.exe`, then Pull again. Before 0.52 the editor's Fetch, Pull and Push did not follow that setting (they always ran Git's own ssh): update, or set a user environment variable `GIT_SSH_COMMAND` = `C:/Windows/System32/OpenSSH/ssh.exe -o BatchMode=yes` and open the editor again.
 - **Android app: nothing responds, or it closes by itself**: long-press its icon → **Send a log** and send it to whoever helps you with it.
 - **Android app: "The app's file access did not start"**: Folders, servers and terminals need it; the rest of the editor works without it. **Send a log** (the message's reason is in it too).
@@ -1118,7 +1120,7 @@ Settings → **Keys** (also **Help → Keys…** on the desktop, or **Keys** in 
 - **Android app: the terminal opens blank, with only the cursor**: before 0.28.1 the shell's prompt could be lost on fast phones. Update the app; in an older one, press `Enter` and the prompt shows. "Starting the shell…" while it waits means the app's file access is starting (the first time after opening the app).
 - **Android app: no Compare with another folder… or Two panes in a folder's menu**: they came to the app in 0.33.0: update it.
 - **Sideways does nothing, or says to turn the phone**: in a browser it needs full screen, which some (an iPhone's) do not give a page. Turn the phone yourself (unlock the screen's rotation in the quick settings); the layout follows. In the Android app, Sideways works even with rotation locked.
-- **Android app: a file opened with Tracker Editor is Read-only**: the app that gave it allows reading only (Gmail attachments, many file managers' "Open with"). Save a copy with ⋯ → **Download**, or open it from Folders instead.
+- **Android app: a file opened with Tinta is Read-only**: the app that gave it allows reading only (Gmail attachments, many file managers' "Open with"). Save a copy with ⋯ → **Download**, or open it from Folders instead.
 - **Android app: Extract fails with "EBADF: bad file descriptor, close"**: before 0.34.2 the app could not extract zip files (its Node.js lacked a checksum the extraction used, and the message hid that). Update the app.
 - **A PDF or document from the tracker opens as text (`%PDF-1.4` …)**: versions before 0.34 opened every tracker attachment as text. Update the app. From 0.34.1 a tab like that left by an older version opens as the document, and the file in your data is never written over.
 - **A document shows a message instead of its pages**: "protected (DRM)": only the app it was bought for opens it. "damaged or is not what its name says": the file is broken, or a different format with that name (an old `.doc` renamed `.docx`, say). Either way **Its program** tries the app made for it.
@@ -1131,7 +1133,7 @@ Settings → **Keys** (also **Help → Keys…** on the desktop, or **Keys** in 
 - **"has no shell (sh), so its files cannot be reached"**: the image has no shell (distroless, scratch). Open a container of the same project that has one, or a `-debug` variant of the image.
 - **New files made in a container belong to root**: set **Run as user** in its settings (`node`, `www-data`, `1000`…) to the user that owns the project there. (Files saved there keep their owner.)
 - **The capture shortcut "is used by another app"**: click the field and press another combination.
-- **The screenshot is black (macOS)**: allow Tracker Editor under System Settings → Privacy & Security → Screen Recording, then restart it.
+- **The screenshot is black (macOS)**: allow Tinta under System Settings → Privacy & Security → Screen Recording, then restart it.
 - **Paste in the edit bar or the line-number menu says the browser did not let it read the clipboard**: allow the clipboard for the site when the browser asks, or long-press in the text and choose **Paste**.
 - **Dictation says to allow the microphone**: allow it for the site or app in the browser's settings. "Needs a connection": the speech service is online.
 - **"This browser cannot read aloud" in the Android app**: versions before 0.27.0 had no voices there: update it. If it now says the phone has no text-to-speech engine, install **Speech Services by Google** from the Play Store (or choose another engine in Android's settings → Text-to-speech output). No voice in your language: add it in the engine's settings.

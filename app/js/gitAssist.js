@@ -38,7 +38,7 @@ export const STEPS = {
   'file-at': { look: true, fields: '{ "rev": "HEAD~1", "path": "src/a.js" }', check: (s) => (!safeRev(s.rev) ? 'rev' : !safeRel(s.path) ? 'path' : ''), cmd: (s) => `git show ${s.rev}:${q(s.path)}`, text: (s) => `Read ${s.path} at ${s.rev}` },
   read: { look: true, fields: '{ "path": ".gitignore" }  (a file as it is now)', check: (s) => (safeRel(s.path) ? '' : 'path'), cmd: (s) => `cat ${q(s.path)}`, text: (s) => `Read ${s.path}` },
   reflog: { look: true, fields: '{ "ref"?: "main", "count"?: 30 }', check: (s) => (s.ref != null && !safeRev(s.ref) ? 'ref' : ''), cmd: (s) => `git reflog${s.ref ? ` ${s.ref}` : ''}${s.count ? ` -n ${Number(s.count)}` : ''}`, text: () => 'Look at where HEAD has been (the reflog)' },
-  backups: { look: true, fields: '{}', check: () => '', cmd: () => '(Tracker Editor’s backups)', text: () => 'Look at the backups taken before earlier steps' },
+  backups: { look: true, fields: '{}', check: () => '', cmd: () => '(Tinta’s backups)', text: () => 'Look at the backups taken before earlier steps' },
   // ---- Easy to undo: they run by themselves ----
   stage: { fields: '{ "paths": [...] }', risk: () => 'auto', check: (s) => (paths(s) ? '' : 'paths'), cmd: (s) => `git add -A -- ${list(s)}`, text: (s) => `Stage ${s.paths.join(', ')}` },
   'stage-all': { fields: '{}', risk: () => 'auto', check: () => '', cmd: () => 'git add -A', text: () => 'Stage all the changes' },
@@ -72,7 +72,7 @@ export const STEPS = {
   'delete-branch': { fields: '{ "name": "old", "force"?: true  (force: even when not merged) }', risk: () => 'danger', backup: () => true, keep: (s) => [s.name], check: (s) => (safeBranch(s.name) ? '' : 'name'), cmd: (s) => `git branch ${s.force ? '-D' : '-d'} ${s.name}`, text: (s) => `Delete the branch ${s.name}${s.force ? ', even if it is not merged' : ''}` },
   restore: { fields: '{ "paths": [...], "from"?: "HEAD~2" }', risk: () => 'danger', backup: () => true, check: (s) => (!paths(s) ? 'paths' : s.from != null && !safeRev(s.from) ? 'from' : ''), cmd: (s) => `git restore ${s.from ? `--source=${s.from} --staged ` : ''}--worktree -- ${list(s)}`, text: (s) => `Throw away the changes to ${s.paths.join(', ')}${s.from ? ` (back to ${s.from})` : ''}` },
   'stash-drop': { fields: '{ "ref": "stash@{0}" }', risk: () => 'danger', check: (s) => (safeStash(s.ref) ? '' : 'ref'), cmd: (s) => `git stash drop ${s.ref}`, text: (s) => `Throw away ${s.ref} from the stash` },
-  undo: { fields: '{ "id": "<a backup’s id>" }', risk: () => 'danger', check: (s) => (typeof s.id === 'string' && /^[a-z0-9]{4,40}$/.test(s.id) ? '' : 'id'), cmd: (s) => `(back to Tracker Editor’s backup ${s.id})`, text: (s) => `Go back to the backup ${s.id} (its branch, commit and changes)` },
+  undo: { fields: '{ "id": "<a backup’s id>" }', risk: () => 'danger', check: (s) => (typeof s.id === 'string' && /^[a-z0-9]{4,40}$/.test(s.id) ? '' : 'id'), cmd: (s) => `(back to Tinta’s backup ${s.id})`, text: (s) => `Go back to the backup ${s.id} (its branch, commit and changes)` },
 };
 
 /** Ops whose step needs the working tree saved first (they change files on disk). */
@@ -243,7 +243,7 @@ export function gitGuide(guide) {
  * each time for one guide, so Claude caches it.
  */
 export function gitSystem({ guide = '' } = {}) {
-  return `You help someone with Git in Tracker Editor, a text editor. Many people find Git confusing and some have damaged their repositories: explain plainly and briefly (Markdown), say what each step does and why, prefer the safe way, and never guess about the repository: look first.
+  return `You help someone with Git in Tinta, a text editor. Many people find Git confusing and some have damaged their repositories: explain plainly and briefly (Markdown), say what each step does and why, prefer the safe way, and never guess about the repository: look first.
 
 Every question comes with a snapshot of the repository (status, branches, recent commits on all branches, stash, reflog, backups).
 

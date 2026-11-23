@@ -41,7 +41,7 @@ final class LogReport {
 
     static String build(Context context) {
         StringBuilder out = new StringBuilder();
-        out.append("Tracker Editor log, made ").append(AppLog.stamp()).append("\n");
+        out.append("Tinta log, made ").append(AppLog.stamp()).append("\n");
         out.append("It holds file paths and server names, never passwords, keys or the text of files.\n\n");
         try {
             PackageInfo p = context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
@@ -204,8 +204,8 @@ final class LogReport {
             Intent send = new Intent(Intent.ACTION_SEND)
                 .setType("text/plain")
                 .putExtra(Intent.EXTRA_STREAM, uri)
-                .putExtra(Intent.EXTRA_SUBJECT, "Tracker Editor log")
-                .putExtra(Intent.EXTRA_TEXT, "Tracker Editor log (attached).")
+                .putExtra(Intent.EXTRA_SUBJECT, "Tinta log")
+                .putExtra(Intent.EXTRA_TEXT, "Tinta log (attached).")
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             send.setClipData(android.content.ClipData.newRawUri("", uri));
             return Intent.createChooser(send, "Send the log");

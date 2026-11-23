@@ -116,7 +116,7 @@ export function SendDialog({ file, projects, actions, onClose }) {
     actions.toast(`Adding “${title.trim() || file.name}” to your tracker…`);
     syncNow().then((r) => r && actions.toast('Added to your tracker. Open it there with “Open in editor”.'));
   };
-  return html`<${Modal} title="Send to tracker" onClose=${onClose}
+  return html`<${Modal} title="Send to Rumbo" onClose=${onClose}
     footer=${html`<span class="spacer" /><button type="button" class="btn" onClick=${onClose}>Cancel</button>
       <button type="button" class="btn primary" onClick=${send}><${Icon} name="send" size=${15} />Add to tracker</button>`}>
     <form class="field-grid" onSubmit=${(e) => (e.preventDefault(), send())}>

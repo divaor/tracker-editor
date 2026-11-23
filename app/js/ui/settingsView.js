@@ -130,14 +130,14 @@ function SyncCard({ sync, actions }) {
 
   const githubForm = html`
     <div class="field-row setup-row">
-      <input value=${setupCode} onInput=${(e) => setSetupCode(e.currentTarget.value)} placeholder="Paste the tracker's setup code (Tracker → Settings → Copy setup code)" aria-label="Setup code" autocomplete="off" />
+      <input value=${setupCode} onInput=${(e) => setSetupCode(e.currentTarget.value)} placeholder="Paste the tracker's setup code (Rumbo → Settings → Copy setup code)" aria-label="Setup code" autocomplete="off" />
       <button type="button" class="btn sm" disabled=${!setupCode.trim()} onClick=${applySetup}>Apply</button>
     </div>
     <form class="field-grid settings-form" onSubmit=${save}>
       <${Field} label="GitHub owner"><input value=${form.owner} onInput=${set('owner')} placeholder="your-username" autocomplete="off" autocapitalize="off" spellcheck=${false} /></${Field}>
       <${Field} label="Repository" hint="Your private data repo, e.g. tracker-data"><input value=${form.repo} onInput=${set('repo')} placeholder="tracker-data" autocomplete="off" autocapitalize="off" spellcheck=${false} /></${Field}>
       <${Field} label="Branch" hint="Blank = the repo's default branch"><input value=${form.branch} onInput=${set('branch')} placeholder="(default branch)" autocomplete="off" autocapitalize="off" spellcheck=${false} /></${Field}>
-      <${Field} label="Tracker data file" hint="Where the tracker keeps projects and items"><input value=${form.trackerPath} onInput=${set('trackerPath')} placeholder="tracker.json" autocomplete="off" autocapitalize="off" spellcheck=${false} /></${Field}>
+      <${Field} label="Rumbo data file" hint="Where Rumbo keeps projects and items"><input value=${form.trackerPath} onInput=${set('trackerPath')} placeholder="tracker.json" autocomplete="off" autocapitalize="off" spellcheck=${false} /></${Field}>
       <${Field} label="Personal access token" wide hint=${hasToken ? 'A token is saved on this device. Paste a new one to replace it.' : 'Fine-grained token with Contents: Read and write on the data repo (the tracker’s works).'}>
         <input type="password" value=${token} onInput=${(e) => setTokenValue(e.currentTarget.value)} placeholder=${hasToken ? '•••••••• (saved)' : 'github_pat_…'} autocomplete="off" />
       </${Field}>
@@ -155,7 +155,7 @@ function SyncCard({ sync, actions }) {
     return html`<${Card} title="Where your data is" icon="disk" id="sync">
       <p class="muted">
         ${where?.dir
-          ? html`Kept on this computer, in <code>${where.dir}</code>. Tracker on this computer uses the same folder: your projects, tags and tracker documents show in both, and Send to tracker reaches it.`
+          ? html`Kept on this computer, in <code>${where.dir}</code>. Rumbo on this computer uses the same folder: your projects, tags and Rumbo documents show in both, and Send to Rumbo reaches it.`
           : 'Kept in this browser, on this device. The tracker opened in this browser (or installed from it) shares it.'}
       </p>
       ${where?.dir && html`<div class="form-actions"><button type="button" class="btn sm" onClick=${() => window.desktop.data.show()}><${Icon} name="folderOpen" size=${15} />Show the folder</button></div>`}
@@ -487,7 +487,7 @@ function TypingCard({ settings }) {
         </select>
       </${Field}>
       <${Check} checked=${t.autoIndent} label="The other editor indents new lines by itself" hint="After each new line, the indentation it adds is replaced by the text's own, so YAML, Python and code keep theirs" onChange=${(v) => set({ autoIndent: v })} />
-      <${Check} checked=${t.minimize} label="Minimize Tracker Editor while it types" hint="The window behind it, often the remote desktop, gets the focus" onChange=${(v) => set({ minimize: v })} />
+      <${Check} checked=${t.minimize} label="Minimize Tinta while it types" hint="The window behind it, often the remote desktop, gets the focus" onChange=${(v) => set({ minimize: v })} />
       ${window.desktop?.platform === 'win32' && html`<${Check} checked=${t.unicode} label="Send characters instead of key presses" hint="If symbols come out wrong because this computer's keyboard layout differs from the remote one" onChange=${(v) => set({ unicode: v })} />`}
     </div>
   </${Card}>`;
@@ -547,8 +547,8 @@ function DesktopCard({ settings, actions }) {
       <${Check} checked=${prefs.background} label="Keep running in the tray when the window is closed" hint="So quick capture and the clipboard history work with the window closed. Quit from the tray icon." onChange=${(v) => set({ background: v })} />
       ${prefs.background && !prefs.tray && html`<p class="notice small">This desktop has no system tray, so closing the window still quits.</p>`}
       ${prefs.shell &&
-      html`<${Check} checked=${prefs.shell.enabled} label="Tracker Editor in Explorer"
-        hint="In Open with for text and code files (without becoming their default program), Edit with Tracker Editor when you right-click a file (Windows 11: under Show more options), and Open in Tracker Editor on folders."
+      html`<${Check} checked=${prefs.shell.enabled} label="Tinta in Explorer"
+        hint="In Open with for text and code files (without becoming their default program), Edit with Tinta when you right-click a file (Windows 11: under Show more options), and Open in Tinta on folders."
         onChange=${(v) => set({ shell: { enabled: v } })} />
       ${prefs.shell.error && html`<p class="notice small" role="alert">Windows did not take it: ${prefs.shell.error}</p>`}`}
     </div>
@@ -905,7 +905,7 @@ function ApiModelForm({ settings, actions }) {
     </div>
     ${claude &&
     html`<details class="help"><summary>Claude: an API key, not your Claude subscription</summary>
-      <p>The Claude API is paid per use with a key from the <a href="https://platform.claude.com/" target="_blank" rel="noopener">Claude Console</a>. A Claude Pro or Max subscription cannot be connected here: Anthropic allows its sign-in only in its own apps. To use your subscription, the ✦ panel has <strong>Ask in the Claude app</strong>, which opens Claude with the question ready; with the Tracker connector in Claude, it can read your files and save fixes back.</p>
+      <p>The Claude API is paid per use with a key from the <a href="https://platform.claude.com/" target="_blank" rel="noopener">Claude Console</a>. A Claude Pro or Max subscription cannot be connected here: Anthropic allows its sign-in only in its own apps. To use your subscription, the ✦ panel has <strong>Ask in the Claude app</strong>, which opens Claude with the question ready; with the Rumbo connector in Claude, it can read your files and save fixes back.</p>
     </details>`}`;
 }
 
@@ -1074,7 +1074,7 @@ function DataCard({ actions }) {
     </div>
     <dl class="props">
       <div><dt>Links to files</dt><dd><input value=${getSettings().appUrl} onChange=${(e) => saveSettings({ appUrl: e.currentTarget.value.trim() })} aria-label="Editor address" /></dd></div>
-      <div><dt>Tracker</dt><dd><input value=${getSettings().trackerUrl} onChange=${(e) => saveSettings({ trackerUrl: e.currentTarget.value.trim() })} aria-label="Tracker address" /></dd></div>
+      <div><dt>Rumbo</dt><dd><input value=${getSettings().trackerUrl} onChange=${(e) => saveSettings({ trackerUrl: e.currentTarget.value.trim() })} aria-label="Rumbo address" /></dd></div>
     </dl>
   </${Card}>`;
 }
@@ -1095,7 +1095,7 @@ export function SettingsView({ settings, sync, actions }) {
     ${dictationSupported() && html`<${DictationCard} settings=${settings} />`}
     <${EncryptionCard} actions=${actions} />
     <${DataCard} actions=${actions} />
-    <p class="muted small about">Tracker Editor ${APP_VERSION} · ${isAndroidApp() ? 'Android app' : window.desktop ? `Desktop app (Electron ${window.desktop.versions?.electron ?? ''})` : 'Web app'} · <a href="https://github.com/divaor/tracker-editor" target="_blank" rel="noopener">Source</a></p>
+    <p class="muted small about">Tinta ${APP_VERSION} · ${isAndroidApp() ? 'Android app' : window.desktop ? `Desktop app (Electron ${window.desktop.versions?.electron ?? ''})` : 'Web app'} · <a href="https://github.com/divaor/tracker-editor" target="_blank" rel="noopener">Source</a></p>
     ${window.desktop?.android?.sendLog &&
     html`<p class="muted small about">Something not working? <button type="button" class="btn link" onClick=${() => window.desktop.android.sendLog().catch((err) => actions.toast(err.message, { kind: 'error' }))}>Send a log</button> (also in the app icon's long-press menu). It has file paths and server names, never passwords or the text of your files.</p>`}
   </div>`;

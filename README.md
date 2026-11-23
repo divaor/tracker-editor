@@ -1,8 +1,10 @@
-# Tracker Editor
+# Tinta
 
-A Notepad++-style text editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs; everything is saved as you type, **on this computer** together with Tracker (no account needed; nothing about syncing shows), or, once you turn it on, synced to your **private GitHub data repository**, so you can read it on your phone and your other computers. Turning sync on copies everything there first, so nothing is lost.
+*Called Tracker Editor until version 0.53; Rumbo was Tracker. Only the names changed: app IDs, links (`tracker-editor://`), the data repo, `Documents/Tracker data` and `.tracker-editor.json` stay the same.*
 
-It is the companion of [Tracker](https://github.com/divaor/tracking_app) and shares its data repository: the same **projects** (Work / Personal) and **tags**, items sent from the editor show up on the tracker, and the tracker opens files in the editor.
+A Notepad++-style text editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs; everything is saved as you type, **on this computer** together with Rumbo (no account needed; nothing about syncing shows), or, once you turn it on, synced to your **private GitHub data repository**, so you can read it on your phone and your other computers. Turning sync on copies everything there first, so nothing is lost.
+
+It is the companion of [Rumbo](https://github.com/divaor/tracking_app) and shares its data repository: the same **projects** (Work / Personal) and **tags**, items sent from the editor show up on the tracker, and the tracker opens files in the editor.
 
 <img src="docs/editor.png" alt="Several files open on a desktop, with projects and tags in the sidebar" width="640"> <img src="docs/phone.png" alt="A Markdown file on a phone in dark mode" width="180">
 
@@ -22,8 +24,8 @@ It is the companion of [Tracker](https://github.com/divaor/tracking_app) and sha
 - **End-to-end encrypted files**: choose **Encrypt** in a file's menu and its text is stored in your data repo as ciphertext. Only your devices, with your passphrase, can read it.
 - **Synced through GitHub**: every device keeps a full local copy and works offline. Changes are committed to `editor/` in your data repo, a batch at a time. If two devices edit the same file, nothing is lost: the other version is kept as a copy named after its device.
 - **Projects and tags**: the tracker's projects and tags, the same Work / Personal filter, and new projects you create here appear in the tracker.
-- **Tracker integration**:
-  - **Send to tracker** turns a file into a task, idea or doc linked to it.
+- **Rumbo integration**:
+  - **Send to Rumbo** turns a file into a task, idea or doc linked to it.
   - The tracker's documents (proposals, artifacts and other attached files) are listed with your files, under the name of their item. They are downloaded on each sync, so you can read them offline and find them with `Ctrl+P`, Find in files and the local model.
   - The tracker shows **Open in editor** on those items and **Edit in editor** on attached files; your edits are saved back to the tracker.
 - **Search that knows where things are**:
@@ -41,7 +43,7 @@ It is the companion of [Tracker](https://github.com/divaor/tracking_app) and sha
   - Or a **model service that answers later** (submit a request, get the answer from a status call or a webhook), described by a connection profile; see [4. Model](#4-model-optional).
 - **Type into another window** (desktop): for remote desktops and consoles that do not take pasted text. `Alt+T` types the selection, or the whole file, as key presses into the window you click into before a short countdown ends.
 - **Files on disk** (desktop): **File → Open File (Edit in Place)** (`Ctrl+O`) edits a file where it is, keeping its line endings and encoding. It reloads when the file changes elsewhere, warns before saving over someone else's change, and **Follow** shows new lines as they are written, like `tail -f`. Huge logs open by their last part.
-- **Your editor in Explorer** (Windows): **Open with → Tracker Editor** for text and code files, **Edit with Tracker Editor** on any file and **Open in Tracker Editor** on folders; a file opened that way opens as a tab edited in place. macOS: Finder's **Open With**.
+- **Your editor in Explorer** (Windows): **Open with → Tinta** for text and code files, **Edit with Tinta** on any file and **Open in Tinta** on folders; a file opened that way opens as a tab edited in place. macOS: Finder's **Open With**.
 - **Folders** (desktop): the sidebar's **Folders** view (`Ctrl+Shift+E`) works like a file explorer for folders on your computer: open, create, rename, copy, cut and paste (to and from Explorer or Finder too), drag to move, delete to the Recycle Bin, sort, with Undo; a tree or columns, favorites and recent folders, a preview of pictures, PDFs and text (Space for a large view), compare two files, zip and unzip; find in a folder, **Properties** (sizes, dates, permissions) and **Open a terminal here**. Text files open as files on disk, edited in place and not synced unless you **Copy into my files**; other files open with their own program; pictures can have their text read into a file next to them.
 - **Drag a tab out** (desktop): to the desktop or a folder for a copy, to a terminal running Claude Code for its path, or to the Claude app to attach it. **Copy for Claude** in the tab menu copies the path of a file on disk, or the name and text of the others.
 - **Quick capture** (desktop): a shortcut that works in any app opens a small window to jot something down, kept as a new note or added to `Inbox.md`.
@@ -84,7 +86,7 @@ It is the companion of [Tracker](https://github.com/divaor/tracking_app) and sha
   - It uses your device's voices, picking the most natural one for the text's language (English, Spanish, Portuguese…).
   - For truly human-sounding voices, connect a speech server; see [5. Natural voices](#5-natural-voices-optional).
 - **Share**: send a file by WhatsApp, Teams, email, Quick Share or any app on the phone (as text or as an attachment), or by email, WhatsApp or Teams on a computer. Copy the text, copy a link that opens it in the editor, or save a copy.
-- **Share to the editor** (Android): in any app, **Share → Tracker Editor** saves the text or file as a new file that syncs like the rest. On a computer, Chrome and Edge can also open text files with the installed app.
+- **Share to the editor** (Android): in any app, **Share → Tinta** saves the text or file as a new file that syncs like the rest. On a computer, Chrome and Edge can also open text files with the installed app.
 - **Also**: light and dark theme, import files from disk (drag and drop works), save a copy to disk, keyboard shortcuts, and home screen shortcuts for a new note or a voice note.
 
 ## How it fits together
@@ -124,9 +126,9 @@ To publish a release, run **Actions → Release desktop app → Run workflow** w
 1. In this repo, go to **Settings → Pages → Build and deployment → Source** and choose **GitHub Actions**. The *Deploy web app to GitHub Pages* workflow publishes `app/` on every push to `main`.
 2. On your phone, open `https://divaor.github.io/tracker-editor/` and install it (iPhone: Share → **Add to Home Screen**; Android: ⋮ → **Install app**).
 3. Connect it with the setup code as in step 1.
-4. To send text or files from other apps to the editor, use their **Share** button and pick **Tracker Editor**. If it isn't in the list, remove the app from your home screen and install it again: Android only reads the list of what an app accepts when it is installed.
+4. To send text or files from other apps to the editor, use their **Share** button and pick **Tinta**. If it isn't in the list, remove the app from your home screen and install it again: Android only reads the list of what an app accepts when it is installed.
 
-The tracker's **Open in editor** links point at this address. If you host the editor elsewhere, set the address in the tracker under **Settings → Tracker Editor**, and in the editor under **Settings → This device → Links to files**.
+The tracker's **Open in editor** links point at this address. If you host the editor elsewhere, set the address in the tracker under **Settings → Tinta**, and in the editor under **Settings → This device → Links to files**.
 
 ## 4. Model (optional)
 
@@ -222,7 +224,7 @@ For remote desktops, virtual machine consoles and other windows that do not take
 It stops when another window takes the focus, when you hold `Escape` (Windows), or with **Stop**. It never types into the editor itself. In **Settings → Typing into other windows** you can change the countdown and the speed (slower for laggy connections), and minimize the editor while it types. For editors that indent new lines by themselves (VS Code, SSMS, Notepad++…), turn on **The other editor indents new lines by itself**: after each line break the indentation it added is cleared and the text's own is typed, so YAML and Python keep exactly theirs.
 
 - **Windows**: works as is (key presses as scan codes, which remote desktop clients pass on).
-- **macOS**: allow Tracker Editor under **System Settings → Privacy & Security → Accessibility** the first time.
+- **macOS**: allow Tinta under **System Settings → Privacy & Security → Accessibility** the first time.
 - **Linux**: needs `xdotool` (X11) or `wtype` (Wayland).
 
 ## 8. Files on disk and logs (desktop)
@@ -272,7 +274,7 @@ Drag a tab out of the window and drop it on another app. The app gets a file, an
 | Another editor (VS Code, Notepad++) | Usually opened | Usually opened (the copy) |
 
 - The app you drop on decides what happens; the editor offers the file to copy, never to move, so the original stays where it is. A drop cannot make Explorer open the folder where a file lives; use **Show in folder** in the tab menu for that.
-- The copies of synced files are written to a temporary folder (`Tracker Editor drag`) and removed after a week. Encrypted files are never written out: their tabs only move within the tab bar.
+- The copies of synced files are written to a temporary folder (`Tinta drag`) and removed after a week. Encrypted files are never written out: their tabs only move within the tab bar.
 - Dropped back on the tab bar, the tab moves there, as before. On the web app, a dragged tab carries its text, so dropping it into a chat box or another app's text field pastes it.
 - **Copy for Claude** (tab menu, or ⋯): for a file on disk, its path (quoted when it has spaces), which Claude Code reads where it is; for the others, the name and the text in a code block, ready to paste into a chat.
 

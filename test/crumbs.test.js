@@ -49,9 +49,9 @@ test('synced files and tracker documents', () => {
   assert.deepEqual(kinds(placeCrumbs({ key: 'f:1', file: { name: 'plan.md', project: '' } })), ['files', 'file']);
   assert.deepEqual(placeCrumbs({ key: 'f:1', file: null }), []);
   const doc = placeCrumbs({ key: 'r:files/2026-x/report.md', doc: { name: 'report.md', item: { id: 'i1', title: 'Quarterly report' } } });
-  assert.deepEqual(labels(doc), ['Tracker', 'Quarterly report', 'report.md']);
+  assert.deepEqual(labels(doc), ['Rumbo', 'Quarterly report', 'report.md']);
   assert.equal(doc[1].itemId, 'i1');
-  assert.deepEqual(labels(placeCrumbs({ key: 'r:files/x/a.txt' })), ['Tracker', 'a.txt']);
+  assert.deepEqual(labels(placeCrumbs({ key: 'r:files/x/a.txt' })), ['Rumbo', 'a.txt']);
   // A file another Android app gave: its name only.
   assert.deepEqual(kinds(placeCrumbs({ key: 'd:content://com.app/doc/42', doc: { name: 'Notes.txt' } })), ['file']);
   assert.deepEqual(placeCrumbs({ key: 'c:5' }), []);

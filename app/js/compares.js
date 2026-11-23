@@ -43,7 +43,7 @@ export function sideWhere(side) {
   if (side.text != null) return side.detail ?? '';
   const k = parseKey(side.key);
   if (k?.kind === 'file') return ['My files', store.get(k.id)?.project].filter(Boolean).join(' · ');
-  if (k?.kind === 'repo') return ['Tracker', store.doc(k.path)?.item.title].filter(Boolean).join(' · ');
+  if (k?.kind === 'repo') return ['Rumbo', store.doc(k.path)?.item.title].filter(Boolean).join(' · ');
   if (k?.kind === 'disk') return isRemotePath(k.path) ? `${server(remoteParts(k.path).id)?.name ?? 'Server'}: ${innerPath(k.path)}` : k.path;
   return '';
 }

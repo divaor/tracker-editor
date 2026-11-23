@@ -9,6 +9,11 @@ const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
+
+// The app was called Tracker Editor until 0.53 (Tinta since): its settings, keychain-encrypted secrets
+// and the page's storage stay in that folder, so an update keeps everything. Before anything reads
+// userData; real Electron only (the phone's Node.js gives its own paths through the shim).
+if (process.versions.electron && !app.commandLine.hasSwitch('user-data-dir')) app.setPath('userData', path.join(app.getPath('appData'), 'Tracker Editor'));
 const { startTyping } = require('./typer.cjs');
 const disk = require('./diskFiles.cjs');
 const folders = require('./folders.cjs');
@@ -149,7 +154,7 @@ const checkFile = (file) => {
 };
 const watched = new Map(); // path → listener
 
-// Files and folders the system gives the app: "Open with" or "Edit with Tracker Editor" in
+// Files and folders the system gives the app: "Open with" or "Edit with Tinta" in
 // Explorer, a file dropped on its icon, the command line, Finder's open-file. The person
 // chose them, so they are allowed like a pick in the open dialog; the page takes them
 // ('disk:take-launched') when it is ready, and is told when more come ('disk:launched').
@@ -200,7 +205,7 @@ ipcMain.handle('disk:open-typed', guard(async (event, typed) => {
       noLink: true,
       title: item.dir ? 'Show a folder' : 'Open a file',
       message: item.dir ? `Show the folder ${name} in Folders?` : `Open ${name} here?`,
-      detail: `${item.path}\n\n${item.dir ? 'Tracker Editor will be able to open and change the files in it, as with a folder you pick.' : 'It opens where it is: what you save goes to this file.'}`,
+      detail: `${item.path}\n\n${item.dir ? 'Tinta will be able to open and change the files in it, as with a folder you pick.' : 'It opens where it is: what you save goes to this file.'}`,
     });
     if (response !== 1) return { cancelled: true };
   }
@@ -984,7 +989,7 @@ ipcMain.handle('lsp:custom-save', guard(async (event, def) => {
     noLink: true,
     title: 'Language server',
     message: `Run ${path.basename(program)} as the language server for ${clean.exts.join(', ')} files?`,
-    detail: `${[program, ...clean.args].join(' ')}\n\nTracker Editor will start it whenever you open one of these files from Folders. It runs as you and can read and change your files, like any program you run: allow only one you trust.`,
+    detail: `${[program, ...clean.args].join(' ')}\n\nTinta will start it whenever you open one of these files from Folders. It runs as you and can read and change your files, like any program you run: allow only one you trust.`,
   });
   if (response !== 1) return { cancelled: true, list: prefs.lspCustom };
   const saved = { ...clean, id, command: program };
@@ -1243,7 +1248,7 @@ ipcMain.handle('folder:allow-parent', guard(async (event, file) => {
     noLink: true,
     title: 'Show a folder',
     message: `Show the folder ${path.basename(dir) || dir} in Folders?`,
-    detail: `${dir}\n\nTracker Editor will be able to open and change the files in it, as with a folder you pick.`,
+    detail: `${dir}\n\nTinta will be able to open and change the files in it, as with a folder you pick.`,
   });
   if (response !== 1) return { cancelled: true };
   if (!allowedFolders.includes(dir)) {
@@ -2778,7 +2783,7 @@ function loadPrefs() {
     snip: { enabled: false, shortcut: DEFAULT_SNIP, ...saved.snip },
     clipboard: { enabled: false, max: clips.DEFAULT_MAX, ...saved.clipboard },
     toldAboutTray: Boolean(saved.toldAboutTray),
-    // Windows: Open with / Edit with Tracker Editor (on by default where installed; the portable app asks).
+    // Windows: Open with / Edit with Tinta (on by default where installed; the portable app asks).
     shell: { enabled: saved.shell?.enabled ?? !process.env.PORTABLE_EXECUTABLE_FILE, applied: saved.shell?.applied ?? '' },
     // Language servers the person added (lsp:custom-save); ones that no longer check out are dropped.
     lspCustom: (Array.isArray(saved.lspCustom) ? saved.lspCustom : []).flatMap((c) => {
@@ -2864,7 +2869,7 @@ function updateTray() {
   try {
     if (!tray) {
       tray = new Tray(nativeImage.createFromPath(path.join(APP_DIR, 'icons', 'icon-192.png')).resize({ width: 18, height: 18 }));
-      tray.setToolTip('Tracker Editor');
+      tray.setToolTip('Tinta');
       tray.on('click', showWindow);
     }
   } catch (err) {
@@ -2874,12 +2879,12 @@ function updateTray() {
   }
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: 'Open Tracker Editor', click: showWindow },
+      { label: 'Open Tinta', click: showWindow },
       { label: 'Quick Capture', accelerator: prefs.capture.enabled ? prefs.capture.shortcut : undefined, registerAccelerator: false, click: openCapture },
       { label: 'Text from a Screenshot', accelerator: prefs.snip.enabled ? prefs.snip.shortcut : undefined, registerAccelerator: false, click: snipFromShortcut },
       { label: 'Clipboard History', enabled: prefs.clipboard.enabled, click: () => send('clipboard-history') },
       { type: 'separator' },
-      { label: 'Quit Tracker Editor', click: () => app.quit() },
+      { label: 'Quit Tinta', click: () => app.quit() },
     ]),
   );
 }
@@ -3051,7 +3056,7 @@ async function snip() {
     const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize });
     const source = sources.find((s) => s.display_id === String(display.id)) ?? sources[0];
     if (!source || source.thumbnail.isEmpty()) {
-      throw new Error(process.platform === 'darwin' ? 'The screen could not be captured. Allow Tracker Editor to record the screen in System Settings, Privacy & Security, then try again.' : 'The screen could not be captured.');
+      throw new Error(process.platform === 'darwin' ? 'The screen could not be captured. Allow Tinta to record the screen in System Settings, Privacy & Security, then try again.' : 'The screen could not be captured.');
     }
     snipShot = { image: source.thumbnail, display };
     const rect = await new Promise((resolve) => {
@@ -3261,7 +3266,7 @@ function createWindow() {
     minWidth: 380,
     minHeight: 480,
     show: false,
-    title: 'Tracker Editor',
+    title: 'Tinta',
     icon: path.join(APP_DIR, 'icons', 'icon-512.png'),
     backgroundColor: '#f6f5f1',
     autoHideMenuBar: process.platform !== 'darwin',
@@ -3349,7 +3354,7 @@ function createWindow() {
       event.preventDefault();
       mainWindow.hide();
       if (!prefs.toldAboutTray && Notification.isSupported()) {
-        new Notification({ title: 'Tracker Editor is still running', body: 'Quick capture and the clipboard history keep working. Quit it from the tray icon.' }).show();
+        new Notification({ title: 'Tinta is still running', body: 'Quick capture and the clipboard history keep working. Quit it from the tray icon.' }).show();
         prefs.toldAboutTray = true;
         writeJson('prefs.json', prefs);
       }

@@ -27,14 +27,14 @@ test('synced files: their text, encrypted ones by name only, untitled ones marke
 
 test('tracker documents and items (the other app’s, marked)', () => {
   const docs = docSources([{ path: 'files/x/notes.md', name: 'notes.md', project: 'Kitchen', tags: [], modifiedAt: '2026-10-02T00:00:00Z', item: { id: 'i1', title: 'Fix the leak' } }], (p) => (p === 'files/x/notes.md' ? 'call the plumber' : null));
-  assert.deepEqual(docs[0], { id: 'r:files/x/notes.md', kind: 'doc', name: 'notes.md', place: 'Tracker · Fix the leak', project: 'Kitchen', tags: [], date: '2026-10-02T00:00:00Z', text: 'call the plumber' });
+  assert.deepEqual(docs[0], { id: 'r:files/x/notes.md', kind: 'doc', name: 'notes.md', place: 'Rumbo · Fix the leak', project: 'Kitchen', tags: [], date: '2026-10-02T00:00:00Z', text: 'call the plumber' });
   assert.equal(docSources([{ path: 'p', name: 'p', item: { title: '' } }], () => null)[0].text, '', 'not downloaded yet');
   const items = itemSources([
     { id: 'm1', title: 'Docker cleanup', type: 'task', status: 'pending', project: 'Deep Time', tags: ['docker'], notes: 'docker system prune', feedback: '', comments: [{ id: 'c1', by: 'Laptop', at: '2026-10-01T00:00:00Z', text: 'also volumes' }, { id: 'c2', by: 'x', at: '2026-10-02T00:00:00Z', editedAt: '2026-10-02T00:00:00Z', deleted: true }], updatedAt: '2026-10-28T00:00:00Z' },
     { id: 'm2', title: 'Old', deleted: true },
   ]);
   assert.equal(items.length, 1);
-  assert.deepEqual([items[0].id, items[0].itemId, items[0].kind, items[0].from, items[0].type, items[0].status, items[0].place], ['i:m1', 'm1', 'item', 'tracker', 'task', 'pending', 'Tracker']);
+  assert.deepEqual([items[0].id, items[0].itemId, items[0].kind, items[0].from, items[0].type, items[0].status, items[0].place], ['i:m1', 'm1', 'item', 'tracker', 'task', 'pending', 'Rumbo']);
   assert.equal(items[0].text, 'Docker cleanup\n\ndocker system prune\n\nalso volumes');
 });
 

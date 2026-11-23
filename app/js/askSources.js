@@ -8,9 +8,9 @@ import { liveComments, projectList } from './tracker-model.js';
 /** The kinds of places the editor searches, for the plan (only those that have something). */
 export const ASK_KINDS = {
   synced: 'My files: notes, snippets and drafts synced across devices',
-  doc: 'Tracker documents: text files attached to tracker items',
+  doc: 'Rumbo documents: text files attached to tracker items',
   disk: 'Files in the folders shown in Folders (on this computer or a server)',
-  item: 'Tracker items: tasks, ideas, Claude work and documents to read',
+  item: 'Rumbo items: tasks, ideas, Claude work and documents to read',
 };
 export const ITEM_TYPES = [
   { id: 'task', label: 'Tasks' },
@@ -42,7 +42,7 @@ export function docSources(docs, textOf) {
     id: `r:${d.path}`,
     kind: 'doc',
     name: d.name,
-    place: d.item?.title ? `Tracker · ${d.item.title}` : 'Tracker',
+    place: d.item?.title ? `Rumbo · ${d.item.title}` : 'Rumbo',
     project: d.project ?? '',
     tags: d.tags ?? [],
     date: d.modifiedAt ?? '',
@@ -60,7 +60,7 @@ export function itemSources(items) {
       kind: 'item',
       from: 'tracker',
       name: i.title,
-      place: 'Tracker',
+      place: 'Rumbo',
       project: i.project ?? '',
       tags: i.tags ?? [],
       type: i.type,

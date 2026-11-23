@@ -1,6 +1,6 @@
-// Windows: Tracker Editor in Explorer's "Open with" list for text and code files
-// (without becoming their default program), "Edit with Tracker Editor" in the
-// right-click menu of every file, and "Open in Tracker Editor" on folders. Kept in the
+// Windows: Tinta in Explorer's "Open with" list for text and code files
+// (without becoming their default program), "Edit with Tinta" in the
+// right-click menu of every file, and "Open in Tinta" on folders. Kept in the
 // current user's part of the registry (no admin rights needed), written as a .reg
 // file that reg.exe imports; turning it off imports one that removes the same keys.
 // The uninstaller removes them too (build/installer.nsh).
@@ -12,8 +12,10 @@ const { execFile } = require('node:child_process');
 const PROG_ID = 'TrackerEditor.File';
 const VERB = 'TrackerEditor';
 const CLASSES = 'HKEY_CURRENT_USER\\Software\\Classes';
+// The program's names before (Tracker Editor until 0.53): their Open with entries are removed.
+const FORMER_EXES = ['Tracker Editor.exe'];
 
-/** Text and code files the app offers to open ("Open with"). Any other file: "Edit with Tracker Editor". */
+/** Text and code files the app offers to open ("Open with"). Any other file: "Edit with Tinta". */
 const TEXT_EXTS = (
   'txt text md markdown log csv tsv json jsonc json5 geojson xml xsd xsl xslt svg yaml yml toml ini cfg conf config env properties ' +
   'html htm css scss sass less js mjs cjs jsx ts mts cts tsx vue svelte py pyw rb php pl pm lua r java kt kts scala groovy gradle ' +
@@ -30,7 +32,7 @@ const quote = (s) => `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"
  * The .reg file that registers (`on`) or removes the app as an editor for `exe` (the
  * program's full path; the portable exe's own path, not where it unpacks itself).
  */
-function regFile(exe, { on = true, exts = TEXT_EXTS, name = 'Tracker Editor' } = {}) {
+function regFile(exe, { on = true, exts = TEXT_EXTS, name = 'Tinta' } = {}) {
   const exeName = path.win32.basename(exe);
   const open = `"${exe}" "%1"`;
   const lines = ['Windows Registry Editor Version 5.00', ''];
@@ -40,6 +42,7 @@ function regFile(exe, { on = true, exts = TEXT_EXTS, name = 'Tracker Editor' } =
     lines.push('');
   };
   const drop = (k) => lines.push(`[-${CLASSES}\\${k}]`, '');
+  for (const former of FORMER_EXES) if (former.toLowerCase() !== exeName.toLowerCase()) drop(`Applications\\${former}`);
   if (!on) {
     drop(`Applications\\${exeName}`);
     drop(PROG_ID);

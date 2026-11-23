@@ -714,7 +714,7 @@ function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath
     const read = createReader(
       (text) => send(s.sender, 'lsp:message', { id: s.id, data: text }),
       (problem) => {
-        addStderr(s, `[Tracker Editor] ${problem}`);
+        addStderr(s, `[Tinta] ${problem}`);
         proc.kill();
       },
     );
@@ -727,7 +727,7 @@ function createLspHost({ send, spawn = spawnProcess, nodePath = process.execPath
     });
     proc.stdin.on('error', () => {});
     proc.on('error', (err) => {
-      addStderr(s, `[Tracker Editor] ${err.message}`);
+      addStderr(s, `[Tinta] ${err.message}`);
       exited(s, proc, null);
     });
     proc.on('exit', (code) => exited(s, proc, code));

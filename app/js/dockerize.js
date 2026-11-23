@@ -1120,7 +1120,7 @@ export function dockerPlan(project, o, { composeName = '' } = {}) {
 }
 
 // The Dockerfile's head comment.
-const head = (project, o, plan) => [`# Tracker Editor wrote this for ${o.name} (${project.label}: ${project.what}).`, `# Build and start it: ${plan}   (DOCKER.md says more)`];
+const head = (project, o, plan) => [`# Tinta wrote this for ${o.name} (${project.label}: ${project.what}).`, `# Build and start it: ${plan}   (DOCKER.md says more)`];
 const lines = (...parts) => `${parts.flat(Infinity).filter((l) => l !== null && l !== false && l !== undefined).join('\n')}\n`;
 const envLine = (env) => (Object.keys(env).length ? `ENV ${Object.entries(env).map(([k, v]) => `${k}=${/\s/.test(v) ? JSON.stringify(v) : v}`).join(' ')}` : null);
 // The folders kept in volumes exist in the image and belong to the user the app runs as.
@@ -1236,7 +1236,7 @@ function staticFile(p, o, top) {
 
 function nginxConf(o) {
   return lines(
-    '# nginx for the built site (Tracker Editor wrote it): the files, and the paths the app routes',
+    '# nginx for the built site (Tinta wrote it): the files, and the paths the app routes',
     '# itself (/settings, /items/12) answered with index.html, so reloading a page works.',
     'server {',
     '    listen 8080;',
@@ -1466,8 +1466,8 @@ function composeText(p, o, { inDocker = false, offline = false } = {}) {
   const platform = PLATFORMS.includes(o.platform) ? o.platform : null;
   return lines(
     offline
-      ? [`# Runs ${o.name} from its image, without internet (Tracker Editor wrote it). install.sh and`, '# install.ps1 load the image and start it: docker compose -f compose.yml up -d']
-      : [`# Builds and runs ${o.name} (Tracker Editor wrote it). DOCKER.md says more.`, `# Start: docker compose${inDocker ? ' -f docker/docker-compose.yml' : ''} up -d --build    Stop: docker compose${inDocker ? ' -f docker/docker-compose.yml' : ''} down`],
+      ? [`# Runs ${o.name} from its image, without internet (Tinta wrote it). install.sh and`, '# install.ps1 load the image and start it: docker compose -f compose.yml up -d']
+      : [`# Builds and runs ${o.name} (Tinta wrote it). DOCKER.md says more.`, `# Start: docker compose${inDocker ? ' -f docker/docker-compose.yml' : ''} up -d --build    Stop: docker compose${inDocker ? ' -f docker/docker-compose.yml' : ''} down`],
     `name: ${o.name}`,
     'services:',
     `  ${o.name}:`,
@@ -1559,7 +1559,7 @@ function guideText(p, o, plan) {
   return lines(
     `# Running ${o.name} with Docker`,
     '',
-    `Tracker Editor wrote these files for ${o.name} (${p.label}: ${p.what}). With Docker installed, one command builds it and starts it${plan.url ? ` at ${plan.url}` : ''}; it starts again by itself when the computer restarts.`,
+    `Tinta wrote these files for ${o.name} (${p.label}: ${p.what}). With Docker installed, one command builds it and starts it${plan.url ? ` at ${plan.url}` : ''}; it starts again by itself when the computer restarts.`,
     '',
     '| File | What it is |',
     '| --- | --- |',
@@ -1608,7 +1608,7 @@ function guideText(p, o, plan) {
     '',
     o.offline
       ? [
-          'On a computer with internet, in this project’s folder, build the package (Tracker Editor’s Dockerize dialog has a button for it):',
+          'On a computer with internet, in this project’s folder, build the package (Tinta’s Dockerize dialog has a button for it):',
           '',
           `- Windows (PowerShell): \`${offlineBuildLine(plan, 'powershell')}\``,
           `- Mac, Linux: \`${offlineBuildLine(plan, 'posix')}\``,
@@ -1627,7 +1627,7 @@ function guideText(p, o, plan) {
           '- Linux: on a computer with internet, download the packages for the server’s system from https://download.docker.com/linux/ (`containerd.io`, `docker-ce`, `docker-ce-cli`, `docker-buildx-plugin`, `docker-compose-plugin`), copy them over and install them (`sudo dpkg -i *.deb`, or `sudo dnf install ./*.rpm`).',
           '- Windows, Mac: the Docker Desktop installer works without internet.',
         ]
-      : 'To install it on a server without internet, open Dockerize again in Tracker Editor and tick **Make it installable offline**: it writes a package (the image and an install script for Linux, Mac and Windows) to copy to the server.',
+      : 'To install it on a server without internet, open Dockerize again in Tinta and tick **Make it installable offline**: it writes a package (the image and an install script for Linux, Mac and Windows) to copy to the server.',
     '',
     '## What Docker needs here',
     '',
@@ -1718,7 +1718,7 @@ function offlineReadme(p, o) {
     'Docker (with Compose) installed.',
     '',
     '1. Build the package on a computer with internet, in the project\'s folder (DOCKER.md',
-    `   there says how, or Tracker Editor's Dockerize dialog). It writes ${name}.tar.gz`,
+    `   there says how, or Tinta's Dockerize dialog). It writes ${name}.tar.gz`,
     `   (or ${name}.tar from PowerShell) into this folder.`,
     '2. Copy this whole folder to the server (a USB drive, scp, a shared folder).',
     '3. On the server, in this folder:',
@@ -1747,5 +1747,5 @@ function offlineReadme(p, o) {
 /** What the model is asked when the person wants the files reviewed. */
 export function reviewQuestion(plan) {
   const names = plan.files.map((f) => f.path).join(', ');
-  return `Review the Docker files Tracker Editor wrote for this project (${names}). Check them against the project's own files: the base image and version, how dependencies are installed, the build, the start command, the port, and what .dockerignore leaves out. Fix what does not fit, and keep it as simple as it is.`;
+  return `Review the Docker files Tinta wrote for this project (${names}). Check them against the project's own files: the base image and version, how dependencies are installed, the build, the start command, the port, and what .dockerignore leaves out. Fix what does not fit, and keep it as simple as it is.`;
 }

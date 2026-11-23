@@ -1,6 +1,6 @@
 {
   "name": "tracker-editor",
-  "productName": "Tracker Editor",
+  "productName": "Tinta",
   "version": "0.52.0",
   "description": "A Notepad++-style editor for many open files, synced through GitHub, with projects, tags, search across files and a local model.",
   "author": "divaor",
@@ -52,7 +52,7 @@
   },
   "build": {
     "appId": "com.divaor.tracker-editor",
-    "productName": "Tracker Editor",
+    "productName": "Tinta",
     "files": [
       "electron/**/*",
       "app/**/*",
@@ -72,7 +72,7 @@
     },
     "protocols": [
       {
-        "name": "Tracker Editor",
+        "name": "Tinta",
         "schemes": [
           "tracker-editor"
         ]
@@ -99,7 +99,7 @@
       ],
       "category": "public.app-category.developer-tools",
       "extendInfo": {
-        "NSAppleEventsUsageDescription": "Tracker Editor types text into another window when you ask it to (Type into another window)."
+        "NSAppleEventsUsageDescription": "Tinta types text into another window when you ask it to (Type into another window)."
       },
       "fileAssociations": [
         {

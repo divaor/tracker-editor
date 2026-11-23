@@ -25,7 +25,7 @@ export function placeCrumbs({ key = '', roots = [], serverName = () => '', serve
     const path = key.slice(2);
     const name = doc?.name || nameOf(path);
     const item = doc?.item;
-    return [{ kind: 'tracker', label: 'Tracker', title: 'Tracker documents' }, item?.title && { kind: 'item', label: item.title, itemId: item.id, title: `Item: ${item.title}` }, { kind: 'file', label: name, title: name, path }].filter(Boolean);
+    return [{ kind: 'tracker', label: 'Rumbo', title: 'Rumbo documents' }, item?.title && { kind: 'item', label: item.title, itemId: item.id, title: `Item: ${item.title}` }, { kind: 'file', label: name, title: name, path }].filter(Boolean);
   }
   if (!key.startsWith('d:')) return [];
   const path = key.slice(2);

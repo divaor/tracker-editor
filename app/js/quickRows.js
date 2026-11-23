@@ -10,7 +10,7 @@ export const QUICK_SECTIONS = {
   tabs: 'Open tabs',
   recent: 'Recent',
   files: 'My files',
-  docs: 'Tracker documents',
+  docs: 'Rumbo documents',
   folders: 'In your folders',
 };
 
@@ -60,7 +60,7 @@ export function quickPlace(row) {
     parts.pop();
     return parts.slice(-2).join('/');
   }
-  if (row.item) return `Tracker · ${row.item}`;
+  if (row.item) return `Rumbo · ${row.item}`;
   return 'My files';
 }
 
@@ -100,7 +100,7 @@ export function quickMarks(row, query) {
   }
   if (row.item) {
     const found = matchRanges(`${row.item} ${name}`, q);
-    const lead = 'Tracker · '.length;
+    const lead = 'Rumbo · '.length;
     if (found.length) return { name: moved(found, row.item.length + 1, name.length), place: moved(found, -lead, lead + row.item.length), project: [] };
   }
   if (row.project) {

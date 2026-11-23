@@ -1,6 +1,8 @@
-# Tracker Editor — notes for Claude
+# Tinta (formerly Tracker Editor) — notes for Claude
 
 A Notepad++-style editor whose files sync through the same private GitHub data repo as Tracker (github.com/divaor/tracking_app). Electron on desktop, a Capacitor app on Android, PWA elsewhere.
+
+- The app is called **Tinta** since 0.53 (Tracker Editor before); the tracker is **Rumbo**. Only shown names changed (titles, manifest, `productName`, the Android label, the APK and installer names, user-visible text, the model's prompts, the Explorer menu's words). Keep everything else: app ids, `tracker-editor://`, the manifest id, the addresses, `.tracker-editor.json`, the `Tracker data` folder, kv keys and secret names, crypto.js's `CHECK_TEXT` (existing vaults check against it), the `TrackerEditor*` registry keys and clipboard format, Git's backup messages, temporary folder names, AppLog's tag and `TERM_PROGRAM`. Electron's userData stays `<appData>/Tracker Editor` (`app.setPath` at the top of main.cjs, real Electron only: the phone's shim has its own paths). The program's file is `Tinta.exe` now: `shellIntegration.regFile` drops the old `Applications\Tracker Editor.exe` entry (`FORMER_EXES`), and the uninstaller removes both; typer.cjs's macOS check names both. In these notes "Tracker Editor" and "the tracker" still name the two apps.
 
 ## Commands
 

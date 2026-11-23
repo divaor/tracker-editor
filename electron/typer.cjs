@@ -129,7 +129,7 @@ function macScript() {
   set lineStart to (item 3 of argv) is "1"
   tell application "System Events"
     set frontApp to name of first application process whose frontmost is true
-    if frontApp is "Tracker Editor" or frontApp is "Electron" then error "stopped self"
+    if frontApp is "Tinta" or frontApp is "Tracker Editor" or frontApp is "Electron" then error "stopped self"
     repeat with c in (characters of theText)
       set ch to contents of c
       if ch is linefeed or ch is return then
@@ -312,7 +312,7 @@ function missingTool(platform, env) {
 function explain(platform, errText) {
   const text = errText.trim();
   if (platform === 'darwin' && /not allowed|1002|1743|25211|assistive/i.test(text)) {
-    return 'Allow Tracker Editor to control the keyboard: System Settings, Privacy & Security, Accessibility.';
+    return 'Allow Tinta to control the keyboard: System Settings, Privacy & Security, Accessibility.';
   }
   if (platform === 'win32' && /Add-Type|language mode|ConstrainedLanguage/i.test(text)) {
     return 'Windows blocked the typing helper (PowerShell is restricted on this computer).';

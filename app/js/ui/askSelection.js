@@ -198,7 +198,7 @@ export function AssistPanel({ scope, actions, onClose, start = null, hasFile = t
     const help = (followUp ? conv.action : action).kind === 'help';
     const file = help && !followUp ? actions.openFileInfo() : null;
     const asked = help && !followUp ? action.prompt || fileQuestion(file ?? {}) : '';
-    let context = followUp ? conv.context : (given ?? (help ? { help: true, label: 'Tracker Editor help', name: 'Tracker Editor', text: asked, whole: false, file } : actions.assistContext()));
+    let context = followUp ? conv.context : (given ?? (help ? { help: true, label: 'Tinta help', name: 'Tinta', text: asked, whole: false, file } : actions.assistContext()));
     if (!context) return;
     // A question that failed before is left out (it is asked again as this one).
     const turns = followUp ? conv.turns.filter((t) => t.answer) : [];
@@ -284,7 +284,7 @@ export function AssistPanel({ scope, actions, onClose, start = null, hasFile = t
   const contextLabel = (c) => c.label ?? (c.whole ? `Whole file · ${c.name}` : 'The selection');
   const head = html`<div class="assist-head">
     <span class="assist-title"><${Icon} name="sparkle" size=${16} />Model</span>
-    <span class="assist-scope" title="Select text in the file to ask about just that part">${conv ? contextLabel(conv.context) : start?.context ? contextLabel(start.context) : mode === 'help' ? 'Tracker Editor help' : scope}</span>
+    <span class="assist-scope" title="Select text in the file to ask about just that part">${conv ? contextLabel(conv.context) : start?.context ? contextLabel(start.context) : mode === 'help' ? 'Tinta help' : scope}</span>
     <span class="spacer" />
     ${llm.enabled && llm.chatModel && html`<${ChatButtons} chatId=${chatId} saved=${Boolean(rows.find((r) => r.id === chatId)?.saved)} listOpen=${listOpen} onToggleList=${() => setListOpen(!listOpen)} onNew=${() => newChat()} />`}
     ${conv && !chatId && html`<button type="button" class="btn ghost sm" title="Start over" onClick=${newChat}>New</button>`}

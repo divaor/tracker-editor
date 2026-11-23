@@ -20,9 +20,17 @@ test('the .reg file registers Open with, Edit with and Open in, for the current 
   assert.ok(reg.includes('[HKEY_CURRENT_USER\\Software\\Classes\\.log\\OpenWithProgids]\r\n"TrackerEditor.File"=""'));
   assert.ok(!/\[HKEY_CURRENT_USER\\Software\\Classes\\\.txt\]\r\n@=/.test(reg), 'the default program of .txt is left alone');
   // The right-click menu of files and folders.
-  assert.ok(reg.includes('[HKEY_CURRENT_USER\\Software\\Classes\\*\\shell\\TrackerEditor]\r\n@="Edit with Tracker Editor"'));
+  assert.ok(reg.includes('[HKEY_CURRENT_USER\\Software\\Classes\\*\\shell\\TrackerEditor]\r\n@="Edit with Tinta"'));
   assert.ok(reg.includes('[HKEY_CURRENT_USER\\Software\\Classes\\Directory\\Background\\shell\\TrackerEditor\\command]\r\n@="\\"C:'));
   assert.ok(reg.includes('\\" \\"%V\\""'));
+});
+
+test('the program renamed (Tracker Editor.exe → Tinta.exe): the old name leaves Open with', () => {
+  const now = regFile('C:\\Users\\Ana\\AppData\\Local\\Programs\\tracker-editor\\Tinta.exe', { exts: ['.txt'] });
+  assert.ok(now.includes('[-HKEY_CURRENT_USER\\Software\\Classes\\Applications\\Tracker Editor.exe]'));
+  assert.ok(now.includes('[HKEY_CURRENT_USER\\Software\\Classes\\Applications\\Tinta.exe]\r\n"FriendlyAppName"="Tinta"'));
+  assert.ok(now.includes('@="Open in Tinta"'));
+  assert.ok(!regFile(EXE, { exts: ['.txt'] }).includes('[-HKEY_CURRENT_USER\\Software\\Classes\\Applications\\Tracker Editor.exe]'), 'not while it still has that name');
 });
 
 test('turning it off removes the same keys and values', () => {

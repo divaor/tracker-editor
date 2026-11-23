@@ -476,7 +476,7 @@ function foldersBridge() {
     unzip: inv('folder:unzip'),
     // Files pasted from other apps by path: not on a phone.
     copyIn: async () => {
-      throw new Error('Files from other apps cannot be pasted here on a phone: share them to Tracker Editor instead.');
+      throw new Error('Files from other apps cannot be pasted here on a phone: share them to Tinta instead.');
     },
     trash: inv('folder:trash'),
     transfers: inv('transfer:list'),
@@ -671,7 +671,7 @@ function install() {
       init: (dir, opts) => nodeInvoke('git:init', dir, opts),
       onProgress: (cb) => nodeOn('git:progress', cb),
     },
-    // Share → Tracker Editor, and text selected in another app: [{ title, text, url, files }].
+    // Share → Tinta, and text selected in another app: [{ title, text, url, files }].
     shared: {
       take: async () => take('shared'),
       onShared: (callback) => subscribe('shared', callback),

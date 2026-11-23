@@ -26,7 +26,7 @@ export const COMPARE_SECTIONS = [
   { id: 'tabs', title: 'Open tabs' },
   { id: 'folders', title: 'In your folders' },
   { id: 'files', title: 'My files' },
-  { id: 'docs', title: 'Tracker documents' },
+  { id: 'docs', title: 'Rumbo documents' },
 ];
 
 /**

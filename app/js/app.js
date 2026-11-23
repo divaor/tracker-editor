@@ -215,7 +215,7 @@ const placeOfKey = (key) => {
   const k = parseKey(key);
   if (k?.kind === 'disk') return placeOfPath(k.path);
   if (k?.kind === 'file') return ['My files', store.get(k.id)?.project].filter(Boolean).join(' · ');
-  if (k?.kind === 'repo') return ['Tracker', store.doc(k.path)?.item.title].filter(Boolean).join(' · ');
+  if (k?.kind === 'repo') return ['Rumbo', store.doc(k.path)?.item.title].filter(Boolean).join(' · ');
   return '';
 };
 
@@ -2150,7 +2150,7 @@ export function App() {
     const docRows = docs
       .filter((d) => repoKey(d.path) !== activeKey)
       .sort((a, b) => (b.modifiedAt > a.modifiedAt ? 1 : -1))
-      .map((d) => ({ id: repoKey(d.path), name: d.name, kind: 'doc', project: d.project, item: d.item.title, modifiedAt: d.modifiedAt, detail: `Tracker · ${d.item.title}`, group: projectGroup(d.project) }));
+      .map((d) => ({ id: repoKey(d.path), name: d.name, kind: 'doc', project: d.project, item: d.item.title, modifiedAt: d.modifiedAt, detail: `Rumbo · ${d.item.title}`, group: projectGroup(d.project) }));
     const rootGroups = new Map();
     const groupOfRoot = (dir) => {
       if (!rootGroups.has(dir)) {
@@ -3022,7 +3022,7 @@ export function App() {
         for (const d of docs) if (!seen.has(d.item.id)) seen.set(d.item.id, d.item);
         return show(
           [...seen.values()].sort((a, b) => (a.title || '').localeCompare(b.title || '')).map((it) => ({ key: it.id, label: it.title || 'Untitled', icon: 'doc', checked: it.id === me?.item.id, run: () => actions.crumbMenu({ key, crumb: { kind: 'item', label: it.title, itemId: it.id }, at, owner }) })),
-          'Tracker',
+          'Rumbo',
         );
       }
       const itemId = crumb.kind === 'item' ? crumb.itemId : me?.item.id;
@@ -3782,7 +3782,7 @@ export function App() {
       const project = vs.groups.find((g) => g.kind === 'project' && g.name.toLowerCase() === run.listing.name.toLowerCase());
       if (project) return actions.setTabView([project.id]);
     }
-    if (!keys.length) return toast('Nothing to show as tabs: tracker items open in the Tracker app.');
+    if (!keys.length) return toast('Nothing to show as tabs: tracker items open in the Rumbo app.');
     store.setFound({ label: run.label ?? foundLabel(run.question), keys });
     actions.setTabView([FOUND]);
   };
@@ -4786,7 +4786,7 @@ export function App() {
       const { typed, stopped } = await typer.start(text, { delay, wait, minimize: options.minimize, unicode: options.unicode, lineStart: options.autoIndent });
       const done = `${typed.toLocaleString()} character${typed === 1 ? '' : 's'}`;
       if (!stopped) toast(`Typed ${done}.`);
-      else if (stopped === 'self') toast(`Nothing typed: Tracker Editor still had the focus. Start again, then click into the other window within ${options.countdown} seconds.`, { timeout: 9000 });
+      else if (stopped === 'self') toast(`Nothing typed: Tinta still had the focus. Start again, then click into the other window within ${options.countdown} seconds.`, { timeout: 9000 });
       else if (stopped === 'focus') toast(`Stopped after ${done}: another window got the focus.`, { timeout: 9000 });
       else if (stopped === 'escape') toast(`Stopped after ${done} (Escape).`);
       else toast(typed ? `Stopped after ${done}.` : 'Typing cancelled.');
@@ -4969,7 +4969,7 @@ export function App() {
     // The Android app: shared while it runs.
     const offShared = window.desktop?.shared?.onShared?.(takeInbox);
     onLaunchFiles((files) => actions.importFiles(files));
-    // Desktop: files and folders opened with the app ("Open with", "Edit with Tracker Editor",
+    // Desktop: files and folders opened with the app ("Open with", "Edit with Tinta",
     // the command line): files as tabs on disk, folders in the folders view.
     const takeLaunched = async () => {
       for (const item of (await window.desktop?.disk?.takeLaunched?.().catch(() => [])) ?? []) {
@@ -5456,7 +5456,7 @@ export function App() {
   return html`<div class="app ${sidebar ? 'with-sidebar' : ''} ${panel ? 'with-panel' : ''} view-${view}" style=${settings.sidebarWidth ? { '--sidebar': `${settings.sidebarWidth}px` } : {}}>
     <header class="topbar">
       <button type="button" class="icon-btn" aria-label="Files" title="Files (Ctrl+B)" aria-pressed=${sidebar} onClick=${() => setSidebar(!sidebar)}><${Icon} name="sidebar" /></button>
-      <span class="brand"><span class="brand-mark"><${Icon} name="code" size=${16} /></span><span class="brand-name">Tracker Editor</span></span>
+      <span class="brand"><span class="brand-mark"><${Icon} name="code" size=${16} /></span><span class="brand-name">Tinta</span></span>
       <button type="button" class="quick-open-btn" onClick=${() => setDialog({ type: 'quickOpen' })}>
         <${Icon} name="search" size=${16} /><span>Open a file…</span><kbd>Ctrl P</kbd>
       </button>

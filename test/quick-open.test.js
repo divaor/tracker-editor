@@ -69,7 +69,7 @@ test('groupQuick keeps the best match first: sections in the order of their firs
     [
       ['folders', 'In your folders', ['strings.js', 'Makefile']],
       ['files', 'My files', ['plan.md']],
-      ['docs', 'Tracker documents', ['spec.md']],
+      ['docs', 'Rumbo documents', ['spec.md']],
       ['ask', '', ['where is the docker command']],
     ],
   );
@@ -84,7 +84,7 @@ test('groupQuick keeps the best match first: sections in the order of their firs
 
 test('quickPlace says where a file is in words', () => {
   assert.equal(quickPlace(synced), 'My files');
-  assert.equal(quickPlace(doc), 'Tracker · Write the spec');
+  assert.equal(quickPlace(doc), 'Rumbo · Write the spec');
   assert.equal(quickPlace(inFolder), 'lib/util');
   assert.equal(quickPlace(atTop), '');
   // An open tab: the last folders of its path (a server's without its address).
@@ -117,7 +117,7 @@ test('quickMarks: the name’s own match, else the path in the folder split betw
   assert.equal(mark('Deep Time', quickMarks(synced, 'time').project), 'Deep [Time]');
   // A tracker document found by its item: the item's letters are marked in the place.
   const byItem = quickMarks(doc, 'write');
-  assert.equal(mark(quickPlace(doc), byItem.place), 'Tracker · [Write] the spec');
+  assert.equal(mark(quickPlace(doc), byItem.place), 'Rumbo · [Write] the spec');
   assert.deepEqual(byItem.name, []);
   assert.deepEqual(quickMarks(typed, 'a'), { name: [], place: [], project: [] });
   assert.deepEqual(quickMarks(ask, 'docker'), { name: [], place: [], project: [] });

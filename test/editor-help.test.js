@@ -101,7 +101,7 @@ test('the commands that fit, with their keys on this computer', () => {
 });
 
 test('what goes to the model: the whole guide in the system message, or passages with the question', () => {
-  const question = 'How do I fold every function in Tracker Editor?';
+  const question = 'How do I fold every function in Tinta?';
   const whole = helpContext(question, GUIDE, { whole: true, desktop: true, version: '0.20.0', name: 'app.js', language: 'JavaScript' });
   assert.equal(whole.guide, GUIDE.trim());
   assert.equal(whole.excerpts, '');
@@ -124,7 +124,7 @@ test('what goes to the model: the whole guide in the system message, or passages
   const [sys2, user2] = helpMessages(question, local, [{ role: 'assistant', content: 'Press Alt+0.' }, { role: 'user', content: 'And unfold?' }]);
   assert.ok(sys2.content.length < 1500, 'no guide in the system message');
   assert.match(sys2.content, /macOS \(Cmd, Option\)/);
-  assert.match(user2.content, /From the Tracker Editor guide:\n<<<\n### 2\. The basics › Code tools/);
+  assert.match(user2.content, /From the Tinta guide:\n<<<\n### 2\. The basics › Code tools/);
   assert.match(user2.content, /in the web app \(a browser or the phone\), on a Mac/);
   const all = helpMessages(question, local, [{ role: 'assistant', content: 'Press Alt+0.' }, { role: 'user', content: 'And unfold?' }]);
   assert.deepEqual(all.slice(2).map((m) => m.role), ['assistant', 'user']);
@@ -133,7 +133,7 @@ test('what goes to the model: the whole guide in the system message, or passages
 
 test('the help actions ask a full question; without a model the passages are the answer', () => {
   const how = withParam(HELP_ACTIONS.find((a) => a.id === 'help-how'), 'compare two files');
-  assert.equal(how.prompt, 'How do I compare two files in Tracker Editor?');
+  assert.equal(how.prompt, 'How do I compare two files in Tinta?');
   assert.equal(how.kind, 'help');
   assert.ok(HELP_ACTIONS.find((a) => a.id === 'help-trouble').trouble);
   assert.match(fileQuestion({ name: 'data.json', language: 'JSON' }), /a JSON file \(data\.json\)/);

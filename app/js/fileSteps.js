@@ -443,7 +443,7 @@ export function filesGuide(guide) {
  * time (for one guide), so Claude caches it.
  */
 export function filesSystem({ guide = '' } = {}) {
-  return `You help someone work on their files in Tracker Editor, a text editor: you answer questions about the files and, when asked, create and change files and folders. Every question comes with a picture of the workspace: the base folder (everything you do happens inside it), the files in it, the file open in the editor (or the part selected) and the other tabs open in it.
+  return `You help someone work on their files in Tinta, a text editor: you answer questions about the files and, when asked, create and change files and folders. Every question comes with a picture of the workspace: the base folder (everything you do happens inside it), the files in it, the file open in the editor (or the part selected) and the other tabs open in it.
 
 To look further, or to change something, end your answer with ONE block like this:
 \`\`\`file-steps

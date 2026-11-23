@@ -19,10 +19,10 @@ function ResultRow({ r, actions }) {
   const line = r.lines?.[0];
   const remoteFile = r.kind === 'disk' && r.id.startsWith('d:remote://');
   return html`<li class=${`ask-row kind-${kindClass(r)}`}>
-    <button type="button" class="ask-open" title=${r.kind === 'item' ? 'Open it in the Tracker app' : line ? `Open it at line ${line.line}` : 'Open it'} onClick=${() => actions.openFound(r, line?.line)}>
+    <button type="button" class="ask-open" title=${r.kind === 'item' ? 'Open it in the Rumbo app' : line ? `Open it at line ${line.line}` : 'Open it'} onClick=${() => actions.openFound(r, line?.line)}>
       <${Icon} name=${remoteFile ? 'server' : (ICONS[r.kind] ?? 'file')} size=${15} />
       <span class="ask-name">${r.name || '(no name)'}</span>
-      ${r.from === 'tracker' && html`<span class="ask-badge" title="An item of the Tracker app: it opens there">Tracker</span>`}
+      ${r.from === 'tracker' && html`<span class="ask-badge" title="An item of the Rumbo app: it opens there">Rumbo</span>`}
       <span class="ask-place">${r.place}</span>
     </button>
     ${r.why && html`<p class="ask-why">${r.why}</p>`}

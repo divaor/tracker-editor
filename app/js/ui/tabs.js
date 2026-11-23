@@ -59,7 +59,7 @@ function tabInfo(key) {
     return { kind, name: d.name, project: '', unsynced: d.dirty, follow: d.follow, dotTitle: 'Not saved', title: `On ${KINDS.disk.label.toLowerCase()}: ${d.path}${d.dirty ? ' · not saved' : ''}` };
   }
   const t = k && store.repoTab(k.path);
-  return t && { kind, name: t.name, project: store.doc(k.path)?.project ?? '', unsynced: !isLocal() && t.dirty, dotTitle: 'Not synced yet', title: `Tracker document: ${t.path}` };
+  return t && { kind, name: t.name, project: store.doc(k.path)?.project ?? '', unsynced: !isLocal() && t.dirty, dotTitle: 'Not synced yet', title: `Rumbo document: ${t.path}` };
 }
 
 /**
@@ -656,7 +656,7 @@ export function FileBar({ file, repo, disk, sealed, projects, canPreview, previe
     const doc = store.doc(repo.path);
     const project = doc?.project && projects.find((p) => p.key === projectKey(doc.project));
     return html`<div class="filebar">
-      <${WhereChip} kind="doc" label="Tracker" state=${whereState({ kind: 'doc', repo, sync: { local: isLocal() } })} title=${`${kindHint('doc', isLocal())}\n${repo.path}`} />
+      <${WhereChip} kind="doc" label="Rumbo" state=${whereState({ kind: 'doc', repo, sync: { local: isLocal() } })} title=${`${kindHint('doc', isLocal())}\n${repo.path}`} />
       <span class="filebar-note" title=${`From the tracker: ${repo.path}`}><span class="filebar-title">${doc?.item.title || repo.name}</span></span>
       ${doc?.project && html`<${ProjectChip} project=${project} name=${doc.project} />`}
       <span class="spacer" />
@@ -696,7 +696,7 @@ export function FileBar({ file, repo, disk, sealed, projects, canPreview, previe
     ${settings.llm.enabled && html`<button type="button" class="btn ghost sm" title="Summarize with the model" onClick=${actions.summarize}><${Icon} name="sparkle" size=${15} /><span class="label">Summarize</span></button>`}
     <button type="button" class="btn ghost sm" title=${linked.length ? `On the tracker: ${linked.map((i) => i.title).join(', ')}` : 'Add to the tracker as a task, idea or doc to read'}
       onClick=${() => actions.openDialog({ type: 'send', id: file.id })}>
-      <${Icon} name="send" size=${15} /><span class="label">${linked.length ? 'On tracker' : 'Send to tracker'}</span>
+      <${Icon} name="send" size=${15} /><span class="label">${linked.length ? 'In Rumbo' : 'Send to Rumbo'}</span>
     </button>
     <${MenuButton} label="More" items=${() => moreItems(file.id)} />
   </div>`;
@@ -839,11 +839,11 @@ export function StatusBar({ recording, big, cursor, language, file, repo, disk, 
   const srv = kind === 'remote' ? serverOf(disk.path) : null;
   if (file && isLocal()) state = `Saved · edited ${timeAgo(file.modifiedAt)}`;
   else if (file) state = file.dirty ? 'Saved on this device · not synced yet' : file.sha ? `Synced · edited ${timeAgo(file.modifiedAt)}${file.modifiedBy ? ` on ${file.modifiedBy}` : ''}` : 'Saved on this device';
-  if (repo) state = repo.dirty && !isLocal() ? 'Edited · goes to the tracker on the next sync' : 'Tracker file';
+  if (repo) state = repo.dirty && !isLocal() ? 'Edited · goes to the tracker on the next sync' : 'Rumbo file';
   if (kind === 'disk') state = disk.dirty ? 'Not saved to disk · Ctrl+S saves' : disk.follow ? 'Following the file as it grows' : isLocal() ? `File on ${KINDS.disk.label.toLowerCase()}, edited where it is` : `File on ${KINDS.disk.label.toLowerCase()} · not synced`;
   if (kind === 'remote') state = `${protocolName(srv.conn?.protocol)} · ${remoteAddress(disk.path, srv.conn)}${disk.dirty ? (isPlace(srv.conn) ? ' · not saved there' : ' · not saved to the server') : ''}`;
   if (disk?.doc) state = `${documentLabel(disk.name)} · ${disk.asText ? 'its text, read-only' : 'shown as it looks, read-only'}`;
-  const label = { synced: 'My files', doc: 'Tracker', disk: KINDS.disk.label, remote: srv?.conn ? connLabel(srv.conn) : 'Server' }[kind];
+  const label = { synced: 'My files', doc: 'Rumbo', disk: KINDS.disk.label, remote: srv?.conn ? connLabel(srv.conn) : 'Server' }[kind];
   const connection = srv && { connected: 'Connected', connecting: 'Connecting…', error: `Not connected: ${srv.status.error}`, disconnected: srv.status.error ? `Not connected: ${srv.status.error}` : 'Not connected' }[srv.status.state];
   const projectNow = projectStatus(project);
   return html`<footer class="statusbar">

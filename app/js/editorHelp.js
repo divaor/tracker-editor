@@ -13,7 +13,7 @@ export const HELP_ACTIONS = [
   {
     id: 'help-how', group: 'help', label: 'How do I…?', icon: 'help', kind: 'help',
     param: { label: 'What do you want to do?', placeholder: 'e.g. compare two files · edit a file on a server · fold every function' },
-    prompt: 'How do I {param} in Tracker Editor?',
+    prompt: 'How do I {param} in Tinta?',
   },
   {
     id: 'help-keys', group: 'help', label: 'Keys for…', icon: 'keyboard', kind: 'help',
@@ -23,7 +23,7 @@ export const HELP_ACTIONS = [
   {
     id: 'help-trouble', group: 'help', label: 'Something isn’t working…', icon: 'alert', kind: 'help',
     param: { label: 'What happens?', placeholder: 'e.g. the language server says nothing · typing into another window drops letters' },
-    prompt: 'In Tracker Editor: {param}. What is wrong and what can I do?',
+    prompt: 'In Tinta: {param}. What is wrong and what can I do?',
     trouble: true,
   },
   { id: 'help-file', group: 'help', label: 'What can I do with this file?', icon: 'file', kind: 'help', prompt: '' },
@@ -32,7 +32,7 @@ export const HELP_ACTIONS = [
 /** The question "What can I do with this file?" asks, for the open file. */
 export function fileQuestion({ name = '', language = '' } = {}) {
   const what = language ? `a ${language} file` : 'this kind of file';
-  return `What can I do with ${what}${name ? ` (${name})` : ''} in Tracker Editor: its preview, formatting, checks, code tools and anything else made for it?`;
+  return `What can I do with ${what}${name ? ` (${name})` : ''} in Tinta: its preview, formatting, checks, code tools and anything else made for it?`;
 }
 
 // Questions about the editor (as opposed to the text open in it), for the panel's free box.
@@ -258,7 +258,7 @@ function whereLine({ desktop, android, mac, name, language }) {
   return `I am ${parts.join(', ')}.`;
 }
 
-const guideTitle = (ctx) => `the Tracker Editor guide${ctx.version ? ` (version ${ctx.version})` : ''}`;
+const guideTitle = (ctx) => `the Tinta guide${ctx.version ? ` (version ${ctx.version})` : ''}`;
 
 /**
  * The question as it is sent: where the person is, the passages (unless the whole guide goes in
@@ -280,7 +280,7 @@ export function helpMessages(question, ctx, history = []) {
   const keys = ctx.mac ? 'macOS (Cmd, Option)' : 'Windows and Linux (Ctrl, Alt)';
   const from = ctx.guide ? 'the guide below (every feature, setting and fix, with Troubleshooting near the end)' : 'the guide passages';
   const system =
-    `You help people use Tracker Editor, a text and code editor (a desktop app and a web app). Answer from ${from} and the commands given with the question: the exact menu, button, setting or keys, as short numbered steps when there are several. Give keys as on ${keys}; say when something works only in the desktop app. ` +
+    `You help people use Tinta, a text and code editor (a desktop app and a web app). Answer from ${from} and the commands given with the question: the exact menu, button, setting or keys, as short numbered steps when there are several. Give keys as on ${keys}; say when something works only in the desktop app. ` +
     `If ${ctx.guide ? 'the guide does' : 'the passages do'} not cover it, say so plainly and point to the closest thing ${ctx.guide ? 'it mentions' : 'they mention'}, or to Help (F1); never invent a feature, a menu or a key. Be brief; use Markdown; answer in the language of the question (the names of menus and buttons as the guide gives them).` +
     (ctx.guide ? `\n\n${guideTitle(ctx).replace(/^t/, 'T')}:\n<<<\n${ctx.guide}\n>>>` : '');
   return [{ role: 'system', content: system }, { role: 'user', content: helpPrompt(question, ctx) }, ...history];

@@ -1,6 +1,6 @@
 {
   "appId": "com.divaor.trackereditor",
-  "appName": "Tracker Editor",
+  "appName": "Tinta",
   "webDir": "app",
   "android": {
     "path": "android",

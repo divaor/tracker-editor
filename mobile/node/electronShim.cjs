@@ -100,14 +100,14 @@ for (const name of ['show', 'hide', 'focus', 'blur', 'restore', 'maximize', 'min
 const PATHS = config.paths ?? {};
 const app = Object.assign(new EventEmitter(), {
   isPackaged: true,
-  name: 'Tracker Editor',
+  name: 'Tinta',
   commandLine: inert('commandLine'),
   dock: inert('dock'),
   getPath: (name) => PATHS[name] ?? PATHS.userData,
   setPath: (name, value) => (PATHS[name] = value),
   getAppPath: () => config.projectDir ?? __dirname,
   getVersion: () => config.version ?? '0.0.0',
-  getName: () => 'Tracker Editor',
+  getName: () => 'Tinta',
   getLocale: () => 'en-US',
   whenReady: () => Promise.resolve(),
   isReady: () => true,

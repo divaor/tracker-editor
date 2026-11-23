@@ -38,7 +38,7 @@ let searches = 0;
 export function createFilesWork({ key = null, folder = null, host, actions }) {
   const k = key ? parseKey(key) : null;
   if (k?.kind === 'file') return notesWork(k.id, { host, actions });
-  if (k?.kind === 'repo') return { unavailable: 'Tracker documents are read-only here: ask about them in Answer mode.' };
+  if (k?.kind === 'repo') return { unavailable: 'Rumbo documents are read-only here: ask about them in Answer mode.' };
   if (k && k.kind !== 'disk') return { unavailable: 'The model changes files in folders, and synced notes.' };
   const file = k?.kind === 'disk' ? k.path : null;
   if (!folder && !file) return { unavailable: 'Open a file, or pick a folder in Folders, first.' };

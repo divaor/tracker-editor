@@ -95,7 +95,7 @@ export function claudeAppPrompt({ action, context, editorFile = '' }) {
   const fence = body.includes('```') ? '~~~' : '```';
   const parts = [action?.prompt || 'Help me with this.'];
   if (body) parts.push(`It is ${what}${context.language ? ` (${context.language})` : ''}:\n${fence}\n${body}\n${fence}`);
-  if (editorFile) parts.push(`This is my Tracker Editor file "${editorFile}". If you have my Tracker connector, you can read it with read_editor_file and save the fixed version with save_editor_file.`);
+  if (editorFile) parts.push(`This is my Tinta file "${editorFile}". If you have my Rumbo connector, you can read it with read_editor_file and save the fixed version with save_editor_file.`);
   return parts.join('\n\n');
 }
 

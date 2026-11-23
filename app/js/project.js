@@ -9,7 +9,7 @@
 export const PROJECT_FILE = '.tracker-editor.json';
 
 /** A new project file: every setting there is, commented out, with what it does. */
-export const PROJECT_TEMPLATE = `// Tracker Editor's settings for this project's files: JSON with comments.
+export const PROJECT_TEMPLATE = `// Tinta's settings for this project's files: JSON with comments.
 // The nearest .tracker-editor.json above a file counts (one in a folder inside the project
 // counts for that folder). Run commands, tasks and variables count once you trust this file:
 // you are asked the first time you run something, and again whenever the file changes.

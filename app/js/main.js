@@ -16,7 +16,7 @@ function showInactive() {
     html`<div class="welcome">
       <div class="welcome-card">
         <h1>Open in another tab</h1>
-        <p class="muted">Tracker Editor works in one tab at a time so your files are never saved over. It’s now open in a newer tab; your changes from here are saved.</p>
+        <p class="muted">Tinta works in one tab at a time so your files are never saved over. It’s now open in a newer tab; your changes from here are saved.</p>
         <div class="welcome-actions"><button type="button" class="btn primary" onClick=${() => location.reload()}>Use it here</button></div>
       </div>
     </div>`,
@@ -57,7 +57,7 @@ try {
   } else showInactive();
 } catch (err) {
   console.error(err);
-  root.textContent = `Tracker Editor could not start: ${err?.message ?? err}`;
+  root.textContent = `Tinta could not start: ${err?.message ?? err}`;
   root.className = 'fatal';
 }
 

@@ -342,7 +342,7 @@ function createPreviewServer({ allowed, tops = () => [], onChange = () => {} } =
     const site = siteOfQuery(search);
     if (!site) return send(res, 404, 'Not found.');
     const stream = `/p/${token}/__reload?site=${encodeURIComponent(site.id)}`;
-    const js = `// Tracker Editor: this page reloads when a file it loaded changes, or as you edit it there.\n(() => {\n  const events = new EventSource(${JSON.stringify(stream)});\n  events.addEventListener('message', (e) => e.data === 'reload' && location.reload());\n})();\n`;
+    const js = `// Tinta: this page reloads when a file it loaded changes, or as you edit it there.\n(() => {\n  const events = new EventSource(${JSON.stringify(stream)});\n  events.addEventListener('message', (e) => e.data === 'reload' && location.reload());\n})();\n`;
     sendBody(req, res, 'text/javascript; charset=utf-8', Buffer.from(js, 'utf8'));
   }
   function events(req, res, search) {

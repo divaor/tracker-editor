@@ -183,7 +183,7 @@ export function DockerizeDialog({ dir, fromFile = false, canAsk = false, actions
       ${!found && html`<p class="muted small dkz-reading">Reading the project…</p>`}
       ${found?.error && html`<p class="notice error" role="alert"><${Icon} name="alert" size=${15} /><span>${found.error}</span></p>`}
       ${project?.kind === 'unknown' &&
-      html`<p class="notice warn" data-kind="unknown"><${Icon} name="info" size=${15} /><span>Tracker Editor does not know how to run this kind of project in Docker. ${project.reason}</span></p>
+      html`<p class="notice warn" data-kind="unknown"><${Icon} name="info" size=${15} /><span>Tinta does not know how to run this kind of project in Docker. ${project.reason}</span></p>
         <p class="small">${canAsk ? 'The model can look at the project and write the files: each one waits for your Apply.' : 'With a model (Settings → Model), it could look at the project and write them for you.'}</p>`}
       ${found?.project && html`<${DockerState} info=${docker} platform=${platform} checking=${checking} onCheck=${askDocker} />`}
     </${Modal}>`;

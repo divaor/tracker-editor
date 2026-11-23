@@ -53,7 +53,7 @@ export const toRemoteUri = (id, path) => `${REMOTE_SCHEME}${id}${path.startsWith
 
 export const KINDS = {
   synced: { label: 'My files', icon: 'cloud', hint: 'In your files: saved on this device and synced to your data repo.' },
-  doc: { label: 'Tracker', icon: 'paperclip', hint: 'A document attached to a tracker item: synced with the tracker.' },
+  doc: { label: 'Rumbo', icon: 'paperclip', hint: 'A document attached to a tracker item: synced with the tracker.' },
   disk: {
     get label() {
       return android() ? 'This device' : 'This computer';

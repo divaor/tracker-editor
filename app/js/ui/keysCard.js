@@ -91,7 +91,7 @@ export function KeysCard({ settings }) {
     setNote({ text: id ? `${PRESETS[id].label}’s keys, with your own changes on top.` : 'This editor’s keys, with your own changes on top.' });
   };
   const exportKeys = () => {
-    download('tracker-editor-keys.json', `${JSON.stringify({ app: 'Tracker Editor', keys: 1, preset, bindings: overrides }, null, 2)}\n`);
+    download('tracker-editor-keys.json', `${JSON.stringify({ app: 'Tinta', keys: 1, preset, bindings: overrides }, null, 2)}\n`);
     setNote({ text: 'Saved as tracker-editor-keys.json: Import… takes it on another computer.' });
   };
   const importKeys = async (e) => {

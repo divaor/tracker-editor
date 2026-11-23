@@ -20,7 +20,7 @@ export class DapError extends Error {
 const baseName = (p) => String(p).split(/[\\/]/).pop();
 const initializeArgs = (adapterID) => ({
   clientID: 'tracker-editor',
-  clientName: 'Tracker Editor',
+  clientName: 'Tinta',
   adapterID,
   pathFormat: 'path',
   linesStartAt1: true,

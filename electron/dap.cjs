@@ -260,7 +260,7 @@ function createDapHost({ send, spawn = spawnProcess, connect = (port, host) => n
         send(s.sender, 'dap:message', { id: s.id, data: text });
       },
       (problem) => {
-        addStderr(s, `[Tracker Editor] ${problem}`);
+        addStderr(s, `[Tinta] ${problem}`);
         end(s, null);
       },
     );
@@ -271,7 +271,7 @@ function createDapHost({ send, spawn = spawnProcess, connect = (port, host) => n
     s.write = (buf) => socket.write(buf);
     socket.setNoDelay?.(true);
     socket.on('data', reader(s));
-    socket.on('error', (err) => addStderr(s, `[Tracker Editor] ${err.message}`));
+    socket.on('error', (err) => addStderr(s, `[Tinta] ${err.message}`));
     socket.on('close', () => end(s, null));
   }
 
@@ -333,7 +333,7 @@ function createDapHost({ send, spawn = spawnProcess, connect = (port, host) => n
     proc.stderr?.on('data', (chunk) => addStderr(s, chunk.toString('utf8')));
     proc.stdin?.on('error', () => {});
     proc.on('error', (err) => {
-      addStderr(s, `[Tracker Editor] ${err.message}`);
+      addStderr(s, `[Tinta] ${err.message}`);
       end(s, null);
     });
     proc.on('exit', (code) => end(s, code));

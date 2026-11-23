@@ -41,11 +41,11 @@ test('the question for the Claude app', () => {
   const prompt = claudeAppPrompt({ action: fixProblemsAction(problems.slice(0, 1)), context: { whole: true, name: 'query.sql', language: 'SQL', text: 'SELECT * FROM t WHERE' }, editorFile: 'query.sql' });
   assert.match(prompt, /^The editor found this problem/);
   assert.match(prompt, /It is the file query.sql \(SQL\):\n```\nSELECT \* FROM t WHERE\n```/);
-  assert.match(prompt, /my Tracker Editor file "query.sql".*read_editor_file.*save_editor_file/s);
+  assert.match(prompt, /my Tinta file "query.sql".*read_editor_file.*save_editor_file/s);
   // A text with fences of its own gets tildes; a part of a file says so; no file name, no connector line.
   const fenced = claudeAppPrompt({ action: { prompt: 'Explain' }, context: { whole: false, name: 'README.md', text: '```js\nx\n```' } });
   assert.match(fenced, /It is a part of README.md:\n~~~\n```js/);
-  assert.doesNotMatch(fenced, /Tracker connector/);
+  assert.doesNotMatch(fenced, /Rumbo connector/);
   // Long texts are cut, and then the link carries no question (it goes by the clipboard).
   const long = claudeAppPrompt({ action: { prompt: 'Explain' }, context: { whole: true, name: 'big.log', text: 'x'.repeat(20000) } });
   assert.match(long, /\[… 8000 more characters\]/);
