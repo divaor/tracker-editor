@@ -4,7 +4,7 @@ Tinta was called Tracker Editor until version 0.53, and Rumbo, the app it works 
 
 Tinta is a Notepad++-style editor for the notes, snippets, logs and code you paste somewhere and want to find again. Keep dozens of files open in tabs. Everything is saved the moment you paste or type, on this computer with the tracker, or, once you turn on sync, in the same private GitHub data repo as the tracker, so your files are on your computers and your phone.
 
-Version 0.41.0 · Download: https://github.com/divaor/tracker-editor/releases/tag/v0.41.0 · Web app: https://divaor.github.io/tracker-editor/
+Version 0.53.0 · Download: https://github.com/divaor/tracker-editor/releases/latest · Web app: https://divaor.github.io/tracker-editor/
 
 ---
 
