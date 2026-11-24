@@ -76,6 +76,8 @@ const SAMPLE = {
   ...(process.platform === 'win32' ? {} : { 'project/*star?.txt': 'a file named like a wildcard' }),
   'project/@list.txt': 'a file named like a list file',
 };
+// How many files SAMPLE makes (one fewer on Windows).
+const SAMPLE_FILES = Object.keys(SAMPLE).filter((r) => !r.endsWith('/')).length;
 
 // RAR 4, CAB and ISO 9660 made by hand (7-Zip reads them but cannot make them): stored files.
 let table;
@@ -343,15 +345,15 @@ test('every format: compressed, listed and extracted, names and contents whole',
     const got = await A.compressPaths([path.join(dir, 'project')], dir, `p-${format}`, { format });
     assert.equal(got.made.length, 1, format);
     assert.equal(path.basename(got.made[0]), `p-${format}${A.COMPRESS_FORMATS[format].ext}`);
-    assert.equal(got.files, 6);
+    assert.equal(got.files, SAMPLE_FILES);
     const info = await A.listArchive(got.made[0]);
     assert.equal(info.type, format === 'tar.gz' ? 'tar.gz' : format, format);
     assert.deepEqual(info.tops, ['project'], format);
-    assert.equal(info.files, 6, format);
+    assert.equal(info.files, SAMPLE_FILES, format);
     assert.ok(info.entries.some((e) => e.name === 'project/src/año ñandú.txt' && e.size === 12), format);
     const x = await A.extractArchive(got.made[0], { to: 'folder' });
     assert.equal(path.basename(x.folder), `p-${format}`);
-    assert.equal(x.files, 6, format);
+    assert.equal(x.files, SAMPLE_FILES, format);
     assert.deepEqual(listAll(x.folder), listAll(dir).filter((p) => p.startsWith('project/')).map((p) => p).sort().filter((p) => !p.includes('p-')), format);
     for (const rel of Object.keys(SAMPLE).filter((r) => !r.endsWith('/'))) {
       assert.ok(fs.readFileSync(path.join(x.folder, rel)).equals(fs.readFileSync(path.join(dir, rel))), `${format}: ${rel}`);
