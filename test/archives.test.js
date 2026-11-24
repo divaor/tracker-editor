@@ -72,7 +72,8 @@ const SAMPLE = {
   'project/src/blob.bin': Buffer.from(Array.from({ length: 70000 }, (_, i) => (i * 31) % 256)),
   'project/src/empty/': null,
   'project/-r': 'a file named like a switch',
-  'project/*star?.txt': 'a file named like a wildcard',
+  // Windows cannot have * or ? in a name: there the file named like a wildcard is not made.
+  ...(process.platform === 'win32' ? {} : { 'project/*star?.txt': 'a file named like a wildcard' }),
   'project/@list.txt': 'a file named like a list file',
 };
 
@@ -616,7 +617,9 @@ test('malicious zips: "..", absolute paths, drive letters, backslashes and a lin
   assert.ok(made.includes('ok/fine.txt'));
   // Nothing new anywhere but the new folder.
   assert.deepEqual(listAll(dir).filter((p) => !p.startsWith('inside/evil/') || p === 'inside/evil/'), [...before, 'inside/evil/'].sort());
-  assert.deepEqual(got.refused.sort(), ['..\\back.txt', 'sub\\..\\..\\win.txt']);
+  // On Windows a drive letter ("C:") is no name either: refused there, a plain folder elsewhere.
+  const windowsOnly = process.platform === 'win32' ? ['C:', 'C:/drive.txt'] : [];
+  assert.deepEqual(got.refused.sort(), ['..\\back.txt', ...windowsOnly, 'sub\\..\\..\\win.txt'].sort());
   // No link was made; names with a backslash are left out.
   assert.ok(!made.some((p) => p.endsWith('@')), made.join(' '));
   assert.ok(!made.some((p) => p.includes('\\')), made.join(' '));
