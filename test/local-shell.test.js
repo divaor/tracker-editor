@@ -194,9 +194,11 @@ test('PowerShell’s prompt says the folder and how the last command ended', { s
 
 // PowerShell as you use it (pwsh in a pseudo-terminal, with PSReadLine reading the keys): each line
 // typed is said as it runs (OSC 633;E with the nonce, then C), the nonce is out of the commands'
-// environment, and the shell goes on reading lines (the wrapper never stops it). Not on Windows:
-// the same script runs there, and Windows' own console host is what passes the sequences on.
-test('PowerShell says each line it reads, with the nonce, and keeps reading', { skip: !pwshOnPath || process.platform === 'win32' }, async () => {
+// environment, and the shell goes on reading lines (the wrapper never stops it). On Linux only (CI
+// has pwsh there): the script is the same everywhere, and this bare pseudo-terminal is not a real
+// one. On macOS PSReadLine waited on its cursor questions while the whole line came at once, and on
+// Windows the console host passes the sequences on its own way.
+test('PowerShell says each line it reads, with the nonce, and keeps reading', { skip: !pwshOnPath || process.platform !== 'linux' }, async () => {
   const pty = require('@lydell/node-pty');
   const hooks = mkdtempSync(path.join(os.tmpdir(), 'hooks-'));
   const nonce = '0123456789abcdef';
