@@ -2,6 +2,8 @@
 // it is, for the tab, its bar and saved comparisons. A side of folders is { path } (here or
 // remote://); of files { key } (an open-able tab key: f:, r:, d:) or { text, label, detail }.
 // Mode 'panes' is two folders browsed side by side (ui/twoPanes.js), its sides where each is now.
+// Mode 'terminals' is a Terminals tab (ui/terminalsTab.js): its name, its terminals.
+import { entryLabel } from './terminalSessions.js';
 import { baseName, folderLabel, placeLabel } from './folders.js';
 import { server } from './servers.js';
 import { parseKey, store } from './store.js';
@@ -56,19 +58,24 @@ export function compareName(c) {
 }
 
 /** What a comparison tab is: "Folders compared", "Two panes"… */
-export const compareKind = (c) => (c?.mode === 'history' ? 'Git history' : c?.mode === 'merge' ? 'Merge view' : c?.mode === 'panes' ? 'Two panes' : c?.mode === 'folders' ? 'Folders compared' : 'Files compared');
+export const compareKind = (c) => (c?.mode === 'terminals' ? 'Terminals' : c?.mode === 'history' ? 'Git history' : c?.mode === 'merge' ? 'Merge view' : c?.mode === 'panes' ? 'Two panes' : c?.mode === 'folders' ? 'Folders compared' : 'Files compared');
 
 /** Its tooltip: both sides in full. */
 export function compareTitle(c) {
   if (!c) return '';
   // A Git history (ui/gitHistory.js): the file or the repository, and what is shown.
   if (c.mode === 'history') return [`Git history of ${c.file ? c.rel || c.file : c.root}`, c.file ? `in ${c.root}, through its renames` : '', c.ref ? `on ${c.ref}` : '', c.folder ? `changes to ${c.folder}` : '', c.query ? `searching “${c.query}”` : ''].filter(Boolean).join('\n');
+  // A Terminals tab: its session's name and its terminals, where each is.
+  if (c.mode === 'terminals') {
+    const list = (c.terminals ?? []).map((t) => entryLabel(t, { serverName: (id) => server(id)?.name ?? '' }));
+    return [`Terminals: ${c.name || 'Terminals'}`, ...list.map((t) => `${t.label} · ${t.where} · ${t.detail}`), 'It comes back as it is when the app starts again'].join('\n');
+  }
   const what = compareKind(c);
   return `${what}:\n← ${[sideName(c.left), sideWhere(c.left)].filter(Boolean).join(' · ')}\n→ ${[sideName(c.right), sideWhere(c.right)].filter(Boolean).join(' · ')}`;
 }
 
 /** Whether a comparison can be saved: both sides are places (not a text taken once). */
-export const canSave = (c) => Boolean(c) && c.mode !== 'merge' && [c.left, c.right].every((s) => s && (s.path || s.key));
+export const canSave = (c) => Boolean(c) && c.mode !== 'merge' && c.mode !== 'terminals' && [c.left, c.right].every((s) => s && (s.path || s.key));
 
 /** The same two places, for a saved comparison and to tell whether one is saved already. */
 export const sameSides = (a, b) => Boolean(a && b) && a.mode === b.mode && ['left', 'right'].every((s) => (a[s]?.path ?? a[s]?.key) === (b[s]?.path ?? b[s]?.key));

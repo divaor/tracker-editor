@@ -56,6 +56,23 @@
   --ft-green: #2c8a45;
   --ft-brown: #a0612e;
   --ft-gray: #6b7280;
+  /* Comparisons (diffView.js): lines changed (blue), added (green), removed (grey) and the
+     words that changed; the unified view's old (red) and new (green) lines. See-through, so a
+     selection shows under them. */
+  --diff-modify-line: rgba(47, 111, 214, 0.13);
+  --diff-modify-word: rgba(47, 111, 214, 0.25);
+  --diff-modify-edge: rgba(47, 111, 214, 0.42);
+  --diff-modify-bar: #7ea6e6;
+  --diff-insert-line: rgba(38, 150, 76, 0.14);
+  --diff-insert-word: rgba(38, 150, 76, 0.28);
+  --diff-insert-edge: rgba(38, 150, 76, 0.45);
+  --diff-insert-bar: #6cbd7c;
+  --diff-delete-line: rgba(25, 23, 18, 0.085);
+  --diff-delete-edge: rgba(25, 23, 18, 0.26);
+  --diff-delete-bar: #b9b5ab;
+  --diff-old-line: rgba(194, 59, 59, 0.09);
+  --diff-old-word: rgba(194, 59, 59, 0.24);
+  --diff-old-bar: #de8c8c;
   --shadow-sm: 0 1px 2px rgba(25, 23, 18, 0.06);
   --shadow: 0 1px 2px rgba(25, 23, 18, 0.05), 0 4px 14px rgba(25, 23, 18, 0.06);
   --shadow-lg: 0 10px 40px rgba(25, 23, 18, 0.18);
@@ -115,6 +132,20 @@
     --ft-green: #6acb7f;
     --ft-brown: #d4996a;
     --ft-gray: #9aa3b0;
+    --diff-modify-line: rgba(110, 162, 242, 0.15);
+    --diff-modify-word: rgba(110, 162, 242, 0.33);
+    --diff-modify-edge: rgba(110, 162, 242, 0.5);
+    --diff-modify-bar: #5d86c4;
+    --diff-insert-line: rgba(79, 191, 145, 0.14);
+    --diff-insert-word: rgba(79, 191, 145, 0.32);
+    --diff-insert-edge: rgba(79, 191, 145, 0.48);
+    --diff-insert-bar: #4c9a78;
+    --diff-delete-line: rgba(255, 255, 255, 0.065);
+    --diff-delete-edge: rgba(255, 255, 255, 0.24);
+    --diff-delete-bar: #6b6860;
+    --diff-old-line: rgba(239, 107, 107, 0.13);
+    --diff-old-word: rgba(239, 107, 107, 0.32);
+    --diff-old-bar: #b65b5b;
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 14px rgba(0, 0, 0, 0.25);
     --shadow-lg: 0 10px 40px rgba(0, 0, 0, 0.5);
@@ -168,6 +199,20 @@
   --ft-green: #6acb7f;
   --ft-brown: #d4996a;
   --ft-gray: #9aa3b0;
+  --diff-modify-line: rgba(110, 162, 242, 0.15);
+  --diff-modify-word: rgba(110, 162, 242, 0.33);
+  --diff-modify-edge: rgba(110, 162, 242, 0.5);
+  --diff-modify-bar: #5d86c4;
+  --diff-insert-line: rgba(79, 191, 145, 0.14);
+  --diff-insert-word: rgba(79, 191, 145, 0.32);
+  --diff-insert-edge: rgba(79, 191, 145, 0.48);
+  --diff-insert-bar: #4c9a78;
+  --diff-delete-line: rgba(255, 255, 255, 0.065);
+  --diff-delete-edge: rgba(255, 255, 255, 0.24);
+  --diff-delete-bar: #6b6860;
+  --diff-old-line: rgba(239, 107, 107, 0.13);
+  --diff-old-word: rgba(239, 107, 107, 0.32);
+  --diff-old-bar: #b65b5b;
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 14px rgba(0, 0, 0, 0.25);
   --shadow-lg: 0 10px 40px rgba(0, 0, 0, 0.5);
@@ -1747,6 +1792,28 @@ button.project-chip:hover {
   opacity: 1;
 }
 
+/* Three buttons or more (a mirror's upload refused on save): the message and × on the first line, the buttons under it. */
+.toast.many {
+  flex-wrap: wrap;
+}
+
+.toast.many .toast-msg {
+  flex-basis: calc(100% - 44px);
+}
+
+.toast.many .icon-btn {
+  order: 1;
+}
+
+.toast.many .btn.link {
+  order: 2;
+}
+
+.toast.error.many .btn.link {
+  color: #fff;
+  text-decoration: underline;
+}
+
 .drop-overlay {
   position: fixed;
   inset: 12px;
@@ -2294,6 +2361,27 @@ button.project-chip:hover {
 
 .crumbs.of-section .crumb.current {
   color: color-mix(in srgb, var(--kc) 70%, var(--text));
+}
+
+/* The whole path (0.54): no scrollbar (the wheel scrolls it sideways), its end in view, the start
+   fading out while it is cut off. */
+.crumbs.whole {
+  scrollbar-width: none;
+}
+
+.crumbs.whole::-webkit-scrollbar {
+  display: none;
+}
+
+.crumbs.whole.cut {
+  mask-image: linear-gradient(to right, #000 0 3px, transparent 3px, #000 26px);
+}
+
+/* A crumb above the folder picked (0.54): going there is asked about first. */
+.crumb.above {
+  color: var(--text-3);
+  text-decoration: underline dotted color-mix(in srgb, var(--text-3) 60%, transparent);
+  text-underline-offset: 3px;
 }
 
 .folders-new {
@@ -5800,6 +5888,15 @@ mark {
   white-space: nowrap;
 }
 
+/* A typed path whose variable names no folder (0.54): said where its place would be. */
+.qo-typed-problem .qo-place-text {
+  color: var(--danger);
+}
+
+.qo-sep {
+  color: var(--text-3);
+}
+
 .qo-foot kbd {
   min-width: 18px;
   padding: 0 4px;
@@ -6493,6 +6590,351 @@ mark {
   background: var(--border);
 }
 
+/* Folders' list of places (ui/folderMenu.js, 0.54): a filter, then sections under colored heads
+   (--sc), drives and servers as blocks edged in their color (--gc), each folder row one full-width
+   button with its few actions at its right edge. Shared with the side-by-side dialog's "Add". */
+.menu.folder-menu {
+  width: min(470px, calc(100vw - 16px));
+  max-width: none;
+  max-height: min(78vh, calc(100dvh - 16px));
+  padding: 0;
+  overflow: hidden;
+}
+
+.fm-filter {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 8px 4px;
+  padding: 0 6px 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text-3);
+}
+
+.fm-filter:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.fm-filter input {
+  flex: 1;
+  min-width: 0;
+  min-height: 34px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.fm-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 2px 6px 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.fm-none {
+  margin: 10px 6px;
+}
+
+.fm-section + .fm-section {
+  margin-top: 6px;
+}
+
+.fm-head {
+  position: sticky;
+  top: -2px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 7px 6px 4px;
+  border-bottom: 2px solid color-mix(in srgb, var(--sc) 55%, transparent);
+  background: var(--surface);
+  color: color-mix(in srgb, var(--sc) 78%, var(--text));
+  font-size: 11.5px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.fm-head > svg {
+  flex: none;
+  color: var(--sc);
+}
+
+.fm-count {
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--sc) 14%, transparent);
+  color: var(--text-2);
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 17px;
+}
+
+.fm-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-top: 3px;
+}
+
+/* A long section scrolls on its own, so the ones after it stay near. */
+.fm-rows.long {
+  max-height: 300px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.fm-block {
+  margin: 3px 0 5px;
+  border-left: 3px solid var(--gc, var(--kc, var(--border-strong)));
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: color-mix(in srgb, var(--gc, var(--border)) 6%, var(--surface));
+}
+
+.fm-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+  border-radius: var(--radius-sm);
+}
+
+.fm-block .fm-row {
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.fm-row:hover,
+.fm-row:focus-within {
+  background: color-mix(in srgb, var(--gc, var(--accent)) 12%, transparent);
+}
+
+.fm-row:focus-within {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+.fm-row.block-head {
+  min-height: 34px;
+  background: color-mix(in srgb, var(--gc, var(--border)) 15%, var(--surface));
+}
+
+.fm-row.block-head:hover,
+.fm-row.block-head:focus-within {
+  background: color-mix(in srgb, var(--gc, var(--border)) 24%, var(--surface));
+}
+
+.fm-open {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: inherit;
+  padding: 3px 6px 3px calc(8px + var(--depth, 0) * 15px);
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 13.5px;
+  text-align: left;
+  outline: none;
+  cursor: pointer;
+}
+
+.fm-open:disabled {
+  cursor: default;
+}
+
+.fm-icon {
+  flex: none;
+  color: var(--gc, var(--text-3));
+}
+
+/* A common parent shown for the folders under it: muted, and quieter still where it cannot open. */
+.fm-row.junction .fm-icon,
+.fm-row.junction .fm-open:disabled .fm-name {
+  color: var(--text-3);
+}
+
+.fm-row.junction .fm-name {
+  color: var(--text-2);
+}
+
+.fm-row.junction .fm-name strong {
+  font-weight: 600;
+}
+
+.fm-drive .fm-icon,
+.fm-server .fm-icon {
+  color: var(--gc, var(--kc));
+}
+
+.fm-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fm-name strong {
+  font-weight: 620;
+}
+
+.fm-drive .fm-name strong,
+.fm-server .fm-name strong {
+  font-weight: 750;
+}
+
+.fm-prefix {
+  color: var(--text-3);
+  font-weight: 400;
+}
+
+.fm-where {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fm-name + .fm-tag,
+.fm-name + .fm-badge {
+  margin-left: auto;
+}
+
+.fm-server .conn-dot {
+  flex: none;
+  color: var(--kind-remote);
+}
+
+.fm-badge {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 650;
+  line-height: 17px;
+}
+
+.fm-badge.current {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+/* What a click does, said while the row is pointed at or picked: "here", "beside", "shown". */
+.fm-tag {
+  flex: none;
+  color: var(--text-3);
+  font-size: 11px;
+  opacity: 0;
+}
+
+.fm-row:hover .fm-tag,
+.fm-row:focus-within .fm-tag {
+  opacity: 1;
+}
+
+.fm-act {
+  flex: none;
+  margin-right: 2px;
+  color: var(--text-3);
+  opacity: 0;
+}
+
+.fm-row:hover .fm-act,
+.fm-row:focus-within .fm-act,
+.fm-act.fm-star.on {
+  opacity: 1;
+}
+
+.fm-act:hover {
+  color: var(--text);
+}
+
+.fm-star.on {
+  color: var(--warn);
+}
+
+.fm-star.on svg {
+  fill: currentColor;
+}
+
+.fm-forget:hover {
+  color: var(--danger);
+}
+
+.fm-row.current .fm-name strong {
+  color: color-mix(in srgb, var(--accent) 70%, var(--text));
+}
+
+.fm-actions .fm-rows {
+  gap: 0;
+}
+
+.fm-action {
+  font-size: 13.5px;
+}
+
+.fm-foot {
+  flex: none;
+  padding: 6px 12px 8px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.fm-foot kbd {
+  font-size: 10.5px;
+}
+
+/* Touch screens and phones: rows a finger can take, their actions always there; the list the screen's width. */
+@media (pointer: coarse), (max-width: 640px) {
+  .fm-row {
+    min-height: 44px;
+  }
+
+  .fm-act {
+    width: 36px;
+    height: 36px;
+    opacity: 1;
+  }
+
+  .fm-tag {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .menu.folder-menu {
+    right: 8px;
+    left: 8px !important;
+    width: auto;
+  }
+
+  /* One scroll for the whole list on a phone: a finger does not tell a list inside a list. */
+  .fm-rows.long {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .fm-foot {
+    display: none;
+  }
+}
+
 /* The text's right-click menu (0.45): IDE rows, a little denser, the keys at the right. */
 .menu.text-menu {
   min-width: 240px;
@@ -6637,26 +7079,290 @@ mark {
   min-height: 0;
 }
 
-.compare-body > .cm-mergeView,
+/* ---- Two texts compared (diffView.js), as JetBrains' diff viewer shows them --------------
+   Each side scrolls on its own and the other follows; changed lines are tinted by kind, the
+   words that changed inside a changed block stronger; a ribbon in the strip between the sides
+   joins each block's lines, » and « on its ends copy it across. Unchanged stretches fold. */
+.compare-body > .cm-diffView,
+.ccmp-body > .cm-diffView {
+  flex: 1;
+}
+
+/* The comparison's view choices in its bar (ui/diffOptions.js). */
+.diff-options {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 2px;
+}
+
+.diff-choice {
+  gap: 5px;
+}
+
+.diff-choice .diff-choice-caret {
+  margin-left: -1px;
+  opacity: 0.6;
+}
+
+.diff-toggle.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.ccmp {
+  container: ccmp / inline-size;
+}
+
+.ccmp.phone .diff-choice .label {
+  display: none;
+}
+
+/* A narrow comparison: the menus by their icons alone (their titles say what is chosen). */
+@container ccmp (max-width: 900px) {
+  .diff-choice .label {
+    display: none;
+  }
+}
+
+/* The unified view: one editor. */
 .compare-body > .cm-editor {
   flex: 1;
   min-width: 0;
   height: 100%;
-  overflow: auto;
-}
-
-.compare-body .cm-mergeViewEditors {
-  min-height: 100%;
-}
-
-.compare-body .cm-editor {
   background: var(--surface);
 }
 
-.compare-body .cm-collapsedLines {
+.cm-diffView {
+  display: flex;
+  min-width: 0;
+  height: 100%;
+  background: var(--surface);
+}
+
+.cm-diffSide {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+}
+
+.cm-diffSide > .cm-editor {
+  height: 100%;
+  background: var(--surface);
+}
+
+/* Room to scroll past the end (diffView.js sets it to a screen less a line). */
+.cm-diffSide .cm-editor .cm-content {
+  padding-bottom: var(--diff-past-end, 6px);
+}
+
+/* The left side's scrollbar would come between its lines and their ribbons: it scrolls with the
+   right one (and the wheel, the keys) instead. */
+.cm-diffSide-a .cm-scroller {
+  scrollbar-width: none;
+}
+
+.cm-diffSide-a .cm-scroller::-webkit-scrollbar {
+  display: none;
+}
+
+.cm-diffStrip {
+  --diff-copy-size: 16px;
+  position: relative;
+  flex: 0 0 40px;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.cm-diffRibbons {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.cm-diffButtons {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* What each kind of change is drawn in: its lines, its words, its edges and gutter bar. */
+.cm-diff-modify {
+  --dl: var(--diff-modify-line);
+  --de: var(--diff-modify-edge);
+  --db: var(--diff-modify-bar);
+}
+
+.cm-diff-insert {
+  --dl: var(--diff-insert-line);
+  --de: var(--diff-insert-edge);
+  --db: var(--diff-insert-bar);
+}
+
+.cm-diff-delete {
+  --dl: var(--diff-delete-line);
+  --de: var(--diff-delete-edge);
+  --db: var(--diff-delete-bar);
+}
+
+.cm-diff-ribbon {
+  fill: var(--dl);
+}
+
+.cm-diff-edge {
+  fill: none;
+  stroke: var(--de);
+  stroke-width: 1;
+}
+
+.cm-editor .cm-line.cm-diff-line {
+  background-color: var(--dl);
+}
+
+.cm-editor .cm-line.cm-diff-first {
+  box-shadow: inset 0 1px 0 var(--de);
+}
+
+.cm-editor .cm-line.cm-diff-last {
+  box-shadow: inset 0 -1px 0 var(--de);
+}
+
+.cm-editor .cm-line.cm-diff-first.cm-diff-last {
+  box-shadow:
+    inset 0 1px 0 var(--de),
+    inset 0 -1px 0 var(--de);
+}
+
+/* None of a block's lines on this side: a thin line where they would be. */
+.cm-editor .cm-line.cm-diff-gap {
+  box-shadow: inset 0 1px 0 var(--de);
+}
+
+.cm-editor .cm-line.cm-diff-gap-end {
+  box-shadow: inset 0 -1px 0 var(--de);
+}
+
+.cm-editor .cm-diff-word {
+  border-radius: 3px;
+  background-color: var(--diff-modify-word);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.cm-diffGutter .cm-gutterElement {
+  width: 3px;
+}
+
+.cm-diffGutter .cm-gutterElement.cm-diff-bar {
+  background: var(--db);
+}
+
+.cm-diffFold {
+  padding: 2px 12px;
+  border-top: 1px dashed var(--border-strong);
+  border-bottom: 1px dashed var(--border-strong);
   background: var(--surface-2);
+  color: var(--text-3);
+  font: 12px/18px var(--font);
+  cursor: pointer;
+  user-select: none;
+}
+
+.cm-diffFold::before {
+  content: '⋯';
+  margin-right: 8px;
+}
+
+.cm-diffFold:hover {
+  color: var(--accent);
+}
+
+/* » on a ribbon's left end copies the change to the right, « on its right end to the left. */
+.cm-diffCopy {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: var(--diff-copy-size);
+  height: var(--diff-copy-size);
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
   color: var(--text-2);
-  font-size: 12px;
+  font: 700 14px/1 var(--font);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.cm-diffCopy.to-right {
+  left: 1px;
+}
+
+.cm-diffCopy.to-left {
+  right: 1px;
+}
+
+@media (pointer: coarse) {
+  .cm-diffStrip {
+    --diff-copy-size: 24px;
+    flex-basis: 54px;
+  }
+}
+
+.cm-diffCopy:hover,
+.cm-diffCopy:focus-visible {
+  background: var(--accent);
+  color: var(--on-accent);
+  outline: none;
+}
+
+/* The unified view (phones): CodeMirror's, the old lines red, the new ones green, no underlines. */
+.cm-editor.cm-diffUnified .cm-changedLine,
+.cm-editor.cm-diffUnified .cm-inlineChangedLine {
+  background-color: var(--diff-insert-line) !important;
+}
+
+.cm-editor.cm-diffUnified .cm-changedText {
+  border-radius: 3px;
+  background: var(--diff-insert-word) !important;
+}
+
+.cm-editor.cm-diffUnified .cm-deletedChunk {
+  background-color: var(--diff-old-line) !important;
+}
+
+.cm-editor.cm-diffUnified .cm-deletedChunk .cm-deletedText {
+  border-radius: 3px;
+  background: var(--diff-old-word) !important;
+}
+
+.cm-editor.cm-diffUnified ins,
+.cm-editor.cm-diffUnified del {
+  text-decoration: none;
+}
+
+.cm-editor.cm-diffUnified .cm-changedLineGutter {
+  background: var(--diff-insert-bar) !important;
+}
+
+.cm-editor.cm-diffUnified .cm-deletedLineGutter {
+  background: var(--diff-old-bar) !important;
+}
+
+.cm-editor.cm-diffUnified.cm-diff-hl-none .cm-changedLine,
+.cm-editor.cm-diffUnified.cm-diff-hl-none .cm-deletedChunk {
+  background-color: transparent !important;
+}
+
+.cm-editor.cm-diffUnified .cm-collapsedLines {
+  border-top: 1px dashed var(--border-strong);
+  border-bottom: 1px dashed var(--border-strong);
+  background: var(--surface-2) !important;
+  color: var(--text-3) !important;
+  font: 12px/18px var(--font);
 }
 
 /* ---- Comparisons in tabs of their own (ui/compareTab.js) ------------------------------
@@ -6771,58 +7477,6 @@ mark {
 
 .ccmp-body[hidden] {
   display: none;
-}
-
-.ccmp-body > .cm-mergeView {
-  flex: 1;
-  min-width: 0;
-  height: 100%;
-  overflow: auto;
-}
-
-.ccmp-body .cm-mergeViewEditors {
-  min-height: 100%;
-}
-
-.ccmp-body .cm-editor {
-  background: var(--surface);
-}
-
-/* → and ← beside each change (the gap MergeView keeps between the sides). */
-.ccmp-body .cm-mergeView .cm-merge-revert {
-  width: 46px;
-  background: var(--surface-2);
-}
-
-.cm-merge-copy {
-  position: absolute;
-  display: flex;
-  gap: 2px;
-  justify-content: center;
-  width: 46px;
-}
-
-/* CodeMirror's own revert button is absolute and full width: these two sit side by side. */
-.ccmp-body .cm-merge-revert .cm-merge-copy button {
-  position: static;
-  display: grid;
-  place-items: center;
-  width: 20px;
-  height: 18px;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--surface);
-  color: var(--text-2);
-  font-size: 12px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.ccmp-body .cm-merge-revert .cm-merge-copy button:hover {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: var(--accent-text, #fff);
 }
 
 .ccmp-plain {
@@ -9942,6 +10596,10 @@ svg.up {
   text-overflow: ellipsis;
 }
 
+.mirror-bar-text > span:first-child {
+  white-space: nowrap;
+}
+
 .mirror-bar.tone-error .mirror-bar-text .muted {
   color: var(--danger);
 }
@@ -10044,6 +10702,202 @@ svg.up {
   .mirror-badge .label {
     display: none;
   }
+}
+
+/* Mirrors by hand (0.54): the server's folders to pick, the check before a transfer, the history, a tab's note. */
+.mirror-browse {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.mirror-browse-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.mirror-browse-head code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mirror-browse-list {
+  max-height: 220px;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.mirror-browse-list button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mirror-browse-list button:hover {
+  background: var(--surface-2);
+}
+
+.mirror-browse-list li.muted,
+.mirror-browse-list li.error-text {
+  padding: 4px 6px;
+}
+
+.mt-summary {
+  margin-top: 0;
+  font-weight: 500;
+}
+
+.mt-section {
+  margin: 10px 0;
+}
+
+.mt-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin-bottom: 4px;
+}
+
+.mt-list,
+.mh-list,
+.mh-files {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mt-list {
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.mt-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 10px;
+  align-items: center;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.mt-row:last-child {
+  border-bottom: 0;
+}
+
+.mt-row.risky {
+  border-left: 3px solid var(--warn);
+}
+
+.mt-pick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.mt-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mt-state {
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.mt-row.risky .mt-state {
+  color: var(--warn);
+}
+
+.mt-sides {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.mt-sides .newer {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.mt-compare {
+  justify-self: end;
+}
+
+.mh-entry {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.mh-entry.undone .mh-what > span:first-child {
+  color: var(--text-3);
+  text-decoration: line-through;
+}
+
+.mh-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mh-arrow.up {
+  color: var(--kind-remote);
+}
+
+.mh-arrow.down {
+  color: var(--kind-disk);
+}
+
+.mh-what {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.mh-files {
+  margin: 6px 0 0 34px;
+}
+
+.mh-file {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 10px;
+  padding: 3px 0;
+}
+
+.mh-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.mirror-note-mark {
+  flex: none;
+  color: var(--kind-remote);
 }
 
 /* ---- Help (ui/help.js): the cheat sheet and the guide -------------------------- */
@@ -11715,7 +12569,7 @@ summary.git-section-head {
 }
 
 .git-pickbar .btn.danger {
-  color: var(--danger, #c0392b);
+  color: var(--danger);
 }
 
 .git-stash-what {
@@ -12061,30 +12915,85 @@ summary.git-section-head {
   font-weight: 650;
 }
 
-/* Folders side by side (ui/sideBySide.js): the ones shown, in order, and what can be added. */
+/* Folders side by side (ui/sideBySide.js, 0.54): two numbered parts, the folders shown (each edged
+   in its color, in order) and "Add a folder" with Folders' list (drives and servers as blocks and
+   cards, ui/folderMenu.js's .fm-* rows): each row one button, its add mark at its right edge. */
+.modal.side-by-side-dialog {
+  height: min(820px, calc(100dvh - 2 * var(--overlay-gap) - var(--safe-top) - var(--safe-bottom)));
+}
+
 .side-by-side-dialog .modal-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.sbs-part {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-height: 0;
 }
 
-.sbs-heading {
-  margin: 4px 0 2px;
-  font-size: 13.5px;
-  font-weight: 700;
+.sbs-part-add {
+  flex: 1 1 0;
+  min-height: 220px;
 }
 
-.sbs-heading .muted {
+.sbs-part-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.sbs-part-head .muted {
   font-weight: 500;
 }
 
-.sbs-shown,
-.sbs-list {
+.sbs-step {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.sbs-part-add .fm-filter {
+  margin: 0;
+}
+
+.sbs-add-list {
+  flex: 1 1 0;
+  min-height: 0;
+  padding: 0 4px 4px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.sbs-add-list .fm-head {
+  background: var(--bg);
+}
+
+.sbs-shown {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
+  max-height: 34vh;
   margin: 0;
   padding: 0;
+  overflow-y: auto;
   list-style: none;
 }
 
@@ -12093,12 +13002,16 @@ summary.git-section-head {
   display: flex;
   align-items: center;
   gap: 7px;
-  min-height: 34px;
+  min-height: 36px;
   padding: 3px 4px 3px 6px;
-  border-left: 3px solid var(--kc);
+  border-left: 4px solid var(--gc, var(--kc));
   border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  background: color-mix(in srgb, var(--kc) 9%, var(--surface));
+  background: color-mix(in srgb, var(--gc, var(--kc)) 10%, var(--surface));
   cursor: grab;
+}
+
+.sbs-row:hover {
+  background: color-mix(in srgb, var(--gc, var(--kc)) 16%, var(--surface));
 }
 
 .sbs-row.dragging {
@@ -12109,7 +13022,7 @@ summary.git-section-head {
 .sbs-row.drop-after::after {
   position: absolute;
   right: 0;
-  left: -3px;
+  left: -4px;
   height: 3px;
   border-radius: 2px;
   background: var(--accent);
@@ -12131,9 +13044,19 @@ summary.git-section-head {
   line-height: 1;
 }
 
+.sbs-no {
+  flex: none;
+  min-width: 18px;
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  text-align: center;
+}
+
 .sbs-kind {
   flex: none;
-  color: var(--kc);
+  color: var(--gc, var(--kc));
 }
 
 .sbs-name {
@@ -12169,90 +13092,119 @@ summary.git-section-head {
   transform: rotate(180deg);
 }
 
-.sbs-group {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 8px 0 2px;
-  color: var(--text-2);
-  font-size: 12.5px;
-  font-weight: 700;
-}
-
-.sbs-group .muted {
-  font-weight: 500;
-}
-
-.sbs-group .conn-dot {
-  color: var(--kind-remote);
-}
-
-.sbs-remote .field-label {
-  color: var(--text-2);
-  font-size: 12.5px;
-  font-weight: 700;
-}
-
-.sbs-add {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  width: 100%;
-  min-height: 32px;
-  padding: 4px 8px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text);
-  font-size: 13.5px;
-  text-align: left;
-}
-
-.sbs-add:hover:not(:disabled),
-.sbs-add:focus-visible {
-  background: var(--accent-soft);
-}
-
-.sbs-add:disabled {
-  opacity: 0.55;
-}
-
-.sbs-add > svg:first-child {
-  flex: none;
-  color: var(--text-2);
-}
-
-.sbs-why {
-  flex: none;
-  color: var(--text-3);
-  font-size: 11.5px;
+/* An add row: the whole row is the button; its mark sits at its right edge, in the middle. */
+.sbs-row-add .fm-open {
+  padding-right: 6px;
 }
 
 .sbs-plus {
+  display: inline-grid;
   flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  margin-left: auto;
+  border-radius: 50%;
   color: var(--accent);
 }
 
-.sbs-remote {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-top: 8px;
+.fm-where + .sbs-plus,
+.fm-where + .sbs-added {
+  margin-left: 6px;
 }
 
-.sbs-remote-row {
+.sbs-row-add:hover .sbs-plus,
+.sbs-row-add:focus-within .sbs-plus {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.sbs-added {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--kind-synced) 14%, transparent);
+  color: color-mix(in srgb, var(--kind-synced) 80%, var(--text));
+  font-size: 11.5px;
+  font-weight: 650;
+  line-height: 22px;
+}
+
+.sbs-row-add.is-added .fm-open:disabled {
+  opacity: 0.85;
+}
+
+.sbs-row-add:not(.is-added) .fm-open:disabled {
+  opacity: 0.6;
+}
+
+.sbs-fav {
+  flex: none;
+  color: var(--warn);
+  fill: currentColor;
+}
+
+.sbs-server-info {
+  cursor: default;
+}
+
+.sbs-state {
+  flex: none;
+  color: var(--text-2);
+  font-size: 11.5px;
+}
+
+.sbs-path {
   display: flex;
+  align-items: center;
   gap: 6px;
+  padding: 4px 6px 6px 23px;
+  color: var(--text-3);
 }
 
-.sbs-remote-row select {
-  flex: 0 1 160px;
-  min-width: 0;
-}
-
-.sbs-remote-row input {
+.sbs-path input {
   flex: 1;
   min-width: 0;
+  min-height: 30px;
+}
+
+@media (pointer: coarse), (max-width: 640px) {
+  .sbs-row {
+    min-height: 44px;
+  }
+
+  .sbs-path input {
+    min-height: 40px;
+  }
+}
+
+.sbs-foot-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+@media (max-width: 640px) {
+  .sbs-part-head .muted {
+    display: none;
+  }
+
+  /* The server links on a row of their own, Cancel and Show under them. */
+  .sbs-foot-links {
+    flex-basis: 100%;
+  }
+
+  .sbs-name {
+    max-width: 60%;
+  }
+
+  .sbs-shown {
+    max-height: 30vh;
+  }
 }
 
 /* The folder to compare with (ui/compareFolderPick.js): one tree in blocks, a block per root
@@ -16077,5 +17029,130 @@ html[data-native='android'] body:has(.edit-bar) .toasts {
   .archive-peek.big .archive-entry-packed,
   .archive-peek.big .archive-entry-date {
     display: none;
+  }
+}
+
+/* ---- Terminals tabs (ui/terminalsTab.js): terminals in the editor's place, full size ----------
+   The panel's strip and screens (TerminalDeck) in a tab of their own; the session's name leads the
+   strip. Over the editor's place as comparisons are (no z-index: their menus rise over the frame). */
+.editor-area > .terminals-tab {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--surface);
+}
+
+.editor-area.panes-split > .terminals-tab {
+  right: auto;
+  width: var(--main-pane-w, 50%);
+}
+
+.terminals-tab .terminal-head {
+  min-height: 36px;
+  padding-left: 6px;
+}
+
+.terminals-tab-name {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 30%;
+  margin-right: 4px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--kind-compare, var(--accent)) 12%, transparent);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.terminals-tab-name .icon {
+  flex: none;
+  color: var(--kind-compare, var(--accent));
+}
+
+.terminals-tab-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.terminals-tab-name.editing {
+  max-width: none;
+}
+
+/* A terminal brought back that was running a login (ssh…): run it again, keep the server, or not. */
+.terminal-offer {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+.terminal-offer > .icon {
+  flex: none;
+  color: var(--accent);
+}
+
+.terminal-offer-text {
+  flex: 1 1 200px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-offer-text code {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.terminal-offer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.terminal-tab-offer {
+  flex: none;
+  display: inline-flex;
+  color: var(--accent);
+}
+
+.terminal-session-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.terminal-session-check input {
+  margin-top: 2px;
+}
+
+@media (max-width: 640px) {
+  .terminals-tab-name {
+    max-width: 40%;
+    padding: 4px 6px;
+  }
+
+  .terminal-offer-text {
+    flex-basis: 100%;
   }
 }

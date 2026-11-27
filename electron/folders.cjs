@@ -284,7 +284,38 @@ function chmodEntries(paths, mode, { recursive = false } = {}) {
   return changed;
 }
 
+/**
+ * Going up past a picked folder (0.54, IPC folder:allow-up): `dir` must be a folder the page
+ * reaches (`roots()`: the picked folders, by real path), `to` (optional) one of the folders above
+ * it, else the one right above it. One that is reachable already comes back at once; otherwise
+ * the person is asked in a native dialog (`ask({ dir, wide })` → 'up' | 'all' | anything else
+ * for no) naming it, and `wide` (`wideOf(dir)`: its drive, share, storage or home, when that holds
+ * more than it) is offered as "Allow all of …", so later ups there never ask. What the person
+ * allows is added to the picked folders (`add`). Never without the question; never from a folder
+ * the page cannot reach. → { dir, allowed? } | { cancelled: true } | { top: true } (at the top).
+ */
+async function allowUp(dir, { to } = {}, { roots, ask, add, wideOf = () => null }) {
+  if (typeof dir !== 'string' || !path.isAbsolute(dir) || !allowedBy(roots(), dir)) throw new Error('That folder was not opened here.');
+  const from = path.resolve(dir);
+  let target = path.dirname(from);
+  if (to !== undefined && to !== null) {
+    if (typeof to !== 'string' || !path.isAbsolute(to)) throw new Error('That is not a folder above it.');
+    target = path.resolve(to);
+    if (target === from || !isInside(target, from)) throw new Error('That is not a folder above it.');
+  }
+  if (target === from) return { top: true };
+  if (allowedBy(roots(), target)) return { dir: target };
+  const offered = wideOf(target);
+  const wide = typeof offered === 'string' && path.isAbsolute(offered) && path.resolve(offered) !== target && isInside(path.resolve(offered), target) ? path.resolve(offered) : null;
+  const answer = await ask({ dir: target, wide });
+  if (answer !== 'up' && !(answer === 'all' && wide)) return { cancelled: true };
+  const allowed = answer === 'all' ? wide : target;
+  add(allowed);
+  return { dir: target, allowed };
+}
+
 module.exports = {
+  allowUp,
   chmodEntries,
   dirMode,
   fileMode,

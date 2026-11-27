@@ -1,18 +1,19 @@
 import { html, useEffect, useLayoutEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import { draggedPaths, dropped, isOwnDrop } from '../dragOut.js';
-import { baseName, breadcrumbs, isImageName, opensHere, opensInEditor, parentOf, peekKind, rangeOf, rootOf, selectionSummary, sortsUp, topmost } from '../folders.js';
+import { baseName, fullCrumbs, isImageName, opensHere, opensInEditor, peekKind, rangeOf, rootOf, selectionSummary, sortsUp, topmost, upOf } from '../folders.js';
 import { formatBytes } from '../format.js';
 import { pathName } from '../compares.js';
 import { dropOperation, inFolder, itemsName, paneCommand, paneRows, sameNamed, transferable } from '../panes.js';
 import { getSettings, saveSettings } from '../settings.js';
-import { server, servers, serverStatus } from '../servers.js';
+import { server, serverStatus } from '../servers.js';
 import { onTransfers, running } from '../transfers.js';
-import { connIcon, hasShell, isRemotePath, remoteParts, remoteRoot } from '../where.js';
+import { connIcon, hasShell, isRemotePath, remoteParts } from '../where.js';
 import { isAndroidApp } from '../platform.js';
 import { toast } from './components.js';
 import { FileIcon } from './fileIcon.js';
 import { binName, DeleteDialog, ExistsDialog, NameField } from './folders.js';
 import { FileViewer } from './folderPreview.js';
+import { crumbsScroll, crumbsToEnd } from './folderMenu.js';
 import { Icon } from './icons.js';
 import { Menu, MenuButton } from './menu.js';
 import { SidewaysButton, usePhoneLayout } from './phone.js';
@@ -39,7 +40,7 @@ const placeOf = (p) => (isRemotePath(p) ? `${server(remoteParts(p).id)?.name ?? 
  * reads its folder, keeps its selection and cursor, and tells the tab what the keys and
  * menus ask (`onCommand`); `handle` gives the tab its folder, what is picked, and `load`.
  */
-function Pane({ side, path, root, active, settings, actions, handle, sort, onSort, onActivate, onGo, onCommand, onPick, drop }) {
+function Pane({ side, path, roots, home = '', onRoots, active, settings, actions, handle, sort, onSort, onActivate, onGo, onCommand, onPick, drop }) {
   const bridge = window.desktop.folders;
   const [listing, setListing] = useState(null); // { entries, truncated } | { error }
   const [selected, setSelected] = useState(() => new Set());
@@ -52,7 +53,11 @@ function Pane({ side, path, root, active, settings, actions, handle, sort, onSor
   const list = useRef(null);
   const typed = useRef({ text: '', at: 0 });
   const comeFrom = useRef(null); // the folder gone up from: picked once the one above is read
-  const up = root ? parentOf(path, root) : null;
+  // The whole path: its end (where the pane is) in view.
+  const crumbsNav = useRef(null);
+  useLayoutEffect(() => crumbsToEnd(crumbsNav.current), [path]);
+  // Up goes past the folder picked too (0.54), to the drive's top: a new folder is asked about first.
+  const up = upOf(path);
   const rows = listing && !listing.error ? paneRows(listing.entries, { up, hidden: settings.showHidden, sort: sort.by, reverse: sort.reverse }) : up ? paneRows([], { up }) : [];
   const entries = rows.filter((r) => !r.up);
   const order = rows.map((r) => r.path);
@@ -99,10 +104,13 @@ function Pane({ side, path, root, active, settings, actions, handle, sort, onSor
     const top = new Set(topmost(picked.map((e) => e.path)));
     return picked.filter((e) => top.has(e.path));
   };
-  const goUp = () => {
+  const goUp = async (to = null) => {
     if (!up) return;
-    comeFrom.current = path;
-    onGo(up);
+    const target = await actions.folderUp(path, to ? { to } : {});
+    if (!target) return;
+    if (!to) comeFrom.current = path;
+    onRoots?.();
+    onGo(target);
   };
   const openEntry = async (e) => {
     if (e.up) return goUp();
@@ -227,8 +235,9 @@ function Pane({ side, path, root, active, settings, actions, handle, sort, onSor
   const remote = isRemotePath(path);
   const conn = remote ? server(remoteParts(path).id) : null;
   const state = conn ? serverStatus(conn.id).state : null;
-  const crumbs = root ? breadcrumbs(path, root) : [{ name: pathName(path), path }];
-  const rootLabel = remote ? (conn?.name ?? 'Server') : null;
+  // The whole path from the drive's top (0.54); crumbs above the folder picked are asked about first.
+  const crumbs = fullCrumbs(path, remote ? { top: conn?.name ?? 'Server' } : { home });
+  const reaches = (p) => remote || Boolean(rootOf(p, roots ?? []));
   const terminalFor = (p) => (isRemotePath(p) ? hasShell(server(remoteParts(p).id)) : Boolean(bridge.terminal));
 
   const entryItems = () => {
@@ -324,15 +333,18 @@ function Pane({ side, path, root, active, settings, actions, handle, sort, onSor
       ${remote && html`<span class="conn-dot state-${state}" title=${state} />`}
       <span class="pane-head-where"><bdi>${placeOf(path)}</bdi></span>
       <span class="spacer" />
-      <button type="button" class="icon-btn xs" aria-label="Up one folder" title="Up one folder (Backspace)" disabled=${!up} onClick=${goUp}><${Icon} name="arrowUp" size=${14} /></button>
+      <button type="button" class="icon-btn xs" aria-label="Up one folder" title="Up one folder (Backspace)" disabled=${!up} onClick=${() => goUp()}><${Icon} name="arrowUp" size=${14} /></button>
       <button type="button" class="icon-btn xs" aria-label=${`Refresh the ${side}`} title="Read it again" onClick=${load}><${Icon} name="rotate" size=${14} /></button>
       <button type="button" class="icon-btn xs" aria-label=${`Another folder on the ${side}`} title=${`Another folder on the ${side} (here or on a server)`} onClick=${onPick}><${Icon} name="edit" size=${13} /></button>
     </div>
-    <nav class="crumbs pane-crumbs" aria-label="Folder path">
-      ${crumbs.map(
-        (c, i) => html`${i > 0 && html`<span class="crumb-sep" key=${`s${i}`}>›</span>`}<button type="button" key=${c.path} class="crumb ${i === crumbs.length - 1 ? 'current' : ''} ${drop.target === c.path && drop.side === side ? 'drop-target' : ''}"
-          aria-current=${i === crumbs.length - 1 ? 'location' : undefined} title=${isRemotePath(c.path) ? remoteParts(c.path).path || '/' : c.path} onClick=${() => onGo(c.path)} ...${i < crumbs.length - 1 ? drop.props(side, c.path) : {}}>${i === 0 && rootLabel ? rootLabel : c.name}</button>`,
-      )}
+    <nav class="crumbs whole pane-crumbs" aria-label="Folder path" ref=${crumbsNav} ...${crumbsScroll}>
+      ${crumbs.map((c, i) => {
+        const last = i === crumbs.length - 1;
+        const above = !reaches(c.path);
+        return html`${i > 0 && html`<span class="crumb-sep" key=${`s${i}`}>›</span>`}<button type="button" key=${c.path} class="crumb ${last ? 'current' : ''} ${above ? 'above' : ''} ${drop.target === c.path && drop.side === side ? 'drop-target' : ''}"
+          aria-current=${last ? 'location' : undefined} title=${`${isRemotePath(c.path) ? remoteParts(c.path).path || '/' : c.path}${above ? '\nNot picked yet: asked first' : ''}`}
+          onClick=${() => (above ? goUp(c.path) : onGo(c.path))} ...${!last && !above ? drop.props(side, c.path) : {}}>${c.name}</button>`;
+      })}
     </nav>
     <div class="pane-columns" role="presentation">${header('name', 'Name', 'name')}${header('size', 'Size', 'size')}${header('modified', 'Modified', 'date')}</div>
     <div class="pane-list ${drop.target === path && drop.side === side ? 'drop-target' : ''}" role="listbox" aria-multiselectable="true" tabindex="0" ref=${list}
@@ -391,10 +403,13 @@ export function PanesTab({ id, record, settings, actions, star = null }) {
   const sorts = record.sorts ?? {};
   const sortOf = (side) => sorts[side] ?? { by: 'name', reverse: false };
 
+  // The folders picked (read again after going up past one), and the home folder for the path's "~".
+  const [home, setHome] = useState('');
+  const refreshRoots = () => bridge.roots().then(setRoots, () => setRoots([]));
   useEffect(() => {
-    bridge.roots().then(setRoots, () => setRoots([]));
+    refreshRoots();
+    bridge.places?.().then((p) => setHome(p?.home ?? ''), () => {});
   }, []);
-  const rootFor = (p) => rootOf(p, [...(roots ?? []), ...servers().map((c) => remoteRoot(c.id))]);
   useLayoutEffect(() => {
     panes.left.current?.focus();
   }, []);
@@ -648,7 +663,7 @@ export function PanesTab({ id, record, settings, actions, star = null }) {
     </div>`}
     <div class="panes ${phone ? 'one' : ''}">
       ${['left', 'right'].map(
-        (side) => html`<${Pane} key=${side} side=${side} path=${pathOf(side)} root=${roots ? rootFor(pathOf(side)) : null} active=${active === side} settings=${settings} actions=${actions}
+        (side) => html`<${Pane} key=${side} side=${side} path=${pathOf(side)} roots=${roots} home=${home} onRoots=${refreshRoots} active=${active === side} settings=${settings} actions=${actions}
           handle=${panes[side]} sort=${sortOf(side)} onSort=${(s) => actions.updateCompare(id, { sorts: { ...sorts, [side]: s } }, { silent: false })}
           onActivate=${() => activate(side)} onGo=${(p) => go(side, p)} onCommand=${command} onPick=${() => actions.pickCompareFolder({ id, side })} drop=${drop} />`,
       )}

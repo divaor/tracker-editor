@@ -1,7 +1,7 @@
 // "file:line" in program output and logs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { findFileRefs, pastedPath, resolveRef } from '../app/js/fileRefs.js';
+import { endsWithVariable, findFileRefs, pastedPath, resolveRef, typedPath } from '../app/js/fileRefs.js';
 
 const refs = (text) => findFileRefs(text).map((r) => `${r.path}@${r.line}:${r.column}`);
 
@@ -48,4 +48,23 @@ test('a pasted path: a whole path alone, as Explorer copies it, or a file:// URL
   for (const text of ['notes.txt', './src/app.js', 'see /var/www', '/a\n/b', 'https://example.com/a.txt', '//cdn.example.com/x.js', '/', 'C:\\', '~/', '', null, 'C:\\a|b.txt', 'x'.repeat(2000)]) {
     assert.equal(pastedPath(text), null, JSON.stringify(text).slice(0, 40));
   }
+});
+
+test('typedPath: a path starting with a variable or ~ (quick open, 0.54)', () => {
+  assert.equal(typedPath('%USERPROFILE%\\.tinta\\settings'), '%USERPROFILE%\\.tinta\\settings');
+  assert.equal(typedPath('%User_profile%/.tinta/settings'), '%User_profile%/.tinta/settings');
+  assert.equal(typedPath('$HOME/src'), '$HOME/src');
+  assert.equal(typedPath('${env:APPDATA}\\Code'), '${env:APPDATA}\\Code');
+  assert.equal(typedPath('$env:TEMP'), '$env:TEMP');
+  assert.equal(typedPath('~'), '~');
+  assert.equal(typedPath('~/projects'), '~/projects');
+  assert.equal(typedPath('C:\\Users\\me\\notes.txt'), 'C:\\Users\\me\\notes.txt', 'a whole path still counts');
+  // An Office lock file and plain words are names to look for, not paths.
+  assert.equal(typedPath('~$report.docx'), null);
+  assert.equal(typedPath('~notes'), null);
+  assert.equal(typedPath('notes'), null);
+  assert.equal(typedPath('$HOME/a*b'), null);
+  assert.equal(endsWithVariable('$HOME'), true);
+  assert.equal(endsWithVariable('C:\\x\\%APPDATA%'), true);
+  assert.equal(endsWithVariable('$HOME/src'), false);
 });

@@ -453,6 +453,7 @@ function foldersBridge() {
     pick: inv('folder:pick'),
     roots: inv('folder:roots'),
     allowParent: inv('folder:allow-parent'),
+    allowUp: inv('folder:allow-up'),
     forget: inv('folder:forget'),
     list: inv('folder:list'),
     properties: inv('folder:properties'),
@@ -515,6 +516,7 @@ function remoteBridge() {
     delete: inv('remote:delete'),
     test: inv('remote:test'),
     connect: inv('remote:connect'),
+    expandPath: inv('remote:expand-path'),
     disconnect: inv('remote:disconnect'),
     forgetHostKey: inv('remote:forget-host-key'),
     pickKey: inv('remote:pick-key'),
@@ -614,6 +616,7 @@ function install() {
       pathOf: () => '',
       // A path typed or pasted: opened once the person confirms it in a native dialog.
       openTyped: (path) => nodeInvoke('disk:open-typed', path),
+      expandTyped: (path) => nodeInvoke('disk:expand-typed', path),
       onChanged(callback) {
         changeListeners.add(callback);
         const off = nodeOn('disk:changed', callback);
@@ -639,6 +642,11 @@ function install() {
       save: (mirror) => nodeInvoke('mirror:save', mirror),
       delete: (id) => nodeInvoke('mirror:delete', id),
       sync: (id, opts) => nodeInvoke('mirror:sync', id, opts),
+      check: (id, paths, direction, opts) => nodeInvoke('mirror:check', id, paths, direction, opts),
+      transfer: (id, items, direction) => nodeInvoke('mirror:transfer', id, items, direction),
+      undo: (entryId) => nodeInvoke('mirror:undo', entryId),
+      history: (id) => nodeInvoke('mirror:history', id),
+      historyText: (entryId, rel) => nodeInvoke('mirror:history-text', entryId, rel),
       onStatus: (cb) => nodeOn('mirror:status', cb),
     },
     // Terminals: on servers over SSH, and a shell on the phone.

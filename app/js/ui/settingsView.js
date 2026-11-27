@@ -272,6 +272,8 @@ function EditorCard({ settings, actions }) {
       ${isDesktopApp() && html`<${TerminalShellField} settings=${settings} />`}
       ${window.desktop?.terminal && html`<${Check} checked=${settings.terminalTmux !== false} label="Keep terminals on SSH servers running (tmux)" hint="When the server has tmux: a dropped connection, a restart or Reopen takes the terminal up again, with its output and what runs in it. × on its tab ends it there."
         onChange=${(v) => saveSettings({ terminalTmux: v })} />`}
+      ${window.desktop?.terminal && html`<${Check} checked=${settings.terminalKeepOutput !== false} label="Keep what Terminals tabs show (on this device)" hint="A Terminals tab comes back with each terminal's last 1,000 lines, colors too, above its new shell. Kept here only, never synced. Off: nothing is kept, and what was kept goes."
+        onChange=${(v) => (saveSettings({ terminalKeepOutput: v }), v || actions.dropTerminalOutputs())} />`}
       ${isDesktopApp() &&
       html`<${Field} label="Run commands (F5)" wide hint=${`One "type: command" per line, to change or add to the built-in ones (${Object.keys(RUN_COMMANDS).filter((e) => RUN_COMMANDS[e]).slice(0, 8).join(', ')}…). {file} is the file, {dir} its folder, {name} its name; an empty command turns a type off.`}>
         <textarea class="run-commands" rows="3" spellcheck=${false} value=${settings.runCommands ?? ''} placeholder=${'py: uv run {file}\nts: bun {file}'} onInput=${(e) => saveSettings({ runCommands: e.currentTarget.value })} />

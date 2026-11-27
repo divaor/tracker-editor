@@ -71,6 +71,8 @@ contextBridge.exposeInMainWorld('desktop', {
       ),
     // A path pasted as text: opened after the person confirms it in a native dialog (unless reachable already).
     openTyped: (path) => ipcRenderer.invoke('disk:open-typed', path),
+    // Where a typed path goes (its variables and ~ expanded), for quick open's row: nothing is allowed by it.
+    expandTyped: (path) => ipcRenderer.invoke('disk:expand-typed', path),
     onChanged(callback) {
       const listener = (_event, change) => callback(change);
       ipcRenderer.on('disk:changed', listener);
@@ -97,6 +99,8 @@ contextBridge.exposeInMainWorld('desktop', {
     roots: () => ipcRenderer.invoke('folder:roots'),
     // The folder of a file open here, for the folders view (asked about in a native dialog when new).
     allowParent: (file) => ipcRenderer.invoke('folder:allow-parent', file),
+    // Going up past a picked folder: the one above it (or `to`, one further up), asked about in a native dialog when new.
+    allowUp: (dir, opts) => ipcRenderer.invoke('folder:allow-up', dir, opts),
     forget: (folder) => ipcRenderer.invoke('folder:forget', folder),
     list: (dir) => ipcRenderer.invoke('folder:list', dir),
     // A folder on this computer in the system's terminal app.
@@ -266,6 +270,8 @@ contextBridge.exposeInMainWorld('desktop', {
     placeKinds: () => ipcRenderer.invoke('remote:place-kinds'),
     startContainer: (name) => ipcRenderer.invoke('remote:start-container', name),
     connect: (id) => ipcRenderer.invoke('remote:connect', id),
+    // A path typed for a server: ~ and $HOME at its start are its home.
+    expandPath: (id, typed) => ipcRenderer.invoke('remote:expand-path', id, typed),
     disconnect: (id) => ipcRenderer.invoke('remote:disconnect', id),
     forgetHostKey: (id) => ipcRenderer.invoke('remote:forget-host-key', id),
     pickKey: () => ipcRenderer.invoke('remote:pick-key'),
@@ -305,6 +311,12 @@ contextBridge.exposeInMainWorld('desktop', {
     delete: (id) => ipcRenderer.invoke('mirror:delete', id),
     // { confirmDeletes: [rel] } deletes those (deleted here) on the server too; { restore: [rel] } brings them back instead.
     sync: (id, opts) => ipcRenderer.invoke('mirror:sync', id, opts),
+    // By hand: what an upload or a download would do ({ quiet }: not connecting), the transfer, its history and Undo.
+    check: (id, paths, direction, opts) => ipcRenderer.invoke('mirror:check', id, paths, direction, opts),
+    transfer: (id, items, direction) => ipcRenderer.invoke('mirror:transfer', id, items, direction),
+    undo: (entryId) => ipcRenderer.invoke('mirror:undo', entryId),
+    history: (id) => ipcRenderer.invoke('mirror:history', id),
+    historyText: (entryId, rel) => ipcRenderer.invoke('mirror:history-text', entryId, rel),
     onStatus(callback) {
       const listener = (_event, mirror) => callback(mirror);
       ipcRenderer.on('mirror:status', listener);

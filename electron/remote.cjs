@@ -14,6 +14,7 @@ const disk = require('./diskFiles.cjs');
 const { checkName, dirMode, fileMode } = require('./folders.cjs');
 const { parseHop } = require('./sshConfig.cjs');
 const places = require('./places.cjs');
+const { expandOnServer } = require('./typedPaths.cjs');
 
 const posix = nodePath.posix;
 const SCHEME = 'remote://';
@@ -548,6 +549,12 @@ class SftpSession {
     await this.call('chmod', p, mode);
   }
 
+  /** A file's modification time set back (Undo of a mirror's upload). */
+  async setTime(p, mtimeMs) {
+    const seconds = Math.floor(mtimeMs / 1000);
+    await this.call('utimes', p, seconds, seconds);
+  }
+
   // Whole files to and from this computer, streamed (for mirrors).
   async downloadTo(p, localPath) {
     await this.call('fastGet', p, localPath, {});
@@ -952,6 +959,12 @@ class FtpSession {
 
   async rmdir(p) {
     await this.run((c) => c.send(`RMD ${p}`));
+  }
+
+  /** MFMT (most servers take it; others say they do not). */
+  async setTime(p, mtimeMs) {
+    const stamp = new Date(mtimeMs).toISOString().replace(/[-:T]/g, '').slice(0, 14);
+    await this.run((c) => c.send(`MFMT ${stamp} ${p}`));
   }
 
   // SITE CHMOD: most Unix FTP servers take it; others say they do not.
@@ -1394,6 +1407,13 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
       const conn = find(id);
       return { ...status(id), root: toUri(id, conn.path || (await s.home().catch(() => '/'))) };
     },
+    /** A path typed for a server (0.54): "~" and "$HOME" at its start are its home (connecting for it). */
+    async expandPath(id, typed) {
+      const text = String(typed ?? '').trim();
+      if (!/^(~|\$HOME|\$\{HOME\})(?=$|\/)/.test(text)) return text;
+      const s = await session(id);
+      return expandOnServer(text, await s.home());
+    },
     disconnect(id) {
       const l = live.get(id);
       if (!l) return;
@@ -1566,11 +1586,11 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
         const st = await s.stat(p);
         return st && { mtimeMs: st.mtimeMs, size: st.size };
       }, { again: true }),
-    /** A file or folder picked in Folders: { dir, size }, or null when it is not there. */
+    /** A file or folder picked in Folders: { dir, size, mtimeMs }, or null when it is not there. */
     entry: (uri) =>
       withPath(uri, async (s, p) => {
         const st = await s.stat(p);
-        return st && { dir: Boolean(st.dir), size: st.size ?? 0 };
+        return st && { dir: Boolean(st.dir), size: st.size ?? 0, mtimeMs: st.mtimeMs ?? 0 };
       }, { again: true }),
     readAppended: (uri, offset, { encoding = 'utf-8' } = {}) =>
       withPath(uri, async (s, p) => {
@@ -1751,6 +1771,15 @@ function createRemote({ store, secrets, askHostKey, askPrompt = async () => unde
         await s.uploadFrom(localPath, p);
         const st = await s.stat(p);
         return { dir: false, size: st?.size ?? 0, mtimeMs: st?.mtimeMs ?? 0 };
+      }),
+    /** Sets a file's modification time where the server lets it (SFTP, FTP's MFMT): true, else false. */
+    setTime: (uri, mtimeMs) =>
+      withPath(uri, async (s, p) => {
+        if (!s.setTime) return false;
+        return s.setTime(p, mtimeMs).then(
+          () => true,
+          () => false,
+        );
       }),
     /** A folder and the ones above it, where missing. */
     mkdirp: (uri) => withPath(uri, (s, p) => mkdirp(s, p)),

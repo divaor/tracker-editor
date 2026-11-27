@@ -17,7 +17,7 @@ import { documentLabel } from '../docTypes.js';
 import { readsAloud } from '../docSpeech.js';
 import { server, serverStatus } from '../servers.js';
 import { mirrorOf } from '../mirrors.js';
-import { mirrorState } from './mirrors.js';
+import { MirrorNote, mirrorState } from './mirrors.js';
 import { indentLabel } from '../indent.js';
 import { problemsSummary } from './problems.js';
 import { tabViewState } from '../tabViews.js';
@@ -41,7 +41,7 @@ function tabInfo(key) {
   const k = parseKey(key);
   if (k?.kind === 'compare') {
     const c = store.compare(k.id);
-    return c && { kind: 'compare', icon: c.mode === 'panes' ? 'panes' : c.mode === 'history' ? 'history' : null, name: compareName(c), project: '', unsynced: Boolean(c.dirty), dotTitle: 'Not saved', title: compareTitle(c) };
+    return c && { kind: 'compare', icon: c.mode === 'panes' ? 'panes' : c.mode === 'history' ? 'history' : c.mode === 'terminals' ? 'terminal' : null, name: compareName(c), project: '', unsynced: Boolean(c.dirty), dotTitle: 'Not saved', title: compareTitle(c) };
   }
   const kind = kindOfKey(key);
   if (k?.kind === 'file') {
@@ -249,12 +249,15 @@ export function TabBar({ session, projects, settings, actions }) {
     return [
       { label: isPinned ? 'Unpin' : 'Pin', icon: 'pin', run: () => store.pin(key, !isPinned) },
       ...lockItems,
-      isCompare && { label: 'Save this comparison…', icon: 'star', disabled: !actions.canSaveCompare(key), run: () => actions.saveCompare(key) },
+      isCompare && store.compare(parseKey(key).id)?.mode !== 'terminals' && { label: 'Save this comparison…', icon: 'star', disabled: !actions.canSaveCompare(key), run: () => actions.saveCompare(key) },
+      isCompare && store.compare(parseKey(key).id)?.mode === 'terminals' && { label: 'Save this session as…', icon: 'star', hint: 'Its terminals, folders, names and layout', run: () => actions.saveTerminalSession(parseKey(key).id) },
       ...(!isCompare && !narrowScreen() ? paneItems(key) : []),
       !isCompare && parseKey(key)?.kind !== 'disk' && { label: 'History', icon: 'history', run: () => (actions.showInMain(key), actions.showHistory()) },
       parseKey(key)?.kind === 'disk' && actions.gitWorksAt?.(parseKey(key).path) && { label: 'History (Git)', icon: 'history', hint: 'Its commits, through its renames', run: () => actions.fileHistory(parseKey(key).path) },
       !isCompare && !locked && { label: 'Compare with…', icon: 'columns', run: () => (actions.showInMain(key), actions.compareWith()) },
       !isCompare && !locked && { label: 'Compare with clipboard', icon: 'copy', run: () => (actions.showInMain(key), actions.compareWithClipboard()) },
+      // Inside a mirror: Upload, Download, Compare with the server's copy, Sync…, History.
+      ...(parseKey(key)?.kind === 'disk' && !locked ? withSeparator(actions.mirrorItems?.([parseKey(key).path]) ?? []) : []),
       { separator: true },
       !isCompare && !locked && { label: 'Copy for Claude', icon: 'claude', run: () => actions.copyForClaude(key) },
       parseKey(key)?.kind === 'disk' && !isContentPath(parseKey(key).path) && { label: 'Copy path', icon: 'copy', run: () => actions.copyPath(parseKey(key).path) },
@@ -536,6 +539,9 @@ export function RunGroup({ run, actions }) {
   </div>`;
 }
 
+// A group of menu items with a separator before it (none when empty).
+const withSeparator = (items) => (items.length ? [{ separator: true }, ...items] : []);
+
 /** The bar of a file on disk (or on a server) edited in place: saving, reloading, following it as it grows. */
 function DiskBar({ disk, buttons, moreItems, locked = false, actions }) {
   const { path, dirty, follow, conflict, missing, truncated, offline } = disk;
@@ -597,6 +603,7 @@ function DiskBar({ disk, buttons, moreItems, locked = false, actions }) {
       <button type="button" class="btn ghost sm" onClick=${() => actions.reloadDisk(path)}>Reload (lose my edits)</button>
       <button type="button" class="btn sm" onClick=${() => actions.saveDisk(path, { force: true })}>Keep mine and save over it</button>
     </div>`}
+    ${!locked && !disk.doc && html`<${MirrorNote} path=${path} actions=${actions} />`}
     ${missing &&
     html`<div class="filebar-notice warn" role="status"><${Icon} name="alert" size=${15} /><span>The file is not ${elsewhere} any more (moved, renamed or deleted). Save puts it back.</span></div>`}
     ${truncated &&
@@ -656,6 +663,7 @@ export function FileBar({ file, repo, disk, sealed, locked = null, projects, can
     disk && { label: isLocal() ? 'Copy into my files' : 'Copy into my files (synced)', icon: 'filePlus', run: () => actions.copyToFiles(disk.path) },
     disk && inFolders(disk.path) && { label: 'Properties', icon: 'info', run: () => actions.showProperties(disk.path) },
     disk && canTerminal(disk.path) && { label: 'Open a terminal in its folder', icon: 'terminal', run: () => actions.terminalHere(parentOfPath(disk.path)) },
+    ...(disk && !locked ? withSeparator(actions.mirrorItems?.([disk.path]) ?? []) : []),
     disk && !locked && !diskReadOnly(disk) && { label: 'Line endings…', icon: 'eol', hint: `${eolStatus(disk).text}: Windows (CRLF) or Unix (LF)`, run: () => actions.lineEndingsMenu() },
     disk && { separator: true },
     id && { label: 'Details…', icon: 'tag', run: () => actions.openDialog({ type: 'file', id }) },
@@ -997,12 +1005,14 @@ export function StatusBar({ recording, big, cursor, language, file, repo, disk, 
     ${terminalsAvailable() && (terminals?.count && !terminals.shown
       ? html`<button type="button" class="status-item status-btn-text status-terminal hidden-running"
           title=${`${terminals.count} terminal${terminals.count === 1 ? '' : 's'} running, hidden: show ${terminals.count === 1 ? 'it' : 'them'} (Ctrl+\`)`}
-          aria-label=${`Show the terminal: ${terminals.count} running`} onClick=${actions.showTerminals}>
+          aria-label=${`Show the terminal: ${terminals.count} running`} onClick=${actions.showTerminals}
+          onContextMenu=${(e) => (e.preventDefault(), actions.terminalMenu({ x: e.clientX, y: e.clientY, above: true }))}>
           <${Icon} name="terminal" size=${14} /><span class="hide-narrow">Terminal</span><span class="status-terminal-count">${terminals.count}</span>
         </button>`
       : html`<button type="button" class="status-item status-btn-text status-terminal"
-          title=${disk ? `Open a terminal in this file’s folder${kind === 'remote' ? ' on the server' : ''} (Ctrl+\` shows or hides the terminal)` : 'Open a terminal (Ctrl+` shows or hides it)'}
-          aria-label=${disk ? 'Open a terminal in this file’s folder' : 'Open a terminal'} onClick=${actions.terminalForFile}>
+          title=${`${disk ? `Open a terminal in this file’s folder${kind === 'remote' ? ' on the server' : ''} (Ctrl+\` shows or hides the terminal)` : 'Open a terminal (Ctrl+` shows or hides it)'}\nRight-click: Terminals tabs, saved sessions`}
+          aria-label=${disk ? 'Open a terminal in this file’s folder' : 'Open a terminal'} onClick=${actions.terminalForFile}
+          onContextMenu=${(e) => (e.preventDefault(), actions.terminalMenu({ x: e.clientX, y: e.clientY, above: true }))}>
           <${Icon} name="terminal" size=${14} /><span class="hide-narrow">Terminal</span>
         </button>`)}
     ${disk && !disk.doc && html`<${EolButton} disk=${disk} actions=${actions} />`}

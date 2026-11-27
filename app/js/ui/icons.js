@@ -74,6 +74,8 @@ const PATHS = {
   stop: () => html`<rect x="6" y="6" width="12" height="12" rx="2" />`,
   history: () => html`<path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5M12 7v5l3 2" />`,
   columns: () => html`<rect x="3" y="4" width="18" height="16" rx="2" /><path d="M12 4v16" />`,
+  // The folder above (up a level).
+  cornerUp: () => html`<path d="M14 9 9 4 4 9" /><path d="M20 20h-7a4 4 0 0 1-4-4V4" />`,
   panes: () => html`<rect x="3" y="4" width="18" height="16" rx="2" /><path d="M12 4v16M6 9h3M6 12h3M15 9h3M15 12h3" />`,
   compare: () => html`<circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><path d="M13 6h3a2 2 0 0 1 2 2v7M11 18H8a2 2 0 0 1-2-2V9" /><path d="m15 9-3-3 3-3M9 15l3 3-3 3" />`,
   pin: () => html`<path d="M9 4h6l-1 6 3 3H7l3-3zM12 13v7" />`,
@@ -103,6 +105,10 @@ const PATHS = {
   details: () => html`<path d="M3 5h18M3 10h18M3 15h18M3 20h18M14 5v15" />`,
   widen: () => html`<path d="M8 7 3 12l5 5M16 7l5 5-5 5M3 12h18" />`,
   narrow: () => html`<path d="M3 12h7M7 8l4 4-4 4M21 12h-7M17 8l-4 4 4 4" />`,
+  // Lines folded toward a middle one (a comparison's unchanged lines collapsed), and one text
+  // with lines taken out and put in (a comparison as one text).
+  foldLines: () => html`<path d="M12 3v6M8.5 5.5 12 9l3.5-3.5M12 21v-6M8.5 18.5 12 15l3.5 3.5M4 12h16" />`,
+  unified: () => html`<rect x="3" y="4" width="18" height="16" rx="2" /><path d="M7 9h2M8 8v2M7 15h2M12 9h5M12 15h5" />`,
   fullscreen: () => html`<path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" />`,
   fullscreenExit: () => html`<path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5" />`,
   bookmark: () => html`<path d="M6 4h12v16l-6-4.5L6 20z" />`,

@@ -8,8 +8,9 @@ let pushToast = () => {};
 
 /** Shows a short message; `action` adds a button (e.g. Undo). */
 /** A message for a moment. With `key`, it replaces one with the same key, and dismissToast(key) removes it. */
-export function toast(message, { kind = 'info', action, timeout = 5000, key = '' } = {}) {
-  pushToast({ message, kind, action, timeout, key });
+// `actions`: several buttons ([{ label, run }]) where `action` is one.
+export function toast(message, { kind = 'info', action, actions, timeout = 5000, key = '' } = {}) {
+  pushToast({ message, kind, action, actions, timeout, key });
 }
 let dropToast = () => {};
 export const dismissToast = (key) => dropToast(key);
@@ -32,12 +33,14 @@ export function Toasts() {
   const dismiss = (id) => setList((l) => l.filter((x) => x.id !== id));
   return html`<div class="toasts" role="status" aria-live="polite">
     ${list.map(
-      (t) => html`<div class="toast ${t.kind === 'error' ? 'error' : ''}" key=${t.id}>
+      (t) => html`<div class="toast ${t.kind === 'error' ? 'error' : ''} ${(t.actions?.filter(Boolean).length ?? 0) > 2 ? 'many' : ''}" key=${t.id}>
         <span class="toast-msg">${t.message}</span>
-        ${t.action && html`<button type="button" class="btn link" onClick=${() => {
-          t.action.run();
-          dismiss(t.id);
-        }}>${t.action.label}</button>`}
+        ${(t.actions ?? (t.action ? [t.action] : [])).filter(Boolean).map(
+          (a) => html`<button type="button" class="btn link" key=${a.label} onClick=${() => {
+            a.run();
+            dismiss(t.id);
+          }}>${a.label}</button>`,
+        )}
         <button type="button" class="icon-btn sm" aria-label="Dismiss" onClick=${() => dismiss(t.id)}><${Icon} name="x" size=${15} /></button>
       </div>`,
     )}

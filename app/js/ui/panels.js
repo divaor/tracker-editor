@@ -4,7 +4,7 @@ import { matchSymbols } from '../codeNav.js';
 import { shortAgo } from '../format.js';
 import { fileKey, repoKey, store } from '../store.js';
 import { folderFiles, onFolderIndex } from '../folderIndex.js';
-import { pastedPath } from '../fileRefs.js';
+import { endsWithVariable, typedPath } from '../fileRefs.js';
 import { looksLikeQuestion, questionOf } from '../askFind.js';
 import { baseName } from '../folders.js';
 import { KINDS } from '../where.js';
@@ -143,6 +143,7 @@ const SECTION_LOOKS = {
   files: { icon: 'cloud', tone: 'kind-synced' },
   docs: { icon: 'paperclip', tone: 'kind-doc' },
   folders: { icon: 'folder', tone: 'kind-disk' },
+  complete: { icon: 'folderOpen', tone: 'kind-disk' },
   symbols: { icon: 'code', tone: 'qo-tone-accent' },
 };
 
@@ -150,6 +151,42 @@ const fullTime = (iso) => {
   const at = iso ? Date.parse(iso) : NaN;
   return Number.isNaN(at) ? '' : new Date(at).toLocaleString();
 };
+
+/**
+ * A path typed in quick open (desktop, 0.54): where it goes once the main process has expanded its
+ * variables and ~ (disk:expand-typed: nothing is allowed by asking), and, when its folder is one
+ * Tinta reaches already, that folder's entries starting with its last part (a variable or ~ at
+ * its end: what is inside it, `inside`). → { result, entries, inside } for `typed`, or null.
+ */
+function useTypedPath(typed) {
+  const [info, setInfo] = useState(null);
+  useEffect(() => {
+    if (!typed || !window.desktop?.disk?.expandTyped) return setInfo(null);
+    let stale = false;
+    const timer = setTimeout(async () => {
+      const inside = endsWithVariable(typed);
+      const result = await window.desktop.disk.expandTyped(inside ? `${typed}/` : typed).catch((err) => ({ problem: String(err?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '') }));
+      let entries = [];
+      if (result?.reachable) {
+        const part = (result.part ?? '').toLowerCase();
+        const listed = await window.desktop.folders.list(result.base).catch(() => null);
+        entries = (listed?.entries ?? []).filter((e) => e.name.toLowerCase().startsWith(part) && (!e.hidden || part.startsWith('.'))).slice(0, 40);
+      }
+      if (!stale) setInfo({ typed, result, entries, inside });
+    }, 120);
+    return () => {
+      stale = true;
+      clearTimeout(timer);
+    };
+  }, [typed]);
+  if (!info || !typed) return null;
+  if (info.typed === typed) return info;
+  // While the next answer comes: the same folder's entries, narrowed by what is typed now (no flicker).
+  const cut = (p) => p.slice(0, Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\')) + 1);
+  if (info.inside || endsWithVariable(typed) || cut(typed) !== cut(info.typed)) return null;
+  const part = typed.slice(cut(typed).length).toLowerCase();
+  return { ...info, stale: true, entries: info.entries.filter((e) => e.name.toLowerCase().startsWith(part)) };
+}
 
 /**
  * Ctrl+P: open a file by (fuzzy) name; also matches the project, and the files in the folders
@@ -179,8 +216,11 @@ export function QuickOpen({ files, docs, actions, onClose, initial = '', symbols
   const tabs = openTabs.map((t) => ({ ...t, tab: true }));
   const tabPaths = new Set(tabs.map((t) => t.path));
   const all = [...tabs, ...recent];
-  // A whole path typed or pasted (desktop): opening it comes first.
-  const typed = !symbolMode && window.desktop?.disk?.openTyped ? pastedPath(query) : null;
+  // A whole path typed or pasted (desktop), or one starting with a variable or ~ ("%USERPROFILE%\.tinta",
+  // "$HOME/src"): opening it comes first, and what is in its folder (when it is reachable) under it.
+  const typed = !symbolMode && window.desktop?.disk?.openTyped ? typedPath(query) : null;
+  const where = useTypedPath(typed);
+  const completions = (where?.entries ?? []).map((e) => ({ id: `complete:${e.path}`, complete: true, path: e.path, name: e.name, dir: e.dir }));
   const searching = Boolean(query.trim());
   const found = quickOpen(searching ? [...all, ...inFolders.files.filter((f) => !tabPaths.has(f.path))] : all, query, 60);
   // Find by asking (with a model on): a question, or anything after "?", is asked of the model; first
@@ -188,7 +228,10 @@ export function QuickOpen({ files, docs, actions, onClose, initial = '', symbols
   const words = query.trim().split(/\s+/).filter(Boolean);
   const asking = Boolean(onAsk) && !symbolMode && (query.trim().startsWith('?') ? questionOf(query).length > 0 : words.length >= 3);
   const askRow = asking ? { id: 'ask', ask: true, name: questionOf(query) } : null;
-  const named = typed ? [{ id: `typed:${typed}`, typed, name: baseName(typed) }, ...found] : found;
+  const target = where && !where.stale ? where.result : null;
+  const typedRow = typed ? { id: `typed:${typed}`, typed, name: baseName(target?.path || typed) || target?.path || typed, target } : null;
+  // A word that only looked like a variable ("$config", no folder by that name): the names found come first.
+  const named = !typedRow ? found : target?.problem && found.length ? [...found, typedRow] : [typedRow, ...completions, ...found];
   const list = askRow ? (looksLikeQuestion(query) ? [askRow, ...named] : [...named, askRow]) : named;
   // Under their sections (the one with the best match first), and the keys go through them in that order.
   const groups = symbolMode ? [{ id: 'symbols', label: 'In this file', rows: symbolList }] : groupQuick(list, { searching });
@@ -204,11 +247,22 @@ export function QuickOpen({ files, docs, actions, onClose, initial = '', symbols
     setIndex(0);
     nav.reset();
   };
+  // Tab on a folder's entry: the path typed goes on with its name (a folder's with its separator),
+  // the way it was written ("$HOME/pr" + Tab → "$HOME/projects/").
+  const complete = (row) => {
+    const q = query.trim();
+    const sep = q.includes('\\') && !q.includes('/') ? '\\' : q.includes('/') ? '/' : (target?.sep ?? '/');
+    const inside = where?.inside;
+    const head = inside ? `${q.replace(/[\\/]+$/, '')}${sep}` : q.slice(0, Math.max(q.lastIndexOf('/'), q.lastIndexOf('\\')) + 1);
+    search(`${head}${row.name}${row.dir ? sep : ''}`);
+  };
   const choose = (file) => {
     onClose();
     if (symbolMode) onSymbol?.(file);
     else if (file.ask) onAsk(query);
     else if (file.typed) actions.openTypedPath(file.typed);
+    // An entry of the folder typed: a folder shows in Folders (here or beside, by its drive), a file opens.
+    else if (file.complete) (file.dir ? actions.showFolderPlaced(file.path) : actions.openDiskPath(file.path));
     else if (file.path) actions.openDiskPath(file.path);
     else actions.openFile(file.id);
   };
@@ -244,13 +298,27 @@ export function QuickOpen({ files, docs, actions, onClose, initial = '', symbols
           <span class="qo-name"><span class="qo-ask-label">Ask:</span> ${f.name}</span><span class="qo-place" /><span class="qo-hint">Find by asking</span>`,
         'Find by asking: the model works out what to look for, the editor searches your files, documents, tracker items and folders, and the model picks the best',
       );
-    if (f.typed)
+    if (f.typed) {
+      // Where it goes once its variables are expanded, or why it cannot (a variable that names no folder).
+      const t = f.target;
+      const folder = t?.dir;
       return option(
         f,
-        'kind-disk qo-typed',
-        html`<span class="qo-icon"><${FileIcon} name=${f.name} size=${16} plain=${plainIcons} /></span>
-          <span class="qo-name">Open ${f.name}</span>${place('disk', f.typed)}<span class="qo-hint">Path</span>`,
-        f.typed,
+        `kind-disk qo-typed ${t?.problem ? 'qo-typed-problem' : ''}`,
+        html`<span class="qo-icon">${folder ? html`<${Icon} name="folderOpen" size=${16} />` : html`<${FileIcon} name=${f.name} size=${16} plain=${plainIcons} />`}</span>
+          <span class="qo-name">${folder ? 'Show' : 'Open'} ${f.name}</span>${place('disk', t?.problem || t?.path || f.typed)}
+          <span class="qo-hint">${t?.problem ? 'Cannot' : folder ? 'Folder' : t && !t.exists ? 'Not found' : 'Path'}</span>`,
+        t?.problem ? `${f.typed}\n${t.problem}` : t?.path && t.path !== f.typed ? `${f.typed}\n→ ${t.path}` : f.typed,
+      );
+    }
+    if (f.complete)
+      return option(
+        f,
+        'kind-disk qo-complete',
+        html`<span class="qo-icon">${f.dir ? html`<${Icon} name="folder" size=${15} />` : html`<${FileIcon} name=${f.name} size=${16} plain=${plainIcons} />`}</span>
+          <span class="qo-name">${f.name}${f.dir ? html`<span class="qo-sep">/</span>` : ''}</span><span class="qo-place" />
+          <span class="qo-hint">${f.dir ? 'Tab: into it · Enter: show it' : 'Enter: open'}</span>`,
+        f.path,
       );
     const kind = quickKind(f);
     const marks = quickMarks(f, query);
@@ -313,6 +381,11 @@ export function QuickOpen({ files, docs, actions, onClose, initial = '', symbols
           }}
           onKeyDown=${(e) => {
             if (nav.key(e, { empty: !query })) return;
+            // Tab completes a typed path with the entry picked (else the first one of its folder).
+            if (e.key === 'Tab' && !e.shiftKey && typed && completions.length) {
+              e.preventDefault();
+              return complete(chosen?.complete ? chosen : completions[0]);
+            }
             if (e.key === 'Enter' && chosen) {
               e.preventDefault();
               choose(chosen);

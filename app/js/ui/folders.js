@@ -1,6 +1,6 @@
 import { html, useEffect, useLayoutEffect, useRef, useState } from '../../vendor/preact-htm.js';
 import { canDragOut, draggedPaths, draggedTab, dropped, isOwnDrop, onDragOutEnd, startDragOut } from '../dragOut.js';
-import { baseName, breadcrumbs, folderLabel, placeLabel, FOLDER_SORTS, isImageName, isLockedName, modeString, moveSectionTo, nameMatcher, opensHere, opensInEditor, parentOf, peekKind, pushRecent, quotePath, rangeOf, renameRange, replaceSection, rootOf, selectionSummary, sortsUp, toggleFavorite, topmost, treeRows, withCurrent } from '../folders.js';
+import { baseName, folderLabel, FOLDER_SORTS, fullCrumbs, isImageName, isLockedName, isWithin, modeString, moveSectionTo, nameMatcher, openPlacement, opensHere, opensInEditor, peekKind, pushRecent, quotePath, rangeOf, renameRange, replaceSection, rootOf, samePath, selectionSummary, sortsUp, toggleFavorite, topmost, treeRows, upOf, withCurrent } from '../folders.js';
 import { formatBytes, timeAgo } from '../format.js';
 import { getSettings, isLocal, saveSettings } from '../settings.js';
 import { diskKey } from '../store.js';
@@ -13,6 +13,7 @@ import { MirrorBar } from './mirrors.js';
 import { Icon } from './icons.js';
 import { FileIcon } from './fileIcon.js';
 import { Menu, MenuButton } from './menu.js';
+import { crumbsScroll, crumbsToEnd, FolderMenu, howOf } from './folderMenu.js';
 import { FileViewer, PeekPane } from './folderPreview.js';
 import { Splitter } from './splitter.js';
 import { onTransfers, running } from '../transfers.js';
@@ -171,6 +172,10 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   const list = useRef(null);
   const typed = useRef({ text: '', at: 0 });
   const pendingSelect = useRef(null); // a path to select once the folder is read (the one you came up from)
+  // The list of folders, servers and comparisons (FolderMenu) under its button, and the path's crumbs.
+  const [listAt, setListAt] = useState(null);
+  const listButton = useRef(null);
+  const crumbsNav = useRef(null);
   // Your folders, and the servers set up here (each from its top folder).
   const serverRoots = servers().map((c) => remoteRoot(c.id));
   const rootFor = (p) => (roots ? rootOf(p, [...roots, ...serverRoots]) : null);
@@ -219,7 +224,14 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     if (!window.desktop?.mirrors) return null;
     const found = mirrorOf(path);
     if (found) return { label: 'Mirror settings…', icon: 'sync', run: () => actions.editMirror(found.mirror) };
-    return isRemotePath(path) ? { label: 'Keep on this computer (mirror)…', icon: 'sync', run: () => actions.newMirror({ conn: remoteParts(path).id, remote: remoteParts(path).path }) } : null;
+    if (isRemotePath(path)) return { label: 'Keep on this computer (mirror)…', icon: 'sync', run: () => actions.newMirror({ conn: remoteParts(path).id, remote: remoteParts(path).path }) };
+    // A folder here (0.54): kept with one on a server, by hand (upload, download, sync when asked).
+    return actions.mirrorOnServer ? { label: 'Mirror on a server…', icon: 'server', hint: 'Upload, download and compare its files with a folder on a server, like an IDE’s deployment', run: () => actions.mirrorOnServer(path) } : null;
+  };
+  // Inside a mirror: Upload / Download / Compare / Sync… / History for `paths` (a separator before them).
+  const mirrorOps = (paths, dir) => {
+    const items = actions.mirrorItems?.(paths, { dir }) ?? [];
+    return items.length ? [...items, { separator: true }] : [];
   };
 
   // Not reachable (the Android app's file access did not start): said, with Try again.
@@ -385,6 +397,10 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
   useLayoutEffect(() => {
     if (cursor) list.current?.querySelector(`[data-path="${CSS.escape(cursor)}"]`)?.scrollIntoView({ block: 'nearest' });
   }, [cursor]);
+  // The whole path can be long: its end (where you are) stays in view.
+  useLayoutEffect(() => {
+    crumbsToEnd(crumbsNav.current);
+  }, [dir, roots]);
 
   // Copy, cut and paste: the system's clipboard events while the list has the focus
   // (Ctrl+V and the Edit menu), so files copied in other apps can be pasted.
@@ -480,6 +496,50 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
 
   /** Opens `path` beside the folders shown (a server's top folder connects first). */
   const openBeside = (path) => actions.showInFolders(path, { beside: true });
+  /**
+   * A folder picked in the list, a favorite or a recent one (0.54): in place of the current folder
+   * when it is on the same drive (server, place) or overlaps a folder shown, beside the others when
+   * it is elsewhere (openPlacement), just worked in when it is shown already. `how`: 'beside'
+   * (Ctrl) or 'replace' (Shift) say it.
+   */
+  const openPlaced = (target, how = 'auto') => {
+    const place = how === 'auto' ? openPlacement(target, sections, dir) : how;
+    const shownAs = sections.find((s) => samePath(s, target));
+    if (place === 'focus' || (shownAs && how !== 'beside')) {
+      if (collapsed.has(shownAs)) toggleCollapsed(shownAs);
+      focusSection(shownAs);
+      requestAnimationFrame(() => list.current?.querySelector(`[data-section="${CSS.escape(shownAs)}"]`)?.scrollIntoView({ block: 'nearest' }));
+      return;
+    }
+    if (place === 'beside') {
+      saveSettings({ folderRecent: pushRecent(getSettings().folderRecent, target) });
+      setFilter('');
+      return openBeside(target);
+    }
+    // In place of the folder it holds or is inside of, else of the one worked in.
+    go(target, (how === 'auto' && sections.find((s) => isWithin(target, s) || isWithin(s, target))) || dir);
+  };
+  /** A server or place from the list: connected, then its start folder placed like a folder. */
+  const openServerPlaced = async (id, how = 'auto') => {
+    try {
+      const { root: start } = await window.desktop.remote.connect(id);
+      openPlaced(start, how);
+    } catch (err) {
+      actions.cannotConnect(id, err, () => openServerPlaced(id, how));
+    }
+  };
+  /**
+   * Up from `from` (0.54): to the drive's top, past the folder picked; a folder above it that is
+   * not picked is asked about first (a native dialog: Go up, or Allow all of its drive). `to`: a
+   * crumb further up.
+   */
+  const goUp = async (from = dir, to = null) => {
+    const target = await actions.folderUp(from, to ? { to } : {});
+    if (!target) return;
+    if (!isRemotePath(target)) await refreshRoots();
+    if (!to) pendingSelect.current = from;
+    go(target, sectionOf(from) ?? from);
+  };
   const closeSection = (s) => {
     const next = sections.filter((x) => x !== s);
     if (!next.length) return;
@@ -912,6 +972,11 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
         if (!items.length || items.some((e) => isRemotePath(e.path))) return toast('Pick files or folders on this device in Folders first, then Compress….');
         return setArchiveDialog({ kind: 'compress', items });
       }
+      // Mirrors by hand: Upload, Download, Compare, Sync…, History for what is picked (else the folder worked in).
+      if (String(ev.detail?.id).startsWith('mirror-')) {
+        const paths = items.length ? items.map((e) => e.path) : [now.current.workDir()];
+        return actions.mirrorAct?.(ev.detail.id.slice(7), paths, { dir: items.length ? items.length === 1 && items[0].dir : true });
+      }
       if (ev.detail?.id === 'extract') {
         if (items.length !== 1 || !now.current.isArchive(items[0])) return toast('Pick an archive in Folders first (zip, 7z, rar, tar…), then Extract….');
         return setArchiveDialog({ kind: 'extract', entry: items[0] });
@@ -1090,11 +1155,8 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     if (key === 'Enter') return handled(), openSelected();
     if (key === 'Backspace' || (key === 'ArrowUp' && ev.altKey)) {
       handled();
-      const up = parentOf(dir, root);
-      if (up) {
-        pendingSelect.current = dir;
-        go(up, dir);
-      }
+      // Past the folder picked too, to the drive's top (a new one asked about first).
+      if (upOf(dir)) goUp(dir);
       return;
     }
     if (key === 'Delete') return handled(), targets().length && setConfirm(targets());
@@ -1151,6 +1213,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
         ]
       : [];
   const backgroundItems = () => [
+    ...mirrorOps([dir], true),
     { label: 'New file', icon: 'filePlus', run: () => startCreating('file') },
     { label: 'New folder (Ctrl+Shift+N)', icon: 'folderPlus', run: () => startCreating('folder') },
     { label: 'New locked file…', icon: 'lock', hint: 'Encrypted with a password, asked for every time it opens', run: () => actions.newLockedFile(workDir()) },
@@ -1193,6 +1256,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     return [
       touchScreen() && !picking && { label: 'Select', icon: 'check', hint: 'Then tap others to pick them too', run: () => setPicking(true) },
       { label: one?.dir ? 'Open' : 'Open (Enter)', icon: one?.dir ? 'folderOpen' : 'file', run: openSelected },
+      ...(items.length ? [{ separator: true }, ...mirrorOps(items.map((e) => e.path), Boolean(one?.dir))] : []),
       one && !one.dir && { label: 'View it large (Space)', icon: 'fullscreen', run: () => setViewing(one.path) },
       one && !one.dir && { label: 'Open with its program', icon: 'external', run: () => openOutside(one) },
       one && !one.dir && ['M', 'R'].includes(gitOn(one.path)) && opensInEditor(one.name) && !isLockedName(one.name) && { label: 'Compare with the last commit (Git)', icon: 'branch', run: () => actions.compareWithHead(one.path) },
@@ -1248,12 +1312,10 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     { label: 'Remove from favorites', icon: 'x', run: () => saveSettings({ folderFavorites: toggleFavorite(settings.folderFavorites, p) }) },
     { label: 'Copy path', icon: 'copy', run: () => actions.copyPath(p) },
   ];
+  // The list's actions (under the folders, servers and comparisons of FolderMenu).
   const rootItems = () => [
-    ...roots.map((r) => ({ label: placeLabel(r), hint: placeLabel(r) === r ? undefined : r, icon: 'folder', checked: r === root, run: () => go(r) })),
-    ...servers().map((c) => ({ label: connLabel(c), hint: connDetail(c), icon: connIcon(c), checked: remoteRoot(c.id) === root, run: () => actions.openServer(c.id) })),
-    { separator: true },
     { label: 'Folders side by side…', icon: 'columns', hint: 'Several of these next to each other, here or on servers', run: () => actions.sideBySide() },
-    { label: 'Open another folder…', icon: 'folderOpen', run: () => pick(remote ? undefined : (parentOf(dir, root) ?? root)) },
+    { label: 'Open another folder…', icon: 'folderOpen', run: () => pick(remote ? undefined : (upOf(dir) ?? dir)) },
     { label: 'Connect to a server…', icon: 'server', run: () => actions.editServer() },
     !isAndroidApp() && { label: 'Servers from your SSH config…', icon: 'server', run: () => actions.importSshConfig() },
     placeKinds().docker && { label: 'Open a Docker container…', icon: 'container', hint: 'Its files and a terminal, like a server', run: () => actions.pickPlace('docker') },
@@ -1261,7 +1323,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     window.desktop?.mirrors && { label: 'Mirrors…', icon: 'sync', run: () => actions.showMirrors() },
     window.desktop?.compare && { label: 'Compare this folder with another…', icon: 'compare', run: () => actions.compareFolders(dir) },
     window.desktop?.compare && { label: 'Two panes…', icon: 'panes', hint: 'This folder and another side by side in a tab, to copy and move files between them (like WinSCP)', run: () => actions.twoPanes(dir) },
-    (settings.savedCompares ?? []).length > 0 && { label: 'Saved comparisons…', icon: 'star', run: () => actions.showSavedCompares() },
+    (settings.savedCompares ?? []).length > 0 && { label: 'All saved comparisons…', icon: 'star', hint: 'Files compared too; rename or delete them', run: () => actions.showSavedCompares() },
     ...(remote ? [] : PLACES.filter((p) => places[p.id] && !roots.includes(places[p.id])).map((p) => ({ label: `Pick in ${p.label}…`, run: () => pick(places[p.id]) }))),
     { separator: true },
     ...sortItems,
@@ -1284,7 +1346,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
 
   // A folder shown beside others: its header's menu.
   const sectionItems = (s) => {
-    const up = parentOf(s, rootFor(s));
+    const up = upOf(s);
     const at = live.indexOf(s);
     const expandFor = () => collapsed.has(s) && toggleCollapsed(s);
     return [
@@ -1293,7 +1355,8 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       { label: 'Expand all', disabled: !collapsed.size, run: () => setCollapsed([]) },
       { label: 'Collapse all', run: () => setCollapsed(live) },
       { separator: true },
-      up && { label: 'Up one folder', icon: 'arrowUp', run: () => go(up, s) },
+      ...mirrorOps([s], true),
+      up && { label: 'Up one folder', icon: 'arrowUp', hint: rootOf(up, [...(roots ?? []), ...serverRoots]) ? undefined : `To ${up}: not picked yet, asked first`, run: () => goUp(s) },
       { label: 'Refresh', icon: 'rotate', run: () => load(s) },
       { label: 'New file here', icon: 'filePlus', run: () => (expandFor(), setCreating({ kind: 'file', name: 'New file.txt', in: s })) },
       { label: 'New folder here', icon: 'folderPlus', run: () => (expandFor(), setCreating({ kind: 'folder', name: 'New folder', in: s })) },
@@ -1305,6 +1368,7 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
       gitItem(s),
       historyItem(s),
       dockerItem(s),
+      mirrorItem(s),
       window.desktop?.compare && { label: 'Compare with another folder…', icon: 'compare', run: () => actions.compareFolders(s) },
       window.desktop?.compare && live.length === 2 && { label: `Compare with ${folderLabel(live.find((x) => x !== s))}`, icon: 'compare', run: () => actions.compareFolders(s, live.find((x) => x !== s)) },
       window.desktop?.compare && { label: 'Open in two panes…', icon: 'panes', run: () => actions.twoPanes(s) },
@@ -1356,8 +1420,11 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     </div>`;
   }
 
-  const crumbs = breadcrumbs(dir, root);
-  const up = parentOf(dir, root);
+  // The whole path, from the drive's top (a server's /, the home folder's ~ on macOS and Linux):
+  // crumbs above the folder picked are asked about first, as the Up button is.
+  const crumbs = fullCrumbs(dir, remote ? { top: rootName(root) } : { home: places.home ?? '' });
+  const reaches = (p) => isRemotePath(p) || Boolean(rootOf(p, roots));
+  const up = upOf(dir);
   // The preview's file: the one the keyboard is on, or the only one selected.
   const peekEntry = (cursor && byPath.get(cursor)) || (selected.size === 1 ? (byPath.get([...selected][0]) ?? null) : null);
   const peekHeight = Math.max(120, settings.folderPreviewHeight || 260);
@@ -1551,19 +1618,24 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
             : html`<button type="button" class="git-branch git-pill none" title="Git: this folder is not in a repository. Click for the Git panel, to make it one" aria-label="Git panel" onClick=${() => actions.toggleGit(dir)}><${Icon} name="branch" size=${13} /></button>`)}
         </span>
         <span class="spacer" />
-        ${tool('Up one folder (Backspace)', 'arrowUp', () => go(up), !up)}
+        ${tool(up && !reaches(up) ? `Up to ${up} (Backspace): not picked yet, asked first` : 'Up one folder (Backspace)', 'arrowUp', () => goUp(dir), !up)}
         ${tool('Refresh (F5)', 'rotate', () => load())}
         <button type="button" class="icon-btn sm fav-toggle ${favorite ? 'on' : ''}" aria-pressed=${favorite} aria-label=${favorite ? 'Remove this folder from favorites' : 'Add this folder to favorites'}
           title=${favorite ? 'Remove this folder from favorites' : 'Add this folder to favorites'} onClick=${() => toggleFav(dir)}><${Icon} name="star" size=${16} /></button>
-        ${recent.length > 0 && html`<${MenuButton} label="Recent folders" icon="clock" items=${() => recent.map((p) => ({ key: p, label: placeName(p), hint: placeHint(p), icon: iconOf(p), run: () => go(p) }))} />`}
+        ${recent.length > 0 && html`<${MenuButton} label="Recent folders" icon="clock" items=${() => recent.map((p) => ({ key: p, label: placeName(p), hint: `${placeHint(p)} · ${openPlacement(p, sections, dir) === 'beside' ? 'opens beside' : 'opens here'}`, icon: iconOf(p), run: () => openPlaced(p) }))} />`}
         ${tool('Folders side by side: add some beside this one (here or on servers), reorder, close', 'columns', () => actions.sideBySide())}
-        <${MenuButton} label="Folders" items=${rootItems} />
+        <button type="button" ref=${listButton} class="icon-btn sm folders-list-btn" aria-label="Folders, servers and comparisons" title="Folders, servers and comparisons: find one and open it here or beside"
+          aria-haspopup="dialog" aria-expanded=${Boolean(listAt)} onClick=${(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            setListAt(listAt ? null : { x: r.right, y: r.bottom + 4, right: true });
+          }}><${Icon} name="more" size=${16} /></button>
       </div>
       ${favorites.length > 0 &&
       html`<div class="folders-quick" role="toolbar" aria-label="Favorite folders">
         ${favorites.map(
-          (p) => html`<button type="button" key=${p} class="fav-chip ${p === dir ? 'current' : ''} ${isRemotePath(p) ? 'kind-remote' : ''} ${dropTarget === p ? 'drop-target' : ''}" title=${placeHint(p)}
-            onClick=${() => go(p)} onContextMenu=${(ev) => (ev.preventDefault(), ev.stopPropagation(), setMenu({ favorite: p, at: { x: ev.clientX, y: ev.clientY } }))} ...${p === dir ? {} : dropProps(p)}>
+          (p) => html`<button type="button" key=${p} class="fav-chip ${p === dir ? 'current' : ''} ${isRemotePath(p) ? 'kind-remote' : ''} ${dropTarget === p ? 'drop-target' : ''}"
+            title=${`${placeHint(p)}\n${{ focus: 'Shown already', beside: 'Opens beside the folders shown (another drive or place)', replace: 'Opens here' }[openPlacement(p, sections, dir)]} · Ctrl+click: beside · Shift+click: here`}
+            onClick=${(ev) => openPlaced(p, howOf(ev))} onContextMenu=${(ev) => (ev.preventDefault(), ev.stopPropagation(), setMenu({ favorite: p, at: { x: ev.clientX, y: ev.clientY } }))} ...${p === dir ? {} : dropProps(p)}>
             <${Icon} name="star" size=${12} /><span>${placeName(p)}</span>
           </button>`,
         )}
@@ -1587,11 +1659,14 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
           onClick=${() => saveSettings({ folderView: details ? 'list' : 'details' })}><${Icon} name="details" size=${16} /></button>
       </div>
       ${(crumbs.length > 1 || multi) &&
-      html`<nav class="crumbs ${multi ? `kind-${remote ? 'remote' : 'disk'} of-section` : ''}" aria-label="Folder path">
-        ${crumbs.map(
-          (c, i) => html`${i > 0 && html`<span class="crumb-sep" key=${`s${i}`}>›</span>`}<button type="button" key=${c.path} class="crumb ${i === crumbs.length - 1 ? 'current' : ''} ${dropTarget === c.path ? 'drop-target' : ''}"
-            aria-current=${i === crumbs.length - 1 ? 'location' : undefined} title=${remote ? remoteParts(c.path).path : c.path} onClick=${() => go(c.path)} ...${i < crumbs.length - 1 ? dropProps(c.path) : {}}>${i === 0 ? rootName(root) : c.name}</button>`,
-        )}
+      html`<nav class="crumbs whole ${multi ? `kind-${remote ? 'remote' : 'disk'} of-section` : ''}" aria-label="Folder path" ref=${crumbsNav} ...${crumbsScroll}>
+        ${crumbs.map((c, i) => {
+          const last = i === crumbs.length - 1;
+          const above = !reaches(c.path);
+          return html`${i > 0 && html`<span class="crumb-sep" key=${`s${i}`}>›</span>`}<button type="button" key=${c.path} class="crumb ${last ? 'current' : ''} ${above ? 'above' : ''} ${dropTarget === c.path ? 'drop-target' : ''}"
+            aria-current=${last ? 'location' : undefined} title=${`${remote ? remoteParts(c.path).path : c.path}${above ? '\nNot picked yet: asked first (Go up, or Allow all of its drive)' : ''}`}
+            onClick=${() => (above ? goUp(dir, c.path) : go(c.path))} ...${!last && !above ? dropProps(c.path) : {}}>${c.name}</button>`;
+        })}
       </nav>`}
       ${mirrored && html`<${MirrorBar} found=${mirrored} actions=${actions} />`}
       <div class="sidebar-filter">
@@ -1654,6 +1729,14 @@ export function FoldersView({ settings, activeKey, openKeys, actions }) {
     ${menu &&
     html`<${Menu} items=${menu.section ? sectionItems(menu.section) : menu.favorite ? favoriteItems(menu.favorite) : menu.entry ? entryItems() : backgroundItems()} at=${menu.at}
       label=${menu.section ? placeName(menu.section) : menu.favorite ? placeName(menu.favorite) : (menu.entry?.name ?? (dir === root ? rootName(root) : baseName(dir)))} onClose=${() => setMenu(null)} />`}
+    ${listAt &&
+    html`<${FolderMenu} at=${listAt} owner=${listButton} onClose=${() => (setListAt(null), listButton.current?.focus())}
+      shown=${live} current=${dir} roots=${roots} favorites=${favorites} recent=${settings.folderRecent ?? []} saved=${settings.savedCompares ?? []} home=${places.home ?? ''}
+      servers=${servers().map((c) => ({ id: c.id, label: connLabel(c), detail: connDetail(c), icon: connIcon(c), state: serverStatus(c.id).state, place: isPlace(c) }))}
+      colorOf=${(p) => groupColor(p)} reachable=${reaches} actions=${rootItems()}
+      onOpen=${openPlaced} onServer=${openServerPlaced} onSaved=${(c) => actions.openSavedCompare(c)} onFavorite=${toggleFav}
+      onForget=${(p) => forget(p).then(() => toast(`${folderLabel(p)} is forgotten here: pick it again to open it (nothing was deleted).`))}
+      onCloseShown=${live.length > 1 ? closeSection : null} onForgetRecent=${(p) => saveSettings({ folderRecent: (getSettings().folderRecent ?? []).filter((x) => x !== p) })} />`}
     ${confirm && html`<${DeleteDialog} entries=${confirm} onConfirm=${() => remove(confirm)} onClose=${() => (setConfirm(null), list.current?.focus())} />`}
     ${exists && html`<${ExistsDialog} names=${exists.names} target=${exists.target} onChoose=${(how) => (setExists(null), exists.run(how))} onClose=${() => (setExists(null), list.current?.focus())} />`}
     ${archiveDialog?.kind === 'extract' &&

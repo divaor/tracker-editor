@@ -6,6 +6,7 @@ import { matchRanges } from './search.js';
 /** The sections' headers ('' for the rows that come without one: a typed path, the Ask row). */
 export const QUICK_SECTIONS = {
   typed: '',
+  complete: 'In that folder',
   ask: '',
   tabs: 'Open tabs',
   recent: 'Recent',
@@ -21,6 +22,8 @@ export const QUICK_SECTIONS = {
  */
 export function quickSection(row, { searching = false } = {}) {
   if (row.typed) return 'typed';
+  // An entry of the folder a typed path is in (0.54: completing it).
+  if (row.complete) return 'complete';
   if (row.ask) return 'ask';
   if (row.tab) return 'tabs';
   if (row.path) return 'folders';

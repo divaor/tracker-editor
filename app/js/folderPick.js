@@ -4,44 +4,11 @@
 // connected). Folders are listed as they are opened and flattened into rows with a depth; the
 // filter works on what is listed, chips open the tree down to a folder (`revealChain`), and a
 // folder is said as "site › src › lib" from its block. Pure, so the tests import it.
-import { breadcrumbs, isWithin, nameMatcher } from './folders.js';
-import { isRemotePath, remoteParts, toRemoteUri } from './where.js';
+import { breadcrumbs, isWithin, nameMatcher, parentPath, pathKey, samePath } from './folders.js';
+import { isRemotePath, remoteParts } from './where.js';
 
-const isWindowsPath = (p) => /^[A-Za-z]:([\\/]|$)|^\\\\/.test(p) || (p.includes('\\') && !p.includes('/'));
-
-/** A path as a key: without the separators at its end (a top folder keeps its own), Windows paths in lower case. */
-export function pathKey(p) {
-  if (!p) return '';
-  if (isRemotePath(p)) {
-    const { id, path } = remoteParts(p);
-    return `remote://${id}${path.replace(/\/+$/, '') || '/'}`;
-  }
-  const trimmed = /^([A-Za-z]:)?[\\/]+$/.test(p) ? p : p.replace(/[\\/]+$/, '');
-  return isWindowsPath(p) ? trimmed.toLowerCase() : trimmed;
-}
-
-/** Whether two paths name the same folder. */
-export const samePath = (a, b) => Boolean(a) && Boolean(b) && pathKey(a) === pathKey(b);
-
-/** The folder a folder is in, here or on a server; '' at the top ("/", "C:\", a server's "/"). */
-export function parentPath(p) {
-  if (!p) return '';
-  if (isRemotePath(p)) {
-    const { id, path } = remoteParts(p);
-    const inner = path.replace(/\/+$/, '');
-    return inner ? toRemoteUri(id, inner.slice(0, inner.lastIndexOf('/')) || '/') : '';
-  }
-  const trimmed = p.replace(/[\\/]+$/, '');
-  if (!trimmed || /^[A-Za-z]:$/.test(trimmed)) return '';
-  const cut = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
-  if (cut < 0) return '';
-  const parent = trimmed.slice(0, cut);
-  if (!parent) return trimmed.startsWith('/') ? '/' : '';
-  if (/^[A-Za-z]:$/.test(parent)) return `${parent}\\`;
-  // \\server\share is the top of a network folder.
-  if (/^\\\\[^\\]+$/.test(parent)) return '';
-  return parent;
-}
+// The path helpers live in folders.js (0.54: Folders goes up with them too); kept here for their callers.
+export { parentPath, pathKey, samePath };
 
 /** The folders of a listing (folders.list's entries), by name: { name, path, hidden }. */
 export function subfolders(entries = []) {

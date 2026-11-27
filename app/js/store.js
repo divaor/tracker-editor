@@ -194,6 +194,9 @@ export async function flush() {
     kvSet('session', session),
     kvSet('repoTabs', [...repoTabs.values()]),
     kvSet('diskTabs', savedDiskTabs()),
+    // Comparisons (and Terminals tabs' records): their timer was cleared above (until 0.54 a
+    // change waiting for it as the app went away was lost).
+    kvSet('compares', [...compares.values()]),
     kvSet('projects', projects),
     kvSet('trackerItems', trackerItems),
     kvSet('trackerOps', trackerOps),

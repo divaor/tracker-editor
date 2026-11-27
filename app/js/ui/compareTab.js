@@ -3,12 +3,14 @@ import { createMergeEditor } from '../editor.js';
 import { childPath, choicePlan, compareListings, copyPlan, countStates, folderChoices, nextDifference, PRESET_HINTS, PRESET_LABELS, presetChoices, setChoice, SHOW, SHOW_LABELS, STATE_LABELS, SYNC_PRESETS, toCheck, treeRows, withChecks } from '../folderCompare.js';
 import { formatBytes, formatDateTime, shortDate } from '../format.js';
 import { pathName, sideName, sideWhere } from '../compares.js';
+import { upOf } from '../folders.js';
 import { getSettings, resolvedTheme, saveSettings } from '../settings.js';
 import { diskKey } from '../store.js';
 import { onTransfers, running } from '../transfers.js';
 import { connIcon, isRemotePath, remoteParts } from '../where.js';
 import { server } from '../servers.js';
 import { isAndroidApp } from '../platform.js';
+import { mirrorOf } from '../mirrors.js';
 import { FileIcon } from './fileIcon.js';
 import { binName } from './folders.js';
 import { Icon } from './icons.js';
@@ -19,6 +21,8 @@ import { PanesTab } from './twoPanes.js';
 import { GitHistoryTab } from './gitHistory.js';
 import { SidewaysButton, usePhoneLayout } from './phone.js';
 import { MergeTab } from './mergeView.js';
+import { DiffOptions, differencesText } from './diffOptions.js';
+import { diffOptionsOf } from '../lineDiff.js';
 
 const message = (err) => String(err?.message ?? err).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
 const sideOf = (s) => s?.path ?? s?.key ?? `text:${s?.label ?? ''}`;
@@ -39,8 +43,11 @@ export function FileCompare({ left, right, settings, actions, onSaved, onDirty, 
   const [reload, setReload] = useState(0);
   const [saving, setSaving] = useState(null);
   const theme = resolvedTheme(settings.theme);
-  // On a phone held upright: one text with the changes marked (the left side's lines removed in place).
-  const unified = usePhoneLayout();
+  // On a phone held upright: one text with the changes marked (the left side's lines removed in
+  // place); elsewhere side by side unless one text is chosen.
+  const phone = usePhoneLayout();
+  const unified = phone || Boolean(settings.compareUnified);
+  const options = diffOptionsOf(settings);
   // The texts now, edits too: kept when the editor is made again (another layout, theme, wrap).
   const texts = useRef(null);
   useEffect(() => {
@@ -70,6 +77,7 @@ export function FileCompare({ left, right, settings, actions, onSaved, onDirty, 
       unified,
       wrap: Boolean(settings.wordWrap) || unified,
       readOnly: { left: sides.left.readOnly, right: sides.right.readOnly },
+      options,
       onChange: (side, text) => {
         texts.current[side] = text;
         setDirty((d) => (d[side] === (text !== base.current[side]) ? d : { ...d, [side]: text !== base.current[side] }));
@@ -80,7 +88,7 @@ export function FileCompare({ left, right, settings, actions, onSaved, onDirty, 
       api.current?.destroy();
       api.current = null;
     };
-  }, [sides, theme, settings.wordWrap, unified]);
+  }, [sides, theme, settings.wordWrap, unified, options.whitespace, options.highlight, options.collapse]);
 
   const save = async (side) => {
     const desc = side === 'left' ? left : right;
@@ -104,7 +112,7 @@ export function FileCompare({ left, right, settings, actions, onSaved, onDirty, 
     setReload((n) => n + 1);
   };
   const count = pos.count;
-  const where = count === 0 ? 'No differences' : pos.index >= 0 ? `Change ${pos.index + 1} of ${count}` : `${count} change${count === 1 ? '' : 's'}`;
+  const where = differencesText(pos);
   const head = (side) => {
     const s = side === 'left' ? left : right;
     const state = sides?.[side];
@@ -130,18 +138,19 @@ export function FileCompare({ left, right, settings, actions, onSaved, onDirty, 
     left?.key && { label: `Open ${names?.left ?? sideName(left)} in a tab`, icon: 'file', run: () => actions.openCompareSide(left) },
     right?.key && { label: `Open ${names?.right ?? sideName(right)} in a tab`, icon: 'file', run: () => actions.openCompareSide(right) },
   ];
-  return html`<div class="ccmp ${unified ? 'unified' : ''}" role="region" aria-label="Files compared">
+  return html`<div class="ccmp ${unified ? 'unified' : ''} ${phone ? 'phone' : ''}" role="region" aria-label="Files compared">
     <div class="ccmp-bar">
       ${extra}
       <span class="muted small ccmp-count" aria-live="polite">${sides && !sides.error ? where : ''}</span>
-      <button type="button" class="icon-btn sm" aria-label="Previous change" title="Previous change (Alt+↑)" disabled=${!count} onClick=${() => api.current?.previous()}><${Icon} name="chevronDown" size=${16} class="up" /></button>
-      <button type="button" class="icon-btn sm" aria-label="Next change" title="Next change (Alt+↓)" disabled=${!count} onClick=${() => api.current?.next()}><${Icon} name="chevronDown" size=${16} /></button>
+      <button type="button" class="icon-btn sm" aria-label="Previous difference" title="Previous difference (Alt+↑)" disabled=${!count} onClick=${() => api.current?.previous()}><${Icon} name="chevronDown" size=${16} class="up" /></button>
+      <button type="button" class="icon-btn sm" aria-label="Next difference" title="Next difference (Alt+↓)" disabled=${!count} onClick=${() => api.current?.next()}><${Icon} name="chevronDown" size=${16} /></button>
       <span class="ccmp-gap" />
       <button type="button" class="btn ghost sm" disabled=${pos.index < 0 || sides?.right?.readOnly} title="Copy the change at the cursor to the right (Alt+→)" onClick=${() => api.current?.copyHere(true)}>
         <span class="label">Copy</span><${Icon} name="arrowRight" size=${14} /></button>
       <button type="button" class="btn ghost sm" disabled=${pos.index < 0 || sides?.left?.readOnly} title="Copy the change at the cursor to the left (Alt+←)" onClick=${() => api.current?.copyHere(false)}>
         <${Icon} name="arrowLeft" size=${14} /><span class="label">Copy</span></button>
       <span class="spacer" />
+      <${DiffOptions} settings=${settings} layout=${!phone} />
       <${MenuButton} label="More" items=${moreItems} />
     </div>
     <div class="ccmp-heads">${head('left')}${head('right')}</div>
@@ -206,7 +215,11 @@ function FoldersTab({ id, record, settings, actions }) {
   const [busy, setBusy] = useState(null);
   const [note, setNote] = useState(null);
   // Syncing: the preset and the person's own choices on top ({ preset, overrides: Map }), and the plan being confirmed.
-  const [sync, setSync] = useState(null);
+  // A mirror's Sync… opens it syncing (`syncPreset`, once).
+  const [sync, setSync] = useState(() => (record.syncPreset ? { preset: record.syncPreset, overrides: new Map() } : null));
+  useEffect(() => {
+    if (record.syncPreset) actions.updateCompare(id, { syncPreset: null }, { silent: true });
+  }, []);
   const [confirming, setConfirming] = useState(null);
   const [tick, setTick] = useState(0);
   const [split, setSplit] = useState(() => getSettings().compareSplit || 0.45);
@@ -338,7 +351,7 @@ function FoldersTab({ id, record, settings, actions }) {
     const { copy: list, same } = copyPlan(entries, picked, from);
     if (!list.length) return setNote({ text: same ? 'Those are the same on both sides already.' : `Nothing to copy: ${picked.length === 1 ? 'it is' : 'they are'} not on the ${from}.` });
     const replaced = list.filter((r) => entries.get(r)?.[to]).length;
-    if (replaced && !confirm(`Copy ${list.length} item${list.length === 1 ? '' : 's'} to the ${to}? ${replaced} there ${replaced === 1 ? 'is' : 'are'} replaced (${forGoodOn(record[to].path) ? `on ${forGoodOn(record[to].path)}: for good` : `the old ones go to ${binName()}`}).`)) return;
+    if (replaced && !confirm(`Copy ${list.length} item${list.length === 1 ? '' : 's'} to the ${to}? ${replaced} there ${replaced === 1 ? 'is' : 'are'} replaced (${replacedGo(record, to)}).`)) return;
     setBusy('copy');
     setNote(null);
     try {
@@ -488,6 +501,12 @@ function FoldersTab({ id, record, settings, actions }) {
       <span class="fcmp-head-name">${pathName(p)}</span>
       <span class="fcmp-head-where"><bdi>${rootWhere(p)}</bdi></span>
       <span class="spacer" />
+      <button type="button" class="icon-btn xs" title=${`Up one folder on the ${side} (past the folder picked too: a new one is asked about first)`} aria-label=${`Up one folder on the ${side}`} disabled=${!upOf(p)}
+        onClick=${async () => {
+          if (!leaveFile()) return;
+          const up = await actions.folderUp(p);
+          if (up) actions.updateCompare(id, { [side]: { path: up }, expanded: [] });
+        }}><${Icon} name="arrowUp" size=${14} /></button>
       <button type="button" class="icon-btn xs" title=${`Compare another folder on the ${side}`} aria-label=${`Change the ${side} folder`}
         onClick=${() => leaveFile() && actions.pickCompareFolder({ id, side })}><${Icon} name="edit" size=${13} /></button>
     </div>`;
@@ -661,17 +680,26 @@ function OneSide({ side, file, name, actions, settings, onCopy }) {
 // What a copy replaces, or a sync deletes, is gone for good on a server and on a phone (the
 // Android app has no Recycle Bin); here it goes to the Recycle Bin (the Trash).
 const forGoodOn = (path) => (isRemotePath(path) ? 'a server' : isAndroidApp() ? 'the phone' : '');
+// The two sides of one mirror (0.54): what a copy replaces is kept in that mirror's history (Undo).
+const mirrorPair = (record) => {
+  const l = mirrorOf(record.left?.path);
+  const r = mirrorOf(record.right?.path);
+  return l && r && l.mirror.id === r.mirror.id && l.side !== r.side && l.rel === r.rel ? l.mirror : null;
+};
+const replacedGo = (record, to) => (mirrorPair(record) ? 'the old ones are kept in the mirror’s history: Undo puts them back' : forGoodOn(record[to].path) ? `on ${forGoodOn(record[to].path)}: for good` : `the old ones go to ${binName()}`);
 
 /** Before a sync runs: what is copied each way (and what that replaces), what is deleted where. */
 function SyncConfirm({ plan, record, entries, onRun, onClose }) {
   const list = (rels) => html`<ul class="fcmp-plan">${rels.slice(0, 200).map((r) => html`<li key=${r}><${Icon} name=${entries.get(r)?.dir ? 'folder' : 'file'} size=${13} /><span>${r}</span></li>`)}${rels.length > 200 && html`<li class="muted">…and ${rels.length - 200} more</li>`}</ul>`;
   const old = (side) => (forGoodOn(record[side].path) ? `deleted for good (on ${forGoodOn(record[side].path)})` : `moved to ${binName()}`);
+  // A copy between a mirror's two sides keeps what it replaces in the mirror's history; deleting does not.
+  const replacedOld = (side) => (mirrorPair(record) ? 'kept in the mirror’s history (Undo)' : old(side));
   const copies = plan.toRight.length + plan.toLeft.length;
   const deletes = plan.deleteLeft.length + plan.deleteRight.length;
   const label = [copies && `Copy ${copies}`, deletes && `${copies ? 'delete' : 'Delete'} ${deletes}`].filter(Boolean).join(' and ');
   const copied = (to, rels, replaced) =>
     rels.length > 0 &&
-    html`<p><strong>${to === 'right' ? '→' : '←'} ${many(rels.length, 'item')} copied to the ${to}</strong>${replaced ? `: ${replaced} of them replace${replaced === 1 ? 's' : ''} what is there (the old ${replaced === 1 ? 'one is' : 'ones are'} ${old(to)})` : ''}.</p>${list(rels)}`;
+    html`<p><strong>${to === 'right' ? '→' : '←'} ${many(rels.length, 'item')} copied to the ${to}</strong>${replaced ? `: ${replaced} of them replace${replaced === 1 ? 's' : ''} what is there (the old ${replaced === 1 ? 'one is' : 'ones are'} ${replacedOld(to)})` : ''}.</p>${list(rels)}`;
   const removed = (side, rels) => rels.length > 0 && html`<p class="fcmp-del-note"><strong>✕ ${many(rels.length, 'item')} deleted on the ${side}</strong> (${old(side)}).</p>${list(rels)}`;
   return html`<${Modal} title="Sync the two folders" onClose=${onClose}
     footer=${html`<span class="spacer" /><button type="button" class="btn" onClick=${onClose}>Cancel</button>

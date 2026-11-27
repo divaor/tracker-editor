@@ -289,10 +289,12 @@ export function CompareFolderDialog({ other = '', side = 'right', panes = false,
     ev.preventDefault();
     const typed = path.trim();
     if (!typedServer || !typed) return;
-    if (!typed.startsWith('/')) return setNote({ text: 'Type the whole path, starting with / (for example /var/www/site).', error: true });
-    const uri = toRemoteUri(typedServer, typed.replace(/\/+$/, '') || '/');
     setBusy('path');
     try {
+      // ~ and $HOME are the server's home (0.54; the main process asks the server).
+      const full = window.desktop.remote.expandPath ? await window.desktop.remote.expandPath(typedServer, typed) : typed;
+      if (!full.startsWith('/')) throw new Error('Type the whole path, starting with / or ~ (for example /var/www/site or ~/site).');
+      const uri = toRemoteUri(typedServer, full.replace(/\/+$/, '') || '/');
       await window.desktop.folders.list(uri);
       choose(uri);
     } catch (err) {

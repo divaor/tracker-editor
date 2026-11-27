@@ -192,11 +192,42 @@ ipcMain.handle('disk:take-pasted', guard((_e, paths) => {
 }));
 // A path pasted as text or typed in quick open: the page names it, so a file or folder it
 // cannot reach yet opens only after the person says so in a native dialog naming it.
-ipcMain.handle('disk:open-typed', guard(async (event, typed) => {
+// Its environment variables and ~ are expanded first (typedPaths.cjs: only variables holding a
+// path), so the dialog names the folder they mean.
+const typedPaths = require('./typedPaths.cjs');
+const expandTyped = (typed) => {
   if (typeof typed !== 'string' || !typed.trim() || typed.length > 1024) throw new Error('That is not a path.');
-  const given = typed.trim();
-  const full = /^~(?=$|[\\/])/.test(given) ? path.join(os.homedir(), given.slice(1)) : given;
-  if (!path.isAbsolute(full)) throw new Error('Give the whole path (C:\\… or /…).');
+  const out = typedPaths.expandTyped(typed, { env: process.env, platform: process.platform, home: os.homedir(), exists: (p) => fs.existsSync(p) });
+  if (out.problem) throw new Error(out.problem);
+  if (!path.isAbsolute(out.path)) throw new Error('Give the whole path (C:\\… or /…).');
+  return out.path;
+};
+// Where a typed path goes, for quick open's row while typing: nothing is allowed by it. `base` is
+// the folder to list for completing the last part (`part`), listed by folder:list only when the
+// page reaches it already (`reachable`).
+ipcMain.handle('disk:expand-typed', guard((_e, typed) => {
+  let full;
+  try {
+    full = expandTyped(typed);
+  } catch (err) {
+    return { problem: err.message };
+  }
+  const stat = (p) => {
+    try {
+      return fs.statSync(p);
+    } catch {
+      return null;
+    }
+  };
+  const s = stat(full);
+  const open = s?.isDirectory() && /[\\/]$/.test(full);
+  const base = open ? full : path.dirname(full);
+  const part = open ? '' : path.basename(full);
+  const reachable = Boolean(stat(base)?.isDirectory()) && folders.allowedBy(allowedFolders, base);
+  return { path: full, exists: Boolean(s), dir: Boolean(s?.isDirectory()), base, part, reachable, sep: path.sep };
+}));
+ipcMain.handle('disk:open-typed', guard(async (event, typed) => {
+  const full = expandTyped(typed);
   const [item] = shellIntegration.launchedPaths([full], { skip: 0, scheme: LINK_SCHEME });
   if (!item) return { missing: true };
   const reachable = folders.allowedBy(allowedFolders, item.path) || (!item.dir && allowedFiles.has(item.path));
@@ -278,6 +309,7 @@ ipcMain.handle('remote:delete', guard((_e, id) => {
 ipcMain.handle('remote:test', guard((_e, conn, secrets) => remote.test(conn ?? {}, secrets ?? {})));
 ipcMain.handle('remote:connect', guard((_e, id) => remote.connect(id)));
 ipcMain.handle('remote:disconnect', guard((_e, id) => remote.disconnect(id)));
+ipcMain.handle('remote:expand-path', guard((_e, id, typed) => remote.expandPath(id, typed)));
 ipcMain.handle('remote:forget-host-key', guard((_e, id) => remote.forgetHostKey(id)));
 ipcMain.handle('remote:host-key-answer', guard((_e, question, ok) => {
   hostKeyQuestions.get(question)?.(Boolean(ok));
@@ -388,6 +420,8 @@ async function syncMirror(id, { confirmDeletes = false, restore = [], auto = fal
   const running = (async () => {
     setMirror(m, { state: 'syncing', progress: { done: 0, total: 0, current: '' }, error: '' });
     try {
+      // An upload, download or undo by hand finishes first (they keep the same state).
+      await mirrorTransfersLib?.idle(id).catch(() => {});
       const summary = await mirrorLib.runMirror(m, mirrorIo(m), { confirmDeletes, restore: Array.isArray(restore) ? restore : [], onProgress: (progress) => setMirror(m, { progress }) });
       m.last = { at: Date.now(), uploaded: summary.uploaded, downloaded: summary.downloaded, deletedLocal: summary.deletedLocal, deletedRemote: summary.deletedRemote, conflicts: summary.conflicts.length, errors: summary.errors.length };
       saveMirrors();
@@ -499,11 +533,14 @@ ipcMain.handle('mirror:save', guard((_e, input = {}) => {
     local,
     mode: mirrorLib.MODES.includes(input.mode) ? input.mode : 'both',
     auto: Boolean(input.auto),
+    // Mirrors by hand: a file saved in the editor inside the folder here is uploaded (when nothing is at risk).
+    uploadOnSave: Boolean(input.uploadOnSave),
     exclude: String(input.exclude ?? mirrorLib.DEFAULT_EXCLUDE).slice(0, 1000),
     last: existing && existing.local === local && existing.remote === remotePath && existing.conn === conn.id ? existing.last : null,
   };
-  // Another pair of folders: the old state does not apply.
-  if (existing && !mirror.last) fs.rmSync(mirrorStatePath(mirror.id), { force: true });
+  // Another pair of folders: the old state does not apply (the same pair keeps it, synced or not:
+  // a mirror kept by hand has a state from its transfers before any sync).
+  if (existing && !(existing.local === local && existing.remote === remotePath && existing.conn === conn.id)) fs.rmSync(mirrorStatePath(mirror.id), { force: true });
   mirrors = existing ? mirrors.map((m) => (m.id === mirror.id ? mirror : m)) : [...mirrors, mirror];
   saveMirrors();
   // Its folder here may have changed: watched again.
@@ -528,6 +565,80 @@ ipcMain.handle('mirror:sync', guard((_e, id, opts = {}) =>
   }),
 ));
 app.whenReady().then(watchMirrors);
+
+// ---- Mirrors by hand (0.54): Upload, Download, Compare, Undo (mirrorTransfer.cjs) ----------
+// The page names a mirror by its id and files by paths on either side of it; mirrorTransfer.cjs
+// turns them into relative paths inside it (never anything else here is written). Each transfer
+// keeps the destination's old versions in <userData>/mirror-history (mirror-history.json) for Undo.
+const { createMirrorTransfers } = require('./mirrorTransfer.cjs');
+let mirrorTransfersLib = null;
+const mirrorTransfers = async () =>
+  (mirrorTransfersLib ??= createMirrorTransfers({
+    remote,
+    toUri: remoteFiles.toUri,
+    parseUri: remoteFiles.parseUri,
+    isRemote,
+    historyDir: path.join(app.getPath('userData'), 'mirror-history'),
+    historyFile: path.join(app.getPath('userData'), 'mirror-history.json'),
+    statePath: (m) => mirrorStatePath(m.id),
+    check: (await loadAppModules()).mirrorCheck,
+    trash: (p) => shell.trashItem(p),
+    mirrorOf: (id) => mirrors.find((m) => m.id === id) ?? null,
+    busy: (m) => Boolean(mirrorLive.get(m.id)?.running),
+  }));
+const mirrorById = (id) => {
+  const m = mirrors.find((x) => x.id === id);
+  if (!m) throw new Error('That mirror is not set up here any more.');
+  return m;
+};
+const friendly = (fn) => async (...args) => {
+  try {
+    return await fn(...args);
+  } catch (err) {
+    throw new Error(remoteFiles.friendlyError(err).message);
+  }
+};
+// What an upload or a download of `paths` would do, file by file. `quiet`: a server not connected
+// is not connected for it (the note over a tab): { offline: true }.
+ipcMain.handle('mirror:check', guard(friendly(async (_e, id, paths, direction, opts = {}) => {
+  const m = mirrorById(id);
+  if (opts?.quiet && !remote.isConnected(m.conn)) return { offline: true };
+  return (await mirrorTransfers()).check(m, paths, direction);
+})));
+// Copies files one way ([{ rel, expect, size }]: what the check saw); many or large ones show as a transfer (Stop).
+ipcMain.handle('mirror:transfer', guard(friendly(async (_e, id, items, direction) => {
+  const m = mirrorById(id);
+  mirrorBusy(id);
+  const t = await mirrorTransfers();
+  const stat = (x) => (x && Number.isFinite(x.size) && Number.isFinite(x.mtimeMs) ? { size: x.size, mtimeMs: x.mtimeMs } : null);
+  const list = (Array.isArray(items) ? items : []).filter((i) => i && typeof i.rel === 'string').map((i) => ({ rel: i.rel, size: Number(i.size) || 0, ...('expect' in i ? { expect: stat(i.expect) } : {}) }));
+  if (!list.length || !['upload', 'download'].includes(direction)) throw new Error('Nothing to do.');
+  const big = list.length > 3 || list.reduce((n, i) => n + i.size, 0) > 2 * 1024 * 1024;
+  if (!big) return t.transfer(m, list, direction);
+  const up = direction === 'upload';
+  const remoteRoot = remoteFiles.toUri(m.conn, m.remote);
+  return startTransfer(
+    { op: 'copy', kind: direction, paths: list.map((i) => (up ? path.join(m.local, ...i.rel.split('/')) : remoteFiles.toUri(m.conn, path.posix.join(m.remote, i.rel)))), dir: up ? remoteRoot : m.local },
+    (job) => t.transfer(m, list, direction, { job }),
+    { wait: true },
+  );
+})));
+ipcMain.handle('mirror:undo', guard(friendly(async (_e, entryId) => {
+  if (typeof entryId !== 'string') throw new Error('Nothing to undo.');
+  return (await mirrorTransfers()).undo(entryId);
+})));
+ipcMain.handle('mirror:history', guard(async (_e, id) => (await mirrorTransfers()).history(typeof id === 'string' ? id : null)));
+// A kept old version as text (to compare with the file now): { text } or { binary }, null when not kept.
+ipcMain.handle('mirror:history-text', guard(async (_e, entryId, rel) => {
+  const bytes = (await mirrorTransfers()).keptBytes(String(entryId), String(rel));
+  if (!bytes) return null;
+  try {
+    return { text: disk.decode(bytes).text };
+  } catch {
+    return { binary: true };
+  }
+}));
+app.whenReady().then(() => mirrorTransfers().then((t) => t.prune()).catch(() => {}));
 
 // ---- Terminals (on servers over SSH, and on this computer) -----------------------
 // A shell on the server, over the same connection as its files, or ('local') the person's
@@ -819,7 +930,7 @@ ipcMain.handle('term:open', guard(async (event, connId, opts = {}) => {
   });
   terminals.set(id, { stream, sender });
   watchTerminalPage(sender);
-  return { id, shell: stream.shell ?? 'posix', profile: stream.profile ?? '', label: stream.label ?? '', distro: stream.distro ?? '', integrated: Boolean(stream.integrated) };
+  return { id, shell: stream.shell ?? 'posix', profile: stream.profile ?? '', label: stream.label ?? '', distro: stream.distro ?? '', integrated: Boolean(stream.integrated), nonce: stream.nonce ?? '' };
 }));
 // A page reloaded or closed: its shells end (once per page, not once per shell).
 const terminalPages = new WeakSet();
@@ -1262,6 +1373,39 @@ ipcMain.handle('folder:allow-parent', guard(async (event, file) => {
   }
   return { dir };
 }));
+// Going up past a picked folder (0.54): from a folder the page reaches, to the one above it (or,
+// `to`, a folder above it: a crumb). One not reachable yet is added only after the person says
+// so in a native dialog naming it; "Allow all of …" adds its drive (share, storage, home folder)
+// instead, so going up there never asks again. folders.cjs allowUp has the rules.
+ipcMain.handle('folder:allow-up', guard(async (event, dir, opts = {}) => {
+  const { folders: names } = await loadAppModules();
+  const home = os.homedir();
+  return folders.allowUp(dir, { to: opts?.to }, {
+    roots: () => allowedFolders,
+    wideOf: (p) => names.wideOf(p, { home }),
+    add: (p) => {
+      if (allowedFolders.includes(p)) return;
+      allowedFolders.push(p);
+      saveFolders();
+    },
+    async ask({ dir: target, wide }) {
+      // "F:\", "/", "\\nas\share", your home folder, the phone's storage by its name.
+      const named = (p) => (p === home ? 'your home folder' : /^\/(storage|sdcard)\b/.test(p) ? names.folderLabel(p) : p);
+      const buttons = wide ? ['Go up', `Allow all of ${named(wide)}`, 'Cancel'] : ['Go up', 'Cancel'];
+      const { response } = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender) ?? mainWindow, {
+        type: 'question',
+        buttons,
+        defaultId: 0,
+        cancelId: buttons.length - 1,
+        noLink: true,
+        title: 'Go up',
+        message: `Go up to ${target}?`,
+        detail: `Tinta will be able to open and change the files in it, as with a folder you pick.${wide ? `\n\nAllow all of ${wide}: every folder in it, so going up there never asks again.` : ''}`,
+      });
+      return response === 0 ? 'up' : response === 1 && wide ? 'all' : null;
+    },
+  });
+}));
 ipcMain.handle('folder:forget', guard((_e, folder) => {
   const at = allowedFolders.indexOf(folder);
   if (at !== -1) allowedFolders.splice(at, 1);
@@ -1353,7 +1497,7 @@ function sendTransfer(job, now = false) {
  * (between servers). The copy functions report through the job: plan(files) for the
  * totals, then start(file), bytes(n so far of that file) and fileDone(file).
  */
-function startTransfer({ op, kind, paths, dir }, work) {
+function startTransfer({ op, kind, paths, dir }, work, { wait = false } = {}) {
   const controller = new AbortController();
   let doneBytes = 0;
   const job = {
@@ -1402,11 +1546,21 @@ function startTransfer({ op, kind, paths, dir }, work) {
     sendTransfer(job, true);
     setTimeout(() => transfers.delete(job.id), 10 * 60 * 1000).unref?.();
   };
-  work(job).then(
-    (result) => end({ state: 'done', result }),
-    (err) => end({ state: err.stopped || controller.signal.aborted ? 'stopped' : 'failed', error: err.stopped ? '' : String(err.message ?? err), result: err.done ?? [] }),
+  const finished = work(job).then(
+    (result) => {
+      // `wait` (a mirror's transfer: an object with the files `done`): stopped between files is not an error.
+      end(wait ? { state: controller.signal.aborted ? 'stopped' : 'done', result: result?.done ?? [] } : { state: 'done', result });
+      return result;
+    },
+    (err) => {
+      end({ state: err.stopped || controller.signal.aborted ? 'stopped' : 'failed', error: err.stopped ? '' : String(err.message ?? err), result: err.done ?? [] });
+      throw err;
+    },
   );
   sendTransfer(job, true);
+  // `wait`: the call itself waits for the end (the card shows the progress meanwhile).
+  if (wait) return finished;
+  finished.catch(() => {});
   return { transfer: job.id };
 }
 ipcMain.handle('transfer:list', guard(() => [...transfers.values()].map(transferView)));
@@ -1748,6 +1902,18 @@ ipcMain.handle('compare:same', guard(async (_e, left, right, rels) => {
 ipcMain.handle('compare:copy', guard(async (_e, from, to, rels) => {
   compareRoot(from);
   compareRoot(to);
+  // Between a mirror's two sides: through the mirror, so the old versions are kept (Undo) and
+  // its state follows (the next sync or check sees them in step). { mirror: { id, direction, entry, done, … } }
+  const pair = (await mirrorTransfers()).pairOf(mirrors, from, to);
+  if (pair) {
+    mirrorBusy(pair.m.id);
+    const list = compareRels(rels);
+    const t = await mirrorTransfers();
+    const out = await startTransfer({ op: 'copy', kind: pair.direction, paths: list.map((rel) => inRoot(from, rel)), dir: to }, (job) => t.copyFromCompare(pair.m, pair.direction, pair.base, list, { job }), { wait: true }).catch((err) => {
+      throw new Error(remoteFiles.friendlyError(err).message);
+    });
+    return { mirror: { id: pair.m.id, direction: pair.direction, ...out } };
+  }
   const groups = folderCompare.byParent(compareRels(rels));
   const work = async (job) => {
     const results = [];
@@ -1989,6 +2155,7 @@ const loadAppModules = async () =>
     replace: await import(pathToFileURL(path.join(APP_DIR, 'js', 'replace.js')).href),
     askFind: await import(pathToFileURL(path.join(APP_DIR, 'js', 'askFind.js')).href),
     lineEndings: await import(pathToFileURL(path.join(APP_DIR, 'js', 'lineEndings.js')).href),
+    mirrorCheck: await import(pathToFileURL(path.join(APP_DIR, 'js', 'mirrorCheck.js')).href),
   });
 // The matching runs in a worker thread, so a pattern that takes very long (or a huge
 // minified file) never freezes the window; Stop, or 15 s on one file, ends the worker.
@@ -3748,6 +3915,7 @@ function buildMenu() {
         item('The Model', 'CmdOrCtrl+Shift+A', 'assistant'),
         shown('Outline and Links', 'CmdOrCtrl+Shift+O', 'outline'),
         shown('Terminal', 'Ctrl+`', 'terminal'),
+        shown('Terminals Tab', 'Ctrl+Shift+`', 'terminals-tab'),
         // While debugging, F5 continues (the page's keys; the menu only shows them).
         { ...shown('Run This File', undefined, 'run-file'), accelerator: debugging && runKey === continueKey ? undefined : runKey },
         shown('Run the Test at the Cursor', 'CmdOrCtrl+F5', 'test-at-cursor'),

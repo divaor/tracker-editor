@@ -4,7 +4,7 @@
 // Text recognition (vendor/ocr/, about 9 MB), the terminal (vendor/xterm/,
 // desktop only), the formatters (vendor/format/) and pdf.js (vendor/pdf/, about 6 MB) are
 // cached the first time they are used.
-const CACHE = 'editor-v0.53.0';
+const CACHE = 'editor-v0.54.0';
 const INBOX = 'editor-inbox'; // shared files waiting for the app (see js/inbox.js)
 const ASSETS = [
   './',
@@ -54,7 +54,11 @@ const ASSETS = [
   'js/codeMenu.js',
   'js/comparePick.js',
   'js/compares.js',
+  'js/lineDiff.js',
+  'js/diffLayout.js',
+  'js/diffView.js',
   'js/folderCompare.js',
+  'js/folderList.js',
   'js/folderPick.js',
   'js/panes.js',
   'js/paneLayout.js',
@@ -140,6 +144,7 @@ const ASSETS = [
   'js/ui/compareFolderPick.js',
   'js/ui/compareTab.js',
   'js/ui/comparePicker.js',
+  'js/ui/diffOptions.js',
   'js/ui/components.js',
   'js/ui/dialogs.js',
   'js/ui/encryption.js',
@@ -172,6 +177,7 @@ const ASSETS = [
   'js/folders.js',
   'js/archives.js',
   'js/folderIndex.js',
+  'js/ui/folderMenu.js',
   'js/ui/folderPreview.js',
   'js/ui/archives.js',
   'js/ui/fullScreen.js',
@@ -216,6 +222,7 @@ const ASSETS = [
   'vendor/purify.js',
   'js/terminalTabs.js',
   'js/terminalSessions.js',
+  'js/sshCommand.js',
   'js/testGutter.js',
   'js/dap.js',
   'js/debugTools.js',
@@ -225,13 +232,17 @@ const ASSETS = [
   'js/project.js',
   'js/dockerize.js',
   'js/terminals.js',
+  'js/terminalsTabs.js',
   'js/ui/terminal.js',
+  'js/ui/terminalsTab.js',
   'js/ui/tests.js',
   'js/ui/debugPanel.js',
   'js/ui/folderSearch.js',
   'js/ui/properties.js',
   'js/ui/mirrors.js',
   'js/mirrors.js',
+  'js/mirrorCheck.js',
+  'js/mirrorFlow.js',
   'js/transfers.js',
   'js/ui/transfers.js',
   'js/docTypes.js',

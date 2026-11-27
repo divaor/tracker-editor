@@ -87,6 +87,11 @@ export const DEFAULT_SETTINGS = {
   // or a reopen takes it up again, its output and what runs in it too.
   terminalTmux: true,
   terminalRecent: [],
+  // Terminals tabs (terminalsTabs.js): their output kept on this device (kv, never synced) to show
+  // above the new shell when they come back; false keeps none.
+  terminalKeepOutput: true,
+  // Terminal sessions saved by name (terminalSessions.js: { id, name, terminals, layout, runAgain, savedAt }; kept on this device).
+  terminalSessions: [],
   indentGuides: true,
   bracketColors: true,
   stickyScroll: true,
@@ -151,6 +156,8 @@ export const DEFAULT_SETTINGS = {
   debugWatches: [],
   // Servers: permissions (rwxr-xr-x) next to each file in the folders view.
   showPermissions: false,
+  // Mirrors by hand: an upload or a download asks first only when something is at risk ('risky'), or 'always'.
+  mirrorConfirm: 'risky',
   // The terminal panel's height (desktop), in pixels.
   terminalHeight: 280,
   // The left terminal's share when two show side by side (0 = half).
@@ -159,6 +166,14 @@ export const DEFAULT_SETTINGS = {
   // the share of a folder comparison its tree takes (0 = the usual).
   savedCompares: [],
   compareSplit: 0,
+  // Two texts compared (lineDiff.js, the comparisons' bar): which spaces count ('exact', 'trim':
+  // not those at the ends of lines, 'ignore': none), what is marked inside changed lines
+  // ('words', 'chars', 'lines', 'none'), unchanged stretches folded away, and one text instead
+  // of side by side (phones always show one text).
+  compareWhitespace: 'exact',
+  compareHighlight: 'words',
+  compareCollapse: true,
+  compareUnified: false,
   // On a phone: folder comparisons and two panes turn the app sideways by themselves (Sideways / Upright).
   compareSideways: false,
   // The HTML preview runs the page's scripts (desktop: served from this computer) for these tab keys.

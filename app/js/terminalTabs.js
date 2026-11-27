@@ -157,3 +157,22 @@ export function commandEnded(data) {
  * ended and with what code: printf's OSC 633;D after it. '' for shells that say it themselves.
  */
 export const endMark = (kind) => (kind === 'posix' || kind === 'wsl' ? `; printf '\\033]633;D;%s\\007' "$?"` : '');
+
+// ---- What a command line runs (OSC 633;E and C), for a Terminals tab brought back ----
+
+/**
+ * OSC 633's data when a shell says the command line it is about to run ("E;<line>;<nonce>", as
+ * VS Code's shell integration writes it: \\ for a backslash, \xHH for ; and control characters):
+ * the line, when the nonce is the one its shell was started with (`nonce`: shellHooks.cjs), else
+ * null. Without the nonce a program's output could pass for the shell (and its line be offered
+ * again); with none to check (`nonce` ''), nothing is believed.
+ */
+export function commandLine(data, nonce) {
+  const parts = String(data ?? '').split(';');
+  if (parts[0] !== 'E' || parts.length !== 3 || !nonce || parts[2] !== nonce) return null;
+  if (parts[1].length > 8192) return null;
+  return parts[1].replace(/\\(?:\\|x([0-9a-fA-F]{2}))/g, (_, hex) => (hex ? String.fromCharCode(parseInt(hex, 16)) : '\\'));
+}
+
+/** Whether OSC 633's data says a command starts ("C"; "E;…" comes just before it). */
+export const commandStarted = (data) => data === 'C';

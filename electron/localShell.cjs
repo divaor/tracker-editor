@@ -7,6 +7,7 @@
 // integration, so they say their folder after each command.
 const { EventEmitter } = require('node:events');
 const { execFile } = require('node:child_process');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -141,9 +142,10 @@ function startDir(dir, { isDir = (p) => fs.statSync(p).isDirectory() } = {}) {
 function openLocalShell({ cols = 100, rows = 24, cwd = '', shell = '', hooksDir = '', distros = [], spawn = spawnPty, platform, env, exists } = {}) {
   const list = listShells({ platform, env, exists, distros });
   const chosen = list.find((s) => s.id === shell) ?? list[0];
-  const start = integrate(chosen, shellEnv(env), hooksDir);
+  // The nonce the shell's "this line runs" (OSC 633;E) comes with, for the page to believe it.
+  const start = integrate(chosen, shellEnv(env), hooksDir, { nonce: crypto.randomBytes(8).toString('hex') });
   const proc = spawn(chosen.file, start.args, { name: 'xterm-256color', cols, rows, cwd: startDir(cwd), env: start.env, useConpty: true });
-  return ptyStream(proc, { shell: chosen.kind, profile: chosen.id, label: chosen.label, distro: chosen.distro ?? '', integrated: Boolean(start.integrated) });
+  return ptyStream(proc, { shell: chosen.kind, profile: chosen.id, label: chosen.label, distro: chosen.distro ?? '', integrated: Boolean(start.integrated), nonce: start.nonce ?? '' });
 }
 
 /** node-pty's spawn (loaded the first time a terminal opens). */
@@ -152,10 +154,10 @@ const spawnPty = (...args) => loadPty().spawn(...args);
 /**
  * A program in a pseudo-terminal (node-pty's process) with the face of a shell on a server:
  * 'data', 'exit' and 'close' events, write, setWindow and close; `info` says which shell it is
- * (`shell`: its kind, `profile`, `label`, `distro`, `integrated`). Also for the terminals of
+ * (`shell`: its kind, `profile`, `label`, `distro`, `integrated`, `nonce`). Also for the terminals of
  * Docker containers and WSL distributions (places.cjs), whose program is docker or wsl.exe.
  */
-function ptyStream(proc, { shell = 'posix', profile = '', label = '', distro = '', integrated = false } = {}) {
+function ptyStream(proc, { shell = 'posix', profile = '', label = '', distro = '', integrated = false, nonce = '' } = {}) {
   const stream = new EventEmitter();
   let closed = false;
   const end = () => {
@@ -174,6 +176,8 @@ function ptyStream(proc, { shell = 'posix', profile = '', label = '', distro = '
   stream.distro = distro;
   // It says when a command ended (shellHooks.cjs); without, a run adds its own mark.
   stream.integrated = integrated;
+  // What its "this line runs" (OSC 633;E) comes with (shellHooks.cjs); '' when it says none.
+  stream.nonce = nonce;
   stream.write = (data) => {
     if (!closed) proc.write(data);
   };

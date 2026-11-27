@@ -6,8 +6,8 @@
 //   one chunk per language, loaded the first time a file needs it, and lsp.js (the
 //   language server client, desktop). files.json lists them so the service worker can
 //   cache all of them for offline use.
-// - xterm.js (with its fit add-on) is bundled into app/vendor/xterm/xterm.js, next
-//   to its stylesheet: the terminal on servers in the desktop app.
+// - xterm.js (with its fit and serialize add-ons) is bundled into app/vendor/xterm/xterm.js,
+//   next to its stylesheet: the terminal in the desktop and Android apps.
 // - Anthropic's SDK for the Claude API is bundled into app/vendor/anthropic.js (claude.js
 //   loads it the first time Claude is the model). The tracker keeps a copy of the file.
 // - pdf.js (its legacy build, for older Android WebViews) goes to app/vendor/pdf/ with its
@@ -78,6 +78,7 @@ const xtermDir = path.join(outDir, 'xterm');
 await rm(xtermDir, { recursive: true, force: true });
 const { version: xtermVersion } = await pkgInfo('@xterm/xterm');
 const { version: fitVersion } = await pkgInfo('@xterm/addon-fit');
+const { version: serializeVersion } = await pkgInfo('@xterm/addon-serialize');
 await build({
   entryPoints: { xterm: path.join(root, 'vendor-src', 'xterm.js') },
   bundle: true,
@@ -85,7 +86,7 @@ await build({
   minify: true,
   target: 'es2022',
   outdir: xtermDir,
-  banner: { js: `/* @xterm/xterm@${xtermVersion} and @xterm/addon-fit@${fitVersion} (MIT) - bundled by scripts/vendor.js */` },
+  banner: { js: `/* @xterm/xterm@${xtermVersion}, @xterm/addon-fit@${fitVersion} and @xterm/addon-serialize@${serializeVersion} (MIT) - bundled by scripts/vendor.js */` },
   legalComments: 'none',
   logLevel: 'warning',
 });
@@ -93,7 +94,7 @@ const xtermCss = await readFile(path.join(root, 'node_modules', '@xterm', 'xterm
 await writeFile(path.join(xtermDir, 'xterm.css'), `/* @xterm/xterm@${xtermVersion} (MIT) - vendored by scripts/vendor.js */\n${xtermCss}`);
 // Only the desktop app uses it: cached when first used, not precached on phones.
 await writeFile(path.join(xtermDir, 'files.json'), `${JSON.stringify(['xterm.js', 'xterm.css'], null, 2)}\n`);
-console.log(`app/vendor/xterm/ <- @xterm/xterm@${xtermVersion}, @xterm/addon-fit@${fitVersion}`);
+console.log(`app/vendor/xterm/ <- @xterm/xterm@${xtermVersion}, @xterm/addon-fit@${fitVersion}, @xterm/addon-serialize@${serializeVersion}`);
 
 // Formatting (Format document): Prettier's standalone build with the parsers used here, and
 // sql-formatter bundled. Loaded when first used, and cached then (vendor/format/files.json).

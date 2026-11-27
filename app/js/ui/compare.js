@@ -2,20 +2,24 @@ import { html, useEffect, useLayoutEffect, useRef, useState } from '../../vendor
 import { createCompareView } from '../editor.js';
 import { resolvedTheme } from '../settings.js';
 import { Icon } from './icons.js';
+import { DiffOptions, differencesText } from './diffOptions.js';
+import { diffOptionsOf } from '../lineDiff.js';
 
 const NARROW = '(max-width: 860px)';
 
 /**
- * Two texts compared, in place of the editor: side by side on wide screens,
- * one text with the changes marked on phones. `compare` is { left, right,
- * name, language, actions }, where left/right are { label, text, detail? } (`detail`:
- * where the file is, e.g. its folder) and actions [{ label, icon, run, primary? }]
+ * Two texts compared, in place of the editor: side by side on wide screens (unless one text is
+ * chosen), one text with the changes marked on phones. The bar's choices (whitespace,
+ * highlighting, folding, layout) are the comparisons' settings (ui/diffOptions.js). `compare`
+ * is { left, right, name, language, actions }, where left/right are { label, text, detail? }
+ * (`detail`: where the file is, e.g. its folder) and actions [{ label, icon, run, primary? }]
  * sit in the bar (e.g. "Restore this version").
  */
 export function CompareView({ compare, settings, onClose }) {
   const el = useRef(null);
   const api = useRef(null);
   const [changes, setChanges] = useState(null);
+  const options = diffOptionsOf(settings);
   const [narrow, setNarrow] = useState(() => matchMedia(NARROW).matches);
   useEffect(() => {
     const query = matchMedia(NARROW);
@@ -23,6 +27,7 @@ export function CompareView({ compare, settings, onClose }) {
     query.addEventListener('change', onChange);
     return () => query.removeEventListener('change', onChange);
   }, []);
+  const unified = narrow || Boolean(settings.compareUnified);
   useLayoutEffect(() => {
     api.current = createCompareView(el.current, {
       left: compare.left.text,
@@ -30,18 +35,20 @@ export function CompareView({ compare, settings, onClose }) {
       name: compare.name,
       language: compare.language,
       dark: resolvedTheme(settings.theme) === 'dark',
-      unified: narrow,
+      unified,
       wrap: settings.wordWrap || narrow,
+      options,
     });
     setChanges(api.current.changes());
     return () => api.current.destroy();
-  }, [compare, narrow]);
-  return html`<div class="compare ${narrow ? 'unified' : ''}" role="region" aria-label="Compare">
+  }, [compare, unified, options.whitespace, options.highlight, options.collapse]);
+  return html`<div class="compare ${unified ? 'unified' : ''}" role="region" aria-label="Compare">
     <div class="compare-bar">
-      <span class="muted small compare-count">${changes === 0 ? 'No differences' : changes ? `${changes} change${changes === 1 ? '' : 's'}` : ''}</span>
-      <button type="button" class="icon-btn sm" aria-label="Previous change" title="Previous change" disabled=${!changes} onClick=${() => api.current?.previous()}><${Icon} name="chevronDown" size=${16} class="up" /></button>
-      <button type="button" class="icon-btn sm" aria-label="Next change" title="Next change" disabled=${!changes} onClick=${() => api.current?.next()}><${Icon} name="chevronDown" size=${16} /></button>
+      <span class="muted small compare-count">${changes == null ? '' : differencesText({ index: -1, count: changes })}</span>
+      <button type="button" class="icon-btn sm" aria-label="Previous difference" title="Previous difference" disabled=${!changes} onClick=${() => api.current?.previous()}><${Icon} name="chevronDown" size=${16} class="up" /></button>
+      <button type="button" class="icon-btn sm" aria-label="Next difference" title="Next difference" disabled=${!changes} onClick=${() => api.current?.next()}><${Icon} name="chevronDown" size=${16} /></button>
       <span class="spacer" />
+      <${DiffOptions} settings=${settings} layout=${!narrow} compact />
       ${(compare.actions ?? []).map(
         (a) => html`<button type="button" key=${a.label} class="btn sm ${a.primary ? 'primary' : ''}" title=${a.label} aria-label=${a.label} onClick=${a.run}><${Icon} name=${a.icon} size=${14} /><span class="label">${a.label}</span></button>`,
       )}

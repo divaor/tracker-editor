@@ -80,3 +80,23 @@ export function pastedPath(text) {
   // A name after the root: not "/" or "C:\" alone.
   return root && /[^\\/]/.test(p.slice(root[0].length)) ? p : null;
 }
+
+// A variable at the start of a path: %NAME% (cmd), $NAME and ${NAME} (sh), $env:NAME and ${env:NAME} (PowerShell), or ~.
+const LEADING_VARIABLE = /^(?:(?:%[A-Za-z_][\w()-]*%|\$\{(?:env:)?[A-Za-z_][\w()-]*\}|\$env:[A-Za-z_][\w()]*|\$[A-Za-z_]\w*)(?=$|[\\/%$])|~(?=$|[\\/]))/;
+
+/**
+ * A path typed in quick open (0.54): what pastedPath takes, or one that starts with an
+ * environment variable or ~ ("%USERPROFILE%\.tinta\settings", "$HOME/src", "~"), which the
+ * main process expands (disk:expand-typed, disk:open-typed). Null for anything else.
+ */
+export function typedPath(text) {
+  const pasted = pastedPath(text);
+  if (pasted) return pasted;
+  let p = String(text ?? '').trim();
+  if (!p || p.length > 1024 || /[\r\n]/.test(p)) return null;
+  if (/^(["']).*\1$/.test(p)) p = p.slice(1, -1).trim();
+  return LEADING_VARIABLE.test(p) && !/["<>|*?\t]/.test(p) ? p : null;
+}
+
+/** Whether a typed path ends with a variable or ~ ("$HOME", "C:\x\%APPDATA%"): completing goes inside it. */
+export const endsWithVariable = (p) => /(?:^|[\\/])(?:%[A-Za-z_][\w()-]*%|\$\{(?:env:)?[A-Za-z_][\w()-]*\}|\$env:[A-Za-z_][\w()]*|\$[A-Za-z_]\w*|~)$/.test(String(p ?? '').trim());

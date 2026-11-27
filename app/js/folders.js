@@ -140,6 +140,125 @@ export function parentOf(dir, root) {
   return crumbs.length > 1 ? crumbs[crumbs.length - 2].path : null;
 }
 
+// ---- Going up past the folder picked (0.54): to the top of its drive, share, storage or server ----
+
+const REMOTE = 'remote://';
+const isRemote = (p) => typeof p === 'string' && p.startsWith(REMOTE);
+const remoteSplit = (p) => {
+  const rest = p.slice(REMOTE.length);
+  const slash = rest.indexOf('/');
+  return { id: slash === -1 ? rest : rest.slice(0, slash), inner: (slash === -1 ? '' : rest.slice(slash)) || '/' };
+};
+const isWindowsPath = (p) => /^[A-Za-z]:([\\/]|$)|^\\\\/.test(p) || (p.includes('\\') && !p.includes('/'));
+
+/** A path as a key: without the separators at its end (a top folder keeps its own), Windows paths in lower case. */
+export function pathKey(p) {
+  if (!p) return '';
+  if (isRemote(p)) {
+    const { id, inner } = remoteSplit(p);
+    return `${REMOTE}${id}${inner.replace(/\/+$/, '') || '/'}`;
+  }
+  const trimmed = /^([A-Za-z]:)?[\\/]+$/.test(p) ? p : p.replace(/[\\/]+$/, '');
+  return isWindowsPath(p) ? trimmed.toLowerCase() : trimmed;
+}
+
+/** Whether two paths name the same folder. */
+export const samePath = (a, b) => Boolean(a) && Boolean(b) && pathKey(a) === pathKey(b);
+
+/** The folder a folder is in, here or on a server; '' at the top ("/", "C:\", "\\server\share", a server's "/"). */
+export function parentPath(p) {
+  if (!p) return '';
+  if (isRemote(p)) {
+    const { id, inner } = remoteSplit(p);
+    const trimmed = inner.replace(/\/+$/, '');
+    return trimmed ? `${REMOTE}${id}${trimmed.slice(0, trimmed.lastIndexOf('/')) || '/'}` : '';
+  }
+  const trimmed = p.replace(/[\\/]+$/, '');
+  if (!trimmed || /^[A-Za-z]:$/.test(trimmed)) return '';
+  const cut = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'));
+  if (cut < 0) return '';
+  const parent = trimmed.slice(0, cut);
+  if (!parent) return trimmed.startsWith('/') ? '/' : '';
+  if (/^[A-Za-z]:$/.test(parent)) return `${parent}\\`;
+  // \\server\share is the top of a network folder.
+  if (/^\\\\[^\\]+$/.test(parent)) return '';
+  return parent;
+}
+
+// Folders mounted as volumes on macOS and Linux: each is a place of its own, like a drive.
+const VOLUME = /^(\/Volumes\/[^/]+|\/media\/[^/]+\/[^/]+|\/run\/media\/[^/]+\/[^/]+|\/mnt\/[^/]+)(\/|$)/;
+
+/**
+ * The top a folder can go up to: a drive ("C:\"), a network share ("\\nas\share"), the phone's
+ * storage or a memory card, a server's "/" (remote://id/), else "/".
+ */
+export function topOf(p) {
+  if (!p) return '';
+  if (isRemote(p)) return `${REMOTE}${remoteSplit(p).id}/`;
+  const drive = /^([A-Za-z]):/.exec(p);
+  if (drive) return `${drive[1].toUpperCase()}:\\`;
+  const share = /^\\\\[^\\/]+[\\/][^\\/]+/.exec(p);
+  if (share) return share[0].replace(/\//g, '\\');
+  const storage = STORAGE.exec(p);
+  if (storage) return storage[1];
+  return '/';
+}
+
+/** The place a folder is on, to tell whether two are on the same one: a drive, a share, a server, the phone's storage or a card, a mounted volume, or 'here'. */
+export function placeKey(p) {
+  if (!p) return '';
+  if (isRemote(p)) return `remote:${remoteSplit(p).id}`;
+  const top = topOf(p);
+  if (top !== '/') return pathKey(top);
+  return VOLUME.exec(p)?.[1] ?? 'here';
+}
+
+/** The folder above `dir` as far as its top goes (topOf), or null there. */
+export function upOf(dir) {
+  if (!dir || samePath(dir, topOf(dir))) return null;
+  return parentPath(dir) || null;
+}
+
+/**
+ * The place "Allow all" opens when going up to `parent`: its drive, share or storage; on macOS
+ * and Linux the home folder holding it (`home`), else its mounted volume, else "/".
+ */
+export function wideOf(parent, { home = '' } = {}) {
+  const top = topOf(parent);
+  if (top !== '/') return top;
+  if (home && home !== '/' && isWithin(parent, home)) return home.replace(/\/+$/, '');
+  return VOLUME.exec(parent)?.[1] ?? '/';
+}
+
+/**
+ * [{ name, path }] from the top of `dir` (topOf) down to it: the whole path. On macOS and Linux a
+ * folder inside the home folder (`home`) starts at "~". `top` names the first one (a server's).
+ */
+export function fullCrumbs(dir, { home = '', top = '' } = {}) {
+  if (!dir) return [];
+  const start = !isRemote(dir) && topOf(dir) === '/' && home && home !== '/' && isWithin(dir, home) ? home.replace(/\/+$/, '') : topOf(dir);
+  const crumbs = breadcrumbs(dir, start);
+  const name = start !== topOf(dir) ? '~' : STORAGE.test(start) ? folderLabel(start) : start === '/' ? '/' : start.replace(/\\$/, '');
+  crumbs[0] = { ...crumbs[0], name: top || name };
+  return crumbs;
+}
+
+/**
+ * How a folder picked in Folders' list opens: 'focus' when it is shown already (it is just worked
+ * in), 'replace' (in place of the current folder) when it is on the same place as the current one
+ * (a drive, a share, a server: placeKey) or holds or is inside a folder shown, else 'beside' (another
+ * root of the tree): a folder on another drive, a server or a place opens side by side.
+ */
+export function openPlacement(target, sections = [], current = '') {
+  if (!target) return 'replace';
+  const shown = (sections ?? []).filter(Boolean);
+  if (shown.some((s) => samePath(s, target))) return 'focus';
+  if (shown.some((s) => isWithin(target, s) || isWithin(s, target))) return 'replace';
+  const from = current || shown[0] || '';
+  if (!from) return 'replace';
+  return placeKey(target) === placeKey(from) ? 'replace' : 'beside';
+}
+
 /**
  * Whether a name passes the filter: it has the text in it (any case), or with * or ?
  * it fits the pattern ("*.yml", "test?.js"). An empty filter lets everything through.

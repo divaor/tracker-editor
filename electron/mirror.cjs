@@ -237,6 +237,25 @@ const readJsonFile = (file) => {
   }
 };
 
+// Relative paths come from the server's listing (and the page) too: never outside the folder
+// here, neither by name nor through a link or junction on the way (real paths compared).
+const insideDir = (root, p) => (p + nodePath.sep).startsWith(root + nodePath.sep);
+/** `rel` (with /) inside the folder `base0` here, checked as above; throws when it would lead out. */
+function localPathIn(base0, rel) {
+  const parts = rel.split('/');
+  const base = nodePath.resolve(base0);
+  const full = nodePath.resolve(base, ...parts);
+  if (parts.some((p) => !p || p === '.' || p === '..') || !insideDir(base, full)) throw new Error('That name from the server cannot be a file here.');
+  // The deepest part that is there, by its real path, inside the folder's real path; the file itself not a link.
+  let at = full;
+  while (at !== base && !fs.existsSync(at)) at = nodePath.dirname(at);
+  if (at === full && fs.lstatSync(full).isSymbolicLink()) throw new Error('it is a link here, so it is left alone.');
+  const root = fs.realpathSync(base);
+  const real = fs.realpathSync(at);
+  if (real !== root && !insideDir(root, real)) throw new Error('a link here leads outside the folder, so it is left alone.');
+  return full;
+}
+
 /**
  * What runMirror works with, for a mirror `m` ({ conn, remote, local, exclude }):
  * this computer through fs, the server through remote.cjs (`remote`, `toUri`),
@@ -245,23 +264,7 @@ const readJsonFile = (file) => {
 function createMirrorIo(m, { remote, toUri, statePath, trash, connected = () => true }) {
   const skip = excluder(m.exclude);
   const remoteUri = (rel) => toUri(m.conn, rel ? posix.join(m.remote, rel) : m.remote);
-  // Relative paths come from the server's listing too: never outside the folder here,
-  // neither by name nor through a link or junction on the way (real paths compared).
-  const inside = (root, p) => (p + nodePath.sep).startsWith(root + nodePath.sep);
-  const localPath = (rel) => {
-    const parts = rel.split('/');
-    const base = nodePath.resolve(m.local);
-    const full = nodePath.resolve(base, ...parts);
-    if (parts.some((p) => !p || p === '.' || p === '..') || !inside(base, full)) throw new Error('That name from the server cannot be a file here.');
-    // The deepest part that is there, by its real path, inside the folder's real path; the file itself not a link.
-    let at = full;
-    while (at !== base && !fs.existsSync(at)) at = nodePath.dirname(at);
-    if (at === full && fs.lstatSync(full).isSymbolicLink()) throw new Error('it is a link here, so it is left alone.');
-    const root = fs.realpathSync(base);
-    const real = fs.realpathSync(at);
-    if (real !== root && !inside(root, real)) throw new Error('a link here leads outside the folder, so it is left alone.');
-    return full;
-  };
+  const localPath = (rel) => localPathIn(m.local, rel);
   // A file here that changed since it was listed is not written over (it is looked at again next time).
   const unchangedHere = (target, expected) => {
     const now = fs.existsSync(target) ? fs.statSync(target) : null;
@@ -325,4 +328,4 @@ function createMirrorIo(m, { remote, toUri, statePath, trash, connected = () => 
   return io;
 }
 
-module.exports = { planMirror, runMirror, createMirrorIo, walkLocal, conflictName, excluder, planSize, MODES, DEFAULT_EXCLUDE };
+module.exports = { planMirror, runMirror, createMirrorIo, walkLocal, localPathIn, conflictName, excluder, planSize, readJsonFile, MODES, DEFAULT_EXCLUDE, COMPARE_MAX };

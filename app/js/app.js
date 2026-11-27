@@ -15,16 +15,18 @@ import { previewKind } from './previews.js';
 import { FORMATTABLE, formatText, formatterFor, guessFormatter } from './formatter.js';
 import { getReaderState, onReaderState, setReaderHighlighter, startReading, stopReading, toggleReading } from './reader.js';
 import { getSettings, isLocal, isSyncConfigured, onSettings, resolvedTheme, saveSettings } from './settings.js';
-import { cleanEntries, entryLabel, entryOf, MAX_SESSION, notOpen, sessionOf, sessionSummary, withRecent } from './terminalSessions.js';
+import { cleanEntries, cleanSavedSessions, entryLabel, entryOf, MAX_SESSION, notOpen, recordOfSaved, sessionOf, sessionSummary, terminalsTabName, withRecent } from './terminalSessions.js';
+import { dropTerminalOutputs, endTerminalsTab, isTerminalsRecord, openTerminalsTabs, pruneTerminalOutputs, runOffer, saveTerminalsTabs, startTerminalsTab, terminalsTabStarted } from './terminalsTabs.js';
+import { serverDraftOf } from './sshCommand.js';
 import { diskKey, fileKey, flush, parseKey, repoKey, setEolFallback, store } from './store.js';
 import { diskAvailable, diskReadOnly, openDiskFiles, recheckServerTabs, reloadDiskTab, saveDiskTab, setSaveQuestions, unwatchDisk, watchDiskTabs } from './diskTabs.js';
 import { convertEndings, eolChoices, EOL_NAMES, fileEolOf, keepEols, mixedWords, saveTarget, writeFormat } from './lineEndings.js';
 import { defaultEol, hereEol, newTextFile } from './newText.js';
 import { withEols } from './textBytes.js';
 import { connIcon, hasShell, isContentPath, isRemotePath, KINDS, kindOfKey, remoteAddress, remoteParts, remoteRoot, toRemoteUri } from './where.js';
-import { onServers, placeKinds, refreshPlaceKinds, server, watchServers } from './servers.js';
+import { onServers, placeKinds, refreshPlaceKinds, refreshServers, server, servers, watchServers } from './servers.js';
 import { HostKeyDialog, PromptDialog, ServerDialog, SshImportDialog } from './ui/servers.js';
-import { activeTerminal, focusTerminal, localShells, onTerminals, openTerminal, renameTerminal, retheme, runAndWait, runInTerminal, setActiveTerminal, setRefHandler, setToggleHandler, showTerminalOn, splitTerminals, terminalFolder, terminals, terminalsAvailable, terminalText, unsplitTerminals } from './terminals.js';
+import { activeTerminal, allTerminals, focusedTerminal, focusTerminal, localShells, moveTerminalTo, onTerminals, openTerminal, PANEL, renameTerminal, retheme, runAndWait, runInTerminal, setActiveTerminal, setKeyHandler, setRefHandler, setToggleHandler, showTerminalOn, splitTerminals, terminalFolder, terminals, terminalsAvailable, terminalText, unsplitTerminals } from './terminals.js';
 import { parseRunCommands, quoteFor, runCommandFor, runLine, wslPath } from './runFile.js';
 import { detectFramework, firstMessageLine, FRAMEWORKS, looksLikeTestFile, parseOutput, parseReport, placeFailures, reportExt, summaryText, testAt, testCommand, testLanguage, testsInFile, testStates } from './testRun.js';
 import { TestsPanel } from './ui/tests.js';
@@ -38,7 +40,8 @@ import { DockerizeDialog } from './ui/dockerize.js';
 import { offlineBuildLine, reviewQuestion } from './dockerize.js';
 import { findFileRefs, pastedPath, resolveRef } from './fileRefs.js';
 import { claudeAppPrompt, claudeAppUrl, codeAround, errorContextText, EXPLAIN_ERROR, explainProblemAction, fixForErrorAction, fixProblemsAction } from './errorHelp.js';
-import { TerminalAgain, TerminalPanel } from './ui/terminal.js';
+import { savedSessionItems, TerminalAgain, TerminalPanel } from './ui/terminal.js';
+import { SavedTerminalSessionsDialog, SaveTerminalSessionDialog, TerminalsTab } from './ui/terminalsTab.js';
 import { createLanguageServers } from './lsp.js';
 import { applyTextEdits, changedLanguages, changedLines, codeActionRows, editPlan, formatFirst, languageOptions, lineOf, locations, textChanges, uriPath } from './lspTools.js';
 import { Menu } from './ui/menu.js';
@@ -64,10 +67,11 @@ import { FOUND, groupOf } from './tabGroups.js';
 import { chats } from './chatStore.js';
 import { PropertiesDialog } from './ui/properties.js';
 import { lastSyncText, mirror as mirrorById, onMirrors, watchMirrors as watchMirrorStatus } from './mirrors.js';
-import { MirrorDeletesDialog, MirrorDialog, MirrorsDialog } from './ui/mirrors.js';
+import { MirrorDeletesDialog, MirrorDialog, MirrorHistoryDialog, MirrorsDialog, TransferDialog } from './ui/mirrors.js';
+import { createMirrorActions } from './mirrorFlow.js';
 import { onTransfers, watchTransfers } from './transfers.js';
 import { TransfersCard } from './ui/transfers.js';
-import { baseName, besideSettings, claudeText, folderLabel, inPlaceSettings, isImageName, isWithin, opensHere, remapPath, withCurrent } from './folders.js';
+import { baseName, besideSettings, claudeText, folderLabel, inPlaceSettings, isImageName, isWithin, openPlacement, opensHere, pushRecent, remapPath, samePath, upOf, withCurrent } from './folders.js';
 import { folderOfPath, nearestTabs } from './comparePick.js';
 import { clampFont, DEFAULT_FONT, pinchFont, stepFont } from './textSize.js';
 import { keyboardState } from './editKeys.js';
@@ -405,6 +409,12 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         const shown = vs ? [...vs.keys, ...vs.guests].filter((x) => !store.session.panes.includes(x)) : [];
         const file = k?.kind === 'file' ? store.get(k.id) : null;
         if (k?.kind === 'compare' && store.compare(k.id)?.dirty && !discard && !confirm('Close the comparison? Your edits in it that are not saved go.')) return;
+        // A Terminals tab: its terminals end (asked first while some run); Ctrl+Shift+T brings them back as they were.
+        if (k?.kind === 'compare' && isTerminalsRecord(store.compare(k.id))) {
+          const open = terminals(k.id).filter((t) => !t.exited);
+          if (open.length && !discard && !confirm(`Close “${store.compare(k.id).name || 'Terminals'}”? Its ${open.length === 1 ? 'terminal ends' : `${open.length} terminals end`}${open.some((t) => t.tmux) ? ' (on servers, their tmux sessions too)' : ''}. Ctrl+Shift+T opens ${open.length === 1 ? 'it' : 'them'} again in ${open.length === 1 ? 'its folder' : 'their folders'}.`)) return;
+          endTerminalsTab(k.id);
+        }
         if (k?.kind === 'disk') {
           hostRef.current?.flushAll();
           // Unsaved changes to a file on disk: ask first.
@@ -809,6 +819,8 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
           const result = await saveDiskTab(path, { force });
           // A test file: its tests' marks follow what was saved.
           if (result === 'saved') actions.refreshTests?.(diskKey(path));
+          // Inside a mirror: uploaded when it says so, else its note looked at again.
+          if (result === 'saved') actions.mirrorAfterSave?.(path);
           if (result === 'saved' && path.split(/[\\/]/).pop() === '.tracker-editor.json') actions.projectSaved?.();
           if (result === 'conflict') {
             const conn = isRemotePath(path) ? server(remoteParts(path).id) : null;
@@ -1176,6 +1188,49 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         setSidebar(true);
         revealInFolders(path);
       },
+      /**
+       * Up from a folder shown (Folders, a comparison's side, a pane), past the folder picked, to its
+       * drive's top (0.54): the folder above `dir` (or `to`, a crumb further up), or null. On this
+       * computer the main process asks first when it was not picked (a native dialog: Go up, Allow
+       * all of the drive, Cancel); on a server the whole server is reachable already.
+       */
+      async folderUp(dir, { to = null } = {}) {
+        const target = to ?? upOf(dir);
+        if (!target) return null;
+        if (isRemotePath(dir)) return target;
+        try {
+          const r = await window.desktop.folders.allowUp(dir, to ? { to } : {});
+          if (!r?.dir) return null;
+          if (r.allowed) {
+            await loadRoots();
+            const short = (p) => (p.length > 42 ? `…${p.slice(-40)}` : p);
+            toast(samePath(r.allowed, r.dir) ? `${baseName(r.dir) || r.dir} can be opened here now.` : `Everything in ${short(r.allowed)} can be opened here now.`, { timeout: 5000 });
+          }
+          return r.dir;
+        } catch (err) {
+          toast(ipcMessage(err), { kind: 'error' });
+          return null;
+        }
+      },
+      /**
+       * A folder shown in Folders where Folders' list puts it (0.54, openPlacement): in place of the
+       * current one on the same drive, server or place, beside the folders shown elsewhere, just
+       * worked in when shown already. `how`: 'beside' or 'replace' say it.
+       */
+      showFolderPlaced(path, { how = 'auto' } = {}) {
+        const s = getSettings();
+        const shown = withCurrent(s.folderSections, s.folder);
+        const place = how === 'auto' ? openPlacement(path, shown, s.folder) : how;
+        saveSettings({ folderRecent: pushRecent(s.folderRecent, path) });
+        if (place === 'focus') {
+          const at = shown.find((p) => samePath(p, path)) ?? path;
+          saveSettings({ sidebarMode: 'folders', folder: at, folderCollapsed: (s.folderCollapsed ?? []).filter((p) => p !== at) });
+          setSidebar(true);
+          return place;
+        }
+        actions.showInFolders(path, { beside: place === 'beside' });
+        return place;
+      },
       /** The folders shown side by side: their order, and adding or closing some (a dialog). */
       sideBySide() {
         if (!window.desktop?.folders) return toast('Folders work in the desktop app.', { kind: 'error' });
@@ -1506,10 +1561,11 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
         setView('editor');
       },
       /** Two folders compared in a tab; without `right`, a dialog asks for it. */
-      compareFolders(left, right = null) {
+      compareFolders(left, right = null, { sync = null } = {}) {
         if (!window.desktop?.compare) return toast('Folders are compared in the desktop and Android apps.', { kind: 'error' });
         if (!right) return setDialog({ type: 'compareFolder', other: left, side: 'right', onPick: (p) => actions.compareFolders(left, p) });
-        store.openCompare({ mode: 'folders', left: { path: left }, right: { path: right }, show: 'diff' });
+        // `sync`: opened with the sync bar and that preset (a mirror's Sync…).
+        store.openCompare({ mode: 'folders', left: { path: left }, right: { path: right }, show: 'diff', ...(sync ? { syncPreset: sync } : {}) });
         setView('editor');
       },
       /** Two folders side by side in a tab (two panes, like WinSCP); without `right`, a dialog asks for it. */
@@ -1535,6 +1591,8 @@ function useActions({ hostRef, setView, setPanel, setDialog, setSidebar, setComp
       compareSame: (left, right, rels) => window.desktop.compare.same(left, right, rels),
       async compareCopy(from, to, rels) {
         const r = await window.desktop.compare.copy(from, to, rels);
+        // Between a mirror's two sides: kept in its history (the toast's Undo).
+        if (r?.mirror) actions.mirrorCopied?.(r.mirror);
         window.dispatchEvent(new CustomEvent('folders:reload'));
         return r;
       },
@@ -2023,6 +2081,24 @@ export function App() {
       rerender();
     });
     return () => (off(), offList());
+  }, []);
+  // Mirrors by hand: the open file's note (the server's copy newer, or this one changed since the
+  // upload), looked at when its tab shows, the window comes back, a server connects or the mirrors
+  // are read (at most once a minute a tab; never connecting by itself).
+  const activeTabKey = store.session.active;
+  useEffect(() => {
+    const k = parseKey(activeTabKey ?? '');
+    if (k?.kind === 'disk') actions.mirrorCheckTab?.(k.path);
+  }, [activeTabKey]);
+  useEffect(() => {
+    const look = () => {
+      const k = parseKey(store.session.active ?? '');
+      if (k?.kind === 'disk') actions.mirrorCheckTab?.(k.path);
+    };
+    window.addEventListener('focus', look);
+    const offServers = onServers(look);
+    const offMirrors = onMirrors(look);
+    return () => (window.removeEventListener('focus', look), offServers(), offMirrors());
   }, []);
   // Transfers (desktop): to and from servers, in the background. A move that got there
   // takes its open tabs along.
@@ -4038,8 +4114,9 @@ export function App() {
    * The terminal's error (its selection, or the last output) explained by the model, with the
    * code around the places it names (files open here, or readable on disk).
    */
-  actions.explainTerminalError = async () => {
-    const s = activeTerminal();
+  actions.explainTerminalError = async (target = null) => {
+    // The one named (a terminal's menu), else the one typed in last.
+    const s = target?.term ? target : focusedTerminal();
     const output = terminalText(s);
     if (!output) return toast('Nothing in the terminal to ask about yet.');
     const base = s.connId === 'local' ? s.cwd : toRemoteUri(s.connId, s.cwd || '/');
@@ -4126,6 +4203,8 @@ export function App() {
   };
   // ---- Git's conflicts (0.49; conflictActions.js): the editor's blocks, the model's merge, the merge view, Mark resolved ----
   Object.assign(actions, createConflictActions({ host: () => hostRef.current, actions, toast, setCompare, setView, gitWorksAt, askReady, getSettings, llmClient, encryptedNotSent: ENCRYPTED_NOT_SENT }));
+  // ---- Mirrors by hand (0.54; mirrorFlow.js): Upload, Download, Compare, Sync…, History, Undo ----
+  Object.assign(actions, createMirrorActions({ actions, setDialog, flush: () => hostRef.current?.flushAll(), runInFolders }));
   // A tab with conflict blocks shows: its bars learn what Git is doing; the last block gone offers Mark resolved.
   useEffect(() => {
     if (cursor?.key && cursor.conflicts > 0) actions.lookUpConflicts(cursor.key);
@@ -4284,7 +4363,8 @@ export function App() {
     if (!terminalsAvailable()) return toast('Terminals work in the desktop app.', { kind: 'error' });
     const conn = server(connId);
     if (conn && !hasShell(conn)) return toast(`${conn.name} is an FTP server; terminals need SSH (SFTP).`, { kind: 'error' });
-    setTerminalShown(true);
+    // A Terminals tab's (opts.host: its id) shows in the tab, not in the panel.
+    if ((opts.host ?? PANEL) === PANEL) setTerminalShown(true);
     try {
       return await openTerminal(connId, { cwd, ...opts });
     } catch (err) {
@@ -4304,7 +4384,7 @@ export function App() {
     if (!terminalsAvailable()) return;
     if (terminalShown) {
       setTerminalShown(false);
-      hostRef.current?.focus();
+      focusMain();
       return;
     }
     if (!terminals().length) {
@@ -4339,22 +4419,26 @@ export function App() {
    */
   actions.splitTerminal = async () => {
     if (!terminalsAvailable()) return;
-    if (splitTerminals()) return (unsplitTerminals(), setTerminalShown(true));
-    const list = terminals();
-    if (!list.length) return actions.toggleTerminal();
+    // In a Terminals tab: its own two side by side.
+    const host = activeTerminalsTab() ?? PANEL;
+    const inPanel = host === PANEL;
+    if (splitTerminals(host)) return (unsplitTerminals(null, host), inPanel && setTerminalShown(true));
+    const list = terminals(host);
+    if (!list.length) return inPanel ? actions.toggleTerminal() : actions.openTerminalsTab();
     if (matchMedia('(max-width: 640px)').matches) return toast('Two terminals side by side need a wider window.');
-    setTerminalShown(true);
-    const s = activeTerminal();
+    if (inPanel) setTerminalShown(true);
+    const s = activeTerminal(host);
     if (list.length > 1) return showTerminalOn(s, 'left');
-    const other = await actions.openTerminal(s.connId, s.cwd);
+    const other = await actions.openTerminal(s.connId, terminalFolder(s), { host, ...(s.connId === 'local' && s.profile ? { shell: s.profile } : {}) });
     if (other) showTerminalOn(other, 'right');
   };
-  /** Rename the terminal in use (its tab shows a field). */
+  /** Rename the terminal in use (its tab shows a field): the Terminals tab's when one is open, else the panel's. */
   actions.renameTerminal = () => {
     if (!terminalsAvailable()) return;
-    if (!terminals().length) return toast('No terminal is open: Ctrl+` opens one.');
-    setTerminalShown(true);
-    requestAnimationFrame(() => window.dispatchEvent(new Event('terminal:rename')));
+    const host = activeTerminalsTab() ?? PANEL;
+    if (!terminals(host).length) return toast('No terminal is open: Ctrl+` opens one.');
+    if (host === PANEL) setTerminalShown(true);
+    requestAnimationFrame(() => window.dispatchEvent(new CustomEvent('terminal:rename', { detail: { host } })));
   };
   // Terminals to open again (terminalSessions.js): the last session (the terminals open when
   // the app last went away: setting `terminalLast`, read as it started) and the recent ones
@@ -4373,7 +4457,7 @@ export function App() {
     const record = () => {
       const entries = [];
       const drop = [];
-      for (const t of terminals()) {
+      for (const t of allTerminals()) {
         const e = entryOf(t);
         if (!e) continue;
         const was = placed.get(t.key);
@@ -4393,6 +4477,8 @@ export function App() {
         const e = entryOf(t);
         if (e) st.map.set(t.key, e);
       }
+      // Moved to a Terminals tab: that tab keeps it, not the panel's last session.
+      for (const t of allTerminals()) if (t.host !== PANEL) st.map.delete(t.key);
       setTerminalCount(list.length);
       clearTimeout(timer);
       timer = setTimeout(record, 1500);
@@ -4403,10 +4489,15 @@ export function App() {
       if (last.length) saveSettings({ terminalLast: last });
     };
     window.addEventListener('editor:flush', remember);
+    // Terminals tabs: their output and records kept too (and those of tabs closed long ago let go).
+    const keepTabs = () => saveTerminalsTabs().catch(() => {});
+    window.addEventListener('editor:flush', keepTabs);
+    pruneTerminalOutputs().catch(() => {});
     return () => {
       off();
       clearTimeout(timer);
       window.removeEventListener('editor:flush', remember);
+      window.removeEventListener('editor:flush', keepTabs);
     };
   }, []);
   // Open now: those; none: all that were open before they were closed (this run's).
@@ -4422,8 +4513,10 @@ export function App() {
     const open = terminals();
     const closedNow = open.length ? [] : lastStretch();
     const lastSet = closedNow.length ? closedNow : previousTerminals;
-    const last = notOpen(lastSet, open, terminalPlace);
-    const recent = notOpen(getSettings().terminalRecent, [...open, ...last], terminalPlace).slice(0, 6);
+    // Open anywhere (the panel, a Terminals tab): not offered again.
+    const anywhere = allTerminals();
+    const last = notOpen(lastSet, anywhere, terminalPlace);
+    const recent = notOpen(getSettings().terminalRecent, [...anywhere, ...last], terminalPlace).slice(0, 6);
     return { running: open.length, last, lastText: last.length ? sessionSummary(last, terminalNames) : '', recent, label: (e) => entryLabel(e, terminalNames) };
   };
   /** Opens terminals again where they were (their shell and name too), the first one in use. */
@@ -4459,6 +4552,193 @@ export function App() {
   actions.terminalHere = (dir) => (isRemotePath(dir) ? actions.openTerminal(remoteParts(dir).id, remoteParts(dir).path) : actions.openTerminal('local', dir));
   /** A folder on this computer in the system's own terminal app. */
   actions.systemTerminalHere = (dir) => window.desktop?.folders?.terminal(dir).catch((err) => toast(ipcMessage(err), { kind: 'error' }));
+
+  /** The keys back to what the main pane shows: a Terminals tab's terminal in use, else the text. */
+  const focusMain = () => {
+    const tab = activeTerminalsTab();
+    if (tab) focusTerminal(activeTerminal(tab));
+    else hostRef.current?.focus();
+  };
+  // ---- Terminals tabs (0.54; terminalsTabs.js, ui/terminalsTab.js): terminals full size in a tab
+  // of their own (a comparison tab of mode 'terminals'), each a session brought back as it was ----
+  /** The Terminals tab open now (its id), else null. */
+  const activeTerminalsTab = () => {
+    const k = parseKey(store.session.active);
+    return k?.kind === 'compare' && isTerminalsRecord(store.compare(k.id)) ? k.id : null;
+  };
+  // The Terminals tab shown last (Ctrl+Shift+` goes back to it).
+  const lastTerminalsTab = useRef(null);
+  if (activeTerminalsTab()) lastTerminalsTab.current = activeTerminalsTab();
+  /** Where a new terminal opens when none is named: the open server file's server, else this computer's folder. */
+  const terminalWhere = () => {
+    const folder = getSettings().sidebarMode === 'folders' ? getSettings().folder : '';
+    const k = parseKey(store.session.active);
+    const near = k?.kind === 'disk' ? (isRemotePath(k.path) ? parentDir(k.path) : '') : isRemotePath(folder) ? folder : '';
+    if (near && hasShell(server(remoteParts(near).id))) return { connId: remoteParts(near).id, cwd: remoteParts(near).path };
+    return { connId: 'local', cwd: actions.localTerminalDir() };
+  };
+  /**
+   * A new Terminals tab: with `move` (a terminal), that one taken there with its shell running;
+   * else one terminal where you are (`where`: { connId, cwd, shell }). Returns its id.
+   */
+  actions.openTerminalsTab = async ({ move = null, where = null, name = '' } = {}) => {
+    if (!terminalsAvailable()) return toast('Terminals work in the desktop and Android apps.', { kind: 'error' });
+    const taken = openTerminalsTabs().map((t) => t.record.name);
+    const key = store.openCompare({ mode: 'terminals', name: name || terminalsTabName(taken), terminals: [], layout: null, runAgain: false });
+    const id = parseKey(key).id;
+    await startTerminalsTab(id, await restoreOpts());
+    if (move) moveTerminalTo(move, id);
+    else {
+      const w = where ?? terminalWhere();
+      await actions.openTerminal(w.connId, w.cwd, { host: id, ...(w.shell ? { shell: w.shell } : {}) });
+    }
+    return id;
+  };
+  /**
+   * Ctrl+Shift+`: in a Terminals tab, one more terminal there (where the one in use is); else the
+   * Terminals tab shown last (one open), else a new one.
+   */
+  actions.terminalsTab = () => {
+    if (!terminalsAvailable()) return toast('Terminals work in the desktop and Android apps.', { kind: 'error' });
+    const here = activeTerminalsTab();
+    if (here) {
+      const s = activeTerminal(here);
+      return actions.openTerminal(s?.connId ?? 'local', s ? terminalFolder(s) : actions.localTerminalDir(), { host: here, ...(s?.connId === 'local' && s.profile ? { shell: s.profile } : {}) });
+    }
+    const open = openTerminalsTabs();
+    const back = open.find((t) => t.id === lastTerminalsTab.current) ?? open.at(-1);
+    if (back) return store.open(`c:${back.id}`);
+    return actions.openTerminalsTab();
+  };
+  // The servers set up here, read before a tab's terminals come back (as the app starts they may
+  // not be yet): a server's terminal is let go only when the list says it is gone, never because
+  // the list could not be read.
+  const serversRead = useRef(null);
+  const readServers = () => (serversRead.current ??= window.desktop?.remote ? refreshServers().then(() => true, () => false) : Promise.resolve(true));
+  const restoreOpts = async () => {
+    const known = await readServers();
+    return { open: actions.openTerminal, hasPlace: (connId) => connId === 'local' || !known || terminalPlace(connId) };
+  };
+  const toldGone = useRef(new Set());
+  /** A Terminals tab's terminals started (it shows for the first time in this run): as its record says. */
+  actions.startTerminalsTab = async (id) =>
+    startTerminalsTab(id, {
+      ...(terminalsTabStarted(id) ? { open: actions.openTerminal } : await restoreOpts()),
+      note: (output) => {
+        const day = (t) => new Date(t).toDateString();
+        const time = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const kept = output.at && day(output.at) !== day(Date.now()) ? ` · from ${new Date(output.at).toLocaleDateString([], { day: 'numeric', month: 'short' })} ${time(output.at)}` : '';
+        return `— Restored ${time(Date.now())}${kept} —`;
+      },
+    }).then((plan) => {
+      if (plan?.gone?.length && !toldGone.current.has(id) && toldGone.current.add(id)) toast(`${plan.gone.length === 1 ? 'A terminal was' : `${plan.gone.length} terminals were`} not opened again: ${plan.gone.length === 1 ? 'its server is' : 'their servers are'} not set up here any more.`, { timeout: 8000 });
+      return plan;
+    });
+  actions.terminalsTabStarted = terminalsTabStarted;
+  /** Settings: keeping Terminals tabs' output turned off, so what was kept goes. */
+  actions.dropTerminalOutputs = () => dropTerminalOutputs().catch(() => {});
+  /** "Run it again": the login a terminal brought back was running, typed into it. */
+  actions.runTerminalOffer = (s) => {
+    runOffer(s);
+    focusTerminal(s);
+  };
+  /**
+   * "Save as a server connection…" for a login typed into a shell (ssh user@host -p port): a host
+   * of ~/.ssh/config is set up from there (its keys and jump host too), else the server dialog
+   * starts with what the line says. Once saved, its terminal can open in the same tab (kept in tmux there).
+   */
+  actions.saveLoginAsServer = async (s, offer) => {
+    const draft = serverDraftOf(offer);
+    if (!draft) return toast('That line does not say a server to connect to.');
+    const host = s?.host ?? PANEL;
+    const opened = (conn) =>
+      toast(`${conn.name} is one of your servers now: its files in Folders, its terminals kept on it (tmux).`, {
+        timeout: 12000,
+        action: { label: 'Open its terminal here', run: () => actions.openTerminal(conn.id, '', { host }) },
+      });
+    if (window.desktop?.remote?.sshConfig && !isAndroidApp()) {
+      const config = await window.desktop.remote.sshConfig().catch(() => null);
+      const alias = config?.hosts?.find((h) => h.alias === offer.host && (!offer.user || offer.user === h.user) && (!offer.port || offer.port === h.port));
+      if (alias && confirm(`${offer.host} is a host of your SSH config (${alias.user ? `${alias.user}@` : ''}${alias.host}:${alias.port}). Set it up from there, with its keys${alias.proxyJump ? ' and its jump host' : ''}?`)) {
+        try {
+          await window.desktop.remote.importSsh([alias.alias]);
+          await refreshServers();
+          const conn = servers().find((c) => c.protocol === 'sftp' && c.host.toLowerCase() === alias.host.toLowerCase() && c.port === alias.port && c.user === alias.user);
+          return conn ? opened(conn) : toast(`${alias.alias} is set up: open it from Folders.`);
+        } catch (err) {
+          return toast(ipcMessage(err), { kind: 'error' });
+        }
+      }
+    }
+    if (draft.jumpNote) toast(`It went through ${draft.jumpNote}: set that one up as a server too, then pick it as this one’s jump host.`, { timeout: 10000 });
+    const { jumpNote, ...conn } = draft;
+    actions.editServer(conn, { onSaved: (saved) => opened(saved) });
+  };
+  /** The sessions saved by name (settings terminalSessions). */
+  actions.savedTerminalSessions = () => cleanSavedSessions(getSettings().terminalSessions);
+  actions.terminalSessionText = (saved) => sessionSummary(saved.terminals, terminalNames);
+  actions.terminalEntryLabel = (entry) => entryLabel(entry, terminalNames);
+  /** A saved session opened: a Terminals tab with its terminals (where they were, logins offered again). */
+  actions.openSavedTerminalSession = (savedId) => {
+    if (!terminalsAvailable()) return toast('Terminals work in the desktop and Android apps.', { kind: 'error' });
+    const saved = actions.savedTerminalSessions().find((x) => x.id === savedId);
+    if (!saved) return toast('That saved session is gone.');
+    const record = recordOfSaved(saved, { newId: () => `t${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}` });
+    store.openCompare(record);
+  };
+  actions.saveTerminalSession = (id = activeTerminalsTab()) => (id ? setDialog({ type: 'saveTerminalSession', id }) : toast('Open a Terminals tab first (Ctrl+Shift+`): its terminals are what is saved.'));
+  actions.showSavedTerminalSessions = () => setDialog({ type: 'terminalSessions' });
+  /** All of a Terminals tab's terminals into the panel, their shells running. */
+  actions.moveTerminalsToPanel = (id) => {
+    for (const t of terminals(id)) moveTerminalTo(t, PANEL);
+    setTerminalShown(true);
+  };
+  /** Where a terminal can go, its shell running: a new Terminals tab, one open, the panel. */
+  actions.terminalMoveItems = (s) => {
+    const others = openTerminalsTabs().filter((t) => t.id !== s.host);
+    return [
+      { separator: true },
+      s.host !== PANEL && { label: 'Move to the panel', icon: 'arrowDown', hint: 'Its shell keeps running', run: () => (moveTerminalTo(s, PANEL), setTerminalShown(true)) },
+      { label: s.host === PANEL ? 'Move to a Terminals tab' : 'Move to a new Terminals tab', icon: 'terminal', hint: 'Its shell keeps running', run: () => actions.openTerminalsTab({ move: s }) },
+      ...others.map((t) => ({ key: `to-${t.id}`, label: `Move to “${t.record.name || 'Terminals'}”`, icon: 'arrowRight', run: () => (terminalsTabStarted(t.id) ? moveTerminalTo(s, t.id) : actions.startTerminalsTab(t.id).then(() => moveTerminalTo(s, t.id)), store.open(`c:${t.id}`)) })),
+    ];
+  };
+  /** The command "Move the terminal": the one typed in last, to a Terminals tab (or back to the panel). */
+  actions.moveTerminal = () => {
+    const s = focusedTerminal();
+    if (!s) return toast('No terminal is open: Ctrl+` opens one.');
+    if (s.host === PANEL) return actions.openTerminalsTab({ move: s });
+    moveTerminalTo(s, PANEL);
+    setTerminalShown(true);
+  };
+  /** The status bar's Terminal, right-clicked: Terminals tabs, saved sessions, the last session. */
+  actions.terminalMenu = (at) => {
+    const { last, lastText } = actions.terminalChoices();
+    setTerminalMenu({
+      at,
+      items: [
+        { label: 'Open a Terminals tab', icon: 'terminal', hint: 'Full size; it comes back as it was (Ctrl+Shift+`)', run: () => actions.openTerminalsTab() },
+        ...openTerminalsTabs().map((t) => ({ key: `tab-${t.id}`, label: `Show “${t.record.name || 'Terminals'}”`, icon: 'arrowRight', run: () => store.open(`c:${t.id}`) })),
+        { separator: true },
+        ...savedSessionItems(actions),
+        { label: 'Saved sessions…', icon: 'list', run: () => actions.showSavedTerminalSessions() },
+        { separator: true },
+        { label: terminalShown ? 'Hide the terminal panel' : 'The terminal panel', icon: 'terminal', hint: 'Ctrl+`', run: () => actions.toggleTerminal() },
+        last.length > 0 && { label: 'Reopen the last session', icon: 'history', hint: lastText, run: () => actions.reopenTerminals(last) },
+      ],
+    });
+  };
+  const [terminalMenu, setTerminalMenu] = useState(null); // { at, items }
+  useEffect(() => {
+    // The app's keys that pass a terminal's shell by: switching tabs, the Terminals tab's key, the palette.
+    const passing = new Set(['terminals-tab', 'next-tab', 'prev-tab', 'command-palette']);
+    setKeyHandler((e) => {
+      const id = commandOfEvent(e, { accept: (x) => passing.has(x) });
+      if (!id) return false;
+      actions.command(id);
+      return true;
+    });
+  }, []);
 
   /**
    * "file:line" clicked in a terminal or Ctrl+clicked in the text: opens the file there.
@@ -5453,7 +5733,8 @@ export function App() {
     // the command line): files as tabs on disk, folders in the folders view.
     const takeLaunched = async () => {
       for (const item of (await window.desktop?.disk?.takeLaunched?.().catch(() => [])) ?? []) {
-        if (item.dir) await actions.showFolder(item.path);
+        // A folder from another drive opens beside the folders shown, one on the same drive in place (openPlacement).
+        if (item.dir) actions.showFolderPlaced(item.path);
         else await actions.openDiskPath(item.path);
       }
     };
@@ -5657,6 +5938,11 @@ export function App() {
       'wsl-open': () => actions.pickPlace('wsl'),
       terminal: () => actions.toggleTerminal(),
       'terminal-split': () => actions.splitTerminal(),
+      'terminals-tab': () => actions.terminalsTab(),
+      'terminals-tab-new': () => actions.openTerminalsTab(),
+      'terminal-sessions': () => actions.showSavedTerminalSessions(),
+      'terminal-session-save': () => actions.saveTerminalSession(),
+      'terminal-move': () => actions.moveTerminal(),
       'terminal-rename': () => actions.renameTerminal(),
       'terminal-reopen': () => actions.reopenLastTerminals(),
       'run-file': () => actions.runFile(),
@@ -5717,6 +6003,11 @@ export function App() {
       'git-init': () => actions.gitInit(),
       dockerize: () => actions.dockerize(),
       'archive-extract': () => actions.inFolders('extract'),
+      'mirror-upload': () => actions.mirrorCommand('upload'),
+      'mirror-download': () => actions.mirrorCommand('download'),
+      'mirror-compare': () => actions.mirrorCommand('compare'),
+      'mirror-sync': () => actions.mirrorCommand('sync'),
+      'mirror-history': () => actions.mirrorHistory(),
       'archive-compress': () => actions.inFolders('compress'),
       tasks: () => actions.showTasks(),
       'project-settings': () => actions.projectSettings(),
@@ -5780,7 +6071,10 @@ export function App() {
       'read-aloud': () => actions.readAloud(),
       flush: async () => {
         hostRef.current?.flushAll();
-        await Promise.all([flush(), chats.flush().catch(() => {})]);
+        // The Terminals tabs' records first (saveTerminalsTabs brings them up to date at once), then
+        // the store writes them: the other way round, a terminal closed just before quitting came back.
+        const terminalsSaved = saveTerminalsTabs().catch(() => {});
+        await Promise.all([flush(), chats.flush().catch(() => {}), terminalsSaved]);
         if (store.pendingCount()) await Promise.race([syncNow(), new Promise((r) => setTimeout(r, 5000))]);
         window.desktop.closeReady?.();
       },
@@ -6005,7 +6299,8 @@ export function App() {
           ${lockShown &&
           html`<${LockScreen} key=${activeKey} name=${activeFile ? activeName : innerName(activeName)} where=${placeOfKey(activeKey)} relock=${Boolean(locks.headerOf(activeKey)?.relock)}
             onUnlock=${(password, opts) => actions.unlockTab(activeKey, password, opts)} onClose=${() => actions.close(activeKey)} />`}
-          ${activeCompare && view === 'editor' && html`<${CompareTab} key=${activeKey} id=${active.id} record=${activeCompare} settings=${settings} actions=${actions} />`}
+          ${activeCompare && view === 'editor' && !isTerminalsRecord(activeCompare) && html`<${CompareTab} key=${activeKey} id=${active.id} record=${activeCompare} settings=${settings} actions=${actions} />`}
+          ${activeCompare && view === 'editor' && isTerminalsRecord(activeCompare) && html`<${TerminalsTab} key=${activeKey} id=${active.id} record=${activeCompare} settings=${settings} actions=${actions} />`}
           ${docShown &&
           activeRepo?.doc &&
           html`<${DocumentView} key=${activeKey} name=${activeRepo.name} kind=${activeRepo.doc} load=${() => repoBytes(activeRepo.path)}
@@ -6017,7 +6312,7 @@ export function App() {
             onOpenOutside=${() => actions.openOutside(activeDisk.path)} bookmarkKey=${activeDisk.path} readKey=${activeKey} onReader=${(r) => (docReader = r)} />`}
           ${!activeKey && html`<${Welcome} actions=${actions} desktop=${diskAvailable()} hasFiles=${store.live().length + docs.length > 0} configured=${isLocal(settings) || isSyncConfigured(settings)} />`}
         </div>
-        ${terminalShown && html`<${TerminalPanel} settings=${settings} actions=${actions} onHide=${() => (setTerminalShown(false), hostRef.current?.focus())} />`}
+        ${terminalShown && html`<${TerminalPanel} settings=${settings} actions=${actions} onHide=${() => (setTerminalShown(false), focusMain())} />`}
         <${ReadAloudBar} />
         ${editing && activeKey && !textGone && !compare && !activeCompare && hostRef.current
           ? html`<${EditBar} host=${hostRef.current} actions=${actions} save=${activeDisk ? 'Save' : isLocal(settings) ? null : 'Sync'} />`
@@ -6058,6 +6353,9 @@ export function App() {
     ${dialog?.type === 'compareFolder' && html`<${CompareFolderDialog} other=${dialog.other} side=${dialog.side} panes=${dialog.panes} openServer=${dialog.openServer} onPick=${dialog.onPick} actions=${actions} onClose=${() => setDialog(null)}
       onNewServer=${() => actions.editServer({}, { back: { ...dialog, openServer: '' }, onSaved: (conn) => setDialog({ ...dialog, openServer: conn.id }) })} />`}
     ${dialog?.type === 'saveCompare' && html`<${SaveCompareDialog} id=${dialog.id} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'saveTerminalSession' && html`<${SaveTerminalSessionDialog} id=${dialog.id} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'terminalSessions' && html`<${SavedTerminalSessionsDialog} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${terminalMenu && html`<${Menu} at=${terminalMenu.at} label="Terminals" items=${terminalMenu.items} onClose=${() => setTerminalMenu(null)} />`}
     ${dialog?.type === 'savedCompares' && html`<${SavedComparesDialog} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'compare' && activeKey &&
     html`<${ComparePicker} ...${compareSources()} roots=${folderRoots(settings)} hidden=${Boolean(settings.showHidden)} detailOf=${placeOfPath} plainIcons=${settings.fileIcons === false}
@@ -6119,6 +6417,8 @@ export function App() {
     ${dialog?.type === 'mirror' && html`<${MirrorDialog} draft=${dialog.draft} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'mirrors' && html`<${MirrorsDialog} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'mirrorDeletes' && mirrorById(dialog.id) && html`<${MirrorDeletesDialog} mirror=${mirrorById(dialog.id)} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'mirrorTransfer' && mirrorById(dialog.mirrorId) && html`<${TransferDialog} mirror=${mirrorById(dialog.mirrorId)} check=${dialog.check} direction=${dialog.direction} ticked=${dialog.ticked ?? null} actions=${actions} onClose=${() => setDialog(null)} />`}
+    ${dialog?.type === 'mirrorHistory' && html`<${MirrorHistoryDialog} id=${dialog.id ?? null} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${dialog?.type === 'properties' && html`<${PropertiesDialog} key=${dialog.path} path=${dialog.path} actions=${actions} onClose=${() => setDialog(null)} />`}
     ${hostKey && html`<${HostKeyDialog} info=${hostKey} onAnswer=${(ok) => (window.desktop.remote.answerHostKey(hostKey.question, ok), setHostKey(null))} />`}
     ${prompts[0] && !hostKey && html`<${PromptDialog} key=${prompts[0].question} info=${prompts[0]} onAnswer=${(answer) => answerPrompt(prompts[0], answer)} />`}
@@ -6177,6 +6477,7 @@ function Welcome({ actions, hasFiles, configured, desktop }) {
         ${desktop && html`<button type="button" class="btn" title="Edit a file where it is (a log, a config file); it is not synced" onClick=${() => actions.openDiskFiles()}><${Icon} name="disk" size=${16} />Open from disk</button>`}
         ${window.desktop?.folders && html`<button type="button" class="btn" title="Browse a folder and open its files where they are; they are not synced (Ctrl+Shift+E)" onClick=${() => actions.showFolders()}><${Icon} name="folderOpen" size=${16} />Open a folder</button>`}
         ${terminalsAvailable() && !actions.terminalChoices().running && html`<button type="button" class="btn" title="A terminal on this computer, in the folder shown in Folders (Ctrl+\`)" onClick=${() => actions.showTerminals()}><${Icon} name="terminal" size=${16} />Open a terminal</button>`}
+        ${terminalsAvailable() && html`<button type="button" class="btn" title="Terminals full size in a tab of their own, brought back as they were when the app starts again (Ctrl+Shift+\`)" onClick=${() => actions.openTerminalsTab()}><${Icon} name="columns" size=${16} />Terminals tab</button>`}
       </div>
       ${terminalsAvailable() && html`<${TerminalAgain} actions=${actions} showRunning title="Terminals" />`}
       ${!configured && html`<p class="notice"><${Icon} name="cloudOff" size=${16} /><span>Not syncing yet. <button type="button" class="btn link" onClick=${actions.showSettings}>Set up sync</button> with the same repo and token as the tracker (or paste its setup code).</span></p>`}
