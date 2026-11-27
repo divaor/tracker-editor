@@ -7,7 +7,6 @@ import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { wideOf } from '../app/js/folders.js';
 
 const require = createRequire(import.meta.url);
 const { allowUp, allowedBy } = require('../electron/folders.cjs');
@@ -24,7 +23,9 @@ function setup(answer) {
     roots: () => roots,
     add: (p) => roots.push(p),
     ask: async (q) => (asked.push(q), typeof answer === 'function' ? answer(q) : answer),
-    wideOf: (p) => wideOf(p, { home: top }),
+    // What "Allow all" offers: here the test's own folder, for anything inside it (folders.js wideOf,
+    // tested in folder-list.test.js, gives the drive on Windows and the home folder elsewhere).
+    wideOf: (p) => (p !== top && p.startsWith(top + path.sep) ? top : null),
   };
   return { top, picked, roots, asked, deps };
 }
@@ -36,7 +37,7 @@ test('going up asks first; Go up allows the folder above, and it is reachable th
   assert.deepEqual(await allowUp(picked, {}, deps), { dir: parent, allowed: parent });
   assert.equal(asked.length, 1);
   assert.equal(asked[0].dir, parent, 'the dialog names the folder');
-  assert.equal(asked[0].wide, top, 'and offers all of its place (here: the home folder holding it)');
+  assert.equal(asked[0].wide, top, 'and offers all of its place (here: the test folder holding it)');
   assert.deepEqual(roots, [picked, parent]);
   assert.equal(allowedBy(roots, path.join(parent, 'other.txt')), true);
   // Reachable now: no question again.
@@ -69,7 +70,7 @@ test('Cancel (or no answer) changes nothing', async () => {
 test('a folder further up, named by a crumb: only one above the folder, asked the same way', async () => {
   const { top, picked, roots, asked, deps } = setup('up');
   assert.deepEqual(await allowUp(picked, { to: top }, deps), { dir: top, allowed: top });
-  assert.equal(asked[0].wide, null, 'the home folder itself: nothing wider to offer');
+  assert.equal(asked[0].wide, null, 'the place itself: nothing wider to offer');
   assert.ok(roots.includes(top));
   const other = setup('up');
   await assert.rejects(allowUp(other.picked, { to: path.join(other.picked, 'src') }, other.deps), /not a folder above/, 'not one inside it');

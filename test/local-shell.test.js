@@ -105,7 +105,7 @@ test('each shell is started so it says its folder, its own startup files still r
 
 // A real shell with its integration: after a cd it says the new folder (OSC 7), and the
 // person's own startup file ran first.
-async function saysFolder(shell, home, extraEnv = {}) {
+async function saysFolder(shell, home, extraEnv = {}, { saysLines = true } = {}) {
   const hooks = mkdtempSync(path.join(os.tmpdir(), 'hooks-'));
   const target = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'a dir ')));
   const s = openLocalShell({ shell, hooksDir: hooks, cwd: home, cols: 120, rows: 30, env: { PATH: process.env.PATH, HOME: home, SHELL: `/usr/bin/${shell}`, TERM: 'xterm', ...extraEnv } });
@@ -128,12 +128,13 @@ async function saysFolder(shell, home, extraEnv = {}) {
   s.write(`echo "semi;colon" back\\\\slash\r`);
   s.write('echo "nonce=[$TE_NONCE]"\r');
   const lines = () => [...out.matchAll(/\u001b\]633;([^\u0007]*)\u0007/g)].map((m) => commandLine(m[1], s.nonce)).filter((l) => l !== null);
-  const runs = await until(() => lines().includes(`echo "semi;colon" back\\\\slash`) && lines().includes('false') && lines().includes(`cd '${target}'`) && out.includes('nonce=['));
+  const runs = await until(() => (!saysLines || (lines().includes(`echo "semi;colon" back\\\\slash`) && lines().includes('false') && lines().includes(`cd '${target}'`))) && out.includes('nonce=['));
   s.close();
   assert.equal(s.integrated, true, 'it says when commands end');
   assert.match(s.nonce, /^[0-9a-f]{16}$/);
   assert.ok(runs, `no lines (OSC 633;E) as they ran: ${JSON.stringify(lines())}\n${out}`);
-  assert.ok(out.includes('\u001b]633;C\u0007'), 'it says a command starts');
+  if (saysLines) assert.ok(out.includes('\u001b]633;C\u0007'), 'it says a command starts');
+  else assert.deepEqual(lines(), [], 'a shell that cannot say its lines says none');
   assert.ok(out.includes('nonce=[]'), 'the nonce is not in the environment the commands see');
   return { said, own, ended, out };
 }
@@ -141,7 +142,9 @@ async function saysFolder(shell, home, extraEnv = {}) {
 test('bash says its folder after a cd, and runs ~/.bashrc (macOS: a login shell, ~/.bash_profile)', { skip: !existsSync('/usr/bin/bash') && !existsSync('/bin/bash') }, async () => {
   const home = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'home-')));
   writeFileSync(path.join(home, process.platform === 'darwin' ? '.bash_profile' : '.bashrc'), 'export OWN_RC=yes\nPS1="$ "\n');
-  const r = await saysFolder('bash', home);
+  // The line run comes from PS0, bash 4.4 and later: macOS's own bash is 3.2 (its usual shell is zsh).
+  const [major, minor] = execFileSync('bash', ['-c', 'echo ${BASH_VERSINFO[0]} ${BASH_VERSINFO[1]}'], { encoding: 'utf8' }).trim().split(' ').map(Number);
+  const r = await saysFolder('bash', home, {}, { saysLines: major > 4 || (major === 4 && minor >= 4) });
   assert.ok(r.said, `no OSC 7 after the cd:\n${r.out}`);
   assert.ok(r.own, `own startup file not run:\n${r.out}`);
   assert.ok(r.ended, `no end of command (OSC 633;D) with its code:\n${r.out}`);
